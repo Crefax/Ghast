@@ -91,6 +91,7 @@ full table is in `PARITY.md`.
 | `ctx.status(s)` / `ctx.chat(s)` | `ctx.status(s)` / `ctx.chat(s)` |
 | raw packet listeners (mineflayer `bot._client.on(...)`) | `Behavior::raw_packets` + `ctx.events().raw` (§3.9) |
 | the core's last-inbound time (lag guard) | `ctx.last_inbound()` |
+| teleport handler (what the server moved / turned us by) | `ctx.events().teleports`: `TeleportEvent { teleport, sent_before, pose_before, after }` |
 | a mirrored rotation step + RotationPlace hold | `ctx.planned_look()` |
 
 Faces keep their wire numbers (`Face::from_id(1) == Some(Face::Up)`, `face.id()`).

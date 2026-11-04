@@ -174,6 +174,24 @@ pub struct RawInbound {
     pub at: Instant,
 }
 
+/// A server teleport / correction (`position`) with the poses around it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TeleportEvent {
+    /// The packet's values as received: absolute or relative per
+    /// [`crate::common::teleport_flags`] in `flags`.
+    pub teleport: crate::common::Teleport,
+    /// What the server had from us just before ([`TickContext::sent`] before the overwrite):
+    /// compare with [`TeleportEvent::after`] to see what the server moved / turned us by.
+    pub sent_before: Pose,
+    /// The client pose just before (it may be ahead of `sent_before` within a tick).
+    pub pose_before: Pose,
+    /// The pose after applying it (relative fields resolved).
+    pub after: Pose,
+}
+
+/// Most teleports kept between two behaviour ticks.
+const MAX_PENDING_TELEPORTS: usize = 64;
+
 /// Most raw packets kept between two behaviour ticks.
 const MAX_PENDING_RAW: usize = 4096;
 
@@ -186,6 +204,8 @@ pub struct TickEvents {
     pub chat_dropped: usize,
     /// The server teleported / corrected the player.
     pub teleported: bool,
+    /// Every teleport in arrival order, with the sent pose before it (at most 64 per tick).
+    pub teleports: Vec<TeleportEvent>,
     /// A join game packet arrived (first join or a proxy server switch).
     pub joined: bool,
     /// The player respawned or changed dimension.
@@ -216,6 +236,7 @@ impl TickEvents {
         self.chat.clear();
         self.chat_dropped = 0;
         self.teleported = false;
+        self.teleports.clear();
         self.joined = false;
         self.respawned = false;
         self.died = false;
@@ -632,7 +653,16 @@ impl<S: Sim> Engine<S> {
                         c.sent.on_ground
                     );
                 }
+                let (sent_before, pose_before) = (c.sent, c.pose);
                 sim.teleport(&mut c.pose, &t);
+                if c.pending.teleports.len() < MAX_PENDING_TELEPORTS {
+                    c.pending.teleports.push(TeleportEvent {
+                        teleport: t,
+                        sent_before,
+                        pose_before,
+                        after: c.pose,
+                    });
+                }
                 if let Some(id) = t.teleport_id {
                     c.out.push(Outbound::TeleportConfirm(id));
                 }
@@ -2409,5 +2439,44 @@ mod tests {
         assert!(placed);
         assert_eq!(e.core.test_held_turns(), 1);
         assert_eq!(plans, looks);
+    }
+
+    /// A teleport event keeps the sent pose from before the overwrite, the raw values and the
+    /// resolved pose.
+    #[test]
+    fn teleport_event_has_the_sent_pose_before() {
+        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+            let mut e = engine(v);
+            join(&mut e);
+            let t0 = Instant::now();
+            e.note_inbound(t0);
+            let mut seen = Vec::new();
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                seen.extend(ctx.events().teleports.iter().copied());
+            });
+            e.tick(&mut b, t0);
+            let sent = e.core.sent;
+            // Relative yaw +30, absolute position.
+            let tp = Teleport {
+                x: 10.5,
+                y: 64.0,
+                z: 8.5,
+                yaw: 30.0,
+                pitch: 0.0,
+                flags: crate::common::teleport_flags::YAW,
+                teleport_id: Some(9),
+            };
+            e.handle(Inbound::Teleport(tp));
+            e.tick(&mut b, t0);
+            e.tick(&mut b, t0);
+            let _ = b;
+            // The spawn position first (join), then ours, each once.
+            assert_eq!(seen.len(), 2, "{v:?}");
+            let ev = seen[1];
+            assert_eq!(ev.teleport, tp);
+            assert_eq!(ev.sent_before, sent);
+            assert_eq!(ev.after.pos, Vec3::new(10.5, 64.0, 8.5));
+            assert_eq!(ev.after.yaw, sent.yaw + 30.0, "{v:?}");
+        }
     }
 }
