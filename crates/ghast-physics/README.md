@@ -8,6 +8,7 @@ vanilla's constant 65536-entry sine table, built once).
 | module | version | verification |
 |---|---|---|
 | `v1_8` | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle (see below) |
+| `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
 
 ## Use
 
@@ -182,6 +183,13 @@ Last run (2026-11-03): 24,000 cases, **2,160,000 ticks, 0 diffs** (oracle fuzz 1
 oracle fuzz with `--use-item true` 200,000 ticks (seed 21), extra fuzz 960,000 ticks; per 160k extra ticks about 14k in water with flow, 4.5k in lava, 7k in
 cobweb, 21k flying, 1.8k outside the border, 1,100 teleports, 1,300 abilities and 2,400 velocity
 events; seeds 4-6 add item use and origins at ±2^24).
+
+1.16.5: `MC=1.16.5 oracle/run.sh fuzz --seed S --count 2000 --ticks 100 --out
+"$PWD/oracle/cache/1.16.5/fuzz/physics_sS.jsonl.gz"`; seeds 11-15 = 1,000,000 ticks, 0 diffs (plus the
+committed `tests/golden/1.16.5/` scenarios and `fuzz_seed1`, replayed by `tests/golden_1_16_5.rs`).
+
+**Total randomized oracle fuzz: 5,160,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
+1,000,000 extras, 1,000,000 edges) and 1.16.5 1,000,000.
 
 ## Performance
 

@@ -45,7 +45,7 @@ pub struct Material {
     pub blocks_movement: bool,
     /// `Material.isSolid()`.
     pub solid: bool,
-    /// `Material.isLiquid()`.
+    /// `Material.isFluid()`.
     pub fluid: bool,
     /// `Material.isOpaque()`.
     pub opaque: bool,
@@ -349,7 +349,7 @@ pub fn recipes() -> &'static [Recipe] {
     &g::recipes::RECIPES
 }
 
-/// 1.8.9 slime / magma cube dimensions for metadata size `n` (vanilla `setSlimeSize`:
+/// 1.8.9 slime / magma cube dimensions for metadata size `n` (vanilla `SlimeEntity.setSize`:
 /// `0.51000005F * n` square, eye height `0.625F * height`).
 #[must_use]
 #[allow(clippy::cast_precision_loss)]

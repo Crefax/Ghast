@@ -65,7 +65,7 @@ memory of typical terrain sections at the cost of a shift per lookup.
 
 ## Vanilla behaviour reproduced
 
-1.8.9 (checked against the client's `NetHandlerPlayClient` / `Chunk.fillChunk` / `S27PacketExplosion`):
+1.8.9 (checked against the client's `ClientPlayNetworkHandler` / `Chunk.method_3895` (unnamed in Legacy Yarn) / `ExplosionS2CPacket`):
 
 - Ground-up `map_chunk` with an empty mask unloads the column; otherwise ground-up replaces the
   whole column (unmasked sections become air). A partial chunk replaces only the masked sections

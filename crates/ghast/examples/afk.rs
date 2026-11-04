@@ -45,7 +45,7 @@ impl Behavior for Afk {
             log::info!("afk: died");
         }
         if ctx.is_dead() {
-            // GuiGameOver enables its buttons after 20 ticks.
+            // DeathScreen enables its buttons after 20 ticks.
             self.dead_ticks += 1;
             if self.dead_ticks == 20 {
                 log::info!("afk: respawning");

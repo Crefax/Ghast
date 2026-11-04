@@ -16,7 +16,7 @@ mechanical), **app** (deliberately not in the library: application or runner spe
 | inbound applied on arrival; S32 not accepted → C0F at once; S08 → C06 at once | same (`Engine::handle`, ghast-inventory confirms) | done |
 | `behaviour.start` on the first ready tick, `tick` while `running` | `start` then `tick` on the first ready tick; `tick` while `running()` | different: the reference calls only `start` on the first tick |
 | actions written immediately in call order (C09 C08 C0A …) | same | done |
-| hands tick (held buttons) → C09 sync → C13 → rotation → physics → C0B sprint → C0B sneak → one C03–C06 | C09 sync → hands → C13 → rotation → physics → … | done (the sync moved before the key processing like vanilla's `updateController`; the hands' own clicks sync first in both, so the wire order is the same) |
+| hands tick (held buttons) → C09 sync → C13 → rotation → physics → C0B sprint → C0B sneak → one C03–C06 | C09 sync → hands → C13 → rotation → physics → … | done (the sync moved before the key processing like vanilla's `ClientPlayerInteractionManager.tick`; the hands' own clicks sync first in both, so the wire order is the same) |
 | rotation held when the post-look would leave a block dug / placed this tick (Grim RotationPlace) | same check (`Client::hold_turn_on_action`, on by default) | done |
 | silent server > 1.5 s: behaviour frozen, keys released, vanilla movement continues | same (`Client::silent_hold`) | done |
 | player column not loaded / no position yet: no tick | same | done |
@@ -42,7 +42,7 @@ mechanical), **app** (deliberately not in the library: application or runner spe
 | `events.chat` (strings) | `events().chat` (`ChatMessage`: `plain()`, position, raw JSON), with `Interests::CHAT` | different |
 | `eyes(pose?)` | `eyes(&pose)` | done |
 | `selectSlot(hotbar)` | `select_slot(slot)` | done |
-| `place(support, face, hit)` — refused unless the sent crosshair is on that face; the held count drops at once | `place(support, face, hit)` — same rule, vanilla `World.rayTrace` (stairs, slabs, reach 4.5); 1.8 planting (seeds, carrot, potato on farmland, nether wart on soul sand, air above) uses the item at once like vanilla `ItemSeeds.onItemUse`, other blocks wait for the server's set_slot | different (the reference decrements for every block item; a wrong local decrement is never corrected by a vanilla server, so ghast predicts only what it can check exactly) |
+| `place(support, face, hit)` — refused unless the sent crosshair is on that face; the held count drops at once | `place(support, face, hit)` — same rule, vanilla `World.rayTrace` (stairs, slabs, reach 4.5); 1.8 planting (seeds, carrot, potato on farmland, nether wart on soul sand, air above) uses the item at once like vanilla `SeedItem.use`, other blocks wait for the server's set_slot | different (the reference decrements for every block item; a wrong local decrement is never corrected by a vanilla server, so ghast predicts only what it can check exactly) |
 | `dig(pos, face)` — instant break C07 start + C0A, same look check | `dig(pos, face)` — C07 start + swing; a non-instant block keeps breaking with `set_buttons(left)` | done |
 | `clickWindow(slot, button, mode, windowId?)` → `Promise<boolean>` | `click(Click::{Pickup, QuickMove, Swap, Drop, PickupAll})` → `Result<ClickTicket, ClickRefused>`; the outcome arrives in `events().inventory.clicks` (`ClickTicket::matches`) | different (no promise: tick-driven; refused while turning — "click only while still") |
 | `window` (id, type, title, size, slot) | `inventory().window()` (`id()`, `kind()`, `title()`), `container_len()`, `slot(i)` | done |
@@ -51,9 +51,9 @@ mechanical), **app** (deliberately not in the library: application or runner spe
 | `openInventory()` | `open_inventory()` | done |
 | `closeWindow()` | `close_window()` | done |
 | `setAim(yaw, pitch)` (mouse counts, 14° / 10.5° a tick) | `set_aim(yaw, pitch)` (same algorithm, same budgets) | done |
-| `setControls({forward, strafe, jump, sneak, sprint})` (numbers, ×0.3 when sneaking) | `set_controls(Controls { forward, back, left, right, jump, sneak, sprint })` (keys; the physics applies ×0.3 and ×0.98 like vanilla `MovementInput`) | different |
+| `setControls({forward, strafe, jump, sneak, sprint})` (numbers, ×0.3 when sneaking) | `set_controls(Controls { forward, back, left, right, jump, sneak, sprint })` (keys; the physics applies ×0.3 and ×0.98 like vanilla `Input`) | different |
 | `setButtons({left, right})` | `set_buttons(Buttons { left, right })` | done |
-| `target()` (block within 4.5 / player within 3, from the sent pose) | `target()` (block) and `target_entity()` (any pickable entity, vanilla `getMouseOver`) | different (two calls) |
+| `target()` (block within 4.5 / player within 3, from the sent pose) | `target()` (block) and `target_entity()` (any pickable entity, vanilla `GameRenderer.updateTargetedEntity`) | different (two calls) |
 | `mining` | `mining()` → `(pos, progress)` | done |
 | `broken` | `broken()` | done |
 | `setFlying(flying)` | `set_flying(flying)` — `abilities` before the move, only with "may fly" | done |
@@ -122,6 +122,6 @@ position deviations; ghast follows vanilla, which the oracle proves):
   flight positions differ by ~1e-6 a tick.
 - Flying through water: vanilla moves a flying player in water with the water rules on top
   of creative flight — the water jump (+0.04 motion Y while jump is held,
-  `EntityLivingBase.onLivingUpdate`) and the water travel (0.02 acceleration, ×0.8 drag);
+  `LivingEntity.tickMovement`) and the water travel (0.02 acceleration, ×0.8 drag);
   the reference flight model has neither. Harvest t592, t742, t786, t878 differ by exactly
   0.04 in y; the following ticks by 0.007–0.028, consistent with the missing water travel.

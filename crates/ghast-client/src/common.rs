@@ -31,7 +31,7 @@ impl Vec3 {
 /// The player's pose: feet position, look, motion and movement flags.
 ///
 /// `yaw` / `pitch` are degrees in vanilla's convention (yaw is an unbounded `f32` like the
-/// client's `rotationYaw`; 0 = south, 90 = west; pitch 90 = straight down).
+/// client's `Entity.yaw`; 0 = south, 90 = west; pitch 90 = straight down).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Pose {
     /// Feet position (bounding box minimum Y).

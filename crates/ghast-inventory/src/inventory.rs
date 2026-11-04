@@ -123,7 +123,7 @@ impl std::fmt::Display for ClickError {
 
 impl std::error::Error for ClickError {}
 
-/// A window click as sent (`window_click`; 1.8 `C0EPacketClickWindow`).
+/// A window click as sent (`window_click`; 1.8 `ClickWindowC2SPacket`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClickPacket {
     /// Window id (0 = player inventory).
@@ -687,7 +687,7 @@ impl Inventory {
 
     /// Client-side use of the held stack (no packet): `n` items off the selected hotbar stack,
     /// the slot emptied when nothing is left. Vanilla does this when a right click places a block
-    /// or plants seeds (1.8 `ItemBlock` / `ItemSeeds.onItemUse`, 1.16.5 `BlockItem.place`) or
+    /// or plants seeds (1.8 `BlockItem` / `SeedItem.use`, 1.16.5 `BlockItem.place`) or
     /// when eating finishes, before the server's `set_slot`; call it then (not in creative,
     /// where vanilla keeps the count). Returns whether there was a stack.
     pub fn consume_held(&mut self, n: u8) -> bool {

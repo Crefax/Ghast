@@ -93,7 +93,7 @@ impl Stack {
         }
     }
 
-    /// Same item, damage and NBT (vanilla `isItemEqual` + `areItemStackTagsEqual`); counts are
+    /// Same item, damage and NBT (vanilla's item + damage check and its NBT check); counts are
     /// not compared.
     #[must_use]
     pub fn same_item(&self, other: &Stack) -> bool {
@@ -229,7 +229,7 @@ fn tag_eq(a: &Tag, b: &Tag) -> bool {
     }
 }
 
-/// `Option<&Stack>` exact equality (the server's `areItemStacksEqual`).
+/// `Option<&Stack>` exact equality (the server's `ItemStack.equalsAll`).
 #[must_use]
 pub fn stacks_equal(a: Option<&Stack>, b: Option<&Stack>) -> bool {
     match (a, b) {

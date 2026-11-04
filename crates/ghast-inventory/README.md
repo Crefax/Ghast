@@ -52,8 +52,8 @@ server compares it with its own result and rejects the click on a mismatch).
 | `Drop { slot, all }` (Q / ctrl+Q; slot -999 = GUI click outside with empty cursor) | 4 | 0 / 1 | none |
 | `PickupAll { slot }` (double click) | 6 | 0 | none |
 
-Reproduced per version: stack limits (incl. 16-stacks, armor slots 1), 1.8 `hasSubtypes`
-damage rules (the 41 item ids read off the vanilla registry), 1.8 PICKUP needing equal damage, 1.8
+Reproduced per version: stack limits (incl. 16-stacks, armor slots 1), 1.8 damage-variant
+rules (the 41 item ids read off the vanilla registry), 1.8 PICKUP needing equal damage, 1.8
 `insertItem` ignoring slot rules vs 1.16.5 checking `canInsert` and slot limits, the quick-move
 retry loops, 1.8's number-key swap with a container slot (the hotbar item goes into the
 inventory via `insertStack`), 1.16.5 swap limits, 1.16.5 `insertStack` preferring the selected

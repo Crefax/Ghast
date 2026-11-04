@@ -988,8 +988,8 @@ fn decode(b: &Block, s: u32) -> Vec<usize> {
 
 /// Patches `facts::V1_8_SHAPE_OVERRIDES` into the minecraft-data shape map (as new shape ids).
 fn apply_overrides(shapes: &mut model::Shapes, blocks: &[Block], notes: &mut Notes) -> R<()> {
-    let mut next = shapes.shapes.keys().max().copied().unwrap_or(0) + 1;
-    for o in facts::V1_8_SHAPE_OVERRIDES {
+    let first = shapes.shapes.keys().max().copied().unwrap_or(0) + 1;
+    for (next, o) in (first..).zip(facts::V1_8_SHAPE_OVERRIDES) {
         if !blocks.iter().any(|b| b.name == o.block) {
             return Err(format!("shape override for unknown block {}", o.block));
         }
@@ -1004,7 +1004,6 @@ fn apply_overrides(shapes: &mut model::Shapes, blocks: &[Block], notes: &mut Not
         for &m in o.metas {
             entry[usize::from(m)] = next;
         }
-        next += 1;
         notes.push(format!(
             "1.8 override {} metas {:?}: {}",
             o.block, o.metas, o.why
@@ -1664,10 +1663,8 @@ fn emit_v1_16_voxels(
                         "{name} context {cname}: oracle sid {got}, rule {w}"
                     ));
                 }
-                None => {
-                    if *scaffolding_bottom_sid.get_or_insert(got) != got || got == 0 {
-                        return Err(format!("{name} context {cname}: bottom shape sid {got}"));
-                    }
+                None if *scaffolding_bottom_sid.get_or_insert(got) != got || got == 0 => {
+                    return Err(format!("{name} context {cname}: bottom shape sid {got}"));
                 }
                 _ => {}
             }

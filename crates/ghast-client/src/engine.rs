@@ -6,7 +6,7 @@
 //!
 //! # Tick model
 //!
-//! Mirrors 1.8.9 `Minecraft.runTick` as recorded in vanilla-client packet traces (and is the same
+//! Mirrors 1.8.9 `MinecraftClient.tick` as recorded in vanilla-client packet traces (and is the same
 //! in 1.16.5):
 //!
 //! 1. inbound packets that arrived since the last tick have been applied (on arrival, like
@@ -364,7 +364,7 @@ fn held_item<W: Sim + ?Sized>(
     Some(sim.held_item(id, count, efficiency(s)))
 }
 
-/// Whether rays hit the entity (`Entity.canBeCollidedWith`): living entities, players,
+/// Whether rays hit the entity (`Entity.collides`): living entities, players,
 /// paintings and the solid objects (boats, minecarts, TNT, falling blocks, item frames, armor
 /// stands, leash knots, end crystals); not items, orbs, projectiles.
 fn collidable(e: &ghast_entity::Entity) -> bool {
@@ -394,7 +394,7 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
     }
 }
 
-/// The entity under the crosshair from `eyes` along `look` (vanilla `getMouseOver`), if
+/// The entity under the crosshair from `eyes` along `look` (vanilla `GameRenderer.updateTargetedEntity`), if
 /// entities are tracked.
 fn entity_pick<W: WorldView + ?Sized>(
     w: &W,
@@ -532,7 +532,7 @@ impl<S: Sim> Engine<S> {
                 c.reset_player("join game");
                 sim.reset_player();
                 sim.spectator(c.game_mode == GameMode::Spectator);
-                // NetHandlerPlayClient.handleJoinGame: settings, then the brand.
+                // ClientPlayNetworkHandler.onGameJoin: settings, then the brand.
                 c.out.push(Outbound::Settings(c.opts.settings.clone()));
                 if let Some(brand) = &c.opts.brand {
                     c.out.push(Outbound::Brand(brand.clone()));
@@ -835,13 +835,13 @@ impl<S: Sim> Engine<S> {
         }
 
         let c = &mut self.core;
-        // PlayerControllerMP.updateController (syncCurrentPlayItem) runs before the key
+        // ClientPlayerInteractionManager.tick (syncSelectedSlot) runs before the key
         // processing: a held slot the server changed is echoed before any click.
         if c.held_slot != c.sent_slot {
             c.sent_slot = c.held_slot;
             c.out.push(Outbound::HeldSlot(i16::from(c.sent_slot)));
         }
-        // Minecraft.runTick key processing (a GUI takes the mouse: buttons up).
+        // MinecraftClient.tick key processing (a GUI takes the mouse: buttons up).
         {
             let gui = c.inv.gui_open() || c.open_window != 0;
             let eye = if c.pose.sneaking {
@@ -895,7 +895,7 @@ impl<S: Sim> Engine<S> {
         for p in c.broken_now.drain(..) {
             self.sim.predict_air(p.x, p.y, p.z);
         }
-        // EntityPlayerSP.onLivingUpdate: a flight toggle is told to the server before the move.
+        // ClientPlayerEntity.tickMovement: a flight toggle is told to the server before the move.
         if let Some(f) = c.want_flying.take() {
             let first = c.out.len();
             self.sim.set_flying(f, &mut c.out);
@@ -999,7 +999,7 @@ impl TickContext<'_> {
     }
 }
 
-/// 1.8 `ItemSeeds.onItemUse` / `ItemSeedFood.onItemUse` on the client: planting on the top of
+/// 1.8 `SeedItem.use` / `CropItem.use` on the client: planting on the top of
 /// its soil with air above uses one item at once (the server's set_slot follows later; it
 /// sends none when the count already agrees). Applied to the `block_place` packets written
 /// from `first` on. Other placements wait for the server's set_slot: predicting them needs
@@ -1263,7 +1263,7 @@ impl TickContext<'_> {
     }
 
     /// Movement keys from now on (kept until changed); the physics turns them into movement
-    /// like vanilla's `MovementInput` (sneaking scales walking by 0.3).
+    /// like vanilla's `Input` (sneaking scales walking by 0.3).
     pub fn set_controls(&mut self, controls: Controls) {
         self.core.controls = controls;
     }
@@ -2231,7 +2231,7 @@ mod tests {
         }));
     }
 
-    /// 1.8 planting uses the seed at once (vanilla `ItemSeeds.onItemUse` on the client); a
+    /// 1.8 planting uses the seed at once (vanilla `SeedItem.use` on the client); a
     /// stone block place waits for the server.
     #[test]
     fn planting_uses_the_seed_at_once() {

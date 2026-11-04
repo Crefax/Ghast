@@ -96,7 +96,7 @@ Faces keep their wire numbers (`Face::from_id(1) == Some(Face::Up)`, `face.id()`
 
 ### 3.1 Controls: numbers → keys
 
-The TypeScript controls are `MovementInput` values: the behaviour itself multiplies by 0.3
+The TypeScript controls are vanilla `Input` values: the behaviour itself multiplies by 0.3
 while sneaking. ghast takes keys, and the physics applies vanilla's ×0.3 (sneak) and ×0.98
 itself.
 
@@ -240,7 +240,7 @@ if (t?.type === 'block') ...; else if (t?.type === 'player') ...
 
 ```rust
 if let Some(hit) = ctx.target() { /* hit.pos, hit.face, hit.hit (Vec3), hit.distance */ }
-if let Some(e) = ctx.target_entity() { /* e.id: any pickable entity, vanilla getMouseOver */ }
+if let Some(e) = ctx.target_entity() { /* e.id: any pickable entity, vanilla GameRenderer.updateTargetedEntity */ }
 ```
 
 Both are computed from the **sent** pose, which is what the server judges. Aim first, then
@@ -250,7 +250,7 @@ act on a later tick, exactly as in the TypeScript contract.
 
 The TypeScript contract decrements the held count for every block item it places. ghast predicts only
 1.8 planting (seeds, carrot and potato on farmland, nether wart on soul sand, air above),
-which is exactly vanilla's `ItemSeeds` check. Other blocks wait for the server's set_slot.
+which is exactly vanilla's `SeedItem` check. Other blocks wait for the server's set_slot.
 A behaviour that counts its stock should read `ctx.inventory()` and not keep its own counter.
 
 ### 3.8 Flight

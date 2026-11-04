@@ -433,7 +433,7 @@ impl ClientVersion for V1_8 {
 
     fn apply_teleport(pose: &mut Pose, t: &Teleport) {
         let (yaw, pitch) = teleport_target(pose, t);
-        // Entity.setPositionAndRotation -> setRotation: both angles `% 360`, no clamp.
+        // Entity.updatePositionAndAngles -> setRotation: both angles `% 360`, no clamp.
         pose.yaw = yaw % 360.0;
         pose.pitch = pitch % 360.0;
     }

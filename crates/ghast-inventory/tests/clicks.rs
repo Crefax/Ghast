@@ -1,4 +1,4 @@
-//! Click prediction against hand-derived vanilla expectations (1.8.9 `Container.slotClick`
+//! Click prediction against hand-derived vanilla expectations (1.8.9 `ScreenHandler.onSlotClick`
 //! and 1.16.5 `ScreenHandler.onSlotClick` traced by hand for each case), and the confirm
 //! protocol.
 
@@ -1120,7 +1120,7 @@ fn damaged_tools_do_not_merge_in_shift_click() {
 
 #[test]
 fn v1_8_items_without_subtypes_merge_across_damage() {
-    // insertItem compares damage only for hasSubtypes items: pumpkin:1 merges into pumpkin:0
+    // insertItem compares damage only for items with damage variants: pumpkin:1 merges into pumpkin:0
     let mut inv = player_inv(
         Version::V1_8,
         &[(9, sd(PUMPKIN, 3, 1)), (36, sd(PUMPKIN, 5, 0))],

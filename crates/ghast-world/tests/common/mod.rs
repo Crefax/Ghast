@@ -28,7 +28,7 @@ pub struct LegacySection {
     pub sky_light: Vec<u8>,
 }
 
-/// Encodes 1.8 chunk data (vanilla `S21PacketChunkData` layout): all block arrays, then all
+/// Encodes 1.8 chunk data (vanilla `ChunkDataS2CPacket` layout): all block arrays, then all
 /// block-light arrays, then (if `sky`) all sky-light arrays, then 256 biomes when `biomes` is
 /// `Some` (ground-up). Returns `(mask, data)`.
 pub fn encode_1_8(

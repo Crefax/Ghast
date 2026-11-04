@@ -280,7 +280,7 @@ impl PhysicsFlags {
     /// Bubble column (1.13+): pushes entities up or down.
     pub const BUBBLE_COLUMN: PhysicsFlags = PhysicsFlags(1 << 7);
     /// 1.8 soul sand: `speed_factor` is applied to horizontal motion when the entity's box
-    /// intersects the block (vanilla `onEntityCollidedWithBlock`), not as a ground speed factor.
+    /// intersects the block (vanilla `Block.onEntityCollision`), not as a ground speed factor.
     pub const COLLIDE_SLOWDOWN: PhysicsFlags = PhysicsFlags(1 << 8);
     /// Fence: 1.16 `#minecraft:fences` tag; 1.8 `FenceBlock` (wooden + nether brick fences).
     pub const FENCE: PhysicsFlags = PhysicsFlags(1 << 9);

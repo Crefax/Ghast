@@ -1,5 +1,5 @@
-//! The client-side click simulation: vanilla's `ScreenHandler.onSlotClick` (MCP
-//! `Container.slotClick`) for 1.8.9 and 1.16.5, the containers' quick-move (`transferSlot`) rules
+//! The client-side click simulation: vanilla's `ScreenHandler.onSlotClick` for
+//! 1.8.9 and 1.16.5, the containers' quick-move (`transferSlot`) rules
 //! and the player inventory's insert logic, over a [`Model`] of the slots.
 //!
 //! Each function follows the vanilla control flow of its version (they differ in many small
@@ -410,7 +410,7 @@ impl Sim<'_> {
         }
     }
 
-    // ---------------------------------------------------------------- slotClick
+    // ---------------------------------------------------------------- onSlotClick
 
     /// Runs `onSlotClick(slot, button, mode)` and returns the stack vanilla returns (what the
     /// click packet carries). The caller validated `slot` (`OUTSIDE` or `0..len`).
@@ -683,7 +683,7 @@ impl Sim<'_> {
         let Some(first) = self.transfer(i)? else {
             return Ok(None);
         };
-        // retrySlotClick: run the shift-click again while the slot still holds the item the
+        // Vanilla's shift-click retry: run the shift-click again while the slot still holds the item the
         // last transfer moved (each round moves at least one item, so this ends).
         let mut item = first.id;
         for _ in 0..4096 {
@@ -816,7 +816,7 @@ impl Sim<'_> {
         Ok(Some(orig))
     }
 
-    /// `ScreenHandler.insertItem` (MCP `mergeItemStack`) of `st` into slots `start..end`.
+    /// `ScreenHandler.insertItem` of `st` into slots `start..end`.
     fn insert(&mut self, st: &mut Stack, start: usize, end: usize, rev: bool) -> R<bool> {
         let v = self.v;
         let end = end.min(self.lay.len);
@@ -996,7 +996,7 @@ impl Sim<'_> {
         Ok(())
     }
 
-    /// `PlayerInventory.insertStack(stack)` (MCP `addItemStackToInventory`); whatever does not
+    /// `PlayerInventory.insertStack(stack)`; whatever does not
     /// fit is dropped by the caller (no inventory effect).
     fn insert_stack(&mut self, mut st: Stack) {
         let v = self.v;

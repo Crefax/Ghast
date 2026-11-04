@@ -75,7 +75,7 @@ pub enum SlotKind {
 
 impl WindowKind {
     /// The window type of a 1.8 `open_window` (`inventoryType`, `slotCount`), as
-    /// `NetHandlerPlayClient.handleOpenWindow` builds it. `None`: the vanilla client opens no
+    /// `ClientPlayNetworkHandler.onOpenScreen` builds it. `None`: the vanilla client opens no
     /// container for it (a slotless type it has no GUI for).
     #[must_use]
     pub fn from_v1_8(inventory_type: &str, slot_count: u8) -> Option<WindowKind> {

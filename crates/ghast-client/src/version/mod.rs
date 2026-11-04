@@ -135,7 +135,7 @@ pub trait ClientVersion: Version + sealed::Sealed {
     /// Queues a play-state packet.
     fn write_play(enc: &mut FrameEncoder, out: &Outbound) -> Result<(), EncodeError>;
     /// Applies a server teleport to the pose the way this version's client does
-    /// (`handlePlayerPosLook` + `setPositionAndRotation`).
+    /// (`onPlayerPositionLook` + `Entity.updatePositionAndAngles`).
     fn apply_teleport(pose: &mut Pose, t: &Teleport);
 }
 
@@ -168,7 +168,7 @@ pub(crate) fn truncate_utf16(s: &str, max: usize) -> &str {
 
 /// The common part of vanilla's teleport handling: relative axes are added, absolute axes
 /// zero that axis' motion; rotations are added when relative. Returns the new yaw / pitch
-/// before the version's `setPositionAndRotation` normalisation.
+/// before the version's `updatePositionAndAngles` normalisation.
 pub(crate) fn teleport_target(pose: &mut Pose, t: &Teleport) -> (f32, f32) {
     use crate::common::teleport_flags as fl;
     let mut x = t.x;

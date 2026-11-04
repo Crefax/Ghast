@@ -3,13 +3,13 @@
 //! A real client turns by `mouse delta × multiplier × 0.15` degrees, so every yaw / pitch
 //! change is an integer multiple of the sensitivity's GCD (`multiplier × 0.15`). Anti-cheats
 //! (Grim's aim checks) look for that. This module reproduces the client's float arithmetic:
-//! the multiplier is computed in `f32` like `EntityRenderer.updateCameraAndRender`, the
-//! angles are added in `f64` and stored as `f32` like `Entity.setAngles`.
+//! the multiplier is computed in `f32` like `GameRenderer.render`, the
+//! angles are added in `f64` and stored as `f32` like `Entity.increaseTransforms`.
 //!
 //! The speed model (at most 14° yaw / 10.5° pitch per tick with a carried budget) is the one
 //! the reference behaviours were tuned with; it is a behaviour choice, not vanilla.
 
-/// `EntityRenderer`: `f = sensitivity * 0.6 + 0.2; f * f * f * 8`, all `f32`.
+/// `GameRenderer`: `f = sensitivity * 0.6 + 0.2; f * f * f * 8`, all `f32`.
 #[must_use]
 pub fn mouse_multiplier(sensitivity: f32) -> f32 {
     let s = sensitivity * 0.6 + 0.2;
@@ -22,7 +22,7 @@ pub fn mouse_gcd(sensitivity: f32) -> f32 {
     mouse_multiplier(sensitivity) * 0.15
 }
 
-/// `MathHelper.wrapAngleTo180_float`.
+/// `MathHelper.wrapDegrees`.
 #[must_use]
 pub fn wrap_degrees(a: f32) -> f32 {
     let mut v = a % 360.0;
@@ -121,7 +121,7 @@ impl Rotation {
 
     /// One tick: the new (yaw, pitch) from the current one.
     ///
-    /// `Entity.setAngles(dx * m, dy * m)`: `yaw = (float)(yaw + dx * 0.15)`,
+    /// `Entity.increaseTransforms(dx * m, dy * m)`: `yaw = (float)(yaw + dx * 0.15)`,
     /// `pitch = (float)(pitch - dy * 0.15)`, pitch clamped to ±90.
     pub fn step(&mut self, yaw: f32, pitch: f32) -> (f32, f32) {
         let m = mouse_multiplier(self.sensitivity);

@@ -1,5 +1,4 @@
-//! The per-tick movement packet (`onUpdateWalkingPlayer` in 1.8, `sendPlayerPacket` /
-//! `onUpdateWalkingPlayer` in 1.16) and the stand-in mover used until `ghast-physics` is
+//! The per-tick movement packet (`ClientPlayerEntity.sendMovementPackets`, 1.8 and 1.16) and the stand-in mover used until `ghast-physics` is
 //! integrated.
 
 use crate::common::{Controls, EntityAction, MovePacket, Pose, Vec3};
@@ -19,7 +18,7 @@ pub struct MovementSender {
     ticks_since_pos: u32,
     server_sprint: bool,
     server_sneak: bool,
-    /// 1.9+: `positionUpdateTicks` is incremented *before* the check (a position at least
+    /// 1.9+: `ticksSinceLastPositionPacketSent` is incremented *before* the check (a position at least
     /// every 20 ticks); 1.8 increments after it (every 21st tick).
     increment_first: bool,
 }
@@ -43,7 +42,7 @@ impl MovementSender {
         Self::default()
     }
 
-    /// A fresh 1.9+ client player: like [`MovementSender::new`], but `positionUpdateTicks`
+    /// A fresh 1.9+ client player: like [`MovementSender::new`], but `ticksSinceLastPositionPacketSent`
     /// is incremented before the check, so a position goes out at least every 20 ticks
     /// (Grim's BadPacketsE flags a 21-tick gap on these versions).
     #[must_use]
@@ -81,7 +80,7 @@ impl MovementSender {
         let dx = pose.pos.x - self.last_pos.x;
         let dy = pose.pos.y - self.last_pos.y;
         let dz = pose.pos.z - self.last_pos.z;
-        // `(double)(rotationYaw - lastReportedYaw) != 0`: an f32 difference.
+        // `(double)(yaw - lastYaw) != 0`: an f32 difference.
         let turned = pose.yaw - self.last_yaw != 0.0 || pose.pitch - self.last_pitch != 0.0;
         if self.increment_first {
             self.ticks_since_pos += 1;
@@ -129,7 +128,7 @@ impl MovementSender {
 /// The stand-in mover used until `ghast-physics` is integrated: the player never moves.
 ///
 /// It reproduces what the vanilla client computes for a player standing still on a floor
-/// right after a (non-relative) teleport: the first tick moves by `motionY = 0` and is not on
+/// right after a (non-relative) teleport: the first tick moves by velocity y = 0 and is not on
 /// ground; gravity then makes the next move collide with the floor, so every later tick is on
 /// ground. It assumes the server put the player on a floor; without world data it cannot
 /// know. Movement keys are ignored (only the sneak key is honoured, it does not move).
@@ -178,7 +177,7 @@ mod tests {
             MovePacket::PositionLook { .. }
         ));
         // Standing still: 20 flying packets, then a position refresh (vanilla checks
-        // `positionUpdateTicks >= 20` before incrementing it: a 21-tick period).
+        // `ticksSinceLastPositionPacketSent >= 20` before incrementing it: a 21-tick period).
         for _ in 0..20 {
             assert!(matches!(
                 s.update(&p).packet,

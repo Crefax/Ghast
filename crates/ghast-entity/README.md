@@ -54,8 +54,8 @@ are ignored.
 
 ## Vanilla behaviour reproduced
 
-Checked with javap against the local 1.8.9 client (`NetHandlerPlayClient`, `S0EPacketSpawnObject`)
-and the official 1.16.5 client jar (`ClientPacketListener`, `ClientboundMoveEntityPacket`). Only
+Checked with javap against the local 1.8.9 client (`ClientPlayNetworkHandler`, `EntitySpawnS2CPacket`)
+and the official 1.16.5 client jar (`ClientPlayNetworkHandler`, `EntityS2CPacket`). Only
 these conclusions are in this repository; no Mojang-derived files are.
 
 | | 1.8.9 | 1.16.5 |

@@ -288,11 +288,10 @@ impl<'a> Reader<'a> {
     /// cause a large allocation or a long loop.
     #[inline]
     pub fn check_count(&self, count: i64, min_elem_size: usize) -> DecodeResult<usize> {
-        let limit = if min_elem_size == 0 {
-            ZERO_SIZE_ELEMENT_LIMIT
-        } else {
-            self.remaining() / min_elem_size
-        };
+        let limit = self
+            .remaining()
+            .checked_div(min_elem_size)
+            .unwrap_or(ZERO_SIZE_ELEMENT_LIMIT);
         Self::check_len(count, limit)
     }
 

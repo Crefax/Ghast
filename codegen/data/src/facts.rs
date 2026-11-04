@@ -72,13 +72,13 @@ const F32_0_05: f64 = 0.05_f32 as f64;
 pub const V1_8: Facts = Facts {
     // Block.slipperiness defaults to 0.6F.
     slipperiness: &[("ice", 0.98), ("packed_ice", 0.98), ("slime", 0.8)],
-    // Soul sand: motionX/Z *= 0.4D when the entity box touches the block.
+    // Soul sand: velocity x / z *= 0.4D when the entity box touches the block.
     speed_factor: &[("soul_sand", 0.4)],
     jump_factor: &[],
-    // Entity.moveEntity while in web: x *= 0.25D, y *= 0.05000000074505806D, z *= 0.25D.
+    // Entity.move while in web: x *= 0.25D, y *= 0.05000000074505806D, z *= 0.25D.
     stuck: &[("web", [0.25, F32_0_05, 0.25])],
     flags: &[
-        // EntityLivingBase.isOnLadder: block == ladder || block == vine.
+        // LivingEntity.isClimbing: block == ladder || block == vine.
         ("ladder", CLIMBABLE),
         ("vine", CLIMBABLE),
         ("water", WATER),
@@ -97,7 +97,7 @@ pub const V1_8: Facts = Facts {
         ("trapdoor", TRAPDOOR),
         ("iron_trapdoor", TRAPDOOR),
     ],
-    // 1.8 blocks whose collision comes from getActualState / neighbour checks.
+    // 1.8 blocks whose collision comes from Block.getBlockState / neighbour checks.
     dependency: &[
         ("fence", Dep::Neighbours("Fence")),
         ("*_fence", Dep::Neighbours("Fence")),

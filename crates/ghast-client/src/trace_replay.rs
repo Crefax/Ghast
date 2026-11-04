@@ -1297,7 +1297,7 @@ fn engine_pass(
         script.t = t;
         let before = *e.sim.test_player();
         e.tick(&mut script, now);
-        let out: Vec<Outbound> = e.outbound().drain(..).collect();
+        let out: Vec<Outbound> = std::mem::take(e.outbound());
         let got: Vec<String> = out
             .iter()
             .filter_map(engine_text)

@@ -60,7 +60,7 @@ Dependencies point one way: the protocol crate knows nothing about the layers ab
 
 ## Tick model
 
-The tick mirrors 1.8.9 `Minecraft.runTick` (and the corresponding 1.16.5 order), verified with
+The tick mirrors 1.8.9 `MinecraftClient.tick` (and the corresponding 1.16.5 order), verified with
 packet traces:
 
 1. Inbound packets are applied on arrival (keep-alives, teleports and window confirms are

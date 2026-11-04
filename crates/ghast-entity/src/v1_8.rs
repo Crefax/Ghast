@@ -376,7 +376,7 @@ fn vel3(r: &mut Reader<'_>) -> R<[i16; 3]> {
 }
 
 /// `entity`, `rel_entity_move`, `entity_look`, `entity_move_look` (vanilla
-/// `handleEntityMovement`: the bare `entity` packet also sets `on_ground = false`).
+/// `onEntityUpdate`: the bare `entity` packet also sets `on_ground = false`).
 #[inline]
 fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bool> {
     let eid = r.read_varint()?;

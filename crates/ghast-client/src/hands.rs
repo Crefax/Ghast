@@ -1,7 +1,7 @@
 //! The mouse buttons in the world: digging, placing and using items, ported from 1.8.9
-//! `Minecraft.runTick` (`clickMouse`, `rightClickMouse`, `sendClickBlockToController`) and
-//! `PlayerControllerMP` (`clickBlock`, `onPlayerDamageBlock`, `resetBlockRemoving`,
-//! `onPlayerRightClick`, `sendUseItem`, `onStoppedUsingItem`), verified against recorded
+//! `MinecraftClient.tick` (`doAttack`, `doUse`, `handleBlockBreaking`) and
+//! `ClientPlayerInteractionManager` (`attackBlock`, `updateBlockBreakingProgress`,
+//! `cancelBlockBreaking`, `onRightClick`, `interactItem`, `stopUsingItem`), verified against recorded
 //! lab packet traces.
 //!
 //! The hands run once per tick after the behaviour and before the movement step (vanilla's
@@ -18,7 +18,7 @@ use ghast_protocol::BlockPos;
 
 use crate::common::{DigStatus, Face, Outbound, Vec3};
 
-/// Survival block reach (`PlayerControllerMP.getBlockReachDistance`).
+/// Survival block reach (`ClientPlayerInteractionManager.getReachDistance`).
 pub const REACH: f64 = 4.5;
 
 /// What the hands need to know about one block state.
@@ -54,7 +54,7 @@ pub struct HeldItem {
     pub count: u8,
     /// Efficiency enchantment level.
     pub efficiency: u8,
-    /// The item places a block (`ItemBlock`).
+    /// The item places a block (`BlockItem`).
     pub places_block: bool,
     /// The item is used by holding right click (food, potion, bow, sword, milk).
     pub usable: bool,
@@ -81,7 +81,7 @@ pub struct DigFactors {
     pub fatigue: u8,
 }
 
-/// `Block.getPlayerRelativeBlockHardness` (float maths): break progress per tick.
+/// `Block.calcBlockBreakingData` (float maths): break progress per tick.
 #[must_use]
 pub fn relative_hardness(b: &BlockQuery, held: Option<&HeldItem>, f: DigFactors) -> f32 {
     let h = b.hardness;
@@ -90,7 +90,7 @@ pub fn relative_hardness(b: &BlockQuery, held: Option<&HeldItem>, f: DigFactors)
     }
     let can_harvest =
         b.harvest_tools.is_empty() || held.is_some_and(|i| b.harvest_tools.contains(&i.id));
-    // EntityPlayer.getToolDigEfficiency
+    // PlayerEntity.getMiningSpeed
     let mut speed = match (held, b.dig_material) {
         (Some(i), Some(m)) => i.tool_speed.map_or(1.0, |t| t(m, i.id)),
         _ => 1.0,
@@ -126,7 +126,7 @@ pub fn relative_hardness(b: &BlockQuery, held: Option<&HeldItem>, f: DigFactors)
     }
 }
 
-/// `Entity.getVectorForRotation(pitch, yaw)` with vanilla's float sine table.
+/// `Entity.getRotationVector(pitch, yaw)` with vanilla's float sine table.
 #[must_use]
 pub fn look_vector(yaw: f32, pitch: f32) -> Vec3 {
     use ghast_physics::math::{cos, sin};
@@ -151,13 +151,13 @@ pub struct BlockHit {
     pub distance: f64,
 }
 
-/// Floor of a coordinate as vanilla's `MathHelper.floor_double`.
+/// Floor of a coordinate as vanilla's `MathHelper.floor`.
 fn floor(v: f64) -> i32 {
     let i = v as i32;
     if v < f64::from(i) { i - 1 } else { i }
 }
 
-/// `Vec3.getIntermediateWithXValue` and friends: the point on the segment `a → b` whose `axis`
+/// `Vec3d.lerpForX` and friends: the point on the segment `a → b` whose `axis`
 /// coordinate is `v`, if it lies within the segment.
 fn intermediate(a: Vec3, b: Vec3, axis: usize, v: f64) -> Option<Vec3> {
     let d = [b.x - a.x, b.y - a.y, b.z - a.z];
@@ -176,7 +176,7 @@ fn sq_dist(a: Vec3, b: Vec3) -> f64 {
     x * x + y * y + z * z
 }
 
-/// `Block.rayTrace` (`collisionRayTrace`): the segment against the block's ray bounds, in
+/// `Block.rayTrace`: the segment against the block's ray bounds, in
 /// block-local coordinates; the nearest of the six plane hits (ties go to the earlier plane:
 /// west, east, down, up, north, south).
 fn block_ray(pos: BlockPos, b: &[f64; 6], start: Vec3, end: Vec3) -> Option<(Vec3, Face)> {
@@ -245,7 +245,7 @@ pub fn ray_trace(
     let test = |p: BlockPos, s: Vec3| -> Option<BlockHit> {
         let b = blocks(p.x, p.y, p.z)?;
         let found = if let Some(passes) = &b.stairs {
-            // BlockStairs.rayTrace: the pass hit farthest from the ray's end wins (strictly;
+            // StairsBlock.rayTrace: the pass hit farthest from the ray's end wins (strictly;
             // ties keep the earlier pass).
             let mut best: Option<(Vec3, Face)> = None;
             let mut best_d = 0.0;
@@ -370,7 +370,7 @@ pub struct EntityHit {
     pub distance: f64,
 }
 
-/// `AxisAlignedBB.calculateIntercept`: the nearest plane hit of the segment `a → b` on the
+/// `Box.method_585` (unnamed in Legacy Yarn): the nearest plane hit of the segment `a → b` on the
 /// box (`x` planes, then `y`, then `z`; ties keep the earlier one).
 fn box_intercept(b: &[f64; 6], a: Vec3, e: Vec3) -> Option<Vec3> {
     let in_yz = |v: &Vec3| v.y >= b[1] && v.y <= b[4] && v.z >= b[2] && v.z <= b[5];
@@ -416,7 +416,7 @@ pub(crate) fn ray_hits_cube(eyes: Vec3, look: Vec3, pos: BlockPos, reach: f64) -
 /// One pickable entity: id, box (absolute), position.
 pub type PickCandidate = (i32, [f64; 6], Vec3);
 
-/// `EntityRenderer.getMouseOver`'s entity part: the entity whose box grown by `border` (1.8:
+/// `GameRenderer.updateTargetedEntity`: the entity whose box grown by `border` (1.8:
 /// 0.1, 1.9+: 0) the look ray (reach 4.5) hits first, closer than the block hit; dropped
 /// beyond 3 blocks (survival). `riding` = the vehicle id (only picked when nothing else is).
 #[must_use]
@@ -536,7 +536,7 @@ pub(crate) struct HandsIo<'a> {
     pub placed: &'a mut bool,
 }
 
-/// `PlayerControllerMP` + the `Minecraft` click state.
+/// `ClientPlayerInteractionManager` + the `MinecraftClient` click state.
 #[derive(Debug, Clone, Default)]
 pub struct Hands {
     hitting: bool,
@@ -636,7 +636,7 @@ impl Hands {
         let t = io.target;
         if self.using {
             if !right {
-                // onStoppedUsingItem
+                // stopUsingItem
                 io.out.push(Outbound::Dig {
                     status: DigStatus::ReleaseUseItem,
                     pos: BlockPos::new(0, 0, 0),
@@ -675,7 +675,7 @@ impl Hands {
             return;
         }
         if io.modern {
-            // 1.16 Minecraft.clickMouse: the action, then the swing; a block hit on air falls
+            // 1.16 MinecraftClient.doAttack: the action, then the swing; a block hit on air falls
             // through to the miss case.
             match t {
                 Some(hit)
@@ -730,7 +730,7 @@ impl Hands {
         self.hitting && self.current == Some(pos) && self.hit_item == io.held.map(|h| h.id)
     }
 
-    /// `clickBlock`: START (aborting a previous block), instant break when fast enough.
+    /// `attackBlock`: START (aborting a previous block), instant break when fast enough.
     pub(crate) fn click_block(&mut self, pos: BlockPos, face: Face, io: &mut HandsIo<'_>) {
         if self.hitting && self.hitting_position(pos, io) {
             return;
@@ -763,7 +763,7 @@ impl Hands {
         self.damage = 0.0;
     }
 
-    /// `onPlayerDamageBlock`.
+    /// `updateBlockBreakingProgress`.
     fn damage_block(&mut self, pos: BlockPos, face: Face, io: &mut HandsIo<'_>) -> bool {
         if self.hit_delay > 0 {
             self.hit_delay -= 1;
@@ -792,7 +792,7 @@ impl Hands {
         true
     }
 
-    /// `onPlayerDestroyBlock`: air on the client; the current block moves to y = −1.
+    /// `breakBlock`: air on the client; the current block moves to y = −1.
     fn destroyed(&mut self, pos: BlockPos, io: &mut HandsIo<'_>) {
         io.broken.push(pos);
         if let Some(c) = self.current {
@@ -801,7 +801,7 @@ impl Hands {
         self.broken += 1;
     }
 
-    /// `resetBlockRemoving`.
+    /// `cancelBlockBreaking`.
     pub(crate) fn reset_block_removing(&mut self, io: &mut HandsIo<'_>) {
         if !self.hitting {
             return;
@@ -817,7 +817,7 @@ impl Hands {
         self.damage = 0.0;
     }
 
-    /// `rightClickMouse` (nothing while a block is being hit).
+    /// `doUse` (nothing while a block is being hit).
     fn right_click_mouse(&mut self, t: Option<BlockHit>, io: &mut HandsIo<'_>) {
         if self.hitting {
             return;
@@ -855,19 +855,19 @@ impl Hands {
             }
         }
         if fall_through && let Some(h) = io.held {
-            // sendUseItem: the item itself (position -1, face 255).
+            // interactItem: the item itself (position -1, face 255).
             io.out.push(Outbound::UseItem {
                 held: io.held_stack.clone(),
                 off_hand: false,
             });
-            // ItemFood.onItemRightClick: only when the player can eat.
+            // FoodItem.onStartUse: only when the player can eat.
             if h.usable && (!h.food || h.always_edible || io.food < 20) {
                 self.using = true;
             }
         }
     }
 
-    /// 1.9+ `rightClickMouse`: main hand, then off hand; per hand the block (activation, then
+    /// 1.9+ `doItemUse` (1.16.5 Yarn): main hand, then off hand; per hand the block (activation, then
     /// the item on the block), then the item itself; the first success / consume ends it.
     fn right_click_modern(&mut self, t: Option<BlockHit>, io: &mut HandsIo<'_>) {
         let any_item = io.held.is_some() || io.off_held.is_some();
@@ -929,7 +929,7 @@ impl Hands {
         }
     }
 
-    /// `onPlayerRightClick`: the placement packet; returns whether something was activated or
+    /// `onRightClick`: the placement packet; returns whether something was activated or
     /// placed (the caller swings).
     pub(crate) fn right_click_block(
         &mut self,
@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn hand_stone_time() {
         // Stone by hand, on ground: 1 / 1.5 / 100 per tick; the f32 sum (as vanilla's
-        // curBlockDamageMP) reaches 1 on the 151st tick, not the 150th.
+        // currentBreakingProgress) reaches 1 on the 151st tick, not the 150th.
         let f = DigFactors {
             on_ground: true,
             ..DigFactors::default()

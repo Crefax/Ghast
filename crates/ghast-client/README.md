@@ -49,7 +49,7 @@ Examples (facade crate): `cargo run -p ghast --release --example afk -- --host �
 Dispatch is compile-time: `Client::run` matches the run-time `GameVersion` once and runs a
 session monomorphised for that version; the engine and the behaviour are version-free.
 
-## Tick model (1.8.9 `Minecraft.runTick`)
+## Tick model (1.8.9 `MinecraftClient.tick`)
 
 1. Inbound packets are applied **on arrival** (like vanilla's per-frame task queue, which
    runs before each tick). Keep-alives, teleports (1.16: `teleport_confirm` +
@@ -61,13 +61,13 @@ session monomorphised for that version; the engine and the behaviour are version
    `attack`, clicks, `swing`, `respawn`) are written in call order before this tick's
    movement packet; `set_aim` / `set_controls` / `set_buttons` / `set_flying` only record
    intent.
-3. Held-slot sync (`PlayerControllerMP.updateController`) → key processing (hands: held
+3. Held-slot sync (`ClientPlayerInteractionManager.tick`) → key processing (hands: held
    buttons) → `set_flying`'s `abilities` → rotation step (only on ticks the behaviour aimed;
    held back for one tick when it would take the crosshair off a block dug or placed this
    tick, see below) → movement step →
    sprint `entity_action` → sneak `entity_action` → **exactly one** of `flying` / `position` /
    `look` / `position_look` (moved > 0.03, or the position refresh: 1.8 checks
-   `positionUpdateTicks >= 20` before incrementing it — every 21st tick — while 1.9+ increments
+   `ticksSinceLastPositionPacketSent >= 20` before incrementing it — every 21st tick — while 1.9+ increments
    first — every 20th tick; Grim's BadPacketsE flags a 21-tick gap on 1.16.5).
    `ctx.sent()` is the pose the server has.
 
@@ -142,8 +142,8 @@ strider / soul speed from the armour NBT) and spectator mode (1.16). Haste / min
 
 ## Hands: dig, place, use (phase 3 groundwork)
 
-`hands.rs` ports 1.8.9 `Minecraft.runTick` key processing and `PlayerControllerMP`
-(verified against recorded lab packet traces); it runs after the behaviour and the held-slot sync
+`hands.rs` ports 1.8.9 `MinecraftClient.tick` key processing and
+`ClientPlayerInteractionManager` (verified against recorded lab packet traces); it runs after the behaviour and the held-slot sync
 and before the movement step, so its packets precede the tick's movement packet.
 
 **Turn held on action ticks** (`Client::hold_turn_on_action`, on by default): Grim's RotationPlace re-checks a dig / place with the look of the movement packet
@@ -167,7 +167,7 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
 - The crosshair is vanilla 1.8's `World.rayTrace(eyes, eyes + look × reach, false, false, true)`
   (block walk with the −1e−4 zero-fraction rule, per-block six-plane test, ties to the earlier
   plane; stairs: the eight half-cube passes, the hit farthest from the ray's end wins) with
-  `Entity.getVectorForRotation` from the float sine table and eyes = feet + `1.62F` (− `0.08F`
+  `Entity.getRotationVector` from the float sine table and eyes = feet + `1.62F` (− `0.08F`
   sneaking); ray shapes from `ghast_physics::v1_8::ray_shape` (ghast-data's oracle-verified
   `selection()` bounds plus the neighbour-dependent fences / panes / walls / doors / chests and
   the stairs passes). `tests/oracle_raytrace.rs`: all **2000** of the oracle's rays bit-exact
@@ -189,7 +189,7 @@ With `Interests::ENTITIES` (and `PLAYER_LIST` for the tab list) the session crea
 version's `ghast_entity` tracker; its packet ids join the filter, so bots without the interest
 never decode entity packets. `ctx.entities()` is the store (`get`, `within`, `players`, …).
 
-- Crosshair: vanilla `getMouseOver`'s entity part — entities that `canBeCollidedWith` (living,
+- Crosshair: vanilla `GameRenderer.updateTargetedEntity` — entities that `collides()` (living,
   players, paintings, boats, minecarts, TNT, falling blocks, item frames, armor stands, leash
   knots, end crystals) whose box, grown by 0.1 on 1.8 (0 on 1.9+), the look ray hits first,
   within 3 blocks and closer than the block hit. It takes over the buttons: left attacks

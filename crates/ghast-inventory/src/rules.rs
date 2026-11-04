@@ -4,7 +4,7 @@
 //!
 //! Stack sizes and durability come from `ghast-data` (checked against the vanilla 1.8.9 and
 //! 1.16.5 item registries); the short lists below were read off the vanilla registries
-//! (`Item.isUnbreakable` in Legacy Yarn = MCP `getHasSubtypes`, `getRecipeRemainder`,
+//! (the damage-variant flag, which Legacy Yarn names `Item.isUnbreakable`; `getRecipeRemainder`;
 //! `MobEntity.getPreferredEquipmentSlot`).
 
 use crate::stack::Stack;
@@ -18,7 +18,7 @@ pub enum Version {
     V1_16_5,
 }
 
-/// 1.8.9 items whose `Item.hasSubtypes` is true (the damage value selects a variant, so merging
+/// 1.8.9 items with damage variants (Legacy Yarn `Item.isUnbreakable()` is true; the damage value selects a variant, so merging
 /// compares it). Sorted.
 const SUBTYPES_1_8: &[i32] = &[
     1, 3, 5, 6, 12, 17, 18, 19, 24, 31, 35, 37, 38, 44, 78, 95, 97, 98, 126, 139, 145, 155, 159,
@@ -56,7 +56,7 @@ impl Version {
         self.info(s.id).map_or(64, |i| i32::from(i.stack_size))
     }
 
-    /// `Item.hasSubtypes` (1.8 only; 1.16 has no damage-selected variants).
+    /// Whether the item has damage variants (1.8 only; 1.16 has no damage-selected variants).
     pub(crate) fn has_subtypes(self, id: i32) -> bool {
         self == Version::V1_8 && SUBTYPES_1_8.binary_search(&id).is_ok()
     }

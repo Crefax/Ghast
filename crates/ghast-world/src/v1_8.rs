@@ -1,7 +1,7 @@
 //! The 1.8.x (protocol 47) world: `id << 4 | meta` sections, `map_chunk`, `map_chunk_bulk`,
 //! block changes and explosions.
 //!
-//! ## Chunk data format (vanilla `Chunk.fillChunk`)
+//! ## Chunk data format (vanilla `Chunk.method_3895`, unnamed in Legacy Yarn)
 //!
 //! For a section mask with `n` bits set, the data is, in this order:
 //! `n × 4096` little-endian `u16` block states (sections in ascending Y), `n × 2048` bytes of block
@@ -45,7 +45,7 @@ pub const PACKET_IDS: [i32; 8] = [
     cb::id::WORLD_BORDER,
 ];
 
-/// Vanilla's `World.isValid` horizontal limit.
+/// Vanilla's `World.isValidPos` horizontal limit.
 const MAX_XZ: i32 = 30_000_000;
 
 /// The client-side world of a 1.8 connection.
@@ -383,7 +383,7 @@ fn changed(b: bool) -> Applied {
     }
 }
 
-/// Vanilla's `Block.BLOCK_STATE_IDS.getByValue` with null as air.
+/// Vanilla's `Block.BLOCK_STATES.fromId` with null as air.
 #[inline]
 fn raw_from_wire(v: i32) -> u16 {
     u16::try_from(v).map_or(0, |r| BlockState::from_raw_vanilla(r).raw())
@@ -461,8 +461,8 @@ fn decode(
         }
         let mut states = [0u16; SECTION_VOLUME];
         let b = &data[k * BLOCK_BYTES..(k + 1) * BLOCK_BYTES];
-        for (s, pair) in states.iter_mut().zip(b.chunks_exact(2)) {
-            *s = BlockState::from_raw_vanilla(u16::from_le_bytes([pair[0], pair[1]])).raw();
+        for (s, pair) in states.iter_mut().zip(b.as_chunks::<2>().0) {
+            *s = BlockState::from_raw_vanilla(u16::from_le_bytes(*pair)).raw();
         }
         out.sections[j] = builder.build(&states);
         if config.light {

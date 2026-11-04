@@ -326,8 +326,10 @@ fn read_payload(r: &mut Reader<'_>, ty: u8, depth: usize) -> DecodeResult<Tag> {
             let n = read_array_len(r, 4)?;
             let s = r.take(n * 4)?;
             Tag::IntArray(
-                s.chunks_exact(4)
-                    .map(|c| i32::from_be_bytes([c[0], c[1], c[2], c[3]]))
+                s.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| i32::from_be_bytes(*c))
                     .collect(),
             )
         }
@@ -335,8 +337,10 @@ fn read_payload(r: &mut Reader<'_>, ty: u8, depth: usize) -> DecodeResult<Tag> {
             let n = read_array_len(r, 8)?;
             let s = r.take(n * 8)?;
             Tag::LongArray(
-                s.chunks_exact(8)
-                    .map(|c| i64::from_be_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
+                s.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| i64::from_be_bytes(*c))
                     .collect(),
             )
         }

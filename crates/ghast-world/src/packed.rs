@@ -20,11 +20,11 @@ pub fn unpack_be(bits: u32, data: &[u8], count: usize, mut put: impl FnMut(usize
     let per = (64 / bits) as usize;
     let mask = (1u64 << bits) - 1;
     let mut i = 0;
-    for w in data.chunks_exact(8) {
+    for w in data.as_chunks::<8>().0 {
         if i >= count {
             break;
         }
-        let mut word = u64::from_be_bytes([w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]]);
+        let mut word = u64::from_be_bytes(*w);
         let n = per.min(count - i);
         for _ in 0..n {
             put(i, (word & mask) as u32);

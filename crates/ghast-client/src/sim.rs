@@ -218,7 +218,7 @@ fn force_position(
     *ticks_since_pos = 0;
 }
 
-/// 1.16 blocks whose `onBlockActivated` succeeds for a plain right click (GUIs, doors,
+/// 1.16 blocks whose `onUse` succeeds for a plain right click (GUIs, doors,
 /// switches, …). Name-based approximation of vanilla's per-block `use` overrides.
 fn activates_1_16(name: &str) -> bool {
     const EXACT: &[&str] = &[
@@ -289,7 +289,7 @@ fn union(boxes: &[ghast_data::Aabb]) -> Option<[f64; 6]> {
     (!boxes.is_empty()).then_some(u)
 }
 
-/// 1.8 blocks whose client `onBlockActivated` answers a right click.
+/// 1.8 blocks whose client `Block.onUse` answers a right click.
 const ACTIVATED_1_8: &[u8] = &[
     23, 25, 26, 54, 58, 61, 62, 64, 69, 71, 77, 84, 92, 93, 94, 96, 107, 116, 117, 118, 120, 130,
     138, 143, 145, 146, 149, 150, 151, 154, 158, 167, 178, 183, 184, 185, 186, 187, 193, 194, 195,
@@ -305,7 +305,7 @@ fn arr(b: &ghast_physics::math::Aabb) -> [f64; 6] {
 }
 
 /// The 1.8 ray shape at a position (ghast-physics: vanilla's bounds after
-/// `setBlockBoundsBasedOnState`, neighbour-dependent shapes and the stairs passes):
+/// `Block.setBoundingBox`, neighbour-dependent shapes and the stairs passes):
 /// `(selection, stairs passes)`.
 fn ray_1_8(w: &ghast_world::v1_8::World, x: i32, y: i32, z: i32) -> RayBox {
     use ghast_physics::v1_8::RayShape;
@@ -499,7 +499,7 @@ impl Sim for Sim18 {
     }
 
     fn reset_player(&mut self) {
-        // A fresh EntityPlayerSP: at the origin, lastReported* zero; abilities and food are
+        // A fresh ClientPlayerEntity: at the origin, lastReported* zero; abilities and food are
         // re-sent by the server.
         let abilities = self.player.abilities;
         let food = self.player.food_level;
