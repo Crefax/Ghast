@@ -5,8 +5,10 @@ DL="$SERVERS/dl"
 JDKS="${JDKS:-$HOME/.local/jdks}"   # Temurin JDKs/JREs; a missing one is downloaded here
 LAB_HEAP="${LAB_HEAP:-896M}"
 # Test accounts (offline mode): opped on both servers; the first one gets auto-fly.
-LAB_OPS="${LAB_OPS:-GhastBot GhastBot2 GhastBot3 GhastBot4 Baseline Baseline2}"
+LAB_OPS="${LAB_OPS:-GhastBot GhastBot2 GhastBot3 GhastBot4 GhastBot5 Baseline Baseline2}"
 LAB_BOT="${LAB_BOT:-GhastBot}"
+# Accounts the lab /fly plugin gives allowFlight on join (read at server start).
+LAB_FLY="${LAB_FLY:-GhastBot GhastBot5}"
 
 GRIM_JAR=grimac-bukkit-2.3.73.jar
 GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/1FIGlM6Q/grimac-bukkit-2.3.73.jar

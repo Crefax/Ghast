@@ -16,8 +16,8 @@ worlds, logs, the built plugin and npm deps live in git-ignored dirs (`lab/serve
 
 Both: offline mode, `-Xmx896M` (`LAB_HEAP`), compression threshold 256, view distance 6, superflat
 (bedrock, 2 dirt, grass: grass is y=3, players stand at y=4), spawn `0 4 0`, peaceful, no mobs.
-Opped accounts (`LAB_OPS`): `GhastBot`, `GhastBot2`, `GhastBot3`, `Baseline`, `Baseline2`. Op does **not**
-exempt from Grim. `GhastBot` (`LAB_BOT`) gets allowFlight on join via the lab plugin (`/fly [player] [on|off]`,
+Opped accounts (`LAB_OPS`): `GhastBot`..`GhastBot5`, `Baseline`, `Baseline2`. Op does **not**
+exempt from Grim. `GhastBot` and `GhastBot5` (`LAB_FLY`, read at server start) get allowFlight on join via the lab plugin (`/fly [player] [on|off]`,
 source in `plugins/labfly`, built at start against the 1.8.8 API, loads on both servers).
 Grim alerts and verbose flags are printed to the console (`config.yml` patched on first start).
 

@@ -31,7 +31,8 @@ if [ ! -f "$B/GhastLabFly.jar" ] || [ "$(cat "$B/labfly.hash" 2>/dev/null)" != "
 fi
 cp -f "$B/GhastLabFly.jar" "$DIR/plugins/GhastLabFly.jar"
 mkdir -p "$DIR/plugins/GhastLabFly"
-printf '# Players that get allowFlight automatically on join / respawn / world or gamemode change.\nauto-fly:\n  - %s\n' "$LAB_BOT" > "$DIR/plugins/GhastLabFly/config.yml"
+{ printf '# Players that get allowFlight automatically on join / respawn / world or gamemode change.\nauto-fly:\n'
+  for n in $LAB_FLY; do printf '  - %s\n' "$n"; done; } > "$DIR/plugins/GhastLabFly/config.yml"
 
 echo "eula=true" > "$DIR/eula.txt"
 cp "$here/templates/server-$VER.properties" "$DIR/server.properties"
