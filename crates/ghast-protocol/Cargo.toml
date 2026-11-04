@@ -1,0 +1,58 @@
+[package]
+name = "ghast-protocol"
+description = "Minecraft Java Edition network protocol for the ghast client library: generated per-version packets, framing, compression, encryption, NBT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "protocol", "packets", "nbt", "bot"]
+categories = ["network-programming", "encoding", "game-development"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast-protocol"
+
+[features]
+default = ["v1_8", "v1_16_5", "tokio", "libdeflate"]
+# Protocol versions (generated packet modules).
+v1_8 = []
+v1_16_5 = []
+# Inflate/deflate whole packets with libdeflate (C, ~2.4x faster inflate than zlib-rs in
+# the `inflate_chunk` bench). Without it everything uses flate2 + zlib-rs (pure Rust).
+# Packet-id peeking for the filter always uses flate2's streaming inflater.
+libdeflate = ["dep:libdeflater"]
+# Async framed reader/writer on top of tokio's AsyncRead/AsyncWrite.
+tokio = ["dep:tokio"]
+# Lazy parsing of chat components (raw JSON strings) with serde_json.
+chat-json = ["dep:serde_json"]
+# Deterministic random value generators for every generated type (used by the
+# round-trip and differential test suites; not part of the stable API).
+testgen = []
+
+[dependencies]
+bytes = { workspace = true }
+bytestring = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+flate2 = { workspace = true }
+aes = { workspace = true }
+cfb8 = { workspace = true }
+libdeflater = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["io-util"] }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+ghast-protocol = { path = ".", default-features = false, features = ["testgen", "chat-json"] }
+proptest = { workspace = true }
+criterion = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "rt", "macros"] }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "protocol"
+harness = false
+required-features = ["v1_8", "libdeflate"]
+
+[package.metadata.docs.rs]
+all-features = true

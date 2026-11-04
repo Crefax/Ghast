@@ -1,0 +1,15 @@
+{
+  "name": "ghast-protocol-differential",
+  "private": true,
+  "description": "Differential test harness: compares ghast-protocol against node-minecraft-protocol.",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "minecraft-protocol": "1.68.0",
+    "minecraft-data": "3.119.0",
+    "prismarine-nbt": "2.8.0",
+    "protodef": "1.19.0"
+  },
+  "overrides": {
+    "minecraft-data": "3.119.0"
+  }
+}

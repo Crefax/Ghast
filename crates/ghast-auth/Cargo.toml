@@ -1,0 +1,48 @@
+[package]
+name = "ghast-auth"
+description = "Authentication and connection setup for the ghast Minecraft client library: offline identities, SOCKS5 proxies, login encryption and Microsoft accounts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "socks5", "authentication", "bot"]
+categories = ["authentication", "network-programming"]
+documentation = "https://docs.rs/ghast-auth"
+readme = "README.md"
+
+[features]
+default = []
+# Microsoft account login (device code -> Xbox Live -> XSTS -> Minecraft) and the session-server
+# `join` call for online-mode servers. Pulls in an HTTPS client (reqwest + rustls/ring).
+microsoft = ["dep:reqwest", "dep:serde", "dep:serde_json", "tokio/fs", "uuid/serde"]
+
+[dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util", "time"] }
+uuid = { workspace = true }
+md-5 = { workspace = true }
+sha1 = { workspace = true }
+rsa = { workspace = true }
+rand_core = { workspace = true }
+
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "io-util", "time", "fs"] }
+wiremock = { workspace = true }
+serde_json = { workspace = true }
+
+[[example]]
+name = "offline_socks5"
+
+[[example]]
+name = "microsoft_device_code"
+required-features = ["microsoft"]
+
+[package.metadata.docs.rs]
+all-features = true

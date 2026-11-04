@@ -1,0 +1,13 @@
+name: GhastLabFly
+version: 1.0
+main: dev.ghast.lab.LabFly
+api-version: 1.13
+description: Lab-only /fly so survival test bots keep allowFlight
+commands:
+  fly:
+    description: Toggle allowFlight (/fly [player] [on|off])
+    usage: /fly [player] [on|off]
+    permission: labfly.fly
+permissions:
+  labfly.fly:
+    default: op

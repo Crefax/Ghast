@@ -1,0 +1,33 @@
+[package]
+name = "ghast-entity"
+description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9 and 1.16.5 entity packets, vanilla-exact server positions, O(1) lookup"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "entity", "bot"]
+categories = ["game-development"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast-entity"
+
+[dependencies]
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+bytes = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_16_5", "testgen"] }
+ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_16_5"] }
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "entity"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true

@@ -1,0 +1,29 @@
+[package]
+name = "ghast-data"
+description = "Static Minecraft Java Edition game data for the ghast client library: blocks, block states, collision shapes, items, entities, biomes, enchantments, foods (generated from PrismarineJS minecraft-data)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "blocks", "items", "game-data", "bot"]
+categories = ["game-development", "data-structures"]
+documentation = "https://docs.rs/ghast-data"
+readme = "README.md"
+
+[features]
+default = ["v1_8", "v1_16_5"]
+# Per-version tables. Each one is independent; enable only what you use to cut compile time.
+v1_8 = []
+v1_16_5 = []
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true

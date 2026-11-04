@@ -1,0 +1,64 @@
+[workspace]
+resolver = "3"
+# Explicit list (not a glob): a half-created crate must not break the workspace.
+# Add a crate here only once its Cargo.toml and src/lib.rs exist.
+members = [
+    "crates/ghast",
+    "crates/ghast-auth",
+    "crates/ghast-client",
+    "crates/ghast-data",
+    "crates/ghast-entity",
+    "crates/ghast-inventory",
+    "crates/ghast-physics",
+    "crates/ghast-protocol",
+    "crates/ghast-world",
+    "codegen/data",
+    "codegen/protocol",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+authors = ["Crefax"]
+repository = "https://github.com/Crefax/Ghast"
+homepage = "https://github.com/Crefax/Ghast"
+
+# Shared dependency versions: crates use `foo = { workspace = true }`.
+[workspace.dependencies]
+# ghast-protocol
+bytes = "1.12"
+bytestring = "1.5"
+thiserror = "2"
+tokio = { version = "1.54", default-features = false }
+uuid = "1"
+serde_json = "1"
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+aes = "0.9.4"
+cfb8 = "0.9.1"
+proptest = "1.12"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+libdeflater = "1.26"
+sha2 = "0.11"
+
+# ghast-auth
+md-5 = "0.10.6"
+sha1 = "0.10.6"
+rsa = "0.9.10"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+wiremock = "0.6.5"
+
+# ghast-client
+log = "0.4.29"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"

@@ -1,0 +1,36 @@
+[package]
+name = "ghast-physics"
+description = "Vanilla-exact, pure and deterministic player movement for the ghast Minecraft Java Edition client library (1.8.9 first), verified bit for bit against the real game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "physics", "movement", "bot", "deterministic"]
+categories = ["game-development", "simulation"]
+documentation = "https://docs.rs/ghast-physics"
+readme = "README.md"
+
+[features]
+default = []
+# Large-fuzz replay test (`tests/fuzz_cache.rs`): replays oracle output from `oracle/cache/` that
+# `oracle/run.sh fuzz` generated. Off by default so `cargo test` needs no Java and no cache.
+oracle-cache = []
+
+[dependencies]
+ghast-data = { path = "../ghast-data", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+
+[dev-dependencies]
+ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_16_5"] }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "tick"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true

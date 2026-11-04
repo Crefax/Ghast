@@ -1,0 +1,56 @@
+[package]
+name = "ghast"
+description = "Headless Minecraft Java Edition client / bot library (1.8.9 and 1.16.5) with vanilla-exact behaviour: facade crate re-exporting the ghast-* crates"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "bot", "client", "headless", "protocol"]
+categories = ["game-development", "network-programming"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast"
+
+[features]
+default = []
+# Online-mode servers (Microsoft accounts).
+microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
+
+[dependencies]
+ghast-client = { path = "../ghast-client", version = "0.1.0" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0" }
+ghast-auth = { path = "../ghast-auth", version = "0.1.0" }
+ghast-data = { path = "../ghast-data", version = "0.1.0" }
+
+[dev-dependencies]
+log = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "io-std", "io-util", "sync"] }
+
+[[example]]
+name = "afk"
+
+[[example]]
+name = "chat"
+
+[[example]]
+name = "movement_course"
+
+[[example]]
+name = "dig_place"
+
+[[example]]
+name = "use_item"
+
+[[example]]
+name = "soak"
+
+[[example]]
+name = "attack"
+
+[[example]]
+name = "inventory_probe"
+
+[package.metadata.docs.rs]
+all-features = true

@@ -1,0 +1,632 @@
+# ghast oracle — vanilla movement as ground truth
+
+A small Java harness that runs the **real** Minecraft client movement code headless on a fake world and
+writes what it did as golden vectors. `ghast-physics` must reproduce those vectors bit for bit; the
+committed vectors let plain `cargo test` check that without Java.
+
+Nothing from Mojang is in this repository. On first use the oracle downloads the vanilla client jar
+(Mojang launcher manifest, SHA-1 checked), its libraries, and Legacy Fabric's **Legacy Yarn** mappings
+(CC0) into the git-ignored `oracle/cache/`, and remaps the jar to Yarn names there. The harness is our
+own code that *calls* vanilla; only Yarn / intermediary names appear in it.
+
+## Quick start
+
+Requirements: a JDK 17+ (`JAVA_HOME` or `java` on `PATH`; the committed vectors were made with JDK 21,
+and a JDK 17 run reproduced them) and, on the first run, network access to piston-meta.mojang.com,
+libraries.minecraft.net, maven.legacyfabric.net, maven.fabricmc.net and Maven Central (~25 MB, cached).
+
+```sh
+oracle/run.sh            # fetch + remap (first run only) + build + regenerate tests/golden/1.8.9/
+oracle/run.sh verify     # regenerate into a temp dir, compare content with tests/golden/1.8.9/
+oracle/run.sh selftest   # determinism: two runs, reverse order, read-back replay must all match
+```
+
+`run.sh` uses `./gradlew` (Gradle 8.5, downloaded by the wrapper) unless `GRADLE=/path/to/gradle` is
+set. Other commands (`oracle/run.sh help` lists them):
+
+| Command | What it does |
+|---|---|
+| `fuzz --seed S --count N --ticks T [--use-item true] [--edges true] [--out F]` | N random cases (streamed; default `cache/1.8.9/fuzz/…jsonl.gz`). ~20k ticks/s. `--use-item true` adds random spans of the `use` key (cases get a `_use` suffix; everything else is the same case). `--extras true` (1.8.9) additionally sprinkles server speed modifiers (ops 0/1/2), depth strider boots and spectator mode from a separate random stream (cases get an `_x` suffix). `--palette edges` (or `--edges true`; 1.8.9) switches to the edge generator: strips of partial-height blocks (soul sand, slabs, snow layers, farmland, carpets, stairs, trapdoors, …) next to each other, to full blocks and to one-block steps, crossed with mostly forward + jump input, so landings and step-ups at small height differences are frequent (cases `edge_s<seed>_<i>`). |
+| `scenarios [--only NAME] [--out F]` | the hand-written scenarios |
+| `replay --in F [--out F]` | read cases in the golden format (header + tick `input`s) and run them in vanilla |
+| `boxes [--out F]` | the collision box dump |
+| `boxes-far [--out F]` | the far-position collision box dump |
+| `selection [--out F]` / `rays [--seed --worlds --rays --out]` | 1.8.9 crosshair bounds / raytrace vectors |
+| `voxels [--out F]` | 1.16.5 voxel grids of all collision shapes (`MC=1.16.5`) |
+| `clicks [--seed S --count N --out F]` | window click vectors (`ClickDump`, both versions): N random cases of a screen handler + contents + 1–10 clicks through the real `ClientPlayerInteractionManager.clickSlot`; default `cache/<mc>/clicks/…`. The golden set has 3000 cases (`tests/golden/<mc>/clicks_seed1.jsonl.gz`), replayed by `crates/ghast-inventory/tests/oracle_clicks.rs`. |
+| `recipes [--out F]` | 1.8.9: the client's crafting recipes in match order (`RecipeDump`) → `tests/golden/1.8.9/recipes.jsonl.gz` |
+| `list` | names and descriptions of the hand-written scenarios |
+| `compare DIR_A DIR_B` | compare decompressed content of golden files |
+| `coverage` | regenerate `YARN_COVERAGE.md` |
+| `decompile` | decompile the Yarn jar into `cache/1.8.9/decompiled/` for local reading (never commit it) |
+
+`gradle printClasspath` prints the harness runtime classpath (for an IDE or a profiler run).
+
+`replay` is the way for other tools (the Rust tests, a case minimiser) to ask vanilla about their own
+cases: write a header line and tick lines with only `input`, and the oracle returns the full records.
+
+## Layout
+
+```
+oracle/
+  run.sh                     entry point
+  build.gradle               source sets: setup (fetch/remap), common (version-agnostic), mc_1_8_9
+  versions/1.8.9.properties  what to download for 1.8.9 (manifest, mapping coordinates, harness)
+  versions/1.8.9.coverage    class list + notes for YARN_COVERAGE.md
+  src/setup/                 Setup (download, SHA-1, tiny-remapper), Coverage (report generator)
+  src/common/                Scenario model, JSON writer (bit-exact floats), SplitMix64 RNG
+  src/mc_1_8_9/              the 1.8.9 harness (Harness, Recorder, Scenarios, Fuzz, CollisionDump, …)
+  cache/                     (git-ignored) jars, libraries, mappings, remapped jar, fuzz output
+tests/golden/1.8.9/
+  scenarios.jsonl.gz         hand-written scenarios
+  fuzz_seed1.jsonl.gz        100 random cases x 60 ticks (seed 1)
+  collision_boxes.jsonl.gz   collision boxes for every block id/meta + neighbour configurations
+  collision_boxes_far.jsonl.gz  the alone/settled boxes again at 3 far positions, absolute coordinates
+  fuzz_edges_seed1.jsonl.gz  100 edge-mode cases x 60 ticks (partial-height blocks, landings, step-ups)
+  selection_boxes.jsonl.gz   ray-test bounds + canCollide for every block id/meta (crosshair)
+  raytrace.jsonl.gz          crosshair raytrace vectors (50 worlds x 40 viewpoints)
+  entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
+```
+
+The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
+version-agnostic, a version needs `versions/<mc>.properties` + `versions/<mc>.coverage` and its own
+harness source set (`src/mc_x_y_z`) compiled against that version's named jar. Implemented: 1.8.9 and
+1.16.5 (see "1.16.5" below).
+
+## How a run works (1.8.9)
+
+What is real vanilla code:
+- `ClientWorld` with its `ClientChunkProvider`; chunk columns are loaded with the real
+  `ClientWorld.handleChunk` and filled by writing raw `id << 4 | meta` values into `ChunkSection`s, i.e.
+  exactly what chunk data packets decode to (a meta a block does not use decodes to **air**).
+- `ClientPlayerEntity`, created by the real `ClientPlayerInteractionManager` the way
+  `MinecraftClient.connect` does it (`createPlayer`, `flipPlayer`, `afterSpawn`, `spawnEntity`,
+  `KeyboardInput`, `copyAbilities`, camera entity, `setGameMode`).
+- Input is a set of held keys, fed through `KeyBinding.setKeyPressed` (what the LWJGL keyboard loop
+  calls) and read by the real `KeyboardInput`. So sprint double-tap, creative double-tap-jump flight
+  toggle, sneak scaling etc. are vanilla.
+- Each tick calls the real `World.tickEntities()`, which runs the chunk bookkeeping and
+  `ClientPlayerEntity.tick()`: `tickMovement` (sprint/fly toggles, pushOutOfBlocks, jump, travel with
+  friction / water / lava / ladders, `Entity.move` with collisions, step-up, sneak edge clipping, block
+  contact effects — web, soul sand, slime) and then `sendMovementPackets`.
+
+What is faked (and why it does not change movement):
+- `MinecraftClient` is allocated without its constructor; only `options`, `world`, `player`,
+  `interactionManager`, `cameraEntity`, `soundManager` (a silent subclass) and the static instance are
+  set. The tick only touches those.
+- `ClientPlayNetworkHandler` is the real class with `sendPacket` overridden to capture packets.
+- Server packets used for setup and events are applied the way their client handlers do it:
+  position/look (no relative flags: velocity zeroed, `updatePositionAndAngles`), abilities, entity
+  velocity (`setVelocityClient(v / 8000)`), movement speed attribute base value (entity properties),
+  status effects (`addStatusEffect`; on the client this does **not** add attribute modifiers — speed
+  effects reach the client only as attribute modifiers, jump boost / blindness are read directly).
+
+Order inside one tick (matches `MinecraftClient.tick`): scenario events (inbound packets) → key states
+→ yaw/pitch (the renderer applies mouse look between ticks) → `world.tickEntities()` → record state and
+the packets sent during the tick.
+
+Setup: after the position packet the oracle does the chunk bookkeeping an earlier tick would have done
+(`checkChunk(player, false)`), so tick 1 is a normal tick. Tick 0 in the output is the state after
+setup; **initialise the Rust state from the tick 0 record**, not from the header.
+
+Block bounds: 1.8 blocks keep their shape in mutable per-`Block` fields. The harness snapshots them
+after bootstrap and restores them before every run (and every collision-dump query), so each case sees
+fresh-JVM state no matter what ran before. See "History-dependent shapes" below for the three blocks
+where that state decides the collision box.
+
+### Item use
+
+If any tick of a case holds the `use` key, the player gets a diamond sword (item 276) in hotbar slot 0
+at setup. Before the world tick (where `MinecraftClient.tick` handles the use key): a rising edge while
+not using calls the real `ClientPlayerInteractionManager.interactItem` (sends `block_place`; the sword
+starts blocking for 72000 ticks), a falling edge while using calls `stopUsingItem` (sends `block_dig`
+status 5). While using, `tickMovement` scales the input by 0.2, resets the sprint double-tap timer and
+blocks sprint starts; forward 0.2 < 0.8 also stops an active sprint.
+
+## History-dependent shapes (anvil, chest, trapped chest)
+
+In 1.8.9 the collision of anvils (145), chests (54) and trapped chests (146) uses the block's mutable
+bounds as they were left by the last shape update of *any* block of that type (`setBoundingBox(world,
+pos)`, run e.g. by the crosshair raytrace); collision itself never recomputes them. Without a shape
+update the bounds are the constructor ones: anvil = full cube, chest = 1/16-inset single chest even
+next to another chest.
+
+**Policy: ghast models the "settled" shape** — the bounds the block's own update sets from its state
+and neighbours (anvil by orientation, chest by double-chest connection). Grim, the judge on real
+servers, models these blocks by state/connection, and a real client has almost always refreshed the
+bounds of nearby blocks.
+
+In `collision_boxes.jsonl.gz` lines for these blocks carry `shape_source`:
+- `"settled"` (config `settled`): `setBoundingBox(world, pos)` is called right before the collision
+  query — every meta alone, and chests with a chest of each meta on each side (plus a chest of the other
+  kind, which does not connect). **These are the reference for ghast.**
+- `"constructor"` (configs `alone`, `chest_neighbour`): no shape update, i.e. what the oracle's movement
+  harness would see. Kept for reference; not the ghast policy.
+
+The movement harness does not settle bounds before each tick, so anvils and chests are left out of the
+fuzz palette and of the hand-written scenarios.
+
+Not covered (port these from elsewhere or add them later):
+- `ClientPlayerInteractionManager.tick` (held-item sync, block breaking), depth strider (no
+  inventory), riding, sleeping, portals, nausea. Item use is covered only as the `use` key with a
+  sword (blocking, never finishes); eating/drinking (which end via a server packet) is not.
+- Other entities (no entity collision boxes or pushing), server corrections. (Spectator mode works: the
+  harness builds the tab-list entry `isSpectator` reads, like the player list packet would.)
+- `ClientWorld.tick()` (time, weather, lighting, random display ticks) — no effect on movement.
+
+## Golden file format
+
+JSON lines, UTF-8. `.gz` files are plain gzip (`zcat` to read). A file is a sequence of cases; each
+case is one `scenario` line followed by its `tick` lines (`t` = 0, 1, …, N). The collision dump has its
+own line types (below).
+
+### Floats
+
+Every `f64`/`f32` value is a two-element array `[decimal, "hex"]`. `hex` is the raw IEEE bits
+(`f64::from_bits(u64::from_str_radix(hex, 16))`, 16 digits; `f32::from_bits`, 8 digits) and is
+authoritative; `decimal` is Java's shortest round-trip form for humans and `null` for NaN/∞. Integers
+and booleans are plain JSON.
+
+### `scenario` line
+
+| key | meaning |
+|---|---|
+| `type` | `"scenario"` |
+| `format` | `1` |
+| `version` | `"1.8.9"` |
+| `name`, `description` | identifier and text |
+| `outside` | `"air"`: every chunk in `loaded_chunks` is loaded, all unlisted blocks are air; `"unloaded"`: only the listed chunk columns are loaded |
+| `loaded_chunks` | list of inclusive chunk rectangles `[cx0, cz0, cx1, cz1]`; columns outside are **not loaded** (an `EmptyChunk`: no blocks, no collision; see quirks) |
+| `fills` | world edits in order: `[x0, y0, z0, x1, y1, z1, id, meta]`, inclusive, later fills overwrite earlier ones; every other position is air |
+| `setup` | the inputs that built the initial state: `game_mode` (`survival`/`creative`/`adventure`), `pos` (f64×3, feet), `yaw`, `pitch` (f32), `vel` (f64×3), `on_ground`, `fall_distance`, `sprinting`, `flying`, `allow_flying` (optional, else from game mode), `fly_speed`, `walk_speed`, `movement_speed_base` (f64), `food_level`, `effects` `[[id, amplifier], …]`; optional (1.8.9 and 1.16.5) `speed_modifiers` `[[amount (f64), operation 0/1/2], …]` (applied like the entity properties packet: base value set, all modifiers replaced, one UUID per modifier; the client's own sprint modifier is added on top while sprinting) and `depth_strider` (diamond boots with that level in the armor slot); optional `bb` (f64×6: the exact box set after the position packet instead of the one derived from `pos` — use it to restart a recorded state bit for bit, since the box carries rounding history the position does not) and, 1.16.5 only, optional `pose` (set before `bb`) |
+| `ticks` | number of tick records after tick 0 |
+
+### `tick` line
+
+| key | meaning |
+|---|---|
+| `type`, `t` | `"tick"`, tick number (0 = after setup) |
+| `input` | absent for `t = 0`. `keys`: comma-separated held keys from `forward,back,left,right,jump,sneak,sprint,use` (empty string = none; `use` = use key held while the crosshair hits nothing, see "Item use"); `yaw`, `pitch` (f32) set before the tick; optional `events` (applied first, in order): `{"type":"velocity","x","y","z"}` (raw 1/8000 units, ints), `{"type":"teleport","pos":[f64×3],"yaw","pitch","flags"?}` (`flags` = the packet's relative-flags byte: bit 0 x, 1 y, 2 z, 3 yaw, 4 pitch; set bits make the value relative, absent/0 = absolute), `{"type":"abilities","invulnerable","flying","allow_flying","creative","fly_speed","walk_speed"}`, `{"type":"speed_attribute","base":f64,"modifiers":[["<uuid>", f64, op], …]}` (entity properties packet for the movement speed: base set, ALL modifiers replaced in that order — if the server's list lacks the sprint modifier `662a6b8d-da3e-4c1c-8813-96ea6097278d`, the sprint bonus is gone until sprinting restarts, as in vanilla), `{"type":"effects","effects":[[id, amplifier], …]}` (the full active effect set after an add/remove effect packet: missing ids are removed, listed ones added/updated) |
+| `state` | player state **after** the tick (below) |
+| `packets` | packets the client sent during the tick, in order (below) |
+
+`state` fields (Yarn name of the vanilla field in parentheses where it is not obvious):
+
+| key | type | meaning |
+|---|---|---|
+| `pos` | f64×3 | `x`, `y`, `z` (feet). After a move these are derived from the box: x = (minX+maxX)/2, y = minY, z = (minZ+maxZ)/2 |
+| `bb` | f64×6 | bounding box `minX, minY, minZ, maxX, maxY, maxZ` — the real position state |
+| `vel` | f64×3 | `velocityX/Y/Z` after the tick |
+| `yaw`, `pitch` | f32 | |
+| `on_ground`, `horizontal_collision`, `vertical_collision`, `colliding` | bool | results of the last move (`colliding` = either) |
+| `velocity_dirty` | bool | set by jumps/knockback; informational |
+| `fall_distance` | f32 | |
+| `in_web` | bool | set by cobweb contact after the move, consumed by the next move |
+| `touching_water` | bool | (`touchingWater`) |
+| `touching_lava`, `climbing` | bool | `isTouchingLava()`, `isClimbing()` evaluated after the tick |
+| `sprinting`, `sneaking` | bool | `isSprinting()`, `isSneaking()` (sneak = held sneak key) |
+| `outside_world_border` | bool | entity flag maintained by the collision query (world border handling) |
+| `no_clip`, `step_height` | bool, f32 | constant here (false, 0.6) |
+| `flying`, `allow_flying`, `creative`, `invulnerable`, `fly_speed`, `walk_speed` | | `PlayerAbilities` |
+| `jump_cooldown` | int | (`jumpingCooldown`) |
+| `jumping` | bool | jump input copied into the entity this tick |
+| `forward_speed`, `sideways_speed` | f32 | entity input after the ×0.98 of travel |
+| `flying_speed` | f32 | (`flyingSpeed`) air acceleration for the **next** tick (0.02, or 0.026 sprinting) |
+| `movement_speed` | f32 | `LivingEntity.movementSpeed` field (set from the attribute after travel; players read the attribute directly) |
+| `movement_speed_attr` | f64 | movement speed attribute value incl. modifiers (sprint ×1.3) |
+| `fly_toggle_timer` | int | (`abilityResyncCountdown`) creative double-tap window |
+| `sprint_toggle_timer` | int | (`field_1763`) sprint double-tap window |
+| `sprinting_ticks_left` | int | (`ticksSinceSprintingChanged`) counts down from 600 while sprinting |
+| `food_level`, `ticks_alive` | int | |
+| `using_item` | bool | `isUsingItem()`; **only present in cases that hold the `use` key** |
+| `input` | object | `KeyboardInput` after this tick: `forward`, `sideways` (f32, sneak-scaled), `jump`, `sneak`. The next tick compares against these for the toggles |
+| `sent` | object | what the server was last told (`sendMovementPackets` bookkeeping): `pos` (f64×3: x, bb.minY, z), `yaw`, `pitch`, `sprinting`, `sneaking`, `ticks_since_pos` (position forced at ≥ 20) |
+
+`packets` entries, named like minecraft-data's 1.8 `play.toServer` packets:
+`{"name":"flying","on_ground"}`, `{"name":"position","pos","on_ground"}`, `{"name":"look","yaw","pitch","on_ground"}`,
+`{"name":"position_look","pos","yaw","pitch","on_ground"}` (`pos` y is the box minY),
+`{"name":"entity_action","action":id,"action_name"}` (0 start_sneaking, 1 stop_sneaking, 3 start_sprinting, 4 stop_sprinting),
+`{"name":"abilities","invulnerable","flying","allow_flying","creative","fly_speed","walk_speed"}`,
+`{"name":"block_place","location":[-1,-1,-1],"direction":255,"item":276}` (start using the held item),
+`{"name":"block_dig","status":5,"status_name":"release_use_item"}` (stop using). A
+`teleport` event also records the `position_look` reply that the client's position handler sends.
+
+### `collision_boxes.jsonl.gz`
+
+`{"type":"block", "id", "name", "slipperiness" (f32), "full_cube", "normal_block", "full_block",
+"render_as_normal_block", "has_collision", "material_blocks_movement", "material_fluid",
+"material_solid", "material_opaque", "material_replaceable", "climbable"}` — one per registered id
+(Yarn semantics: `full_cube` = `Block.isFullCube()` = opaque material, normal render, not a power
+source; `normal_block` = `Block.isNormalBlock()`; see YARN_COVERAGE.md).
+
+`{"type":"boxes", "id", "meta", "config", "neighbours", "state", "boxes", "exact", "history_dependent"?,
+"history_metas"?}` — the boxes `Block.appendCollisionBoxes` adds for the raw value `id << 4 | meta`
+placed at (0, 64, 0), with the listed neighbours `[dx, dy, dz, id, meta]` (everything else air).
+`state` is the decoded block state string, `null` when the meta decodes to air. `boxes` are relative to
+the block position (f64×6 each, `[minX, minY, minZ, maxX, maxY, maxZ]`); `exact` = adding the position
+back reproduces vanilla's absolute values bit for bit (true for every line). `config` = `alone` (all
+id/meta pairs, with the history check), `stone_sides`, `one_side`, `self_*` (fences, panes, bars,
+walls), `stair_neighbour`, `settled` (anvils and chests, see below), `door_lower_with_upper` / `door_upper_with_lower`, `chest_neighbour`,
+`gate_between_walls`. `history_dependent` means the result changes after the same block computed its
+shape elsewhere (another meta, alone or next to a copy of itself): anvils, chests, trapped chests; their
+lines also carry `shape_source` (`constructor` / `settled`, see "History-dependent shapes").
+
+Note: the box values are floats widened to double (`0.1F` → `0.10000000149011612`), and vanilla adds
+them to the integer block position in double precision.
+
+### `collision_boxes_far.jsonl.gz`
+
+Some blocks build their collision box in **float** arithmetic on the block position
+(`pos.getX() + 0.0625F` is an int + float sum), so far from the origin the box is not
+`(double) pos + local shape`. This file repeats the `alone` lines (and the `settled` lines of anvils
+and chests) at three far reference positions: (29999000, 200, -29999000), (-1234567, 5, 7654321) and
+(-16777217, 100, -16777219) (just past 2^24, where floats no longer hold every integer).
+
+`{"type":"boxes_abs", "id", "meta", "config" ("alone"/"settled"), "pos": [x, y, z], "state", "boxes",
+"same_as_local", "shape_source"?}` — `boxes` are **absolute** (f64×6 each, `[decimal, "hex"]`);
+`same_as_local` = every coordinate equals the local shape from `collision_boxes.jsonl.gz` added to `pos` in
+double precision, bit for bit.
+
+Result: `same_as_local` is false only for **cactus (81), cake (92) and all fence gates (107, 183–187)**,
+at all three positions; e.g. a cactus at x = 29999000 has minX = maxX = 29999000.0 (the 0.0625 inset is
+lost in float). Soul sand and snow layers also use float arithmetic, but only on y, which is exact for
+y ≤ 255, so they always match. Reproduce the float sums exactly in Rust for those blocks:
+`(pos.x as f32 + 0.0625f32) as f64` etc.
+
+### Landing step-up cases (1.8.9 `scenarios.jsonl.gz`)
+
+`landing_*` scenarios cover the 1.8.9 step-up that runs while landing (`Entity.move`: step-up when x/z
+was clipped and the entity was on ground **or** the move's dy was clipped while falling): soul sand
+into grass (bunny hop, sprint-jump, walking off 1/2/3-block ledges), 1..7 snow layers into an edge at
+most 0.5 higher, farmland (collides as a full block in 1.8.9) into a slab-topped block, carpet into a
+slab, slabs into a full block. For the `landing_*` variants after `landing_step_carpet_ledge`, the
+spawn offset, yaw (0..30°), strip width and arrival (walk / sprint / hop) were chosen by running
+vanilla until the case contains a landing step-up; the result is an ordinary fixed scenario.
+
+### `selection_boxes.jsonl.gz` and `raytrace.jsonl.gz` (1.8.9, crosshair)
+
+`{"type":"selection", "id", "meta", "config", "neighbours", "state", "bounds", "can_collide",
+"can_collide_liquid", "has_collision_box"}` — `bounds` (f64×6, block-local) are the block's bounds
+right after `setBoundingBox(world, pos)`, which is what `Block.rayTrace` tests (and what the outline
+box `getSelectionBox` adds to the position); `can_collide` / `can_collide_liquid` =
+`Block.canCollide(state, false / true)` — `World.rayTrace` skips blocks for which it is false (air,
+fire, liquids without the liquid flag, portals, …); `has_collision_box` matters for the
+`ignoreBlockWithoutBoundingBox` flag. Configs: every id/meta `alone`, plus the neighbour sets of
+`collision_boxes.jsonl.gz` (fences, panes, bars, walls, stairs, doors, chests) and tripwire over stone.
+Stairs are special: their ray test runs 8 passes over half-cube sub-boxes (stateful fields of the
+block, reset between runs), so use the raytrace vectors for them rather than `bounds`.
+
+`raytrace.jsonl.gz`: 50 worlds (the `fuzz_seed1` terrain generator, header = the usual `scenario`
+line) with 40 viewpoints each: `{"type":"ray", "k", "feet" (f64×3), "yaw", "pitch", "head_yaw"
+(f32), "sneaking", "eye_height" (f32), "reach" (4.5 survival / 5.0 creative), "eyes", "look"
+(f64×3), "pick", "ray_fff"}`. `pick` is the real crosshair pick `Entity.rayTrace(reach, 1.0F)`
+(= `World.rayTrace(eyes, eyes + look * reach, false, false, true)`, which also reports the last
+non-collidable block on a miss); `ray_fff` is `World.rayTrace(…, false, false, false)`. Results:
+`{"type": "block" | "miss" | "null", "block": [x, y, z], "side", "hit": f64×3}`. Note: at tick delta
+1.0 the look vector of a living entity uses `pitch` and **`headYaw`** (the client's tick-time pick runs
+before the world tick, so `headYaw` is the previous tick's yaw); `eyes` = feet + 1.62 (− 0.08 sneaking).
+
+### `entity_sizes.jsonl.gz` (1.8.9 and 1.16.5)
+
+Entity dimensions as the client sees them. Common fields of `{"type":"entity_size", …}`: "id", "name",
+"variant", "width", "height", "eye_height" (f32), "box" (f64×6); `{"type":"entity_size", …, "error"}` marks
+something the client could not construct (none at present).
+
+**1.8.9** — every entity is built the way the client builds it from its spawn packet, at feet
+(0.5, 64, 0.5) or block (0, 64, 0):
+- `"spawn":"mob"` (spawn_mob): `EntityType.createInstanceFromRawId(type)` + `updatePositionAndAngles`, as in
+  `ClientPlayNetworkHandler.onMobSpawn`. One line per non-abstract living registry id (Pig = 90 included;
+  "Mob" 48 / "Monster" 49 are abstract and never spawned).
+- `"spawn":"object"` (spawn_entity): the per-type constructors of `onEntitySpawn`, with `"object_type"`
+  (packet type: 1 boat, 2 item, 10 minecart, 50 TNT, … 90 fishing bobber) and `"data"` (packet data: the
+  minecart type 0..6, the item frame facing, the potion value, …; -1 for the fishing bobber, whose data
+  is its owner's entity id). These differ from the registry
+  constructors (e.g. the XP orb is 0.5 here, 0.25 via the registry). Item frames have one line per
+  facing (`"facing"`, `"block_pos"`).
+- `"spawn":"xp_orb"`, `"spawn":"painting"` (one line per motive × facing: `"motive"`, `"facing"`,
+  `"facing_id"`, `"block_pos"`; the box depends on both, width/height stay 0.5),
+  `"spawn":"global"` (lightning, not in the registry), `"spawn":"player"` (another player,
+  `OtherClientPlayerEntity`), `"spawn":"client_player"`.
+- "id" is the registry id (`EntityType` class → id map), -1 when the entity has none (lightning,
+  fishing bobber, players). "pos" (f64×3) is the entity position after spawning.
+- "collision_border" = `getTargetingMargin` (the 0.1 growth used when picking entities).
+
+Variants start from a freshly spawned entity; metadata goes through `DataTracker.writeUpdatedEntries`
+(what the entity metadata packet does, including the entity's tracked-data hook). `"applied"` says when
+the client changes the size: `metadata` (immediately), `next_tick` (the size is set in a client tick
+method — passive babies in `tickMovement`, wither skeleton in `tickMovement`, armor stand marker in
+`tick()` — and the dump runs that step), `input` (client player sneak), `server` (not a client path).
+- `baby`: passive mobs incl. horses (metadata 12 = -1). Zombies / zombie pigmen (metadata 12 = 1): **the
+  1.8.9 client never resizes them** — a baby zombie keeps the adult 0.6 × 1.95 box (only the eye height
+  changes); `baby_server` (`setBaby(true)`) is the server's 0.3 × 0.975. `villager` (zombie metadata 13):
+  no size change.
+- `wither` (skeleton type 1: 0.72 × 2.535). A type-0 skeleton on the client is 0.6 × **1.8** (the client
+  never applies the server's 0.6 × 1.95). `elder` (guardian flags bit 2: 1.9975). `size_1..4` (slime /
+  magma cube metadata 16; `default` is the constructor size before any metadata). Armor stand `small`
+  (halves only the eye height), `marker` / `small_marker` (0 × 0). Player `sneaking` (eye height only).
+- Horse types (metadata 19) and zombie villagers do not change the size in 1.8.9; horse types have no
+  lines.
+- **Boxes after a size change are not centred**: `Entity.setBounds` keeps the box's min corner, so a
+  resized entity's box runs from the old min corner until its next `updatePosition` (any move or
+  interpolation step) recentres it. The dumped "box" is the state right after the change; recentre with
+  "pos" ± width / 2 if you need the steady state. Some objects already spawn off-centre: small fireballs
+  and wither skulls are positioned with the 1.0 fireball box and shrunk to 0.3125 afterwards, so their
+  box starts at pos - 0.5.
+
+**1.16.5** — `{"type":"entity_type", "id", "name", "width", "height", "fixed"}` (the type's registered
+dimensions) for every type, including those without a client instance (player, fishing bobber,
+lightning; the client player is measured separately as "minecraft:player (client player)"), and
+`entity_size` lines with "box" at feet (0.5, 64, 0.5), "targeting_margin", "pose", "fixed",
+"poses": {pose: [width, height, eye_height]}. Variants: `baby` (passive mobs via the age setter; zombies,
+piglins, … via `setBaby`), `size_1..4` (slime, magma cube), armor stand `small` / `marker` /
+`small_marker`.
+
+## Determinism and verification
+
+- All outputs are written atomically (a `.<name>.partial` file in the same directory, then renamed), so
+  a test run reading `tests/golden/` never sees a half-written file. Keep anything that must survive
+  a session (replay cases, big fuzz runs) under `oracle/cache/…`, not in a temporary directory.
+- `selftest`: the golden set generated twice in one JVM; every hand-written and golden-fuzz case rerun
+  in reverse order after the collision dump has disturbed block state; and the written files read back
+  with `replay` — all must reproduce identical content. Last result: pass.
+- `verify`: a fresh JVM regenerates the golden set and compares it with `tests/golden/1.8.9/`.
+- Compare *decompressed* content across machines: gzip bytes may differ between zlib builds.
+
+## 1.16.5 (second version)
+
+Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 oracle/run.sh verify`,
+`MC=1.16.5 oracle/run.sh fuzz --seed 7 --count 1000`. Mappings: Fabric **Yarn** `1.16.5+build.10`
+(CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
+Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` (100 x 60),
+`collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`, `voxel_shapes.jsonl.gz`.
+
+Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
+and javac refuses to compile against them, so `prepareVanilla` drops parameter annotations from the
+remapped jar (`remap.stripParameterAnnotations`; nothing reads them at run time).
+
+### How a 1.16.5 run works
+
+More of the client is real than in 1.8.9:
+- **Inbound packets are real.** Setup and events are encoded into bytes and decoded by the real packet
+  classes, then given to the real `ClientPlayNetworkHandler` handlers: player abilities, entity
+  properties (movement speed base + modifiers), health/food, status effects, equipment (boots),
+  position/look (which sends the real `teleport_confirm` + `position_look` reply), entity velocity.
+- **Chunks arrive as chunk data packets.** Each column is built like a server holds it, serialised with
+  `ChunkDataS2CPacket` and decoded by `ClientChunkManager.loadChunkFromPacket` (palette, biomes).
+- **Tags are vanilla.** The client gets block/fluid tags from the server; the oracle builds them with
+  the vanilla tag loader from the data pack inside the jar and applies them like the tag packet does
+  (ladders/vines/scaffolding climbable, water/lava fluid tags, soul speed blocks).
+- **The connection captures everything sent**, also packets sent outside the handler's `sendPacket`.
+- Faked: `MinecraftClient` (allocated; options, sound manager (silent), tutorial manager, thread,
+  game renderer camera, world renderer (no-op), world, player, interaction manager, camera entity),
+  `GameOptions` (allocated: its constructor creates key bindings through `InputUtil`, whose static
+  initialiser loads the GLFW native library; the movement key bindings are allocated directly, sprint
+  and sneak as hold-mode `StickyKeyBinding`s), and the tab-list entry (gives `isSpectator`).
+- The player list entry is built for the game mode, so **spectator mode works** (no-clip flight).
+- Item use (`use` key): a **shield** in the main hand (swords no longer block). Rising edge →
+  `interactItem` → `use_item` packet; falling edge → `stopUsingItem` → `block_dig` status 5.
+- `auto_jump` is a setup field (vanilla's option default is on; bots turn it off; the scenarios use
+  off except `auto_jump`).
+- Not covered: elytra / fall flying (needs the server to set the flag), riptide, boats and other
+  vehicles, entity collisions, powder snow (1.17), held-item packets, `ClientWorld.tick()`.
+
+### 1.16.5 format differences
+
+- `fills` entries are `[x0, y0, z0, x1, y1, z1, state]` with the **global block state id**
+  (`Block.STATE_IDS`, the id chunk/block packets use); the header adds `"states": {"id": "name[...]"}`
+  for every id used.
+- `setup` adds `speed_modifiers` (`[[amount, operation], …]` as an entity properties packet sends them),
+  `auto_jump`, `soul_speed`, `depth_strider` (boots enchantment levels).
+- Teleport events get ids 1, 2, … (the setup teleport is id 0).
+- `state` fields: `pos`, `bb`, `vel`, `yaw`, `pitch`, `on_ground`, `horizontal_collision`,
+  `vertical_collision`, `fall_distance`, `movement_multiplier` (f64×3, cobweb / berry bush slowdown for
+  the next move), `pose` (`standing`/`crouching`/`swimming`/…), `width`, `height`, `eye_height`,
+  `touching_water`, `submerged_in_water`, `water_height`, `lava_height` (f64), `in_lava`, `first_update`,
+  `climbing`, `swimming`, `sprinting`, `sneaking`, `in_sneaking_pose`, `fall_flying`, `using_item`,
+  `no_clip`, `step_height`, abilities (`flying`, `allow_flying`, `creative`, `invulnerable`, `fly_speed`,
+  `walk_speed`), `jump_cooldown`, `jumping`, `forward_speed`, `sideways_speed`, `upward_speed`,
+  `flying_speed`, `movement_speed`, `movement_speed_attr` (f64), `last_block_pos`,
+  `fly_toggle_timer`, `sprint_toggle_timer` (`ticksLeftToDoubleTapSprint`),
+  `ticks_since_sprinting_changed` (counts up), `auto_jump_enabled`, `ticks_to_next_autojump`,
+  `food_level`, `age`, `velocity_modified`, `submerged_fluid` (eye fluid tag: `water`/`lava`/null),
+  `input` (1.8.9 fields plus `pressing_forward/back/left/right`) and `sent` (adds `on_ground`).
+- `packets` use minecraft-data 1.16.2 names: `flying`, `position`, `look`, `position_look` (`pos` y is
+  the feet y), `entity_action` (0 press_shift_key, 1 release_shift_key, 3 start_sprinting,
+  4 stop_sprinting, 8 start_fall_flying), `abilities` (`flying` only), `teleport_confirm`
+  (`teleport_id`), `use_item` (`hand`), `block_dig` (`status`), `held_item_slot`.
+
+### `collision_shapes.jsonl.gz` / `collision_shapes_far.jsonl.gz` (1.16.5)
+
+- `{"type":"block", "name", "first_state", "states", "default_state", "slipperiness",
+  "velocity_multiplier", "jump_velocity_multiplier", "collidable", "climbable", "soul_speed_block",
+  "offset_type"}` for every block (f32 values as `[decimal, "hex"]`).
+- `{"type":"shape", "id", "state", "boxes", "full_cube", "solid_block", "suffocates", "fluid"
+  (null/"water"/"lava"), "fluid_level"?, "fluid_still"?, "fluid_height"?, "contexts"?}` for every one of
+  the 17112 states, placed at (0, 64, 0): `boxes` = `getCollisionShape(world, pos, ShapeContext.absent())`
+  as its box list (block-local).
+- **Entity-context policy:** shapes are state-driven in 1.16, but the collision query passes the moving
+  entity. The dump evaluates five player contexts — feet `below` (y - 1.8), `inside` (y + 0.5),
+  `above` (y + 1), `above_descending`, `inside_descending` (descending = sneaking) — and adds
+  `contexts: {name: boxes}` only for states where some context differs from the context-free shape.
+  Result: only **scaffolding** (32 states) depends on the context (solid top only when the feet are
+  above it and not sneaking; the bottom-flag "collision shape" when above). Fluids' "walk on fluid" shape
+  is empty for players in every context.
+- Far file: `{"type":"shape_abs","id","pos","boxes","same_as_local"}` — the shape offset to three far
+  positions (as `BlockCollisionSpliterator` offsets it). Only **bamboo** (random per-position model
+  offset) differs from local + pos. The 1.8.9 float-arithmetic blocks (cactus, cake, fence gates) are
+  exact in 1.16 (VoxelShapes in double).
+
+### `voxel_shapes.jsonl.gz` (1.16.5)
+
+The collision code of 1.16 works on voxel grids (`VoxelShape.calculateMaxDistance` walks grid cells),
+so this file records the grids themselves, deduplicated:
+
+- `{"type":"block", "name", "first_state", "states", "default_state", "slipperiness",
+  "velocity_multiplier", "jump_velocity_multiplier" (f32), "tags": {"climbable", "fences", "walls",
+  "fence_gates", "trapdoors", "soul_speed_blocks", "fire"}}`.
+- `{"type":"voxel_shape", "sid", "class", "sizes": [nx, ny, nz], "points_x", "points_y", "points_z",
+  "filled", "empty", "boxes"}` — every distinct shape once (before the first state that uses it).
+  `class` = `simple` (`SimpleVoxelShape`: points are i/n of `sizes`, coordinate index = floor(c * n)
+  clamped) or `array` (`ArrayVoxelShape`: explicit points) or `sliced`; `points_*` = the shape's
+  `getPointPositions(axis)` as f64 `[decimal, "hex"]` (n + 1 values); `filled` = one `0`/`1` per cell,
+  cell (x, y, z) at index `(x * ny + y) * nz + z` (the `BitSetVoxelSet` order); `boxes` =
+  `getBoundingBoxes()` for convenience.
+- `{"type":"context", "name", "feet_dy", "feet_y" (f64), "block_y", "descending"}` — the player
+  contexts used for `context_shapes`: `below` (dy -1.8), `inside` (0.5), `above` (1.0),
+  `above_descending`, `inside_descending`, and `feet_<dy>` / `feet_<dy>_descending` for dy = -0.1,
+  -2.0E-5, -1.0E-6, 0.0, 1.0E-6, 0.01, 0.05, 0.1, 0.124, 0.125, 0.13, 0.999, 0.99998, 0.999995, 1.0
+  (feet y = 64 + dy in double; the block is at y = 64).
+- `{"type":"state", "id", "state", "collision_shape": sid, "context_shapes"?: {context name: sid},
+  "full_cube_identity", "empty_identity", "exceeds_cube", "should_suffocate", "is_air",
+  "has_dynamic_bounds", "material", "material_blocks_movement", "material_liquid", "material_solid",
+  "material_replaceable", "side_solid_full_square": [N, E, S, W], "side_solid_up", "side_solid_down",
+  "fluid": null | {"kind", "level", "falling", "still", "height", "height_fluid_above"}}` for every
+  state id. `collision_shape` is the context-free shape
+  (`ShapeContext.absent()`); `context_shapes` appear only where a player context differs (scaffolding:
+  feet `below` = y - 1.8, `inside` = y + 0.5, `above` = y + 1; `_descending` = sneaking; the held item
+  only changes the outline shape). Scaffolding thresholds seen in the `feet_*` contexts: the
+  bottom-flag shape (0..0.125) applies once the feet are above `y - 1.0E-5F` (empty at dy -2.0E-5,
+  bottom shape from dy -1.0E-6 on); the full scaffolding shape applies only when the feet are above
+  `y + 1 - 1.0E-5F` and the player is not descending (dy 0.99998 → bottom shape, 0.999995 → full).
+  `empty_identity` = the shape object is `VoxelShapes.empty()`; `full_cube_identity` = the shape object is `VoxelShapes.fullCube()`
+  (the fast path of `BlockCollisionSpliterator`); `has_dynamic_bounds` = no shape cache; `material` =
+  the Yarn field name of the `Material` (`ice`, `dense_ice`, …); fluid heights are f32
+  (`FluidState.getHeight` alone and with the same fluid above). Moving pistons and shulker boxes are
+  dumped without block entities.
+
+### 1.16.5 quirks (observed in the vectors)
+
+- `ClientWorld.isChunkLoaded` is always true: the client player always ticks and the 1.8.9
+  "unloaded column ⇒ velocityY = -0.1" rule never applies (`walk_into_unloaded`: normal gravity, no
+  collision in the empty column).
+- No idle `flying` packets: a bare on-ground packet is sent only when `on_ground` changed; position is
+  still forced every 20 ticks.
+- `teleport` → `teleport_confirm` then `position_look` with `on_ground` false, before the tick's own
+  packets.
+- Sneaking = crouching pose (height 1.5), input ×0.3 whenever `in_sneaking_pose` (also when the gap
+  above is too low to stand). A 1-high space gives the swimming pose (height 0.6) on land.
+- Soul speed: the client only removes soul sand's 0.4 velocity multiplier; the speed boost is a
+  server-side attribute modifier (`soul_speed_server_boost` sends it like the server:
+  `(double)(0.03F * (1 + 0.35F * level))`, operation 0).
+- Default world border radius 29,999,984 (collides like a wall: `world_border`).
+- Sliding down a honey wall caps the falling speed (`honey_wall_slide`); berry bushes / cobwebs set
+  `movement_multiplier`, consumed by the next move.
+
+## Notes for implementers
+
+What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or
+cases to run: use `replay` (above), or ask the oracle maintainer.
+
+### Initialising and stepping
+
+- **Initialise from the tick 0 record, not from the `scenario` header.** Tick 0 holds the state after
+  setup, including derived values: `bb`, `movement_speed_attr`, `flying_speed`, timers, `sent`. The header
+  only records how the oracle built that state.
+- Then for every tick: apply `input.events` in order (inbound packets) → set the held keys → set
+  `yaw`/`pitch` → run one client tick → compare with `state` and `packets`.
+- The world is `fills` applied in order inside `loaded_chunks`; everything else in those chunks is air,
+  everything outside them is an unloaded column (see quirks).
+
+### State carried from one tick to the next (all in `state`)
+
+| field | why it matters |
+|---|---|
+| `bb` | the real position state; after a move, pos = ((minX+maxX)/2, minY, (minZ+maxZ)/2) |
+| `vel`, `on_ground` | `on_ground` from the previous tick gates jumping and the sprint double-tap |
+| `horizontal_collision` | the previous tick's value stops sprinting before this tick's move |
+| `in_web` | set by cobweb contact after a move, consumed (×0.25 / ×0.05 / ×0.25) at the start of the next move |
+| `fall_distance`, `jump_cooldown` | |
+| `flying_speed` | air acceleration for the **next** tick (set after travel: 0.02, ×1.3 sprinting) |
+| `movement_speed_attr` | ground speed, read live (sprint modifier ×1.3 applies immediately) |
+| `sprint_toggle_timer`, `fly_toggle_timer`, `sprinting_ticks_left` | double-tap windows (7 ticks) and the 600-tick sprint countdown |
+| `input` | the previous tick's input; sprint and flight double-taps compare against it |
+| `sent` | drives the movement packet choice |
+| `outside_world_border` | changes how the collision query treats border positions |
+
+### Packet rules (`packets`)
+
+- Order in a tick: sprint change `entity_action`, sneak change `entity_action`, then **exactly one**
+  movement packet.
+- Position is included when the squared distance to `sent.pos` (x, bb.minY, z) is > 9.0E-4 or
+  `ticks_since_pos` ≥ 20. Look is included when yaw or pitch differ from `sent`. Neither → `flying`.
+- `abilities` is sent when the double-tap toggles flight and when landing ends creative flight.
+- A `teleport` event also produces the client's `position_look` reply (`on_ground` false).
+
+### Quirks (all observed in the vectors)
+
+- **Unloaded chunks.** The client treats every chunk column as existing. An unloaded column is an
+  empty chunk: no blocks, no collision boxes at all. Gravity is replaced when the column at
+  `((int) x, (int) z)` (truncation, not floor) is not loaded: `velocityY = -0.1` while y > 0 (then ×0.98),
+  instead of `-0.08`.
+- **Late air speed.** Ground acceleration reads the speed attribute directly, so a sprint change takes
+  effect immediately. Air acceleration uses `flying_speed`, which is set after travel, so a sprint change
+  reaches it one tick late.
+- **Double-taps** (sprint, creative flight) compare with the previous tick's `input`.
+- **Collision.** `Entity.move` clips Y, then X, then Z (`Box.method_589` / `method_583` / `method_594`).
+  Step-up (0.6) retries the move raised by the step height when x or z was clipped and the entity was on
+  ground before the move or is landing in this move (dy was clipped and requested dy < 0).
+  `on_ground = vertical_collision && requested dy < 0`.
+- **Sneak edge.** While on ground and sneaking, x/z are reduced in 0.05 steps until the box moved
+  down by 1 would still collide.
+- **Climbing.** `climbing` checks the block at the feet (ladder or vine). While climbing: x/z clamped to
+  ±0.15, fall distance reset, descent clamped to -0.15, no descent while sneaking. Horizontal collision
+  while climbing sets `velocityY = 0.2` after the move.
+- **Friction.** The block at (floor(x), floor(bb.minY) - 1, floor(z)): slipperiness × 0.91; ground
+  acceleration factor 0.16277136 / f³.
+- **pushOutOfBlocks** (client player) is tested at the four corners ±0.35 × width at minY + 0.5 and uses
+  `World.method_8565` ("has a collision box whose average edge length is ≥ 1").
+- **Coordinate clamp.** `PlayerEntity.tick` clamps x and z to ±29,999,999 (`world_border` scenario: the
+  player stops at 29,999,999.0 with no collision flag and keeps its velocity).
+- **World border.** Collision positions outside the world border are treated as stone while the entity
+  is inside it (default border here: centre 0,0, size 6e7). Border packets are not modelled yet.
+- **Block shapes** are floats widened to double (0.1F = 0.10000000149011612), added to the integer block
+  position in double. An unused meta decodes to air (network path), not to a default state.
+- **Anvils and chests:** use the `settled` shapes (see "History-dependent shapes").
+
+### Yarn names that mislead
+
+`LivingEntity.flyingSpeed` is the air acceleration; `initializeAttribute` is a plain getter;
+`World.doesBoxCollide` returns the *list* of collision boxes; `ticksSinceSprintingChanged` counts down;
+`abilityResyncCountdown` is the flight double-tap window; `field_1763` is the sprint double-tap window;
+`Block.isFullCube` = opaque && normal render && not a power source, `isNormalBlock` = blocks movement &&
+normal render. Full list: YARN_COVERAGE.md, "Names to read carefully".
+
+## Window clicks (`clicks`, both versions)
+
+`ClickDump` reuses the movement harness' player (`Harness.Run`) and calls the real client click path:
+`ClientPlayerInteractionManager.clickSlot` → `ScreenHandler.getNextActionId` + `onSlotClick` → the
+captured `window_click` packet. Screen handlers are built the way the client's screens build them
+(1.8.9: `ChestScreenHandler` on a `SimpleInventory`, `Generic3x3ScreenHandler`, `HopperScreenHandler`,
+`CraftingScreenHandler` on the client world, `FurnaceScreenHandler` on a `ClientNetworkSyncedInventory`;
+1.16.5: the `ScreenHandlerType` constructors for generic 9×1…9×6, 3×3, hopper, shulker box, crafting,
+furnace) or the player's own `PlayerScreenHandler`. Per case (seed × index → SplitMix64): window type,
+sync id, selected slot, random contents (items chosen for stack sizes, subtypes, armor, damage,
+remainders, NBT; over-stacked and, on 1.8, zero-count stacks), cursor, armor/offhand, and 1–10
+clicks of modes 0/1/2/4/6 (buttons as the GUI sends them, slot -999 for modes 0/4). Each line holds
+the state before (window 0 slots, screen slots, cursor, player inventory, every stack as its wire
+bytes) and per click the packet body (`write(PacketByteBuf)`) and the state after.
+
+`--craft true` (golden `clicks_craft_seed1.jsonl.gz`): only window 0 and crafting tables, grids
+filled from a random vanilla recipe (1.8.9 also the special recipes' ingredients), 40 % of the
+clicks on the result slot and 30 % on the grid. The 1.8.9 client computes crafting results from its
+own recipes (the vectors contain them). On 1.16.5 the vanilla data pack is loaded the way an
+integrated server loads it (`ServerResourceManager.reload` with the `DefaultResourcePack`), its
+recipes are sent to the client as a real `SynchronizeRecipesS2CPacket` (sorted by type and id:
+`RecipeManager.values()` order depends on identity hash codes) whose bytes are the file's first line
+`{"declare_recipes": hex}`, and after every click that changed the grid the server's result
+(`getFirstMatch(CRAFTING)` → `craft`) is put into the result slot and recorded as `"server"`.
+Plain 1.16.5 cases sync the recipes too (a real client always has them). 1.16.5 needs `remap.fixPackageAccess=true` (cross-package
+protected calls such as `Slot.onTake` after remapping the single official package).
+
+`recipes.jsonl.gz` lines: `{"i", "type":"shaped", "w", "h", "in":[[id,data]|null…], "out":hex,
+"copy_nbt"}`, `{"i", "type":"shapeless", "in":[[id,data]…], "out":hex}`, `{"i", "type":"special",
+"class", "size"}` (data 32767 = any).
+
+Line schema: `{"case", "kind", "rows"` (1.8.9) / `"menu"` (1.16.5 menu type id, -1 = window 0)`, "sync",
+"selected", "w0": [slot hex…], "screen": [slot hex…] | null, "cursor": hex, "inv": [40 (1.8.9) / 41
+(1.16.5) slot hex], "clicks": [{"slot", "button", "mode", "packet": hex, "w0", "screen", "cursor",
+"inv"}]}` — slot hex = `writeItemStack` bytes, packet hex = the body after the packet id. Real: the
+click path, screen handlers, inventories, item stacks and NBT. Faked: nothing beyond the movement
+harness (the client screens are not opened; the handler is put into `openScreenHandler` /
+`currentScreenHandler` directly). `selftest` also reruns 500 click cases in reverse order on the
+same player (no state leaks between cases).

@@ -1,0 +1,32 @@
+[package]
+name = "ghast-inventory"
+description = "Inventory and container windows for the ghast Minecraft Java Edition client library: vanilla client-side click prediction, the window confirm protocol and lazy-NBT item stacks (1.8.9 and 1.16.5)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "inventory", "bot", "container"]
+categories = ["game-development"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast-inventory"
+
+[dependencies]
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+bytes = { workspace = true }
+bytestring = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+# tests/oracle_clicks.rs (golden vectors from the vanilla oracle)
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+# examples/live_clicks.rs (lab test tool)
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5", "tokio"] }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
+
+[package.metadata.docs.rs]
+all-features = true

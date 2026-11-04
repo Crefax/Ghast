@@ -1,0 +1,43 @@
+[package]
+name = "ghast-client"
+description = "Headless Minecraft Java Edition client for the ghast library: connection, login, fixed 50 ms tick loop and a version-agnostic bot API (1.8.9 and 1.16.5)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "bot", "client", "headless"]
+categories = ["game-development", "network-programming"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast-client"
+
+[features]
+default = []
+# Online-mode servers: Microsoft account sessions and the session-server join call.
+microsoft = ["ghast-auth/microsoft"]
+
+[dependencies]
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5", "tokio", "libdeflate", "chat-json"] }
+ghast-auth = { path = "../ghast-auth", version = "0.1.0" }
+ghast-world = { path = "../ghast-world", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5", "physics"] }
+ghast-physics = { path = "../ghast-physics", version = "0.1.0" }
+ghast-inventory = { path = "../ghast-inventory", version = "0.1.0" }
+ghast-entity = { path = "../ghast-entity", version = "0.1.0" }
+ghast-data = { path = "../ghast-data", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
+
+[dev-dependencies]
+ghast-data = { path = "../ghast-data", version = "0.1.0" }
+flate2 = { workspace = true }
+serde_json = { workspace = true }
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.0" }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread", "test-util"] }
+
+[package.metadata.docs.rs]
+all-features = true

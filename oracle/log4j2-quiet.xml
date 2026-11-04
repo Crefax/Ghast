@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Silences vanilla's log4j output during oracle runs (errors still go to stderr). -->
+<Configuration status="OFF">
+  <Appenders>
+    <Console name="err" target="SYSTEM_ERR">
+      <PatternLayout pattern="[vanilla %level] %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Root level="error">
+      <AppenderRef ref="err"/>
+    </Root>
+  </Loggers>
+</Configuration>

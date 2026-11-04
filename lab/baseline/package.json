@@ -1,0 +1,10 @@
+{
+  "name": "ghast-lab-baseline",
+  "private": true,
+  "description": "mineflayer AFK bot used as the CPU/RAM baseline for ghast (lab only)",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "mineflayer": "4.39.0"
+  }
+}

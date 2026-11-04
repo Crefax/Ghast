@@ -1,0 +1,75 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+# Cargo.lock IS committed (workspace has binaries/examples and reproducible CI)
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Oracle (Java harness): Mojang jars, mappings and decompiled code are NEVER committed.
+# They are downloaded at run time from Mojang / Legacy Fabric into these caches.
+/oracle/cache/
+/oracle/build/
+/oracle/.gradle/
+/oracle/out/
+*.jar
+!/oracle/gradle/wrapper/gradle-wrapper.jar
+/decompiled/
+**/decompiled/
+*.mcp
+*.srg
+*.tsrg
+*.tiny
+mappings/
+# Golden test vectors produced by the oracle ARE committed (they are plain numbers) — see CLAUDE.md.
+
+# Private / secret material: never in this public repo
+.env
+.env.*
+*.local.json
+config.local.*
+accounts*.json
+alts*.json
+server-passwords*.json
+link-identity*.json
+proxies*.json
+*.key
+*.pem
+auth-cache/
+profiles/
+
+# Real-server packet traces (contain account names, coordinates, servers): never committed
+/traces/private/
+*.private.jsonl
+*.private.jsonl.gz
+
+# Logs, scratch, benchmarks
+*.log
+logs/
+/scratch/
+/tmp/
+perf.data*
+flamegraph*.svg
+*.profraw
+*.cpuprofile
+
+# Downloaded inputs (minecraft-data, npm deps for differential tests)
+/.cache/
+node_modules/
+
+# Local lab servers (Paper/Grim jars, worlds, logs, built plugin) and baseline-bot deps: never committed
+/lab/servers/
+/lab/baseline/node_modules/
+/lab/results/
+
+# Local-only notes and machine-specific scripts (never published)
+/CLAUDE.md
+/private/
+/lab/private/

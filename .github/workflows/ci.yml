@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      oracle:
+        description: "Also regenerate the golden vectors with the vanilla oracle and compare (needs network, ~5 min)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, "1.89"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}
+      # Lints and formatting are checked once, on stable (new lints appear with new toolchains).
+      - name: fmt
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all --check
+      - name: clippy
+        if: matrix.rust == 'stable'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+      - name: doc
+        if: matrix.rust == 'stable'
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  oracle:
+    name: Oracle verify (${{ matrix.mc }})
+    if: github.event_name == 'workflow_dispatch' && inputs.oracle
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mc: ["1.8.9", "1.16.5"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            oracle/cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: oracle-${{ matrix.mc }}-${{ hashFiles('oracle/versions/*.properties', 'oracle/build.gradle', 'oracle/gradle/wrapper/gradle-wrapper.properties') }}
+      - name: verify
+        run: oracle/run.sh verify
+        env:
+          MC: ${{ matrix.mc }}

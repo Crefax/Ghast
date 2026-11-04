@@ -1,0 +1,3 @@
+# Players that get allowFlight automatically on join / respawn / world or gamemode change.
+auto-fly:
+  - GhastBot

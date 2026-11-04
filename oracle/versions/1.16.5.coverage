@@ -1,0 +1,92 @@
+# Classes covered by YARN_COVERAGE_1.16.5.md (Yarn names). "note <member> = <text>" lines feed the
+# "names to read carefully" table.
+
+[Player tick and input]
+net/minecraft/client/network/ClientPlayerEntity
+net/minecraft/client/network/AbstractClientPlayerEntity
+net/minecraft/entity/player/PlayerEntity
+net/minecraft/entity/player/PlayerAbilities
+net/minecraft/entity/player/HungerManager
+net/minecraft/client/input/Input
+net/minecraft/client/input/KeyboardInput
+net/minecraft/client/option/KeyBinding
+net/minecraft/client/option/StickyKeyBinding
+net/minecraft/client/network/ClientPlayerInteractionManager
+
+[Living entity travel, entity move, poses]
+net/minecraft/entity/LivingEntity
+net/minecraft/entity/Entity
+net/minecraft/entity/EntityPose
+net/minecraft/entity/EntityDimensions
+net/minecraft/entity/attribute/EntityAttributes
+net/minecraft/entity/attribute/EntityAttributeInstance
+net/minecraft/entity/attribute/EntityAttributeModifier
+net/minecraft/entity/effect/StatusEffects
+net/minecraft/entity/effect/StatusEffectInstance
+net/minecraft/enchantment/EnchantmentHelper
+
+[Math, shapes and geometry]
+net/minecraft/util/math/Box
+net/minecraft/util/math/MathHelper
+net/minecraft/util/math/Vec3d
+net/minecraft/util/math/BlockPos
+net/minecraft/util/shape/VoxelShape
+net/minecraft/util/shape/VoxelShapes
+net/minecraft/block/ShapeContext
+net/minecraft/block/EntityShapeContext
+
+[World access and collision query]
+net/minecraft/world/World
+net/minecraft/client/world/ClientWorld
+net/minecraft/world/CollisionView
+net/minecraft/world/BlockCollisionSpliterator
+net/minecraft/world/chunk/WorldChunk
+net/minecraft/world/chunk/ChunkSection
+net/minecraft/client/world/ClientChunkManager
+net/minecraft/world/border/WorldBorder
+
+[Blocks and fluids]
+net/minecraft/block/Block
+net/minecraft/block/AbstractBlock
+net/minecraft/block/AbstractBlock$AbstractBlockState
+net/minecraft/fluid/FluidState
+net/minecraft/fluid/FlowableFluid
+net/minecraft/block/FluidBlock
+net/minecraft/block/BubbleColumnBlock
+net/minecraft/block/HoneyBlock
+net/minecraft/block/SweetBerryBushBlock
+net/minecraft/block/CobwebBlock
+net/minecraft/block/ScaffoldingBlock
+net/minecraft/block/SoulSandBlock
+net/minecraft/block/SlimeBlock
+net/minecraft/block/BedBlock
+net/minecraft/block/LadderBlock
+net/minecraft/block/VineBlock
+net/minecraft/block/TrapdoorBlock
+net/minecraft/tag/BlockTags
+net/minecraft/tag/FluidTags
+
+[Outgoing packets]
+net/minecraft/network/packet/c2s/play/PlayerMoveC2SPacket
+net/minecraft/network/packet/c2s/play/ClientCommandC2SPacket
+net/minecraft/network/packet/c2s/play/TeleportConfirmC2SPacket
+net/minecraft/network/packet/c2s/play/UpdatePlayerAbilitiesC2SPacket
+net/minecraft/network/packet/c2s/play/PlayerInteractItemC2SPacket
+
+note ClientPlayerEntity.ticksLeftToDoubleTapSprint = sprint double-tap window (7 ticks); reset while sneaking or using an item
+note ClientPlayerEntity.ticksSinceSprintingChanged = counts UP every tick, reset to 0 by setSprinting (1.8.9 counted down)
+note ClientPlayerEntity.inSneakingPose = crouching pose decision of tickMovement (also true when standing up would collide)
+note ClientPlayerEntity.autoJumpEnabled = copied from the auto-jump option at the end of sendMovementPackets (so it lags one tick)
+note ClientPlayerEntity.lastOnGround = a bare on-ground packet is sent only when this differs (no idle flying packets in 1.16)
+note ClientPlayerEntity.field_3939 = unnamed: fall flying flag of the last tick (elytra)
+note PlayerEntity.abilityResyncCountdown = misleading: the creative double-tap-jump flight toggle window (7 ticks)
+note PlayerEntity.field_7509 = unnamed: base air acceleration 0.02 (flyingSpeed is set from it after travel; x1.3 sprinting)
+note LivingEntity.flyingSpeed = misleading: acceleration used when not on ground; creative flight swaps in the fly speed during travel
+note LivingEntity.method_26317 = unnamed: gravity inside fluids (velocity.y - gravity / 16, with the 0.003 snap near the surface)
+note LivingEntity.method_26318 = unnamed: ground/air travel step: updateVelocity, climbing clamp, move, 0.2 climb when blocked or jumping on a ladder
+note LivingEntity.method_31079 = unnamed: static helper returning (x, y, 0) of a vector
+note LivingEntity.method_29920 = unnamed: "can sneak down in water" (true for players)
+note LivingEntity.jumpingCooldown = 10-tick jump cooldown while jump is held on ground
+note Entity.movementMultiplier = slow-movement multiplier set by cobweb / sweet berry bush contact, applied and cleared by the next move
+note Entity.field_25599 = unnamed: tag of the fluid the eyes are submerged in
+note Entity.firstUpdate = true until the first baseTick; fluid checks ignore lava while it is set
