@@ -61,7 +61,7 @@ pub mod version;
 
 pub use client::{Account, Client, TICK};
 pub use common::{ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3};
-pub use engine::{Behavior, ClickRefused, ClickTicket, Idle, TickContext, TickEvents};
+pub use engine::{Behavior, ClickRefused, ClickTicket, Idle, RawInbound, TickContext, TickEvents};
 pub use error::{ClientError, SessionEnd};
 pub use ghast_entity as entity;
 pub use ghast_inventory as inventory;

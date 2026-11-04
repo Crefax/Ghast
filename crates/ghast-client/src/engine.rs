@@ -56,6 +56,16 @@ pub trait Behavior {
         Interests::NONE
     }
 
+    /// Extra clientbound play packet ids (of `version`) to copy undecoded into
+    /// [`TickEvents::raw`], including packets the core consumes itself (the core's handling
+    /// does not change). Read every tick like [`Behavior::interests`]; a change updates the
+    /// packet filter. Decoding is the behaviour's job (`ghast::protocol::v1_8::play::clientbound`
+    /// / `v1_16_5`).
+    fn raw_packets(&self, version: GameVersion) -> std::borrow::Cow<'static, [i32]> {
+        let _ = version;
+        std::borrow::Cow::Borrowed(&[])
+    }
+
     /// Called on the first tick the player is in the world, before that tick's
     /// [`Behavior::tick`] (both see the same events).
     fn start(&mut self, ctx: &mut TickContext<'_>) {
@@ -85,6 +95,9 @@ impl<B: Behavior + ?Sized> Behavior for Box<B> {
     }
     fn interests(&self) -> Interests {
         (**self).interests()
+    }
+    fn raw_packets(&self, version: GameVersion) -> std::borrow::Cow<'static, [i32]> {
+        (**self).raw_packets(version)
     }
     fn start(&mut self, ctx: &mut TickContext<'_>) {
         (**self).start(ctx);
@@ -150,6 +163,20 @@ impl Behavior for Idle {
     fn tick(&mut self, _ctx: &mut TickContext<'_>) {}
 }
 
+/// A clientbound play packet copied for the behaviour ([`Behavior::raw_packets`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawInbound {
+    /// Packet id (version-specific).
+    pub id: i32,
+    /// The body after the id, undecoded (a cheap reference-counted copy).
+    pub body: bytes::Bytes,
+    /// When the frame was decoded from the socket (frames read together share it).
+    pub at: Instant,
+}
+
+/// Most raw packets kept between two behaviour ticks.
+const MAX_PENDING_RAW: usize = 4096;
+
 /// What happened since the behaviour's previous tick.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TickEvents {
@@ -177,6 +204,11 @@ pub struct TickEvents {
     pub block_updates: Vec<(ghast_protocol::BlockPos, u32)>,
     /// Block changes dropped because too many piled up between two behaviour ticks.
     pub block_updates_dropped: usize,
+    /// The packets asked for with [`Behavior::raw_packets`], in arrival order (kept while the
+    /// behaviour is on hold, like chat).
+    pub raw: Vec<RawInbound>,
+    /// Raw packets dropped because more than 4096 piled up between two behaviour ticks.
+    pub raw_dropped: usize,
 }
 
 impl TickEvents {
@@ -192,6 +224,8 @@ impl TickEvents {
         self.inventory = ghast_inventory::Events::default();
         self.block_updates.clear();
         self.block_updates_dropped = 0;
+        self.raw.clear();
+        self.raw_dropped = 0;
     }
 }
 
@@ -486,6 +520,25 @@ impl<S: Sim> Engine<S> {
     /// Time of the last inbound bytes.
     pub(crate) fn last_inbound(&self) -> Option<Instant> {
         self.core.last_inbound
+    }
+
+    /// Queues a raw packet copy for the behaviour's next tick.
+    pub(crate) fn push_raw(&mut self, p: RawInbound) {
+        let ev = &mut self.core.pending;
+        if ev.raw.len() < MAX_PENDING_RAW {
+            ev.raw.push(p);
+        } else {
+            ev.raw_dropped += 1;
+        }
+    }
+
+    /// The raw packet ids the behaviour wants (none once it failed or finished).
+    pub(crate) fn raw_packets<B: Behavior>(&self, b: &B) -> std::borrow::Cow<'static, [i32]> {
+        if self.state.failed || self.state.done {
+            std::borrow::Cow::Borrowed(&[])
+        } else {
+            b.raw_packets(self.core.opts.version)
+        }
     }
 
     /// The inventory (the connection feeds it its packets).
@@ -1532,6 +1585,37 @@ impl TickContext<'_> {
         true
     }
 
+    /// When the last inbound bytes arrived (a gap before a setback means lag).
+    #[must_use]
+    pub fn last_inbound(&self) -> Option<Instant> {
+        self.core.last_inbound
+    }
+
+    /// The yaw / pitch this tick's movement step will use, from this tick's
+    /// [`TickContext::set_aim`] and the digs / places written so far (incl. the turn held by
+    /// [`crate::Client::hold_turn_on_action`]). Computed on a copy: the rotation's carried
+    /// budget does not change. Clicks of held buttons, which run after the behaviour, are not
+    /// seen. Without an aim this tick: the current look.
+    #[must_use]
+    pub fn planned_look(&self) -> (f32, f32) {
+        let c = &*self.core;
+        let now = (c.pose.yaw, c.pose.pitch);
+        #[cfg(test)]
+        if let Some(l) = c.forced_look {
+            return l;
+        }
+        if !c.aimed {
+            return now;
+        }
+        let mut r = c.rotation;
+        let (yaw, pitch) = r.step(c.pose.yaw, c.pose.pitch);
+        if c.opts.hold_turn_on_action && !post_look_ok(c, yaw, pitch) {
+            now
+        } else {
+            (yaw, pitch)
+        }
+    }
+
     /// Starts or stops creative-style flight: the `abilities` packet goes out before this
     /// tick's movement step, like a double-tapped jump (but without the jump). Starting needs
     /// the server's "may fly" ability; asking for the current state sends nothing.
@@ -2280,5 +2364,50 @@ mod tests {
                 "soil {soil} item {item}"
             );
         }
+    }
+
+    /// `planned_look` is the look the movement step then uses: a plain turn, a turn held on a
+    /// place tick, no aim; and it leaves the rotation's budget alone.
+    #[test]
+    fn planned_look_is_the_next_look() {
+        let mut e = engine(GameVersion::V1_8_9);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        e.core
+            .inv
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(1, 64, 0)));
+        let floor = ghast_protocol::BlockPos::new(8, 63, 8);
+        let mut n = 0;
+        let mut placed = false;
+        let mut plans: Vec<(f32, f32)> = Vec::new();
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            n += 1;
+            if n % 5 == 0 {
+                // No aim this tick: the current look.
+            } else if !placed {
+                ctx.set_aim(90.0, 89.5);
+                if ctx.place(floor, crate::Face::Up, Vec3::new(8.5, 64.0, 8.5)) {
+                    placed = true;
+                    ctx.set_aim(90.0, -60.0);
+                }
+            } else {
+                ctx.set_aim(150.0, -60.0);
+            }
+            // Asking twice changes nothing.
+            let p = ctx.planned_look();
+            assert_eq!(p, ctx.planned_look());
+            plans.push(p);
+        });
+        let mut looks = Vec::new();
+        for _ in 0..40 {
+            e.tick(&mut b, t0);
+            e.outbound().clear();
+            looks.push((e.core.pose.yaw, e.core.pose.pitch));
+        }
+        let _ = b;
+        assert!(placed);
+        assert_eq!(e.core.test_held_turns(), 1);
+        assert_eq!(plans, looks);
     }
 }

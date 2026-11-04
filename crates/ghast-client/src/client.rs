@@ -336,6 +336,8 @@ where
         ),
         read_timeout: client.read_timeout,
         interests: Interests::NONE,
+        raw_ids: Vec::new(),
+        raw_mask: [0; 4],
         _v: std::marker::PhantomData,
     };
     let result = play.run(behavior, shutdown).await;
@@ -470,6 +472,9 @@ struct Play<V: HasSim, R, W> {
     engine: Engine<V::Sim>,
     read_timeout: Duration,
     interests: Interests,
+    /// Packet ids copied for the behaviour (`Behavior::raw_packets`), as a bit set.
+    raw_ids: Vec<i32>,
+    raw_mask: [u64; 4],
     _v: std::marker::PhantomData<V>,
 }
 
@@ -486,13 +491,23 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    fn set_filter(&mut self, interests: Interests) {
+    fn set_filter(&mut self, interests: Interests, raw: &[i32]) {
         self.interests = interests;
+        raw.clone_into(&mut self.raw_ids);
+        self.raw_mask = [0; 4];
+        for &id in raw {
+            if (0..256).contains(&id) {
+                self.raw_mask[id as usize >> 6] |= 1 << (id & 63);
+            }
+        }
         self.engine
             .sim
             .collect_block_updates(interests.contains(Interests::BLOCK_UPDATES));
         let mut filter: PacketFilter = V::play_filter(interests);
         for id in self.engine.sim.entity_packet_ids() {
+            filter.insert(id);
+        }
+        for &id in raw {
             filter.insert(id);
         }
         self.dec.set_filter(filter);
@@ -514,7 +529,18 @@ where
 
     /// Decodes and applies everything buffered. Returns a session end on kick.
     fn drain_inbound(&mut self) -> Result<Option<SessionEnd>, ClientError> {
+        let mut at = None;
         while let Some(raw) = self.dec.next_packet()? {
+            if (0..256).contains(&raw.id)
+                && self.raw_mask[raw.id as usize >> 6] & (1 << (raw.id & 63)) != 0
+            {
+                let at = *at.get_or_insert_with(std::time::Instant::now);
+                self.engine.push_raw(crate::engine::RawInbound {
+                    id: raw.id,
+                    body: raw.body.clone(),
+                    at,
+                });
+            }
             self.engine.sim.world_packet(&raw).map_err(|e| match e {
                 SimError::Decode(source) => ClientError::Decode {
                     state: State::Play,
@@ -581,7 +607,8 @@ where
         mut shutdown: Pin<&mut S>,
     ) -> Result<SessionEnd, ClientError> {
         let interests = self.engine.interests(behavior);
-        self.set_filter(interests);
+        let raw = self.engine.raw_packets(behavior);
+        self.set_filter(interests, &raw);
         self.engine.note_inbound(Instant::now().into_std());
         // Frames that arrived together with login success.
         if let Some(end) = self.drain_inbound()? {
@@ -655,8 +682,9 @@ where
                         return Ok(SessionEnd::Quit(reason));
                     }
                     let interests = self.engine.interests(behavior);
-                    if interests != self.interests {
-                        self.set_filter(interests);
+                    let raw = self.engine.raw_packets(behavior);
+                    if interests != self.interests || *raw != *self.raw_ids {
+                        self.set_filter(interests, &raw);
                     }
                 }
             }

@@ -105,6 +105,13 @@ set_compression (1.8 play), combat_event (1.16 immediate respawn). `Interests::C
 `TickEvents::block_updates` (position, raw state; at most 4096 between two behaviour ticks,
 the rest counted in `block_updates_dropped`) — no extra packets, only the copy.
 
+**Raw tap:** `Behavior::raw_packets(version)` names extra clientbound play packet ids; each such
+frame — also one the core consumes itself (position, held slot, abilities, …) — is copied
+undecoded (`Bytes` clone) into `TickEvents::raw` (`RawInbound { id, body, at }`, arrival
+order, kept while the behaviour is on hold, at most 4096 per tick, the rest counted in
+`raw_dropped`). The core's own handling does not change; a tapped id the core handles
+optionally (chat) is then handled too. Read every tick; a change rebuilds the filter.
+
 ## Vanilla details reproduced
 
 - Join: `settings` then the brand plugin message (`MC|Brand` / `minecraft:brand`, `vanilla`).

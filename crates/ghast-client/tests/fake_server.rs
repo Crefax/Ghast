@@ -734,6 +734,76 @@ async fn chat_reaches_the_behaviour<V: Fake>(v: GameVersion) {
 }
 both!(chat_reaches_the_behaviour, chat_reaches_the_behaviour);
 
+/// `Behavior::raw_packets`: a packet the core consumes (the position) and one it normally drops
+/// before decoding (update_time) both reach `TickEvents::raw` undecoded, in arrival order,
+/// and the core still applies the position.
+async fn raw_packets_reach_the_behaviour<V: Fake>(v: GameVersion) {
+    struct Tap {
+        ids: [i32; 2],
+        seen: Vec<(i32, usize)>,
+        pos: Option<f64>,
+    }
+    impl Behavior for Tap {
+        fn raw_packets(&self, _v: GameVersion) -> std::borrow::Cow<'static, [i32]> {
+            std::borrow::Cow::Owned(self.ids.to_vec())
+        }
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            let mut last = None;
+            for r in &ctx.events().raw {
+                assert!(last.is_none_or(|t| t <= r.at), "arrival order");
+                last = Some(r.at);
+                self.seen.push((r.id, r.body.len()));
+            }
+            assert!(ctx.last_inbound().is_some());
+            self.pos = Some(ctx.pose().pos.x);
+            if self.seen.iter().any(|s| s.0 == self.ids[1]) {
+                ctx.disconnect("got it");
+            }
+        }
+    }
+    let (pos_id, time_id) = match v {
+        GameVersion::V1_8_9 => (
+            ghast_protocol::v1_8::play::clientbound::id::POSITION,
+            ghast_protocol::v1_8::play::clientbound::id::UPDATE_TIME,
+        ),
+        _ => (
+            ghast_protocol::v1_16_5::play::clientbound::id::POSITION,
+            ghast_protocol::v1_16_5::play::clientbound::id::UPDATE_TIME,
+        ),
+    };
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V>("Tester", 128).await;
+        spawn::<V>(&mut c).await;
+        c.until::<V>("position_look").await;
+        // update_time: world age and time of day (two longs).
+        c.send(&RawPacket::new(time_id, Bytes::from_static(&[0; 16])))
+            .await;
+        while c.recv().await.is_some() {}
+    };
+    let mut b = Tap {
+        ids: [pos_id, time_id],
+        seen: Vec::new(),
+        pos: None,
+    };
+    let cl = client(addr, v, "Tester");
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Quit(_))), "{end:?}");
+    let ids: Vec<i32> = b.seen.iter().map(|s| s.0).collect();
+    assert_eq!(ids, [pos_id, time_id], "{:?}", b.seen);
+    assert_eq!(b.seen[1].1, 16);
+    assert_eq!(
+        b.pos,
+        Some(8.5),
+        "the core still applies the tapped position"
+    );
+}
+both!(
+    raw_packets_reach_the_behaviour,
+    raw_packets_reach_the_behaviour
+);
+
 /// The session future is `Send` with a `Send` behaviour, so many bots can share a
 /// multi-threaded runtime; one bot's failure stays in its task.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

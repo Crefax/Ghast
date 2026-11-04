@@ -89,6 +89,9 @@ full table is in `PARITY.md`.
 | `ctx.mining`, `ctx.broken` | `ctx.mining()`, `ctx.broken()` |
 | `ctx.setFlying(b)` | `ctx.set_flying(b)` |
 | `ctx.status(s)` / `ctx.chat(s)` | `ctx.status(s)` / `ctx.chat(s)` |
+| raw packet listeners (mineflayer `bot._client.on(...)`) | `Behavior::raw_packets` + `ctx.events().raw` (§3.9) |
+| the core's last-inbound time (lag guard) | `ctx.last_inbound()` |
+| a mirrored rotation step + RotationPlace hold | `ctx.planned_look()` |
 
 Faces keep their wire numbers (`Face::from_id(1) == Some(Face::Up)`, `face.id()`).
 
@@ -258,6 +261,39 @@ A behaviour that counts its stock should read `ctx.inventory()` and not keep its
 `set_flying(true)` needs the server's "may fly" and must be called in the air: vanilla ends
 flight on landing (it sends the `abilities` packet itself), which is why a guard like
 `if (!pose.flying && !pose.onGround) ctx.setFlying(true)` is needed.
+
+### 3.9 Raw packets, lag, the look the physics will use
+
+Guards that listen to raw packets (mineflayer `bot._client.on(...)`) name the ids they want;
+the frames arrive undecoded in the next tick's events. Packets the core consumes itself are
+included, and the core still handles them as before.
+
+```rust
+use std::borrow::Cow;
+use ghast::protocol::v1_8::play::clientbound::{self as cb, id};
+
+fn raw_packets(&self, v: GameVersion) -> Cow<'static, [i32]> {
+    match v {
+        GameVersion::V1_8_9 => Cow::Borrowed(&[id::PLAYER_INFO, id::TITLE, id::POSITION]),
+        _ => Cow::Borrowed(&[]),
+    }
+}
+
+fn tick(&mut self, ctx: &mut TickContext<'_>) {
+    for r in &ctx.events().raw {
+        // r.at: when the frame was read (e.g. a tab-list add + remove within 100 ms).
+        let raw = ghast::protocol::RawPacket::new(r.id, r.body.clone());
+        if r.id == id::PLAYER_INFO {
+            if let Ok(p) = raw.decode_as::<cb::PlayerInfo>() { /* ... */ }
+        }
+    }
+    // Lag: how long since the last inbound bytes (e.g. > 1.5 s before a setback).
+    let quiet = ctx.last_inbound().map(|t| t.elapsed());
+    // The yaw / pitch this tick's movement step will use (after set_aim, including a turn
+    // held by hold_turn_on_action): pick W/A/S/D from it instead of mirroring the rotation.
+    let (yaw, _pitch) = ctx.planned_look();
+}
+```
 
 ## 4. Grim settings
 
