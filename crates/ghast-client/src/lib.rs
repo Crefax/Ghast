@@ -66,6 +66,7 @@ pub use error::{ClientError, SessionEnd};
 pub use ghast_entity as entity;
 pub use ghast_inventory as inventory;
 pub use ghast_protocol::BlockPos;
+pub use ghast_world as world;
 pub use hands::{BlockHit, Buttons};
 pub use interest::Interests;
 pub use sim::{ForceStepPosition, WorldView};

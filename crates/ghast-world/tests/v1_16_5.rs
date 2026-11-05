@@ -501,3 +501,68 @@ fn captured_packets() {
             .unwrap_or_else(|err| panic!("{}: {err}", e.path().display()));
     }
 }
+
+#[test]
+fn block_entities_from_chunks_and_updates() {
+    use ghast_protocol::v1_16_5::play::clientbound::{ClientboundPlayPacket as C, TileEntityData};
+    use ghast_world::BlockEntity;
+    let mut w = World::new(WorldConfig::default().with_block_entities(true));
+    let mut d = Vec::new();
+    encode_section_1_16(&mut d, &[STONE; 4096], Palette16::Indirect(4), &[]);
+    let nbt = |x, y, z| {
+        RawNbt::from_bytes(Bytes::from(common::be_nbt(x, y, z, "minecraft:chest"))).unwrap()
+    };
+    let chunk = |full: bool, list: Vec<RawNbt>| {
+        C::MapChunk(MapChunk {
+            x: 1,
+            z: 0,
+            ground_up: full,
+            bit_map: 1 << 4,
+            heightmaps: RawNbt::END,
+            biomes: full.then(|| vec![1; 1024]),
+            chunk_data: Bytes::from(d.clone()),
+            block_entities: list,
+        })
+    };
+    // Entries in two sections plus one without coordinates (skipped).
+    let bad = RawNbt::from_bytes(Bytes::from_static(&[10, 0, 0, 0])).unwrap();
+    w.handle(&chunk(true, vec![nbt(17, 70, 2), nbt(20, 10, 3), bad]))
+        .unwrap();
+    let col = w.column(1, 0).unwrap();
+    assert_eq!(col.block_entities().count(), 2);
+    assert!(matches!(
+        w.block_entity(17, 70, 2),
+        Some(BlockEntity::Nbt { action: 0, .. })
+    ));
+    // A partial chunk replaces the block entities of its sections only.
+    w.handle(&chunk(false, vec![])).unwrap();
+    assert!(w.block_entity(17, 70, 2).is_none(), "section 4 replaced");
+    assert!(w.block_entity(20, 10, 3).is_some(), "section 0 untouched");
+    // tile_entity_data, then a block change to another block removes it.
+    let p = TileEntityData {
+        location: BlockPos { x: 18, y: 64, z: 1 },
+        action: 9,
+        nbt_data: Some(nbt(18, 64, 1)),
+    };
+    assert_eq!(w.handle(&C::TileEntityData(p)), Ok(Applied::Changed));
+    assert!(matches!(
+        w.block_entity(18, 64, 1),
+        Some(BlockEntity::Nbt { action: 9, .. })
+    ));
+    // Same block (stone -> stone): kept; different block: removed.
+    w.apply_block_change(&BlockChange {
+        location: BlockPos { x: 18, y: 64, z: 1 },
+        r#type: i32::from(STONE),
+    });
+    assert!(w.block_entity(18, 64, 1).is_some());
+    w.apply_block_change(&BlockChange {
+        location: BlockPos { x: 18, y: 64, z: 1 },
+        r#type: 0,
+    });
+    assert!(w.block_entity(18, 64, 1).is_none());
+    // Off: not in the packet ids, nothing stored.
+    let mut off = World::new(WorldConfig::default());
+    assert!(!off.packet_ids().any(|id| id == 0x09));
+    off.handle(&chunk(true, vec![nbt(17, 70, 2)])).unwrap();
+    assert_eq!(off.column(1, 0).unwrap().block_entities().count(), 0);
+}

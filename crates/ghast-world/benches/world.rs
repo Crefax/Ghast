@@ -152,10 +152,12 @@ fn benches(c: &mut Criterion) {
     {
         let mut w = ghast_world::v1_8::World::new(WorldConfig::default());
         let mut w16 = ghast_world::v1_16_5::World::new(WorldConfig::default());
-        let mut wl = ghast_world::v1_8::World::new(WorldConfig {
-            biomes: true,
-            light: true,
-        });
+        let mut wl = ghast_world::v1_8::World::new(
+            WorldConfig::default()
+                .with_biomes(true)
+                .with_light(true)
+                .with_block_entities(false),
+        );
         for cx in -10..=10 {
             for cz in -10..=10 {
                 let t = terrain(&mut rng);

@@ -25,10 +25,7 @@ fn tracker(config: Config) -> Tracker {
 }
 
 fn events() -> Config {
-    Config {
-        events: true,
-        ..Config::default()
-    }
+    Config::default().with_events(true)
 }
 
 /// Zombie (54) at fixed (x, y, z), velocity (vx, vy, vz), with a metadata list.
@@ -502,13 +499,15 @@ fn respawn_and_login() {
 
 #[test]
 fn config_filters_packets() {
-    let t = Tracker::new(Config {
-        metadata: false,
-        equipment: false,
-        effects: false,
-        player_list: false,
-        events: false,
-    });
+    let t = Tracker::new(
+        Config::default()
+            .with_metadata(false)
+            .with_equipment(false)
+            .with_effects(false)
+            .with_player_list(false)
+            .with_events(false)
+            .with_skins(false),
+    );
     assert!(t.wants(id::REL_ENTITY_MOVE));
     assert!(!t.wants(id::ENTITY_METADATA));
     assert!(!t.wants(id::PLAYER_INFO));
@@ -607,4 +606,25 @@ fn class_item_and_box() {
     t.apply(&sheep.raw(id::SPAWN_ENTITY_LIVING)).unwrap();
     assert_eq!(t.get(31).unwrap().size(), Some((0.45, 0.65)));
     assert_eq!(t.get(12).unwrap().size(), Some((0.25, 0.25)), "item");
+}
+
+#[test]
+fn skin_textures_opt_in() {
+    let uuid = 77u128;
+    for skins in [false, true] {
+        let mut t = tracker(Config::default().with_skins(skins));
+        t.apply(&player_add(uuid, "Bob", true).raw(id::PLAYER_INFO))
+            .unwrap();
+        let info = t.player_info(&Uuid::from_u128(uuid)).unwrap();
+        assert_eq!(info.name.as_ref(), "Bob");
+        assert_eq!(
+            info.textures.as_deref(),
+            skins.then(|| "x".repeat(500)).as_deref()
+        );
+        assert_eq!(
+            (info.game_mode, info.ping),
+            (1, 42),
+            "parsing continues after the properties"
+        );
+    }
 }

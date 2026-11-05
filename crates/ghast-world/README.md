@@ -40,7 +40,14 @@ raw fields for callers that do not build packet structs.
 - `ColumnMap`: version-independent map of loaded columns (`get`, `raw`, `contains`, `iter`, ...).
 - `Section` (`Uniform` / indexed / direct, see below), `block_index(x, y, z)`.
 - `Border`: centre, `size()` (interpolated), `target_size()`, warning fields.
-- `WorldConfig { biomes: bool (default true), light: bool (default false) }`.
+- `WorldConfig` (`#[non_exhaustive]`; build it with
+  `WorldConfig::default().with_biomes(..).with_light(..).with_block_entities(..)`): `biomes`
+  (default true), `light` (default false), `block_entities` (default false). `World::packet_ids()` gives the packet ids for a configuration
+  (`PACKET_IDS` plus `BLOCK_ENTITY_IDS` when block entities are on).
+- Block entities (opt-in): `Column::block_entities()` returns `([x, y, z] column-local,
+  &BlockEntity)` pairs, plus `Column::block_entity(x, y, z)` and `World::block_entity(x, y, z)`.
+  `BlockEntity` is either `Nbt { action, nbt }` (a raw NBT copy) or `Sign([lines; 4])` (1.8,
+  raw chat JSON).
 - `Applied::{Changed, Ignored, NotWorldPacket}`; `WorldError` (malformed data).
 - `packed::{unpack_be, pack, words_needed}`: the 1.16+ compact long array layout.
 
@@ -108,6 +115,26 @@ World border (both versions): all six `world_border` actions; a lerp is advanced
 `advance_time(ms)` (deterministic); 1.8 computes progress in `float`, 1.16 in `double`. Login and
 world changes reset it to the vanilla default (centre 0, 0, size 6e7).
 
+## Block entities (opt-in)
+
+With `WorldConfig::block_entities` the world keeps block entity data as the server sends it.
+Off, the packets are not in `packet_ids()`, nothing is parsed, and block changes do no extra
+work. The only cost is an empty `Vec` (24 bytes) per column.
+
+- **1.8:** `update_sign` (four raw chat JSON lines) and `tile_entity_data` (raw NBT + action).
+  1.8 chunks carry no block entities. A ground-up chunk is a new vanilla chunk, so its block
+  entities are dropped; a partial chunk keeps them, as vanilla does.
+- **1.16.5:** the `map_chunk` block entity list (each compound goes to the position in its
+  `x` / `y` / `z` ints; entries without them are skipped) and `tile_entity_data`. A partial chunk
+  drops the block entities of the sections it replaces, as vanilla does.
+- **Block changes** remove the block entity at that position when the block *type* changes
+  (1.8: block id; 1.16: block), and keep it for a state change of the same block, as vanilla
+  does.
+  - This applies to `block_change`, `multi_block_change`, explosions and `set_block_state`.
+- Data for unloaded columns and `y` outside `0..256` is ignored.
+- Vanilla applies an update only when a block entity of the right kind already exists at that
+  position. ghast stores whatever is sent, so a viewer sees the server's data.
+
 ## Unloaded columns and physics
 
 `block_state` returns `None` for unloaded columns: behaviour code must never treat that as air. The `ghast_physics::BlockView` implementation is the one place that maps
@@ -159,6 +186,10 @@ cargo bench -p ghast-world
   4..=8 and 15 (which block each bit field lands in), out-of-palette indices / non-state ids /
   oversized array palette / oversized hash palette / trailing bytes, full vs partial, view window,
   section-position multi block change (incl. negative section Y), explosion floor, respawn.
+- Block entities: signs, tile data with actions, same-block vs other-block changes, ground-up
+  vs partial chunks (both versions), 1.16 chunk lists (including entries without coordinates),
+  the off switch; a proptest of random sign / tile / block-change / partial-chunk sequences with
+  junk NBT never panics and keeps one entry per position.
 - `tests/robustness.rs`: proptest random and mutated chunk data for both versions and random
   bulk packets never panic; a failed 1.16 decode leaves the column unloaded; a property test
   compares truncated 1.8 chunks with a direct model of vanilla `fillChunk`; a model check

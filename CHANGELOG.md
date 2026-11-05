@@ -2,6 +2,27 @@
 
 All crates share one version number.
 
+## 0.2.0 — 2026-11-05
+
+Breaking: public configuration and event structs are now `#[non_exhaustive]`; build the
+configuration structs with `Default` + `with_*` builders (`WorldConfig`, `ghast_entity::Config`,
+`ClientSettings`). Future fields will not be breaking changes.
+
+### ghast-client
+- Observers: `Behavior::after_tick(&TickView)` runs after every movement step with a read-only
+  view (the pose sent this tick, world, entities, inventory, events).
+- `WorldView::column(cx, cz)` returns a whole stored column; `ghast::world` is re-exported.
+- `Client::world_config(..)` opts into light, biomes and block entities.
+- `TickContext::swings()` counts every arm swing sent.
+- `Interests::ENTITIES` / `PLAYER_LIST` can change mid-session; new `Interests::PLAYER_SKINS`.
+
+### ghast-world
+- Opt-in block-entity store (`WorldConfig::with_block_entities`): signs and tile entity data on
+  1.8, chunk block entities and tile entity data on 1.16.5; `Column::block_entities()`.
+
+### ghast-entity
+- `PlayerInfo::textures` (skin property), opt-in via `Config::with_skins`.
+
 ## 0.1.3 — 2026-11-05
 
 ### ghast-client

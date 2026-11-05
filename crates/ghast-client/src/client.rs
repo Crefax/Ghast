@@ -89,6 +89,7 @@ pub struct Client {
     record: Option<std::path::PathBuf>,
     force_step_position: crate::sim::ForceStepPosition,
     hold_turn_on_action: bool,
+    world_config: Option<ghast_world::WorldConfig>,
 }
 
 impl Client {
@@ -110,6 +111,7 @@ impl Client {
             record: None,
             force_step_position: crate::sim::ForceStepPosition::Off,
             hold_turn_on_action: true,
+            world_config: None,
         }
     }
 
@@ -168,6 +170,15 @@ impl Client {
     #[must_use]
     pub fn record(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.record = Some(path.into());
+        self
+    }
+
+    /// What the world keeps besides block states. Default: nothing (no light, no biomes:
+    /// the bot does not need them, and they cost memory and decoding time). A viewer that
+    /// draws the world can turn them on; [`crate::WorldView::column`] gives the data.
+    #[must_use]
+    pub fn world_config(mut self, config: ghast_world::WorldConfig) -> Self {
+        self.world_config = Some(config);
         self
     }
 
@@ -321,17 +332,8 @@ where
             V::new_sim(&crate::sim::SimOptions {
                 record: client.record.clone(),
                 force_step_position: client.force_step_position,
-                entities: behavior.interests().contains(Interests::ENTITIES).then(|| {
-                    // Positions, metadata (item stacks, sneak / pose flags); equipment and other
-                    // entities' effects are not decoded (cheaper).
-                    ghast_entity::Config {
-                        metadata: true,
-                        equipment: false,
-                        effects: false,
-                        player_list: behavior.interests().contains(Interests::PLAYER_LIST),
-                        events: false,
-                    }
-                }),
+                entities: entity_config(behavior.interests()),
+                world: client.world_config,
             }),
         ),
         read_timeout: client.read_timeout,
@@ -481,6 +483,20 @@ struct Play<V: HasSim, R, W> {
     _v: std::marker::PhantomData<V>,
 }
 
+/// The entity tracking the interests ask for: positions and metadata (item stacks, sneak /
+/// pose flags); equipment and other entities' effects are not decoded (cheaper).
+fn entity_config(interests: Interests) -> Option<ghast_entity::Config> {
+    interests.contains(Interests::ENTITIES).then(|| {
+        ghast_entity::Config::default()
+            .with_metadata(true)
+            .with_equipment(false)
+            .with_effects(false)
+            .with_player_list(interests.contains(Interests::PLAYER_LIST))
+            .with_events(false)
+            .with_skins(interests.contains(Interests::PLAYER_SKINS))
+    })
+}
+
 /// What woke the play loop.
 enum Wake {
     Read(std::io::Result<usize>),
@@ -506,8 +522,14 @@ where
         self.engine
             .sim
             .collect_block_updates(interests.contains(Interests::BLOCK_UPDATES));
+        // Entity tracking follows the interests at run time (a tracker started late begins
+        // empty: entities spawned before are not known until the server sends them again).
+        self.engine.sim.set_entities(entity_config(interests));
         let mut filter: PacketFilter = V::play_filter(interests);
         for id in self.engine.sim.entity_packet_ids() {
+            filter.insert(id);
+        }
+        for id in self.engine.sim.world_packet_ids() {
             filter.insert(id);
         }
         for &id in raw {
@@ -730,5 +752,22 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The interests map to the tracker configuration (none without `ENTITIES`).
+    #[test]
+    fn entity_config_follows_the_interests() {
+        assert_eq!(entity_config(Interests::PLAYER_LIST), None);
+        let c = entity_config(Interests::ENTITIES).unwrap();
+        assert!(c.metadata && !c.player_list && !c.skins);
+        let c =
+            entity_config(Interests::ENTITIES | Interests::PLAYER_LIST | Interests::PLAYER_SKINS)
+                .unwrap();
+        assert!(c.player_list && c.skins);
     }
 }

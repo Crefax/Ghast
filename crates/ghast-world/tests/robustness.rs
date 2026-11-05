@@ -29,7 +29,7 @@ mod v1_8 {
 
         #[test]
         fn random_chunk_data(ground_up: bool, mask: u16, data in proptest::collection::vec(any::<u8>(), 0..70_000), light: bool) {
-            let mut w = World::new(WorldConfig { biomes: true, light });
+            let mut w = World::new(WorldConfig::default().with_biomes(true).with_light(light).with_block_entities(true));
             w.apply_chunk_data(0, 0, true, 1, &[0; 8192 + 2048 + 2048 + 256]).unwrap();
             let r = w.apply_chunk_data(0, 0, ground_up, mask, &data);
             if r.is_err() {
@@ -52,7 +52,7 @@ mod v1_8 {
                 let n = data.len();
                 data.truncate(trunc % n);
             }
-            let mut w = World::new(WorldConfig { biomes: true, light: true });
+            let mut w = World::new(WorldConfig::default().with_biomes(true).with_light(true).with_block_entities(true));
             let r = w.apply_chunk_data(1, -1, true, mask ^ mask_flip, &data);
             if r.is_err() {
                 prop_assert!(w.is_column_loaded(1, -1));
@@ -178,6 +178,84 @@ fn block_changes_match_model() {
                 .filter(|&&v| v != 0)
                 .count();
             assert_eq!(col.section(j).map_or(0, |s| usize::from(s.non_air())), n);
+        }
+    }
+}
+
+/// Random sequences of block-entity packets, block changes and chunk reloads never panic and
+/// keep one entry per position, all inside the column.
+#[cfg(all(feature = "v1_8", feature = "v1_16_5"))]
+mod block_entities {
+    use bytes::Bytes;
+    use ghast_protocol::BlockPos;
+    use ghast_protocol::nbt::RawNbt;
+    use ghast_world::{Column, WorldConfig};
+    use proptest::prelude::*;
+
+    fn check(c: &Column) {
+        let keys: Vec<[u8; 3]> = c.block_entities().map(|(k, _)| k).collect();
+        let mut sorted = keys.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), keys.len(), "one entry per position");
+        assert!(keys.iter().all(|k| k[0] < 16 && k[2] < 16));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(300))]
+
+        #[test]
+        fn sequences(ops in proptest::collection::vec((0u8..5, -20i32..40, -5i32..300, -20i32..40, any::<u16>(), any::<u8>()), 1..60), junk in proptest::collection::vec(any::<u8>(), 0..64)) {
+            let cfg = WorldConfig::default().with_block_entities(true);
+            let mut w8 = ghast_world::v1_8::World::new(cfg);
+            let mut w16 = ghast_world::v1_16_5::World::new(cfg);
+            for cx in -2..=2 {
+                for cz in -2..=2 {
+                    w8.apply_chunk_data(cx, cz, true, 1, &[0; 8192 + 2048 + 2048 + 256]).unwrap();
+                    w16.apply_chunk_data(cx, cz, true, 0, None, &[]).unwrap();
+                }
+            }
+            let nbt = |x: i32, y: i32, z: i32| {
+                RawNbt::from_bytes(Bytes::from(super::common::be_nbt(x, y, z, "id"))).unwrap()
+            };
+            let junk_nbt = RawNbt::from_bytes(Bytes::from(junk)).ok();
+            for (op, x, y, z, state, action) in ops {
+                let location = BlockPos { x, y, z };
+                match op {
+                    0 => {
+                        w8.apply_update_sign(&ghast_protocol::v1_8::play::clientbound::UpdateSign {
+                            location,
+                            text1: "a".into(),
+                            text2: "b".into(),
+                            text3: "c".into(),
+                            text4: "d".into(),
+                        });
+                    }
+                    1 => {
+                        let nbt_data = if action % 3 == 0 { junk_nbt.clone() } else { Some(nbt(x, y, z)) };
+                        w8.apply_tile_entity_data(&ghast_protocol::v1_8::play::clientbound::TileEntityData { location, action, nbt_data: nbt_data.clone() });
+                        w16.apply_tile_entity_data(&ghast_protocol::v1_16_5::play::clientbound::TileEntityData { location, action, nbt_data });
+                    }
+                    2 => {
+                        w8.apply_block_change(&ghast_protocol::v1_8::play::clientbound::BlockChange { location, r#type: i32::from(state) });
+                        w16.apply_block_change(&ghast_protocol::v1_16_5::play::clientbound::BlockChange { location, r#type: i32::from(state) });
+                    }
+                    3 => {
+                        let mut list = vec![nbt(x, y, z)];
+                        list.extend(junk_nbt.clone());
+                        w16.apply_block_entities(&list);
+                    }
+                    _ => {
+                        let _ = w16.apply_chunk_data(x >> 4, z >> 4, false, i32::from(state), None, &[]);
+                    }
+                }
+            }
+            for (_, c) in w8.columns().iter() {
+                check(c);
+            }
+            for (_, c) in w16.columns().iter() {
+                check(c);
+            }
         }
     }
 }

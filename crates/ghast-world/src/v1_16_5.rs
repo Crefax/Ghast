@@ -21,11 +21,11 @@
 use ghast_data::v1_16_5::{Block, BlockState, STATE_COUNT};
 use ghast_protocol::v1_16_5::play::clientbound::{
     self as cb, BlockChange, ClientboundPlayPacket, Explosion, Login, MapChunk, MultiBlockChange,
-    Respawn, UnloadChunk, UpdateViewDistance, UpdateViewPosition,
+    Respawn, TileEntityData, UnloadChunk, UpdateViewDistance, UpdateViewPosition,
 };
 
 use crate::border::{Border, LerpMath, border_packet};
-use crate::column::{Biomes, Column, ColumnMap, MAX_Y, SECTIONS};
+use crate::column::{Biomes, BlockEntity, Column, ColumnMap, MAX_Y, SECTIONS};
 use crate::packed::{unpack_be, words_needed};
 use crate::section::{SECTION_VOLUME, SectionBuilder};
 use crate::{Applied, ChunkPos, WorldConfig, WorldError};
@@ -46,6 +46,18 @@ pub const PACKET_IDS: [i32; 10] = [
     cb::id::UPDATE_VIEW_POSITION,
     cb::id::UPDATE_VIEW_DISTANCE,
 ];
+
+/// Extra packet ids with [`WorldConfig::block_entities`] (chunk block entities come with
+/// `map_chunk`).
+pub const BLOCK_ENTITY_IDS: [i32; 1] = [cb::id::TILE_ENTITY_DATA];
+
+/// Same block type (the condition under which vanilla keeps a block entity).
+fn same_block(a: u16, b: u16) -> bool {
+    match (BlockState::from_id(a), BlockState::from_id(b)) {
+        (Some(a), Some(b)) => a.block() == b.block(),
+        _ => a == b,
+    }
+}
 
 /// The client's chunk window (vanilla `ClientChunkManager`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -217,6 +229,9 @@ impl World {
             ClientboundPlayPacket::UpdateViewPosition(p) => Ok(self.apply_view_position(p)),
             ClientboundPlayPacket::UpdateViewDistance(p) => Ok(self.apply_view_distance(p)),
             ClientboundPlayPacket::WorldBorder(p) => Ok(self.apply_world_border(p)),
+            ClientboundPlayPacket::TileEntityData(p) if self.config.block_entities => {
+                Ok(self.apply_tile_entity_data(p))
+            }
             _ => Ok(Applied::NotWorldPacket),
         }
     }
@@ -287,14 +302,74 @@ impl World {
     /// # Errors
     /// Malformed section data (the column is unloaded).
     pub fn apply_map_chunk(&mut self, p: &MapChunk) -> Result<Applied, WorldError> {
-        self.apply_chunk_data(
+        let r = self.apply_chunk_data(
             p.x,
             p.z,
             p.ground_up,
             p.bit_map,
             p.biomes.as_deref(),
             &p.chunk_data,
-        )
+        )?;
+        if r == Applied::Changed && self.config.block_entities {
+            self.apply_block_entities(&p.block_entities);
+        }
+        Ok(r)
+    }
+
+    /// Stores a chunk's block entity list (with [`WorldConfig::block_entities`]): each compound
+    /// goes to the loaded column containing its `x` / `y` / `z` ints; entries without them are
+    /// skipped.
+    pub fn apply_block_entities(&mut self, list: &[ghast_protocol::nbt::RawNbt]) {
+        use ghast_protocol::nbt::Tag;
+        for nbt in list {
+            let Ok(Some(tree)) = nbt.parse() else {
+                continue;
+            };
+            let Tag::Compound(c) = &tree.tag else {
+                continue;
+            };
+            let int = |k: &str| match c.get(k) {
+                Some(Tag::Int(v)) => Some(*v),
+                _ => None,
+            };
+            let (Some(bx), Some(by), Some(bz)) = (int("x"), int("y"), int("z")) else {
+                continue;
+            };
+            crate::column::put_nbt(
+                &mut self.columns,
+                ghast_protocol::BlockPos {
+                    x: bx,
+                    y: by,
+                    z: bz,
+                },
+                0,
+                Some(nbt),
+            );
+        }
+    }
+
+    /// The block entity at a position (`None` when absent or the column is not loaded).
+    #[must_use]
+    pub fn block_entity(&self, x: i32, y: i32, z: i32) -> Option<&BlockEntity> {
+        self.columns.get(x >> 4, z >> 4)?.block_entity(x, y, z)
+    }
+
+    /// `tile_entity_data` (with [`WorldConfig::block_entities`]).
+    pub fn apply_tile_entity_data(&mut self, p: &TileEntityData) -> Applied {
+        if !self.config.block_entities {
+            return Applied::Ignored;
+        }
+        crate::column::put_nbt(&mut self.columns, p.location, p.action, p.nbt_data.as_ref())
+    }
+
+    /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
+    pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
+        let extra: &'static [i32] = if self.config.block_entities {
+            &BLOCK_ENTITY_IDS
+        } else {
+            &[]
+        };
+        PACKET_IDS.into_iter().chain(extra.iter().copied())
     }
 
     /// [`World::apply_map_chunk`] without the packet struct.
@@ -339,9 +414,12 @@ impl World {
                     sections,
                     biomes,
                     light: None,
+                    block_entities: Vec::new(),
                 },
             );
         } else if let Some(col) = self.columns.get_mut(x, z) {
+            // Vanilla drops the block entities of the replaced sections.
+            col.remove_block_entities_in(mask as u32 & 0xFFFF);
             for (j, s) in sections.iter_mut().enumerate() {
                 if mask & (1 << j) != 0 {
                     col.sections[j] = s.take();
@@ -373,11 +451,12 @@ impl World {
         for &r in &p.records {
             let local = (r & 0xFFF) as i32;
             let y = sy.wrapping_mul(16).wrapping_add(local & 15);
-            col.set_raw(
+            col.set_raw_with(
                 (local >> 8) & 15,
                 y,
                 (local >> 4) & 15,
                 raw_from_wire(((r as u64) >> 12) as i64),
+                same_block,
             );
         }
         Applied::Changed
@@ -441,7 +520,7 @@ fn set_block(columns: &mut ColumnMap, x: i32, y: i32, z: i32, raw: u16) -> bool 
     }
     match columns.get_mut(x >> 4, z >> 4) {
         Some(c) => {
-            c.set_raw(x, y, z, raw);
+            c.set_raw_with(x, y, z, raw, same_block);
             true
         }
         None => false,

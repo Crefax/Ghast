@@ -17,10 +17,7 @@ fn body<P: PacketSet>(p: &P) -> Bytes {
 }
 
 fn all_config() -> Config {
-    Config {
-        events: true,
-        ..Config::default()
-    }
+    Config::default().with_events(true).with_skins(true)
 }
 
 /// Every packet in the store links consistently.

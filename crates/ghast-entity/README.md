@@ -42,8 +42,10 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
   Object, Painting}`), `item()` (stack of an item entity), `dimensions()` / `size()` / `bounding_box()` (vanilla, see below);
   `Entities::near` is an alias of `within`.
 - Per-version helpers: `health`, `item`, `flags`, `custom_name`, `meta::*` indices.
-- `Config { metadata, equipment, effects, player_list, events }`: everything is on by default
-  except `events`. `Event` covers spawned / removed / moved / velocity / status / metadata /
+- `Config` (`#[non_exhaustive]`; build it with `Config::default().with_metadata(..)` etc.):
+  `metadata`, `equipment`, `effects`, `player_list`, `events`, `skins`. Everything is on by
+  default except `events` and `skins`. `PlayerInfo` is `#[non_exhaustive]` too (read-only). With `skins`, `PlayerInfo::textures` keeps the base64
+  `"textures"` profile property (skin / cape URLs) of tab-list entries. `Event` covers spawned / removed / moved / velocity / status / metadata /
   equipment / effects / mounted / collected / player list.
 - Packet id lists per version: `CORE_IDS`, `METADATA_IDS`, `EQUIPMENT_IDS`, `EFFECT_IDS`,
   `PLAYER_LIST_IDS`.
@@ -117,7 +119,8 @@ crate parses that packet itself and follows vanilla.
 - `wants(id)` is a 256-bit mask check, so the client can drop unwanted packets before decoding.
   With metadata, equipment, effects and the tab list off, only the movement core is parsed. In
   1.16 metadata is still read for item entities, whose stack the pickup rule needs.
-- `player_info` skips profile properties (skins) without allocating.
+- `player_info` skips profile properties (skins) without allocating; with `Config::skins` only
+  the `"textures"` value is copied (one allocation per added player).
 
 Bench (`cargo bench -p ghast-entity`, x86-64 WSL): a busy stream of 10,000 packets over 300
 entities (35 % rel move, 20 % move+look, 15 % look, 10 % head rotation, 7 % velocity, 6 % teleport,

@@ -40,6 +40,8 @@ trait Fake: ClientVersion {
     fn close_window(window_id: u8) -> RawPacket;
     /// A stone block.
     fn stone(x: i32, y: i32, z: i32) -> RawPacket;
+    /// An experience orb (a simple entity spawn).
+    fn xp_orb(entity_id: i32) -> RawPacket;
     fn sb_play_name(raw: &RawPacket) -> &'static str;
     fn handshake_protocol(raw: &RawPacket) -> i32;
     fn login_start_name(raw: &RawPacket) -> String;
@@ -154,6 +156,17 @@ impl Fake for V1_8 {
             location: ghast_protocol::BlockPos::new(x, y, z),
             r#type: 1 << 4,
         })
+    }
+    fn xp_orb(entity_id: i32) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_8::play::clientbound::SpawnEntityExperienceOrb {
+                entity_id,
+                x: 8 * 32,
+                y: 64 * 32,
+                z: 8 * 32,
+                count: 1,
+            },
+        )
     }
     fn sb_play_name(raw: &RawPacket) -> &'static str {
         ghast_protocol::v1_8::play::serverbound::ServerboundPlayPacket::decode_raw(raw)
@@ -286,6 +299,17 @@ impl Fake for V1_16_5 {
             location: ghast_protocol::BlockPos::new(x, y, z),
             r#type: 1,
         })
+    }
+    fn xp_orb(entity_id: i32) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_16_5::play::clientbound::SpawnEntityExperienceOrb {
+                entity_id,
+                x: 8.0,
+                y: 64.0,
+                z: 8.0,
+                count: 1,
+            },
+        )
     }
     fn sb_play_name(raw: &RawPacket) -> &'static str {
         ghast_protocol::v1_16_5::play::serverbound::ServerboundPlayPacket::decode_raw(raw)
@@ -898,6 +922,89 @@ async fn lobby_with_only_a_bad_chunk_still_ticks() {
     assert!(matches!(end, Ok(SessionEnd::Kicked { .. })), "{end:?}");
     assert!(b.0);
 }
+
+/// `Interests::ENTITIES` can be switched on and off mid-session: tracking starts empty
+/// (an entity spawned before is unknown) but knows our own entity id from the join, sees
+/// spawns from then on, and switching off frees the store.
+async fn entities_switch_at_run_time<V: Fake>(v: GameVersion) {
+    /// Our entity id, orb 77 known, orb 78 known.
+    type Seen = (Option<i32>, bool, bool);
+    struct Watch {
+        n: u32,
+        on: bool,
+        seen: Vec<(u32, Option<Seen>)>,
+        stage: u8,
+    }
+    impl Behavior for Watch {
+        fn interests(&self) -> Interests {
+            if self.on {
+                Interests::ENTITIES
+            } else {
+                Interests::NONE
+            }
+        }
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            self.n += 1;
+            let es = ctx
+                .entities()
+                .map(|e| (e.self_id(), e.get(77).is_some(), e.get(78).is_some()));
+            self.seen.push((self.n, es));
+            match self.stage {
+                0 if self.n == 5 => {
+                    self.on = true;
+                    ctx.chat("on");
+                    self.stage = 1;
+                }
+                1 if es.is_some_and(|e| e.2) => {
+                    self.on = false;
+                    self.stage = 2;
+                }
+                2 if es.is_none() => ctx.disconnect("done"),
+                _ => {}
+            }
+        }
+    }
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V>("Tester", 128).await;
+        spawn::<V>(&mut c).await;
+        c.until::<V>("position_look").await;
+        c.send(&V::xp_orb(77)).await;
+        c.until::<V>("chat").await;
+        c.send(&V::xp_orb(78)).await;
+        while c.recv().await.is_some() {}
+    };
+    let mut b = Watch {
+        n: 0,
+        on: false,
+        seen: Vec::new(),
+        stage: 0,
+    };
+    let cl = client(addr, v, "Tester");
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(
+        matches!(end, Ok(SessionEnd::Quit(_))),
+        "{end:?} {:?}",
+        b.seen
+    );
+    // Off before the switch, then a tracker that knows us (42) and only the later orb.
+    assert!(b.seen.iter().take(5).all(|s| s.1.is_none()), "{:?}", b.seen);
+    let on: Vec<_> = b.seen.iter().filter_map(|s| s.1).collect();
+    assert!(on.iter().all(|e| e.0 == Some(42)), "{on:?}");
+    assert!(
+        on.iter().all(|e| !e.1),
+        "orb 77 spawned before the switch: {on:?}"
+    );
+    let last = on.last().unwrap();
+    assert!(last.2, "orb 78 tracked: {on:?}");
+    assert_eq!(
+        b.seen.last().unwrap().1,
+        None,
+        "store freed after switching off"
+    );
+}
+both!(entities_switch_at_run_time, entities_switch_at_run_time);
 
 /// A container the server opens holds the mouse (no digging) until it is closed — by the
 /// behaviour (`close_window`, the client's own close) or by the server — then the held left

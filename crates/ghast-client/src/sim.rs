@@ -53,9 +53,42 @@ pub trait WorldView {
     /// Dig / place facts of a block (hardness, tool group, ray box); `None` when the column
     /// is not loaded.
     fn block_query(&self, x: i32, y: i32, z: i32) -> Option<BlockQuery>;
+
+    /// The whole loaded column (sections, light / biomes when kept, see
+    /// [`crate::Client::world_config`]) for bulk reads without a call per block. Block states
+    /// are the version's raw ids, as in [`WorldView::raw_block`]. `None` when not loaded.
+    fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
+        let _ = (chunk_x, chunk_z);
+        None
+    }
 }
 
 /// World + movement of one version.
+/// The join / respawn packets of the session (cheap `Bytes` copies).
+#[derive(Debug, Default)]
+struct SessionPackets {
+    login: Option<RawPacket>,
+    respawn: Option<RawPacket>,
+}
+
+impl SessionPackets {
+    fn note(&mut self, raw: &RawPacket, login: i32, respawn: i32) {
+        if raw.id == login {
+            self.login = Some(raw.clone());
+            self.respawn = None;
+        } else if raw.id == respawn {
+            self.respawn = Some(raw.clone());
+        }
+    }
+
+    /// Feeds them to a fresh tracker.
+    fn replay(&self, mut apply: impl FnMut(&RawPacket)) {
+        for r in [&self.login, &self.respawn].into_iter().flatten() {
+            apply(r);
+        }
+    }
+}
+
 /// Most block changes kept between two behaviour ticks (a chunk-sized burst is 65536).
 const MAX_BLOCK_UPDATES: usize = 4096;
 
@@ -116,6 +149,13 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     );
     /// Packet ids the entity tracker wants (empty without tracking).
     fn entity_packet_ids(&self) -> Vec<i32>;
+    /// Packet ids the world consumes with its configuration.
+    fn world_packet_ids(&self) -> Vec<i32>;
+    /// The entity tracking configuration (`None`: not tracking).
+    fn entity_config(&self) -> Option<ghast_entity::Config>;
+    /// Starts (empty, our entity id and dimension from the session's join / respawn), stops
+    /// (frees the store) or reconfigures entity tracking mid-session.
+    fn set_entities(&mut self, config: Option<ghast_entity::Config>);
     /// Client-side flight toggle: sets the physics' flying flag and appends the `abilities`
     /// packet when it changes (starting needs "may fly").
     fn set_flying(&mut self, flying: bool, out: &mut Vec<Outbound>);
@@ -140,11 +180,14 @@ pub(crate) struct SimOptions {
     pub force_step_position: ForceStepPosition,
     /// Track entities (and the tab list).
     pub entities: Option<ghast_entity::Config>,
+    /// What the world keeps besides block states (default: nothing, see [`config`]).
+    pub world: Option<WorldConfig>,
 }
 
 /// Grim compatibility (**not vanilla**): when to send the position on a tick whose move stayed
 /// under vanilla's 0.03-block resend threshold. See `crates/ghast-physics/GRIM_NOTES.md`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ForceStepPosition {
     /// Vanilla: never.
     #[default]
@@ -321,10 +364,10 @@ type RayBox = (Option<[f64; 6]>, Option<[Option<[f64; 6]>; 8]>);
 
 fn config() -> WorldConfig {
     // The bot needs block states only: no biomes, no light.
-    WorldConfig {
-        biomes: false,
-        light: false,
-    }
+    WorldConfig::default()
+        .with_biomes(false)
+        .with_light(false)
+        .with_block_entities(false)
 }
 
 fn abilities_flags(a: &ghast_physics::Abilities) -> i8 {
@@ -356,6 +399,11 @@ pub(crate) struct Sim18 {
     entities: Option<ghast_entity::v1_8::Tracker>,
     /// Block changes since the last drain (position, version raw state), when collected.
     updates: BlockUpdates,
+    /// The session's last join and respawn packets: a tracker started mid-session replays
+    /// them to learn our entity id and dimension.
+    session: SessionPackets,
+    /// The world keeps block entities (signs, tile entity NBT).
+    block_entities: bool,
 }
 
 impl std::fmt::Debug for Sim18 {
@@ -396,6 +444,8 @@ impl Sim18 {
             force_step_position: ForceStepPosition::Off,
             entities: None,
             updates: BlockUpdates::default(),
+            session: SessionPackets::default(),
+            block_entities: false,
         }
     }
 
@@ -404,6 +454,10 @@ impl Sim18 {
         let mut s = Self::new();
         s.force_step_position = opts.force_step_position;
         s.entities = opts.entities.map(ghast_entity::v1_8::Tracker::new);
+        if let Some(c) = opts.world {
+            s.world = ghast_world::v1_8::World::new(c);
+            s.block_entities = c.block_entities;
+        }
         if let Some(p) = opts.record.as_deref() {
             match crate::record::Recorder::create(p) {
                 Ok(r) => s.rec = Some(r),
@@ -415,6 +469,10 @@ impl Sim18 {
 }
 
 impl WorldView for Sim18 {
+    fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
+        self.world.column(chunk_x, chunk_z)
+    }
+
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         self.world.is_column_loaded(chunk_x, chunk_z)
     }
@@ -452,6 +510,10 @@ impl WorldView for Sim18 {
 
 impl Sim for Sim18 {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        {
+            use ghast_protocol::v1_8::play::clientbound::id;
+            self.session.note(raw, id::LOGIN, id::RESPAWN);
+        }
         if let Some(t) = &mut self.entities
             && t.wants(raw.id)
         {
@@ -492,6 +554,12 @@ impl Sim for Sim18 {
             }
             cb::id::WORLD_BORDER => {
                 w.apply_world_border(&raw.decode_as()?);
+            }
+            cb::id::UPDATE_SIGN if self.block_entities => {
+                w.apply_update_sign(&raw.decode_as()?);
+            }
+            cb::id::TILE_ENTITY_DATA if self.block_entities => {
+                w.apply_tile_entity_data(&raw.decode_as()?);
             }
             _ => {}
         }
@@ -632,6 +700,29 @@ impl Sim for Sim18 {
     fn drain_block_updates(&mut self, out: &mut Vec<(BlockPos, u32)>) -> usize {
         out.append(&mut self.updates.list);
         std::mem::take(&mut self.updates.dropped)
+    }
+
+    fn world_packet_ids(&self) -> Vec<i32> {
+        self.world.packet_ids().collect()
+    }
+
+    fn entity_config(&self) -> Option<ghast_entity::Config> {
+        self.entities.as_ref().map(|t| t.config())
+    }
+
+    fn set_entities(&mut self, config: Option<ghast_entity::Config>) {
+        if self.entity_config() == config {
+            return;
+        }
+        self.entities = config.map(|c| {
+            let mut t = ghast_entity::v1_8::Tracker::new(c);
+            self.session.replay(|r| {
+                if let Err(e) = t.apply(r) {
+                    log::debug!("entity tracker: session packet 0x{:02x}: {e}", r.id);
+                }
+            });
+            t
+        });
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
@@ -816,6 +907,11 @@ pub(crate) struct Sim16 {
     entities: Option<ghast_entity::v1_16_5::Tracker>,
     /// Block changes since the last drain (position, version raw state), when collected.
     updates: BlockUpdates,
+    /// The session's last join and respawn packets: a tracker started mid-session replays
+    /// them to learn our entity id and dimension.
+    session: SessionPackets,
+    /// The world keeps block entities (signs, tile entity NBT).
+    block_entities: bool,
 }
 
 impl std::fmt::Debug for Sim16 {
@@ -836,6 +932,8 @@ impl Sim16 {
             force_step_position: ForceStepPosition::Off,
             entities: None,
             updates: BlockUpdates::default(),
+            session: SessionPackets::default(),
+            block_entities: false,
         }
     }
 
@@ -844,6 +942,10 @@ impl Sim16 {
         let mut s = Self::new();
         s.force_step_position = opts.force_step_position;
         s.entities = opts.entities.map(ghast_entity::v1_16_5::Tracker::new);
+        if let Some(c) = opts.world {
+            s.world = ghast_world::v1_16_5::World::new(c);
+            s.block_entities = c.block_entities;
+        }
         if let Some(p) = opts.record.as_deref() {
             match crate::record::Recorder::create(p) {
                 Ok(r) => s.rec = Some(r),
@@ -855,6 +957,10 @@ impl Sim16 {
 }
 
 impl WorldView for Sim16 {
+    fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
+        self.world.column(chunk_x, chunk_z)
+    }
+
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         self.world.is_column_loaded(chunk_x, chunk_z)
     }
@@ -903,6 +1009,10 @@ impl WorldView for Sim16 {
 
 impl Sim for Sim16 {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        {
+            use ghast_protocol::v1_16_5::play::clientbound::id;
+            self.session.note(raw, id::LOGIN, id::RESPAWN);
+        }
         if let Some(t) = &mut self.entities
             && t.wants(raw.id)
         {
@@ -954,6 +1064,9 @@ impl Sim for Sim16 {
             }
             cb::id::WORLD_BORDER => {
                 w.apply_world_border(&raw.decode_as()?);
+            }
+            cb::id::TILE_ENTITY_DATA if self.block_entities => {
+                w.apply_tile_entity_data(&raw.decode_as()?);
             }
             _ => {}
         }
@@ -1079,6 +1192,29 @@ impl Sim for Sim16 {
     fn drain_block_updates(&mut self, out: &mut Vec<(BlockPos, u32)>) -> usize {
         out.append(&mut self.updates.list);
         std::mem::take(&mut self.updates.dropped)
+    }
+
+    fn world_packet_ids(&self) -> Vec<i32> {
+        self.world.packet_ids().collect()
+    }
+
+    fn entity_config(&self) -> Option<ghast_entity::Config> {
+        self.entities.as_ref().map(|t| t.config())
+    }
+
+    fn set_entities(&mut self, config: Option<ghast_entity::Config>) {
+        if self.entity_config() == config {
+            return;
+        }
+        self.entities = config.map(|c| {
+            let mut t = ghast_entity::v1_16_5::Tracker::new(c);
+            self.session.replay(|r| {
+                if let Err(e) = t.apply(r) {
+                    log::debug!("entity tracker: session packet 0x{:02x}: {e}", r.id);
+                }
+            });
+            t
+        });
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
@@ -1221,6 +1357,9 @@ pub(crate) mod test_chunks {
 
 #[cfg(test)]
 impl WorldView for Box<dyn Sim> {
+    fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
+        (**self).column(chunk_x, chunk_z)
+    }
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         (**self).is_column_loaded(chunk_x, chunk_z)
     }
@@ -1277,6 +1416,15 @@ impl Sim for Box<dyn Sim> {
     }
     fn drain_block_updates(&mut self, out: &mut Vec<(BlockPos, u32)>) -> usize {
         (**self).drain_block_updates(out)
+    }
+    fn world_packet_ids(&self) -> Vec<i32> {
+        (**self).world_packet_ids()
+    }
+    fn entity_config(&self) -> Option<ghast_entity::Config> {
+        (**self).entity_config()
+    }
+    fn set_entities(&mut self, config: Option<ghast_entity::Config>) {
+        (**self).set_entities(config);
     }
     fn entity_packet_ids(&self) -> Vec<i32> {
         (**self).entity_packet_ids()

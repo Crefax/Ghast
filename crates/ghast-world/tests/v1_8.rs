@@ -77,10 +77,12 @@ fn check_column(w: &World, cx: i32, cz: i32, secs: &[Option<LegacySection>; 16])
 fn ground_up_round_trip() {
     let mut rng = Rng(0x1234_5678);
     for (dim, sky) in [(0i8, true), (-1, false), (1, false)] {
-        let mut w = World::new(WorldConfig {
-            biomes: true,
-            light: true,
-        });
+        let mut w = World::new(
+            WorldConfig::default()
+                .with_biomes(true)
+                .with_light(true)
+                .with_block_entities(false),
+        );
         w.apply_login(&login(dim));
         for n in 0..6 {
             let secs = random_column(&mut rng);
@@ -580,4 +582,107 @@ fn world_border_moves_with_time() {
     // A dimension change resets the border.
     w.apply_respawn(&respawn(1));
     assert_eq!(w.border().size(), 6.0e7);
+}
+
+fn be_world() -> World {
+    let mut w = World::new(WorldConfig::default().with_block_entities(true));
+    let mut secs: [Option<LegacySection>; 16] = Default::default();
+    secs[4] = Some(LegacySection {
+        blocks: vec![1 << 4; 4096],
+        block_light: vec![0; 2048],
+        sky_light: vec![0; 2048],
+    });
+    let (m, d) = encode_1_8(&secs, true, Some(&[0; 256]));
+    w.apply_map_chunk(&map_chunk(0, 0, true, m, d.clone()))
+        .unwrap();
+    w.apply_map_chunk(&map_chunk(-1, 0, true, m, d)).unwrap();
+    w
+}
+
+#[test]
+fn block_entities_signs_and_tile_data() {
+    use ghast_protocol::nbt::RawNbt;
+    use ghast_protocol::v1_8::play::clientbound::{
+        ClientboundPlayPacket as C, TileEntityData, UpdateSign,
+    };
+    use ghast_world::BlockEntity;
+    let mut w = be_world();
+    assert!(w.packet_ids().any(|id| id == 0x33) && w.packet_ids().any(|id| id == 0x35));
+    let sign = |x, y, z| UpdateSign {
+        location: BlockPos { x, y, z },
+        text1: "{\"text\":\"a\"}".into(),
+        text2: "\"b\"".into(),
+        text3: "\"\"".into(),
+        text4: "\"d\"".into(),
+    };
+    // Place a wall sign block first (id 68), then its text.
+    w.apply_block_change(&BlockChange {
+        location: BlockPos { x: -3, y: 70, z: 5 },
+        r#type: 68 << 4 | 2,
+    });
+    assert_eq!(
+        w.handle(&C::UpdateSign(sign(-3, 70, 5))),
+        Ok(Applied::Changed)
+    );
+    match w.block_entity(-3, 70, 5) {
+        Some(BlockEntity::Sign(l)) => assert_eq!((&*l[0], &*l[3]), ("{\"text\":\"a\"}", "\"d\"")),
+        other => panic!("{other:?}"),
+    }
+    // Same block, other meta: kept (vanilla keeps the block entity of the same block).
+    w.apply_block_change(&BlockChange {
+        location: BlockPos { x: -3, y: 70, z: 5 },
+        r#type: 68 << 4 | 3,
+    });
+    assert!(w.block_entity(-3, 70, 5).is_some());
+    // Another block: removed.
+    w.apply_block_change(&BlockChange {
+        location: BlockPos { x: -3, y: 70, z: 5 },
+        r#type: 0,
+    });
+    assert!(w.block_entity(-3, 70, 5).is_none());
+
+    // tile_entity_data keeps the raw NBT and the action.
+    let nbt = common::be_nbt(2, 64, 3, "Skull");
+    let p = TileEntityData {
+        location: BlockPos { x: 2, y: 64, z: 3 },
+        action: 4,
+        nbt_data: Some(RawNbt::from_bytes(Bytes::from(nbt.clone())).unwrap()),
+    };
+    assert_eq!(w.handle(&C::TileEntityData(p)), Ok(Applied::Changed));
+    let col = w.column(0, 0).unwrap();
+    let all: Vec<_> = col.block_entities().collect();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].0, [2, 64, 3]);
+    assert!(matches!(all[0].1, BlockEntity::Nbt { action: 4, nbt: n } if **n == nbt[..]));
+    // Unloaded column: ignored.
+    assert_eq!(w.apply_update_sign(&sign(500, 70, 5)), Applied::Ignored);
+    // A partial chunk keeps block entities (vanilla 1.8); a ground-up chunk drops them.
+    let mut secs: [Option<LegacySection>; 16] = Default::default();
+    secs[4] = Some(LegacySection {
+        blocks: vec![1 << 4; 4096],
+        block_light: vec![0; 2048],
+        sky_light: vec![0; 2048],
+    });
+    let (m, d) = encode_1_8(&secs, true, None);
+    w.apply_map_chunk(&map_chunk(0, 0, false, m, d)).unwrap();
+    assert!(w.block_entity(2, 64, 3).is_some());
+    let (m, d) = encode_1_8(&secs, true, Some(&[0; 256]));
+    w.apply_map_chunk(&map_chunk(0, 0, true, m, d)).unwrap();
+    assert!(w.block_entity(2, 64, 3).is_none());
+}
+
+#[test]
+fn block_entities_off_costs_nothing() {
+    use ghast_protocol::v1_8::play::clientbound::{ClientboundPlayPacket as C, UpdateSign};
+    let mut w = loaded_world();
+    assert!(!w.packet_ids().any(|id| id == 0x33 || id == 0x35));
+    let p = C::UpdateSign(UpdateSign {
+        location: BlockPos { x: 1, y: 70, z: 1 },
+        text1: "".into(),
+        text2: "".into(),
+        text3: "".into(),
+        text4: "".into(),
+    });
+    assert_eq!(w.handle(&p), Ok(Applied::NotWorldPacket));
+    assert_eq!(w.column(0, 0).unwrap().block_entities().count(), 0);
 }

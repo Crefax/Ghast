@@ -23,6 +23,7 @@ pub const REACH: f64 = 4.5;
 
 /// What the hands need to know about one block state.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct BlockQuery {
     /// The block is air (`Material.AIR`).
     pub air: bool,
@@ -47,6 +48,7 @@ pub struct BlockQuery {
 
 /// The held stack as far as digging and using need it.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct HeldItem {
     /// Item id.
     pub id: u16,
@@ -66,8 +68,184 @@ pub struct HeldItem {
     pub tool_speed: Option<fn(DigMaterial, u16) -> f32>,
 }
 
+impl BlockQuery {
+    /// A solid, instantly breakable block with no tool group, no ray box and no activation;
+    /// set the rest with the `with_*` methods.
+    #[must_use]
+    pub const fn new(block: u16) -> Self {
+        BlockQuery {
+            air: false,
+            water: false,
+            block,
+            hardness: 0.0,
+            dig_material: None,
+            harvest_tools: &[],
+            selection: None,
+            stairs: None,
+            activates: false,
+        }
+    }
+
+    /// Air (id 0, no ray box).
+    pub const AIR: BlockQuery = BlockQuery::new(0).with_air(true);
+
+    /// The block is air.
+    #[must_use]
+    pub const fn with_air(mut self, on: bool) -> Self {
+        self.air = on;
+        self
+    }
+
+    /// The block is water.
+    #[must_use]
+    pub const fn with_water(mut self, on: bool) -> Self {
+        self.water = on;
+        self
+    }
+
+    /// Hardness (negative: unbreakable).
+    #[must_use]
+    pub const fn with_hardness(mut self, hardness: f32) -> Self {
+        self.hardness = hardness;
+        self
+    }
+
+    /// Tool group.
+    #[must_use]
+    pub const fn with_dig_material(mut self, m: Option<DigMaterial>) -> Self {
+        self.dig_material = m;
+        self
+    }
+
+    /// Item ids that harvest the block (empty: any).
+    #[must_use]
+    pub const fn with_harvest_tools(mut self, tools: &'static [u16]) -> Self {
+        self.harvest_tools = tools;
+        self
+    }
+
+    /// Selection (ray) box relative to the block.
+    #[must_use]
+    pub const fn with_selection(mut self, b: Option<[f64; 6]>) -> Self {
+        self.selection = b;
+        self
+    }
+
+    /// 1.8 stairs ray passes.
+    #[must_use]
+    pub const fn with_stairs(mut self, passes: Option<[Option<[f64; 6]>; 8]>) -> Self {
+        self.stairs = passes;
+        self
+    }
+
+    /// Right-clicking activates it.
+    #[must_use]
+    pub const fn with_activates(mut self, on: bool) -> Self {
+        self.activates = on;
+        self
+    }
+}
+
+impl HeldItem {
+    /// One item of `id` with nothing else known; set the rest with the `with_*` methods.
+    #[must_use]
+    pub const fn new(id: u16) -> Self {
+        HeldItem {
+            id,
+            count: 1,
+            efficiency: 0,
+            places_block: false,
+            usable: false,
+            food: false,
+            always_edible: false,
+            tool_speed: None,
+        }
+    }
+
+    /// Stack size.
+    #[must_use]
+    pub const fn with_count(mut self, count: u8) -> Self {
+        self.count = count;
+        self
+    }
+
+    /// Efficiency level.
+    #[must_use]
+    pub const fn with_efficiency(mut self, level: u8) -> Self {
+        self.efficiency = level;
+        self
+    }
+
+    /// The item places a block.
+    #[must_use]
+    pub const fn with_places_block(mut self, on: bool) -> Self {
+        self.places_block = on;
+        self
+    }
+
+    /// The item is used by holding right click.
+    #[must_use]
+    pub const fn with_usable(mut self, on: bool) -> Self {
+        self.usable = on;
+        self
+    }
+
+    /// Food (and whether it can be eaten at a full food bar).
+    #[must_use]
+    pub const fn with_food(mut self, food: bool, always_edible: bool) -> Self {
+        self.food = food;
+        self.always_edible = always_edible;
+        self
+    }
+
+    /// Tool speed per dig group.
+    #[must_use]
+    pub const fn with_tool_speed(mut self, f: Option<fn(DigMaterial, u16) -> f32>) -> Self {
+        self.tool_speed = f;
+        self
+    }
+}
+
+impl DigFactors {
+    /// On ground.
+    #[must_use]
+    pub const fn with_on_ground(mut self, on: bool) -> Self {
+        self.on_ground = on;
+        self
+    }
+
+    /// Eyes in water.
+    #[must_use]
+    pub const fn with_in_water(mut self, on: bool) -> Self {
+        self.in_water = on;
+        self
+    }
+
+    /// Aqua affinity on the helmet.
+    #[must_use]
+    pub const fn with_aqua_affinity(mut self, on: bool) -> Self {
+        self.aqua_affinity = on;
+        self
+    }
+
+    /// Haste level (amplifier + 1), 0 = none.
+    #[must_use]
+    pub const fn with_haste(mut self, level: u8) -> Self {
+        self.haste = level;
+        self
+    }
+
+    /// Mining fatigue level (amplifier + 1), 0 = none.
+    #[must_use]
+    pub const fn with_fatigue(mut self, level: u8) -> Self {
+        self.fatigue = level;
+        self
+    }
+}
+
 /// Mining speed modifiers of the player.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct DigFactors {
     /// On ground.
     pub on_ground: bool,
@@ -140,6 +318,7 @@ pub fn look_vector(yaw: f32, pitch: f32) -> Vec3 {
 
 /// A block the crosshair is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct BlockHit {
     /// The block.
     pub pos: BlockPos,
@@ -207,6 +386,7 @@ fn block_ray(pos: BlockPos, b: &[f64; 6], start: Vec3, end: Vec3) -> Option<(Vec
 
 /// What a ray found.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum RayResult {
     /// A block's ray bounds.
     Block(BlockHit),
@@ -359,6 +539,7 @@ pub fn pick(
 
 /// An entity the crosshair is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct EntityHit {
     /// The entity id.
     pub id: i32,

@@ -18,11 +18,17 @@ impl Interests {
     /// Chat messages ([`crate::TickEvents::chat`]).
     pub const CHAT: Interests = Interests(1 << 0);
     /// Entities (spawns, moves, metadata, equipment, effects): [`crate::TickContext::entities`]
-    /// and the entity crosshair / attack / interact. Read once at session start.
+    /// and the entity crosshair / attack / interact. Can be switched at run time: tracking then
+    /// starts empty (entities already spawned stay unknown until the server sends them again)
+    /// and switching off frees the store.
     pub const ENTITIES: Interests = Interests(1 << 1);
     /// The tab list (player names and UUIDs) on top of [`Interests::ENTITIES`] — the most
-    /// expensive packet on busy servers. Read once at session start.
+    /// expensive packet on busy servers. Switching it restarts the tracker empty.
     pub const PLAYER_LIST: Interests = Interests(1 << 2);
+    /// Skin / cape textures (the base64 `"textures"` profile property) of tab-list entries,
+    /// on top of [`Interests::PLAYER_LIST`] (`PlayerInfo::textures`). Switching it restarts
+    /// the tracker empty.
+    pub const PLAYER_SKINS: Interests = Interests(1 << 4);
     /// Block changes (1.8 S23/S22, 1.16 block_change / multi_block_change) as
     /// [`crate::TickEvents::block_updates`]. The world applies them either way; this only
     /// collects them for the behaviour.

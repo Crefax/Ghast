@@ -56,9 +56,18 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 let name = own_str(r)?;
                 let props = r.read_varint()?;
                 let props = r.check_count(i64::from(props), 3)?;
+                let mut textures = None;
                 for _ in 0..props {
-                    skip_string(r)?;
-                    skip_string(r)?;
+                    if store.config.skins {
+                        let key = r.read_string()?;
+                        let value = r.read_string()?;
+                        if &*key == "textures" {
+                            textures = Some(Box::<str>::from(&*value));
+                        }
+                    } else {
+                        skip_string(r)?;
+                        skip_string(r)?;
+                    }
                     if r.read_bool()? {
                         skip_string(r)?;
                     }
@@ -77,6 +86,7 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                         game_mode,
                         ping,
                         display_name,
+                        textures,
                     },
                 );
             }

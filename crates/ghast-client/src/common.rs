@@ -95,6 +95,7 @@ impl Controls {
 
 /// Where a chat message is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ChatPosition {
     /// A player chat message.
     Chat,
@@ -121,6 +122,7 @@ impl ChatPosition {
 
 /// A chat message from the server. The text stays raw JSON until asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ChatMessage {
     /// The chat component as the server sent it (JSON).
     pub json: ByteString,
@@ -182,6 +184,7 @@ impl GameMode {
 
 /// Player abilities (`abilities` packet).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Abilities {
     /// Raw flags: 1 invulnerable, 2 flying, 4 may fly, 8 creative (instant break).
     pub flags: i8,
@@ -217,6 +220,7 @@ impl Abilities {
 
 /// Health, food and saturation (`update_health`).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Health {
     /// Health points (20 = full; ≤ 0 = dead).
     pub health: f32,
@@ -252,6 +256,7 @@ pub mod teleport_flags {
 
 /// A server teleport (position packet), before it is applied to the pose.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Teleport {
     /// X (absolute or relative, see `flags`).
     pub x: f64,
@@ -271,6 +276,7 @@ pub struct Teleport {
 
 /// Login-state packets from the server, common to every version.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum LoginInbound {
     /// The server refused the login (chat JSON).
     Disconnect(ByteString),
@@ -303,6 +309,7 @@ pub enum LoginInbound {
 
 /// Static information from the join game packet.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct JoinGame {
     /// The player's entity id.
     pub entity_id: i32,
@@ -321,6 +328,7 @@ pub struct JoinGame {
 
 /// Clientbound play packets the core understands, common to every version.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Inbound {
     /// Keep-alive to echo.
     KeepAlive(i64),
@@ -417,6 +425,7 @@ pub enum Inbound {
 
 /// Sneak / sprint `entity_action` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum EntityAction {
     /// Start sneaking.
     StartSneaking,
@@ -480,6 +489,7 @@ impl MovePacket {
 
 /// Client settings (`settings` packet), sent right after join game like vanilla.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct ClientSettings {
     /// Locale, e.g. `en_US` (1.8) / `en_us` (1.16).
     pub locale: String,
@@ -493,6 +503,50 @@ pub struct ClientSettings {
     pub skin_parts: u8,
     /// Main hand (1.9+): 0 left, 1 right.
     pub main_hand: i32,
+}
+
+impl ClientSettings {
+    /// The locale, e.g. `en_US` (1.8) / `en_us` (1.16).
+    #[must_use]
+    pub fn with_locale(mut self, locale: impl Into<String>) -> Self {
+        self.locale = locale.into();
+        self
+    }
+
+    /// The view distance in chunks.
+    #[must_use]
+    pub const fn with_view_distance(mut self, chunks: i8) -> Self {
+        self.view_distance = chunks;
+        self
+    }
+
+    /// Chat visibility: 0 full, 1 commands only, 2 hidden.
+    #[must_use]
+    pub const fn with_chat_mode(mut self, mode: i8) -> Self {
+        self.chat_mode = mode;
+        self
+    }
+
+    /// Chat colours.
+    #[must_use]
+    pub const fn with_chat_colors(mut self, on: bool) -> Self {
+        self.chat_colors = on;
+        self
+    }
+
+    /// Displayed skin parts (bit mask; 0x7f = all).
+    #[must_use]
+    pub const fn with_skin_parts(mut self, mask: u8) -> Self {
+        self.skin_parts = mask;
+        self
+    }
+
+    /// Main hand (1.9+): 0 left, 1 right.
+    #[must_use]
+    pub const fn with_main_hand(mut self, hand: i32) -> Self {
+        self.main_hand = hand;
+        self
+    }
 }
 
 impl Default for ClientSettings {
@@ -570,6 +624,7 @@ impl Face {
 
 /// The `use_entity` action.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum EntityUse {
     /// Right click (0).
     Interact,
@@ -581,6 +636,7 @@ pub enum EntityUse {
 
 /// `block_dig` status values used by the client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DigStatus {
     /// Start destroying a block (0).
     Start,
@@ -607,6 +663,7 @@ impl DigStatus {
 
 /// Serverbound play packets the core writes, common to every version.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Outbound {
     /// Keep-alive answer.
     KeepAlive(i64),

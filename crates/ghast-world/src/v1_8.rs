@@ -14,11 +14,11 @@
 use ghast_data::v1_8::{BLOCK_COUNT, BlockState};
 use ghast_protocol::v1_8::play::clientbound::{
     self as cb, BlockChange, ClientboundPlayPacket, Explosion, Login, MapChunk, MapChunkBulk,
-    MultiBlockChange, Respawn,
+    MultiBlockChange, Respawn, TileEntityData, UpdateSign,
 };
 
 use crate::border::{Border, LerpMath, border_packet};
-use crate::column::{Biomes, Column, ColumnMap, MAX_Y, SECTIONS, SectionLight};
+use crate::column::{Biomes, BlockEntity, Column, ColumnMap, MAX_Y, SECTIONS, SectionLight};
 use crate::section::{SECTION_VOLUME, SectionBuilder};
 use crate::{Applied, ChunkPos, WorldConfig, WorldError};
 
@@ -44,6 +44,15 @@ pub const PACKET_IDS: [i32; 8] = [
     cb::id::EXPLOSION,
     cb::id::WORLD_BORDER,
 ];
+
+/// Extra packet ids with [`WorldConfig::block_entities`].
+pub const BLOCK_ENTITY_IDS: [i32; 2] = [cb::id::UPDATE_SIGN, cb::id::TILE_ENTITY_DATA];
+
+/// Same block type (1.8: same block id, any meta), the condition under which vanilla keeps a
+/// block entity across a block change.
+fn same_block(a: u16, b: u16) -> bool {
+    a >> 4 == b >> 4
+}
 
 /// Vanilla's `World.isValidPos` horizontal limit.
 const MAX_XZ: i32 = 30_000_000;
@@ -176,8 +185,53 @@ impl World {
             ClientboundPlayPacket::MultiBlockChange(p) => Ok(self.apply_multi_block_change(p)),
             ClientboundPlayPacket::Explosion(p) => Ok(self.apply_explosion(p)),
             ClientboundPlayPacket::WorldBorder(p) => Ok(self.apply_world_border(p)),
+            ClientboundPlayPacket::UpdateSign(p) if self.config.block_entities => {
+                Ok(self.apply_update_sign(p))
+            }
+            ClientboundPlayPacket::TileEntityData(p) if self.config.block_entities => {
+                Ok(self.apply_tile_entity_data(p))
+            }
             _ => Ok(Applied::NotWorldPacket),
         }
+    }
+
+    /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
+    pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
+        let extra: &'static [i32] = if self.config.block_entities {
+            &BLOCK_ENTITY_IDS
+        } else {
+            &[]
+        };
+        PACKET_IDS.into_iter().chain(extra.iter().copied())
+    }
+
+    /// The block entity at a position (`None` when absent or the column is not loaded).
+    #[must_use]
+    pub fn block_entity(&self, x: i32, y: i32, z: i32) -> Option<&BlockEntity> {
+        self.columns.get(x >> 4, z >> 4)?.block_entity(x, y, z)
+    }
+
+    /// `update_sign` (with [`WorldConfig::block_entities`]; ignored for unloaded columns).
+    pub fn apply_update_sign(&mut self, p: &UpdateSign) -> Applied {
+        if !self.config.block_entities {
+            return Applied::Ignored;
+        }
+        let l = &p.location;
+        let Some(col) = self.columns.get_mut(l.x >> 4, l.z >> 4) else {
+            return Applied::Ignored;
+        };
+        let lines = [&p.text1, &p.text2, &p.text3, &p.text4].map(|t| Box::<str>::from(&**t));
+        col.put_block_entity(l.x, l.y, l.z, BlockEntity::Sign(lines));
+        Applied::Changed
+    }
+
+    /// `tile_entity_data` (with [`WorldConfig::block_entities`]): stores the NBT with its
+    /// action; ignored for unloaded columns and packets without NBT.
+    pub fn apply_tile_entity_data(&mut self, p: &TileEntityData) -> Applied {
+        if !self.config.block_entities {
+            return Applied::Ignored;
+        }
+        crate::column::put_nbt(&mut self.columns, p.location, p.action, p.nbt_data.as_ref())
     }
 
     /// Join game: vanilla creates a new client world, so everything is unloaded.
@@ -404,7 +458,7 @@ impl World {
         for r in &p.records {
             let x = i32::from(r.horizontal_pos >> 4);
             let z = i32::from(r.horizontal_pos & 15);
-            col.set_raw(x, i32::from(r.y), z, raw_from_wire(r.block_id));
+            col.set_raw_with(x, i32::from(r.y), z, raw_from_wire(r.block_id), same_block);
         }
         Applied::Changed
     }
@@ -431,10 +485,12 @@ impl World {
 
     fn commit(&mut self, x: i32, z: i32, ground_up: bool, d: Decoded) {
         if ground_up {
+            // A ground-up chunk is a new vanilla chunk: its block entities are gone.
             let col = Column {
                 sections: d.sections,
                 biomes: d.biomes,
                 light: self.config.light.then(|| Box::new(d.light)),
+                block_entities: Vec::new(),
             };
             self.columns.insert(x, z, col);
             return;
@@ -489,7 +545,7 @@ fn set_block(columns: &mut ColumnMap, x: i32, y: i32, z: i32, raw: u16) -> bool 
     }
     match columns.get_mut(x >> 4, z >> 4) {
         Some(c) => {
-            c.set_raw(x, y, z, raw);
+            c.set_raw_with(x, y, z, raw, same_block);
             true
         }
         None => false,

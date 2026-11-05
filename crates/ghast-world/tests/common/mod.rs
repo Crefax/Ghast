@@ -130,3 +130,21 @@ pub fn put_words(out: &mut Vec<u8>, bits: u32, vals: &[u32]) {
         out.extend_from_slice(&w.to_be_bytes());
     }
 }
+
+/// NBT compound `{x: int, y: int, z: int, id: string}` (network form: unnamed root).
+pub fn be_nbt(x: i32, y: i32, z: i32, id: &str) -> Vec<u8> {
+    let mut v = vec![10u8, 0, 0];
+    for (k, val) in [("x", x), ("y", y), ("z", z)] {
+        v.push(3);
+        v.extend_from_slice(&(k.len() as u16).to_be_bytes());
+        v.extend_from_slice(k.as_bytes());
+        v.extend_from_slice(&val.to_be_bytes());
+    }
+    v.push(8);
+    v.extend_from_slice(&2u16.to_be_bytes());
+    v.extend_from_slice(b"id");
+    v.extend_from_slice(&(id.len() as u16).to_be_bytes());
+    v.extend_from_slice(id.as_bytes());
+    v.push(0);
+    v
+}

@@ -74,6 +74,60 @@ pub struct Column {
     pub(crate) sections: [Option<Section>; SECTIONS],
     pub(crate) biomes: Biomes,
     pub(crate) light: Option<Box<[Option<SectionLight>; SECTIONS]>>,
+    /// Block entities by [`be_key`] (only with [`crate::WorldConfig::block_entities`]).
+    pub(crate) block_entities: Vec<(u16, BlockEntity)>,
+}
+
+/// A block entity's data as the server sent it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BlockEntity {
+    /// Raw NBT compound (a private copy, never a view into a packet buffer). `action` is the
+    /// `tile_entity_data` action (1.8: 1 spawner, 2 command block, 3 beacon, 4 skull, 5 flower
+    /// pot, 6 banner; 1.16 adds 7..15, 9 = sign), or 0 for the block entity list of a 1.16 chunk.
+    Nbt {
+        /// Update action.
+        action: u8,
+        /// The NBT bytes (`TAG_Compound` root).
+        nbt: bytes::Bytes,
+    },
+    /// 1.8 `update_sign`: the four lines as raw chat JSON.
+    Sign([Box<str>; 4]),
+}
+
+/// Stores a `tile_entity_data` / chunk block entity NBT payload (both versions): ignored for
+/// unloaded columns, `y` outside `0..256` and the "no compound" value.
+#[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+pub(crate) fn put_nbt(
+    columns: &mut ColumnMap,
+    l: ghast_protocol::BlockPos,
+    action: u8,
+    nbt: Option<&ghast_protocol::nbt::RawNbt>,
+) -> crate::Applied {
+    let Some(nbt) = nbt.filter(|n| !n.is_end()) else {
+        return crate::Applied::Ignored;
+    };
+    if !(MIN_Y..MAX_Y).contains(&l.y) {
+        return crate::Applied::Ignored;
+    }
+    let Some(col) = columns.get_mut(l.x >> 4, l.z >> 4) else {
+        return crate::Applied::Ignored;
+    };
+    col.put_block_entity(
+        l.x,
+        l.y,
+        l.z,
+        BlockEntity::Nbt {
+            action,
+            nbt: bytes::Bytes::copy_from_slice(nbt.as_bytes()),
+        },
+    );
+    crate::Applied::Changed
+}
+
+/// Column-local key of a block position: `y << 8 | z << 4 | x` (`y` in `0..256`).
+#[inline]
+pub(crate) fn be_key(x: i32, y: i32, z: i32) -> u16 {
+    (((y & 0xFF) << 8) | ((z & 15) << 4) | (x & 15)) as u16
 }
 
 impl Column {
@@ -112,6 +166,75 @@ impl Column {
             }
             None => *slot = Section::single(i, state),
         }
+    }
+
+    /// Block entities as `([x, y, z] column-local, data)`, in arrival order. Empty unless
+    /// [`crate::WorldConfig::block_entities`] is on.
+    pub fn block_entities(&self) -> impl Iterator<Item = ([u8; 3], &BlockEntity)> {
+        self.block_entities
+            .iter()
+            .map(|(k, b)| ([(k & 15) as u8, (k >> 8) as u8, ((k >> 4) & 15) as u8], b))
+    }
+
+    /// The block entity at column-local `x`, `z` (low four bits) and world `y`.
+    #[must_use]
+    pub fn block_entity(&self, x: i32, y: i32, z: i32) -> Option<&BlockEntity> {
+        if !(MIN_Y..MAX_Y).contains(&y) {
+            return None;
+        }
+        let k = be_key(x, y, z);
+        self.block_entities
+            .iter()
+            .find(|(key, _)| *key == k)
+            .map(|(_, b)| b)
+    }
+
+    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    pub(crate) fn put_block_entity(&mut self, x: i32, y: i32, z: i32, be: BlockEntity) {
+        if !(MIN_Y..MAX_Y).contains(&y) {
+            return;
+        }
+        let k = be_key(x, y, z);
+        match self.block_entities.iter_mut().find(|(key, _)| *key == k) {
+            Some(slot) => slot.1 = be,
+            None => self.block_entities.push((k, be)),
+        }
+    }
+
+    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    pub(crate) fn remove_block_entity(&mut self, x: i32, y: i32, z: i32) -> bool {
+        if !(MIN_Y..MAX_Y).contains(&y) {
+            return false;
+        }
+        let k = be_key(x, y, z);
+        let before = self.block_entities.len();
+        self.block_entities.retain(|(key, _)| *key != k);
+        before != self.block_entities.len()
+    }
+
+    /// Drops the block entities in the sections of `mask` (bit = section index).
+    #[cfg_attr(not(feature = "v1_16_5"), allow(dead_code))]
+    pub(crate) fn remove_block_entities_in(&mut self, mask: u32) {
+        self.block_entities
+            .retain(|(k, _)| mask & (1 << (k >> 12)) == 0);
+    }
+
+    /// Sets a block like [`Column::set_raw`] and drops the block entity there when the block
+    /// type changes (`same_block(old, new)` is the version's block-type comparison), as vanilla
+    /// does.
+    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    pub(crate) fn set_raw_with(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        state: u16,
+        same_block: fn(u16, u16) -> bool,
+    ) {
+        if !self.block_entities.is_empty() && !same_block(self.raw(x, y, z), state) {
+            self.remove_block_entity(x, y, z);
+        }
+        self.set_raw(x, y, z, state);
     }
 
     /// The section at index `0..16` (`y >> 4`); `None` when it is all air.
@@ -178,7 +301,16 @@ impl Column {
                     .map(|s| 2048 + s.sky.as_ref().map_or(0, |_| 2048))
                     .sum::<usize>()
         });
-        sections + biomes + light
+        let be = self.block_entities.capacity() * size_of::<(u16, BlockEntity)>()
+            + self
+                .block_entities
+                .iter()
+                .map(|(_, b)| match b {
+                    BlockEntity::Nbt { nbt, .. } => nbt.len(),
+                    BlockEntity::Sign(l) => l.iter().map(|s| s.len()).sum(),
+                })
+                .sum::<usize>();
+        sections + biomes + light + be
     }
 }
 

@@ -197,7 +197,9 @@ Open: entities are not hit by the crosshair yet; the 1.16 attack cooldown only m
 
 With `Interests::ENTITIES` (and `PLAYER_LIST` for the tab list) the session creates the
 version's `ghast_entity` tracker; its packet ids join the filter, so bots without the interest
-never decode entity packets. `ctx.entities()` is the store (`get`, `within`, `players`, …).
+never decode entity packets. `ctx.entities()` is the store (`get`, `within`, `players`, …). The
+interests can change mid-session: a tracker started late is empty but knows our own entity id
+and dimension (it replays the session's join / respawn packets); switching off drops it.
 
 - Crosshair: vanilla `GameRenderer.updateTargetedEntity` — entities that `collides()` (living,
   players, paintings, boats, minecarts, TNT, falling blocks, item frames, armor stands, leash
@@ -241,6 +243,29 @@ yaw, pitch, using item) and the inbound events applied before it (teleports — 
 with their `flags` byte, the reply the client sent in `ghast_reply` — our velocity, abilities), plus
 ghast's own `state` and packets. Compare with `oracle/cache/replay_compare.py`. Block changes
 after a column was first seen and explosion pushes are not representable (`ghast_note`).
+
+## API stability (0.2)
+
+Types the library fills in and may extend are `#[non_exhaustive]`: the events (`TickEvents`,
+`RawInbound`, `TeleportEvent`), the pose and status types (`Pose`, `Health`, `Abilities`,
+`ChatMessage`, `Teleport`, `JoinGame`), the crosshair results (`BlockHit`, `EntityHit`,
+`RayResult`), and the enums `Inbound`, `Outbound`, `SessionEnd`, `ClientError`, `ClickRefused`,
+`GameVersion`, `Account`, `ForceStepPosition`, ... (match them with a `_` arm). Option structs
+are built with methods: `ClientSettings::default().with_view_distance(4)`,
+`WorldConfig::default().with_light(true)`. Plain inputs (`Controls`, `Buttons`, `Vec3`, the
+hands' `BlockQuery` / `HeldItem` / `DigFactors`) stay open structs.
+
+## Observers (viewers, recorders)
+
+All read-only and free unless used:
+
+- `Client::world_config(WorldConfig::default().with_light(true)…)`: what the world keeps
+  besides block states (light, biomes, block entities; default: nothing extra).
+- `ctx.world().column(cx, cz)` / `view.world().column(..)`: the stored `ghast::world::Column`
+  (sections, light, biomes) for bulk reads, instead of one `raw_block` call per block.
+- `ctx.swings()`: arm swings written so far (behaviour, actions and held buttons).
+- `Behavior::after_tick(&TickView)`: called after every movement step (also while on hold or
+  after the behaviour finished) with the sent pose, world, entities, inventory and events.
 
 ## Behaviour API reference and trace replay
 

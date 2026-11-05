@@ -123,17 +123,13 @@ fn crosshair_matches_vanilla() {
                     (None, Some(p.boxes().map(|b| b.as_ref().map(arr))))
                 }
             };
-            Some(BlockQuery {
-                air: state.is_air(),
-                water: false,
-                block: u16::from(state.block().id()),
-                hardness: 1.0,
-                dig_material: None,
-                harvest_tools: &[],
-                selection,
-                stairs,
-                activates: false,
-            })
+            Some(
+                BlockQuery::new(u16::from(state.block().id()))
+                    .with_air(state.is_air())
+                    .with_hardness(1.0)
+                    .with_selection(selection)
+                    .with_stairs(stairs),
+            )
         };
         let end = Vec3::new(
             eyes.x + look.x * reach,

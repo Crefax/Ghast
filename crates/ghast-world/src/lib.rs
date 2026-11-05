@@ -44,18 +44,56 @@ pub mod v1_16_5;
 pub mod v1_8;
 
 pub use border::Border;
-pub use column::{Biomes, ChunkPos, Column, ColumnMap, MAX_Y, MIN_Y, SECTIONS, SectionLight};
+pub use column::{
+    Biomes, BlockEntity, ChunkPos, Column, ColumnMap, MAX_Y, MIN_Y, SECTIONS, SectionLight,
+};
 pub use error::WorldError;
 pub use section::{SECTION_VOLUME, Section, block_index};
 
 /// What a world keeps besides block states.
+///
+/// `#[non_exhaustive]`: build it from [`WorldConfig::default`] with the `with_*` methods, so new
+/// options can be added without breaking callers:
+///
+/// ```
+/// let c = ghast_world::WorldConfig::default().with_biomes(false).with_block_entities(true);
+/// assert!(!c.biomes && c.block_entities && !c.light);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorldConfig {
     /// Keep biome ids (1.8: 256 bytes, 1.16.5: 2 KiB per column). Default `true`.
     pub biomes: bool,
     /// Keep the 1.8 block / sky light arrays sent with chunks (4 KiB per section, never
     /// recomputed locally). Default `false`: the physics does not need light.
     pub light: bool,
+    /// Keep block entities (1.8 `update_sign` / `tile_entity_data`, 1.16.5 chunk block entity
+    /// lists and `tile_entity_data`), see [`Column::block_entities`]. Default `false`: off costs
+    /// nothing (the packets are not in the world's packet ids, nothing is parsed).
+    pub block_entities: bool,
+}
+
+impl WorldConfig {
+    /// Sets [`WorldConfig::biomes`].
+    #[must_use]
+    pub const fn with_biomes(mut self, on: bool) -> Self {
+        self.biomes = on;
+        self
+    }
+
+    /// Sets [`WorldConfig::light`].
+    #[must_use]
+    pub const fn with_light(mut self, on: bool) -> Self {
+        self.light = on;
+        self
+    }
+
+    /// Sets [`WorldConfig::block_entities`].
+    #[must_use]
+    pub const fn with_block_entities(mut self, on: bool) -> Self {
+        self.block_entities = on;
+        self
+    }
 }
 
 impl Default for WorldConfig {
@@ -63,6 +101,7 @@ impl Default for WorldConfig {
         WorldConfig {
             biomes: true,
             light: false,
+            block_entities: false,
         }
     }
 }

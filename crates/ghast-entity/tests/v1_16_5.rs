@@ -311,10 +311,7 @@ fn item_meta(eid: i32, count: i8) -> ghast_protocol::RawPacket {
 #[test]
 fn pickup_shrinks_item_stacks() {
     for metadata in [true, false] {
-        let mut t = tracker(Config {
-            metadata,
-            ..Config::default()
-        });
+        let mut t = tracker(Config::default().with_metadata(metadata));
         spawn_object(&mut t, 10, 37, [0.0; 3], 1, [0; 3]);
         t.apply(&item_meta(10, 5)).unwrap();
         assert_eq!(v1_16_5::item(t.get(10).unwrap()).unwrap().count, 5);
@@ -449,10 +446,7 @@ fn respawn_rules() {
 #[test]
 fn class_item_and_box() {
     use ghast_entity::EntityClass;
-    let mut t = tracker(Config {
-        metadata: false,
-        ..Config::default()
-    });
+    let mut t = tracker(Config::default().with_metadata(false));
     spawn_living(&mut t, 7, 102, [1.0, 64.0, 1.0], [0; 3]);
     spawn_object(&mut t, 8, 37, [0.0; 3], 1, [0; 3]);
     spawn_object(&mut t, 9, 6, [0.0; 3], 0, [0; 3]);

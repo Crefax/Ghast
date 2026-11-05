@@ -82,6 +82,14 @@ pub trait Behavior {
         true
     }
 
+    /// Called after every tick's movement step (also while the behaviour is on hold or has
+    /// finished), with a read-only view of what the server now has: the pose sent this tick,
+    /// the world, entities and inventory. For observers (a viewer, a recorder); it cannot act.
+    /// Default: nothing.
+    fn after_tick(&mut self, view: &TickView<'_>) {
+        let _ = view;
+    }
+
     /// Called once when the session ends (or the behaviour panicked).
     fn stop(&mut self, reason: &str) {
         let _ = reason;
@@ -108,6 +116,9 @@ impl<B: Behavior + ?Sized> Behavior for Box<B> {
     fn running(&self) -> bool {
         (**self).running()
     }
+    fn after_tick(&mut self, view: &TickView<'_>) {
+        (**self).after_tick(view);
+    }
     fn stop(&mut self, reason: &str) {
         (**self).stop(reason);
     }
@@ -115,6 +126,7 @@ impl<B: Behavior + ?Sized> Behavior for Box<B> {
 
 /// Why [`TickContext::click`] (or opening / closing a window) sent nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ClickRefused {
     /// The player is turning: click only while still.
     Turning,
@@ -165,6 +177,7 @@ impl Behavior for Idle {
 
 /// A clientbound play packet copied for the behaviour ([`Behavior::raw_packets`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RawInbound {
     /// Packet id (version-specific).
     pub id: i32,
@@ -176,6 +189,7 @@ pub struct RawInbound {
 
 /// A server teleport / correction (`position`) with the poses around it.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct TeleportEvent {
     /// The packet's values as received: absolute or relative per
     /// [`crate::common::teleport_flags`] in `flags`.
@@ -197,6 +211,7 @@ const MAX_PENDING_RAW: usize = 4096;
 
 /// What happened since the behaviour's previous tick.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct TickEvents {
     /// Chat messages in arrival order (only with [`Interests::CHAT`]).
     pub chat: Vec<ChatMessage>,
@@ -311,6 +326,8 @@ pub(crate) struct Core {
     want_flying: Option<bool>,
     /// Turns held back because they would have moved the crosshair off a clicked block.
     held_turns: u64,
+    /// Arm swings (main and off hand) written in finished ticks.
+    swings: u64,
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
@@ -374,6 +391,7 @@ impl Core {
             broken_now: Vec::new(),
             want_flying: None,
             held_turns: 0,
+            swings: 0,
             #[cfg(test)]
             forced_look: None,
         }
@@ -1053,6 +1071,136 @@ impl<S: Sim> Engine<S> {
         c.sent.sneaking = c.pose.sneaking;
         c.sent.sprinting = c.pose.sprinting;
         c.sent.flying = c.pose.flying;
+        c.swings += count_swings(&c.out);
+
+        if self.state.started && !self.state.failed {
+            let name = c.opts.name.clone();
+            let view = TickView {
+                core: &self.core,
+                world: &self.sim,
+            };
+            if catch_unwind(AssertUnwindSafe(|| b.after_tick(&view))).is_err() {
+                log::error!(
+                    "[{name}] behaviour {} panicked in after_tick: stopped",
+                    b.name()
+                );
+                self.stop(b, "panic");
+            }
+        }
+    }
+}
+
+/// Arm swings (main or off hand) in a packet list.
+fn count_swings(out: &[Outbound]) -> u64 {
+    out.iter()
+        .filter(|o| matches!(o, Outbound::Swing | Outbound::SwingOffHand))
+        .count() as u64
+}
+
+/// A read-only view after the movement step ([`Behavior::after_tick`]).
+pub struct TickView<'a> {
+    core: &'a Core,
+    world: &'a dyn WorldView,
+}
+
+impl std::fmt::Debug for TickView<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TickView")
+            .field("tick", &self.core.tick)
+            .field("sent", &self.core.sent)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TickView<'_> {
+    /// Ticks since the session started.
+    #[must_use]
+    pub fn tick(&self) -> u64 {
+        self.core.tick
+    }
+
+    /// The protocol version.
+    #[must_use]
+    pub fn version(&self) -> GameVersion {
+        self.core.opts.version
+    }
+
+    /// The client pose after this tick's movement step.
+    #[must_use]
+    pub fn pose(&self) -> &Pose {
+        &self.core.pose
+    }
+
+    /// What the server has after this tick's movement packet (position, look, flags).
+    #[must_use]
+    pub fn sent(&self) -> &Pose {
+        &self.core.sent
+    }
+
+    /// The world.
+    #[must_use]
+    pub fn world(&self) -> &dyn WorldView {
+        self.world
+    }
+
+    /// The tracked entities (with [`Interests::ENTITIES`]).
+    #[must_use]
+    pub fn entities(&self) -> Option<&ghast_entity::Entities> {
+        self.world.entities()
+    }
+
+    /// The inventory and the open window.
+    #[must_use]
+    pub fn inventory(&self) -> &ghast_inventory::Inventory {
+        &self.core.inv
+    }
+
+    /// What the behaviour saw this tick (the events of [`TickContext::events`]).
+    #[must_use]
+    pub fn events(&self) -> &TickEvents {
+        &self.core.current
+    }
+
+    /// Our entity id.
+    #[must_use]
+    pub fn entity_id(&self) -> i32 {
+        self.core.entity_id
+    }
+
+    /// Health, food and saturation.
+    #[must_use]
+    pub fn health(&self) -> Health {
+        self.core.health
+    }
+
+    /// Game mode.
+    #[must_use]
+    pub fn game_mode(&self) -> GameMode {
+        self.core.game_mode
+    }
+
+    /// The selected hotbar slot.
+    #[must_use]
+    pub fn held_slot(&self) -> u8 {
+        self.core.held_slot
+    }
+
+    /// The block being broken and its progress 0 … 1.
+    #[must_use]
+    pub fn mining(&self) -> Option<(ghast_protocol::BlockPos, f32)> {
+        self.core.hands.mining()
+    }
+
+    /// Arm swings sent so far (see [`TickContext::swings`]).
+    #[must_use]
+    pub fn swings(&self) -> u64 {
+        self.core.swings
+    }
+
+    /// Blocks broken so far.
+    #[must_use]
+    pub fn broken(&self) -> u64 {
+        self.core.hands.broken
     }
 }
 
@@ -1236,6 +1384,14 @@ impl TickContext<'_> {
     #[must_use]
     pub fn entity_id(&self) -> i32 {
         self.core.entity_id
+    }
+
+    /// Arm swings (main and off hand) written so far in the session: every `arm_animation`,
+    /// whether from [`TickContext::swing`], an action (place, dig, attack) or the held buttons
+    /// (digging swings every tick). Includes this tick's written so far.
+    #[must_use]
+    pub fn swings(&self) -> u64 {
+        self.core.swings + count_swings(&self.core.out)
     }
 
     /// Health, food and saturation.
@@ -2561,6 +2717,152 @@ mod tests {
             let d = first_dig.unwrap_or_else(|| panic!("{v:?}: no dig after the close"));
             // The hands run after the behaviour: the closing tick already digs.
             assert!(d >= 15, "{v:?}: dug at tick {d} with the window open");
+        }
+    }
+
+    /// `swings` counts every arm swing: the behaviour's, an action's and the held button's.
+    #[test]
+    fn swings_count_every_arm_swing() {
+        let mut e = engine(GameVersion::V1_8_9);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut n = 0;
+        let mut seen = Vec::new();
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            n += 1;
+            ctx.set_aim(90.0, 89.5);
+            if n == 1 {
+                ctx.swing();
+                ctx.swing();
+            }
+            if n == 20 {
+                // Hold the left button on the stone floor: a swing every tick while digging.
+                ctx.set_buttons(Buttons {
+                    left: true,
+                    right: false,
+                });
+            }
+            seen.push(ctx.swings());
+        });
+        let mut sent = 0u64;
+        for _ in 0..30 {
+            e.tick(&mut b, t0);
+            sent += count_swings(&std::mem::take(e.outbound()));
+        }
+        let _ = b;
+        assert_eq!(seen[0], 2, "this tick's own swings count at once");
+        assert!(sent > 10, "the held button swings: {sent}");
+        // The last reading misses only the hands' swing of the last tick.
+        assert_eq!(*seen.last().unwrap() + 1, sent);
+        assert_eq!(e.core.swings, sent);
+    }
+
+    /// `WorldView::column` gives the stored column; light and biomes only when configured.
+    #[test]
+    fn column_view_and_world_config() {
+        for config in [
+            None,
+            Some(
+                ghast_world::WorldConfig::default()
+                    .with_biomes(true)
+                    .with_light(true),
+            ),
+        ] {
+            let sim = crate::sim::Sim18::with(&crate::sim::SimOptions {
+                world: config,
+                ..crate::sim::SimOptions::default()
+            });
+            let mut e = Engine::new(opts(GameVersion::V1_8_9), Box::new(sim) as Box<dyn Sim>);
+            join(&mut e);
+            let w: &dyn WorldView = &e.sim;
+            let col = w.column(0, 0).expect("loaded");
+            assert_eq!(u32::from(col.raw(8, 63, 8)), w.raw_block(8, 63, 8).unwrap());
+            assert_eq!(col.raw(8, 63, 8), 1 << 4);
+            assert!(w.column(5, 5).is_none());
+            let light = col.sky_light(8, 63, 8);
+            assert_eq!(light.is_some(), config.is_some(), "{config:?}");
+            let biomes = !matches!(col.biomes(), ghast_world::Biomes::None);
+            assert_eq!(biomes, config.is_some(), "{config:?}");
+        }
+    }
+
+    /// `after_tick` runs after the movement step with the sent pose, also once the behaviour
+    /// finished; a panic there stops the behaviour only.
+    #[test]
+    fn after_tick_sees_the_sent_pose() {
+        struct Obs {
+            n: u32,
+            views: Vec<(u64, Pose, u64)>,
+        }
+        impl Behavior for Obs {
+            fn tick(&mut self, ctx: &mut TickContext<'_>) {
+                self.n += 1;
+                ctx.set_aim(150.0, 10.0);
+                ctx.set_controls(Controls {
+                    forward: true,
+                    ..Controls::default()
+                });
+            }
+            fn running(&self) -> bool {
+                self.n < 5
+            }
+            fn after_tick(&mut self, view: &TickView<'_>) {
+                self.views.push((view.tick(), *view.sent(), view.swings()));
+                assert!(view.world().is_column_loaded(0, 0));
+                assert_eq!(view.version(), GameVersion::V1_8_9);
+            }
+        }
+        let mut e = engine(GameVersion::V1_8_9);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut b = Obs {
+            n: 0,
+            views: Vec::new(),
+        };
+        let mut sent = Vec::new();
+        for _ in 0..10 {
+            e.tick(&mut b, t0);
+            e.outbound().clear();
+            sent.push(e.core.sent);
+        }
+        assert_eq!(b.n, 5);
+        assert_eq!(b.views.len(), 10, "also after the behaviour finished");
+        for (i, (_, p, _)) in b.views.iter().enumerate() {
+            assert_eq!(*p, sent[i]);
+        }
+        assert_ne!(
+            b.views[0].1.yaw, b.views[4].1.yaw,
+            "the view follows the turn"
+        );
+    }
+
+    /// With block entities on, a 1.8 sign update reaches the column (and the packet passes the
+    /// filter); off by default.
+    #[test]
+    fn block_entities_follow_the_world_config() {
+        use ghast_protocol::v1_8::play::clientbound as cb;
+        for on in [false, true] {
+            let sim = crate::sim::Sim18::with(&crate::sim::SimOptions {
+                world: on.then(|| ghast_world::WorldConfig::default().with_block_entities(true)),
+                ..crate::sim::SimOptions::default()
+            });
+            assert_eq!(sim.world_packet_ids().contains(&cb::id::UPDATE_SIGN), on);
+            let mut e = Engine::new(opts(GameVersion::V1_8_9), Box::new(sim) as Box<dyn Sim>);
+            join(&mut e);
+            let raw = RawPacket::from_packet(&cb::UpdateSign {
+                location: ghast_protocol::BlockPos::new(3, 64, 4),
+                text1: "\"Hello\"".into(),
+                text2: "\"\"".into(),
+                text3: "\"\"".into(),
+                text4: "\"\"".into(),
+            })
+            .unwrap();
+            e.sim.world_packet(&raw).unwrap();
+            let w: &dyn WorldView = &e.sim;
+            let be = w.column(0, 0).unwrap().block_entity(3, 64, 4);
+            assert_eq!(be.is_some(), on, "{be:?}");
         }
     }
 }

@@ -10,7 +10,15 @@ use crate::entity::{Entity, EntityType, MetaValue};
 /// What the tracker keeps. Everything off costs nothing beyond position tracking; packets for a
 /// disabled part are not parsed (and the client should not even decode them, see the version
 /// modules' packet id lists).
+///
+/// `#[non_exhaustive]`: build it from [`Config::default`] with the `with_*` methods:
+///
+/// ```
+/// let c = ghast_entity::Config::default().with_equipment(false).with_skins(true);
+/// assert!(c.metadata && !c.equipment && c.skins);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Config {
     /// Entity metadata (flags, health, item of item entities, names, ...). Default `true`.
     pub metadata: bool,
@@ -22,6 +30,53 @@ pub struct Config {
     pub player_list: bool,
     /// Queue [`Event`]s for [`Entities::drain_events`]. Default `false`.
     pub events: bool,
+    /// Keep the base64 `"textures"` profile property (skin / cape URLs) of tab-list entries in
+    /// [`PlayerInfo::textures`]. Default `false`: properties are skipped without allocating.
+    pub skins: bool,
+}
+
+impl Config {
+    /// Sets [`Config::metadata`].
+    #[must_use]
+    pub const fn with_metadata(mut self, on: bool) -> Self {
+        self.metadata = on;
+        self
+    }
+
+    /// Sets [`Config::equipment`].
+    #[must_use]
+    pub const fn with_equipment(mut self, on: bool) -> Self {
+        self.equipment = on;
+        self
+    }
+
+    /// Sets [`Config::effects`].
+    #[must_use]
+    pub const fn with_effects(mut self, on: bool) -> Self {
+        self.effects = on;
+        self
+    }
+
+    /// Sets [`Config::player_list`].
+    #[must_use]
+    pub const fn with_player_list(mut self, on: bool) -> Self {
+        self.player_list = on;
+        self
+    }
+
+    /// Sets [`Config::events`].
+    #[must_use]
+    pub const fn with_events(mut self, on: bool) -> Self {
+        self.events = on;
+        self
+    }
+
+    /// Sets [`Config::skins`].
+    #[must_use]
+    pub const fn with_skins(mut self, on: bool) -> Self {
+        self.skins = on;
+        self
+    }
 }
 
 impl Default for Config {
@@ -32,6 +87,7 @@ impl Default for Config {
             effects: true,
             player_list: true,
             events: false,
+            skins: false,
         }
     }
 }
@@ -83,8 +139,9 @@ pub enum Event {
     PlayerList,
 }
 
-/// A tab-list entry.
+/// A tab-list entry (`#[non_exhaustive]`: read-only for callers, fields may be added).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PlayerInfo {
     /// Profile name.
     pub name: Box<str>,
@@ -94,6 +151,9 @@ pub struct PlayerInfo {
     pub ping: i32,
     /// Display name (raw chat JSON), if set.
     pub display_name: Option<Box<str>>,
+    /// The base64 `"textures"` profile property as sent (only with [`Config::skins`]; its
+    /// signature is not kept). Decoded it is JSON with the skin and cape URLs.
+    pub textures: Option<Box<str>>,
 }
 
 #[derive(Default, Clone, Copy)]
