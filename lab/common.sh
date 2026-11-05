@@ -5,7 +5,7 @@ DL="$SERVERS/dl"
 JDKS="${JDKS:-$HOME/.local/jdks}"   # Temurin JDKs/JREs; a missing one is downloaded here
 LAB_HEAP="${LAB_HEAP:-896M}"
 # Test accounts (offline mode): opped on both servers; the first one gets auto-fly.
-LAB_OPS="${LAB_OPS:-GhastBot GhastBot2 GhastBot3 GhastBot4 GhastBot5 GhastBot6 GhastBot7 GhastBot8 GhastBot9 GhastBot10 Baseline Baseline2}"
+LAB_OPS="${LAB_OPS:-GhastBot GhastBot2 GhastBot3 GhastBot4 GhastBot5 GhastBot6 GhastBot7 GhastBot8 GhastBot9 GhastBot10 GhastBot11 Baseline Baseline2}"
 LAB_BOT="${LAB_BOT:-GhastBot}"
 # Accounts the lab /fly plugin gives allowFlight on join (read at server start).
 LAB_FLY="${LAB_FLY:-GhastBot GhastBot5}"
