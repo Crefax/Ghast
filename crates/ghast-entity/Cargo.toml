@@ -14,8 +14,8 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-entity"
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
-ghast-data = { path = "../ghast-data", version = "0.1.0", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.1", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.1.1", default-features = false, features = ["v1_8", "v1_16_5"] }
 bytes = { workspace = true }
 uuid = { workspace = true }
 

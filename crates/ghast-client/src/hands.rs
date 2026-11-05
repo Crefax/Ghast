@@ -536,6 +536,18 @@ pub(crate) struct HandsIo<'a> {
     pub placed: &'a mut bool,
 }
 
+impl HandsIo<'_> {
+    /// The non-air block at `pos` (`None`: air or not loaded). A block broken earlier in this
+    /// tick (by the behaviour's `dig` or the hands) reads as air, like vanilla, which sets it
+    /// to air in the world at once: the held button must not start it again in the same tick.
+    fn solid(&self, pos: BlockPos) -> Option<BlockQuery> {
+        if self.broken.contains(&pos) {
+            return None;
+        }
+        (self.blocks)(pos.x, pos.y, pos.z).filter(|b| !b.air)
+    }
+}
+
 /// `ClientPlayerInteractionManager` + the `MinecraftClient` click state.
 #[derive(Debug, Clone, Default)]
 pub struct Hands {
@@ -678,9 +690,7 @@ impl Hands {
             // 1.16 MinecraftClient.doAttack: the action, then the swing; a block hit on air falls
             // through to the miss case.
             match t {
-                Some(hit)
-                    if (io.blocks)(hit.pos.x, hit.pos.y, hit.pos.z).is_some_and(|b| !b.air) =>
-                {
+                Some(hit) if io.solid(hit.pos).is_some() => {
                     self.click_block(hit.pos, hit.face, io);
                 }
                 _ => {
@@ -695,7 +705,7 @@ impl Hands {
         io.out.push(Outbound::Swing);
         match t {
             Some(hit) => {
-                if (io.blocks)(hit.pos.x, hit.pos.y, hit.pos.z).is_some_and(|b| !b.air) {
+                if io.solid(hit.pos).is_some() {
                     self.click_block(hit.pos, hit.face, io);
                 }
             }
@@ -717,7 +727,7 @@ impl Hands {
         }
         match t.filter(|_| io.entity.is_none()) {
             Some(hit) if left => {
-                let solid = (io.blocks)(hit.pos.x, hit.pos.y, hit.pos.z).is_some_and(|b| !b.air);
+                let solid = io.solid(hit.pos).is_some();
                 if solid && self.damage_block(hit.pos, hit.face, io) {
                     io.out.push(Outbound::Swing);
                 }
@@ -749,9 +759,7 @@ impl Hands {
             pos,
             face,
         });
-        let b = (io.blocks)(pos.x, pos.y, pos.z);
-        if let Some(b) = b
-            && !b.air
+        if let Some(b) = io.solid(pos)
             && relative_hardness(&b, io.held.as_ref(), io.factors) >= 1.0
         {
             self.destroyed(pos, io);
@@ -773,7 +781,7 @@ impl Hands {
             self.click_block(pos, face, io);
             return true;
         }
-        let Some(b) = (io.blocks)(pos.x, pos.y, pos.z).filter(|b| !b.air) else {
+        let Some(b) = io.solid(pos) else {
             self.hitting = false;
             return false;
         };
@@ -843,8 +851,7 @@ impl Hands {
         }
         let mut fall_through = true;
         if let Some(hit) = t
-            && let Some(b) = (io.blocks)(hit.pos.x, hit.pos.y, hit.pos.z)
-            && !b.air
+            && let Some(b) = io.solid(hit.pos)
         {
             if self.right_click_block(hit, &b, io) {
                 fall_through = false;
@@ -885,8 +892,7 @@ impl Hands {
             if let Some(e) = io.entity {
                 self.interact(e, off_hand, io);
             } else if let Some(hit) = t
-                && let Some(b) = (io.blocks)(hit.pos.x, hit.pos.y, hit.pos.z)
-                && !b.air
+                && let Some(b) = io.solid(hit.pos)
             {
                 let cursor = Vec3::new(
                     hit.hit.x - f64::from(hit.pos.x),
@@ -1098,6 +1104,79 @@ mod tests {
             ..HeldItem::default()
         };
         assert_eq!(run(Some(stick)), ["place_main", "use_main", "place_off"]);
+    }
+
+    /// Pressing the left button on an instant-break block sends one START: the held-button
+    /// pass of the same tick sees the block as air (vanilla breaks it in the world at once),
+    /// for 1.8 and 1.16 alike. Also with a block the behaviour broke earlier in the tick.
+    #[test]
+    fn instant_break_press_starts_once() {
+        fn instant(x: i32, y: i32, z: i32) -> Option<BlockQuery> {
+            Some(if (x, y, z) == (0, 0, 0) {
+                BlockQuery {
+                    hardness: 0.0,
+                    ..stone()
+                }
+            } else {
+                BlockQuery {
+                    air: true,
+                    selection: None,
+                    ..stone()
+                }
+            })
+        }
+        let hit = Some(BlockHit {
+            pos: BlockPos::new(0, 0, 0),
+            face: Face::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            distance: 1.6,
+        });
+        for modern in [false, true] {
+            for pre_broken in [false, true] {
+                let mut h = Hands::default();
+                let (mut out, mut placed) = (Vec::new(), false);
+                let mut broken = if pre_broken {
+                    vec![BlockPos::new(0, 0, 0)]
+                } else {
+                    Vec::new()
+                };
+                let mut io = HandsIo {
+                    blocks: &instant,
+                    target: hit,
+                    held: None,
+                    held_stack: None,
+                    food: 20,
+                    modern,
+                    off_held: None,
+                    off_stack: None,
+                    entity: None,
+                    factors: DigFactors::default(),
+                    sneaking: false,
+                    out: &mut out,
+                    broken: &mut broken,
+                    placed: &mut placed,
+                };
+                h.tick(true, false, &mut io);
+                let starts = out
+                    .iter()
+                    .filter(|o| {
+                        matches!(
+                            o,
+                            Outbound::Dig {
+                                status: DigStatus::Start,
+                                ..
+                            }
+                        )
+                    })
+                    .count();
+                let want = usize::from(!pre_broken);
+                assert_eq!(
+                    starts, want,
+                    "modern {modern} pre_broken {pre_broken}: {out:?}"
+                );
+                assert_eq!(h.broken, want as u64);
+            }
+        }
     }
 
     #[test]

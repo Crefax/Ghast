@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "ghast"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ghast-auth",
  "ghast-client",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "md-5",
  "rand_core 0.6.4",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "flate2",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-codegen-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "serde_json",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-codegen-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "sha2",
@@ -699,7 +699,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-data"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "serde_json",
@@ -707,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-entity"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "criterion",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-inventory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "bytestring",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-physics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "flate2",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "bytes",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-world"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "criterion",
