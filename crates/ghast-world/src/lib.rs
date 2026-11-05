@@ -30,7 +30,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![warn(missing_docs, unnameable_types)]
 
 mod border;
 mod column;
@@ -48,7 +48,7 @@ pub use column::{
     Biomes, BlockEntity, ChunkPos, Column, ColumnMap, MAX_Y, MIN_Y, SECTIONS, SectionLight,
 };
 pub use error::WorldError;
-pub use section::{SECTION_VOLUME, Section, block_index};
+pub use section::{Direct, Indexed, SECTION_VOLUME, Section, block_index};
 
 /// What a world keeps besides block states.
 ///

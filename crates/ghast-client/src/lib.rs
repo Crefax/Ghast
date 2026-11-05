@@ -43,7 +43,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs, rust_2018_idioms, unreachable_pub)]
+#![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
 
 mod client;
 pub mod common;
@@ -61,7 +61,10 @@ pub mod version;
 
 pub use client::{Account, Client, TICK};
 pub use common::{ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3};
-pub use engine::{Behavior, ClickRefused, ClickTicket, Idle, RawInbound, TickContext, TickEvents};
+pub use engine::{
+    Behavior, ClickRefused, ClickTicket, Idle, RawInbound, TeleportEvent, TickContext, TickEvents,
+    TickView,
+};
 pub use error::{ClientError, SessionEnd};
 pub use ghast_entity as entity;
 pub use ghast_inventory as inventory;

@@ -2,6 +2,24 @@
 
 All crates share one version number.
 
+## 0.2.1 — 2026-11-05
+
+Additive fixes: public types that downstream crates could not name are now exported.
+
+### ghast-client
+- Fix: `TickView` was not exported, so no crate outside ghast-client could implement
+  `Behavior::after_tick`. It is now `ghast_client::TickView` (and `ghast::TickView`).
+- Fix: `TeleportEvent` (the element type of `TickEvents::teleports`) is now exported.
+- `TickView::dimension()` and `TickView::using_item()`, as on `TickContext`.
+
+### ghast-world
+- `Indexed` and `Direct`, the boxed section storages inside `Section`, are now exported
+  (opaque types).
+
+### All crates
+- The `unnameable_types` lint is enabled (warn; CI denies warnings), so a public type that
+  cannot be named from outside its crate fails the build.
+
 ## 0.2.0 — 2026-11-05
 
 Breaking: public configuration and event structs are now `#[non_exhaustive]`; build the

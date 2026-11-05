@@ -148,6 +148,8 @@ pub(crate) trait HasSim {
 }
 
 mod sealed {
+    // Deliberately unnameable: downstream crates cannot implement `ClientVersion`.
+    #[allow(unnameable_types, reason = "sealed trait pattern")]
     pub trait Sealed {}
     impl Sealed for super::V1_8 {}
     impl Sealed for super::V1_16_5 {}

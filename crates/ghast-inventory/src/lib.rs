@@ -45,7 +45,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![warn(missing_docs, unnameable_types)]
 
 mod crafting;
 mod inventory;

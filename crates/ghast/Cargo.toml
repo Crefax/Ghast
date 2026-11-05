@@ -19,14 +19,14 @@ default = []
 microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.2.0" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.0" }
-ghast-auth = { path = "../ghast-auth", version = "0.2.0" }
-ghast-data = { path = "../ghast-data", version = "0.2.0" }
+ghast-client = { path = "../ghast-client", version = "0.2.1" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.1" }
+ghast-auth = { path = "../ghast-auth", version = "0.2.1" }
+ghast-data = { path = "../ghast-data", version = "0.2.1" }
 
 [dev-dependencies]
 log = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "io-std", "io-util", "sync"] }
+tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "io-std", "io-util", "sync", "net"] }
 
 [[example]]
 name = "afk"

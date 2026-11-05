@@ -39,7 +39,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs, rust_2018_idioms, unreachable_pub)]
+#![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
 
 pub mod connect;
 pub mod crypto;

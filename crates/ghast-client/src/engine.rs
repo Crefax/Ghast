@@ -86,6 +86,24 @@ pub trait Behavior {
     /// finished), with a read-only view of what the server now has: the pose sent this tick,
     /// the world, entities and inventory. For observers (a viewer, a recorder); it cannot act.
     /// Default: nothing.
+    ///
+    /// ```
+    /// use ghast_client::{Behavior, TickContext, TickView};
+    ///
+    /// /// Logs where the server has the player, once a second.
+    /// struct Tracker;
+    ///
+    /// impl Behavior for Tracker {
+    ///     fn tick(&mut self, _ctx: &mut TickContext<'_>) {}
+    ///
+    ///     fn after_tick(&mut self, view: &TickView<'_>) {
+    ///         if view.tick() % 20 == 0 {
+    ///             let p = view.sent();
+    ///             println!("{} {:?} in {}", view.tick(), p.pos, view.dimension());
+    ///         }
+    ///     }
+    /// }
+    /// ```
     fn after_tick(&mut self, view: &TickView<'_>) {
         let _ = view;
     }
@@ -1201,6 +1219,20 @@ impl TickView<'_> {
     #[must_use]
     pub fn broken(&self) -> u64 {
         self.core.hands.broken
+    }
+
+    /// The current dimension (`"0"` / `"-1"` / `"1"` on 1.8, the world name on 1.16), as
+    /// [`TickContext::dimension`].
+    #[must_use]
+    pub fn dimension(&self) -> &str {
+        &self.core.dimension
+    }
+
+    /// Using the held item (eating, blocking, drawing a bow): movement input is slowed. As
+    /// [`TickContext::using_item`].
+    #[must_use]
+    pub fn using_item(&self) -> bool {
+        self.core.hands.using_item()
     }
 }
 
