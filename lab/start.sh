@@ -14,22 +14,35 @@ fetch "$GRIM_URL" "$DL/$GRIM_JAR" "$GRIM_SHA"
 ln -sf "$DL/$PAPER_JAR" "$DIR/$PAPER_JAR"
 cp -f "$DL/$GRIM_JAR" "$DIR/plugins/$GRIM_JAR"
 
-# Lab /fly plugin, compiled once against the 1.8.8 Bukkit API (Java 8 bytecode, loads on 1.16.5 too).
-B="$SERVERS/build"; src="$here/plugins/labfly"
-h=$(cat $(find "$src" -type f | sort) | sha256sum | cut -c1-16)
-if [ ! -f "$B/GhastLabFly.jar" ] || [ "$(cat "$B/labfly.hash" 2>/dev/null)" != "$h" ]; then
-  api="$SERVERS/1.8/cache/patched_1.8.8.jar"
-  if [ ! -f "$api" ]; then
-    mkdir -p "$SERVERS/1.8"; fetch "https://fill-data.papermc.io/v1/objects/7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86/paper-1.8.8-445.jar" "$DL/paper-1.8.8-445.jar" 7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86
-    (cd "$SERVERS/1.8" && "$JDK21/bin/java" -Dpaperclip.patchonly=true -jar "$DL/paper-1.8.8-445.jar" >/dev/null)
+# Plugins built from source against the 1.8.8 Bukkit API (Java 8 bytecode; the /fly one loads on 1.16.5 too).
+# build_plugin <src dir> <jar name>: rebuilt only when the source changed; src dir has plugin.yml + src/**.java.
+B="$SERVERS/build"
+build_plugin() {
+  local src=$1 name=$2 h
+  h=$(cat $(find "$src" -type f -not -path '*/.git/*' | sort) | sha256sum | cut -c1-16)
+  if [ ! -f "$B/$name.jar" ] || [ "$(cat "$B/$name.hash" 2>/dev/null)" != "$h" ]; then
+    local api="$SERVERS/1.8/cache/patched_1.8.8.jar"
+    if [ ! -f "$api" ]; then
+      mkdir -p "$SERVERS/1.8"; fetch "https://fill-data.papermc.io/v1/objects/7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86/paper-1.8.8-445.jar" "$DL/paper-1.8.8-445.jar" 7ff6d2cec671ef0d95b3723b5c92890118fb882d73b7f8fa0a2cd31d97c55f86
+      (cd "$SERVERS/1.8" && "$JDK21/bin/java" -Dpaperclip.patchonly=true -jar "$DL/paper-1.8.8-445.jar" >/dev/null)
+    fi
+    rm -rf "$B/$name"; mkdir -p "$B/$name"
+    "$JDK21/bin/javac" -nowarn -Xlint:-options --release 8 -encoding UTF-8 -cp "$api" -d "$B/$name" $(find "$src/src" -name '*.java')
+    find "$src" -maxdepth 1 -name '*.yml' -exec cp {} "$B/$name/" \;
+    (cd "$B/$name" && "$JDK21/bin/jar" cf "$B/$name.jar" .)
+    echo "$h" > "$B/$name.hash"
   fi
-  rm -rf "$B/labfly"; mkdir -p "$B/labfly"
-  "$JDK21/bin/javac" -nowarn -Xlint:-options --release 8 -cp "$api" -d "$B/labfly" $(find "$src/src" -name '*.java')
-  cp "$src/plugin.yml" "$src/config.yml" "$B/labfly/"
-  (cd "$B/labfly" && "$JDK21/bin/jar" cf "$B/GhastLabFly.jar" .)
-  echo "$h" > "$B/labfly.hash"
+  cp -f "$B/$name.jar" "$DIR/plugins/$name.jar"
+}
+build_plugin "$here/plugins/labfly" GhastLabFly
+# Extra, out-of-repo plugins for this version (e.g. stand-ins for a private server's plugins, kept in the private
+# bot repo): one source dir per line in the git-ignored lab/servers/extra-plugins-<ver>.txt.
+if [ -f "$SERVERS/extra-plugins-$VER.txt" ]; then
+  while read -r d; do
+    case "$d" in ''|'#'*) continue ;; esac
+    d=${d/#\~/$HOME}; build_plugin "$d" "$(basename "$d")"
+  done < "$SERVERS/extra-plugins-$VER.txt"
 fi
-cp -f "$B/GhastLabFly.jar" "$DIR/plugins/GhastLabFly.jar"
 mkdir -p "$DIR/plugins/GhastLabFly"
 { printf '# Players that get allowFlight automatically on join / respawn / world or gamemode change.\nauto-fly:\n'
   for n in $LAB_FLY; do printf '  - %s\n' "$n"; done; } > "$DIR/plugins/GhastLabFly/config.yml"
