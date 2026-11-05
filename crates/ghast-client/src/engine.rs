@@ -926,7 +926,9 @@ impl<S: Sim> Engine<S> {
         }
         // MinecraftClient.tick key processing (a GUI takes the mouse: buttons up).
         {
-            let gui = c.inv.gui_open() || c.open_window != 0;
+            // The screen as the inventory models it (vanilla: a window the client has no
+            // screen for opens none; a window the client closed is gone at once).
+            let gui = c.inv.gui_open();
             let eye = if c.pose.sneaking {
                 c.opts.version.sneak_eye_height()
             } else {
@@ -1403,6 +1405,8 @@ impl TickContext<'_> {
     pub fn close_window(&mut self) -> Result<(), ClickRefused> {
         let o = self.core.inv.close().map_err(ClickRefused::Inventory)?;
         self.core.out.push(Outbound::Inventory(o));
+        // Vanilla closeHandledScreen: the container ends on the client too.
+        self.core.open_window = 0;
         Ok(())
     }
 
@@ -2477,6 +2481,81 @@ mod tests {
             assert_eq!(ev.sent_before, sent);
             assert_eq!(ev.after.pos, Vec3::new(10.5, 64.0, 8.5));
             assert_eq!(ev.after.yaw, sent.yaw + 30.0, "{v:?}");
+        }
+    }
+
+    /// A container the server opened and the behaviour closed (`close_window`) no longer
+    /// holds the mouse: the left button digs again (both versions). While it is open the
+    /// buttons are up.
+    #[test]
+    fn closed_window_frees_the_buttons() {
+        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+            let mut e = engine(v);
+            join(&mut e);
+            let t0 = Instant::now();
+            e.note_inbound(t0);
+            if v == GameVersion::V1_16_5 {
+                // The 1.16 test chunk is all air: put a stone floor under the player.
+                use ghast_protocol::v1_16_5::play::clientbound as cb;
+                let raw = RawPacket::from_packet(&cb::BlockChange {
+                    location: ghast_protocol::BlockPos::new(8, 63, 8),
+                    r#type: 1,
+                })
+                .unwrap();
+                e.sim.world_packet(&raw).unwrap();
+            }
+            e.core.inv.on_open_window(
+                5,
+                Some(ghast_inventory::WindowKind::Chest { rows: 3 }),
+                "Vault".into(),
+            );
+            e.handle(Inbound::OpenWindow(5));
+            // Something on the cursor: vanilla's client-side close drops it (the server
+            // throws it out), so the client forgets it too.
+            e.core
+                .inv
+                .on_set_slot(-1, -1, Some(ghast_inventory::Stack::new(1, 3, 0)));
+            let mut n = 0;
+            let mut closed_at = None;
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                n += 1;
+                ctx.set_aim(90.0, 89.5);
+                ctx.set_buttons(Buttons {
+                    left: true,
+                    right: false,
+                });
+                if n == 15 {
+                    assert!(ctx.inventory().cursor().is_some());
+                    ctx.close_window().unwrap();
+                    assert_eq!(ctx.open_window(), None);
+                    let inv = ctx.inventory();
+                    assert!(!inv.gui_open() && inv.window().is_none() && inv.cursor().is_none());
+                    closed_at = Some(n);
+                }
+            });
+            let mut first_dig = None;
+            for i in 1..=30 {
+                e.tick(&mut b, t0);
+                let out = std::mem::take(e.outbound());
+                if first_dig.is_none()
+                    && out.iter().any(|o| {
+                        matches!(
+                            o,
+                            Outbound::Dig {
+                                status: crate::common::DigStatus::Start,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    first_dig = Some(i);
+                }
+            }
+            let _ = b;
+            assert_eq!(closed_at, Some(15));
+            let d = first_dig.unwrap_or_else(|| panic!("{v:?}: no dig after the close"));
+            // The hands run after the behaviour: the closing tick already digs.
+            assert!(d >= 15, "{v:?}: dug at tick {d} with the window open");
         }
     }
 }

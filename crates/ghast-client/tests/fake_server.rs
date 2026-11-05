@@ -35,6 +35,11 @@ trait Fake: ClientVersion {
     /// Play-state set compression (1.8 only).
     fn play_compress(threshold: i32) -> Option<RawPacket>;
     fn transaction(action: i16) -> RawPacket;
+    /// A 27-slot chest window.
+    fn open_chest(window_id: u8) -> RawPacket;
+    fn close_window(window_id: u8) -> RawPacket;
+    /// A stone block.
+    fn stone(x: i32, y: i32, z: i32) -> RawPacket;
     fn sb_play_name(raw: &RawPacket) -> &'static str;
     fn handshake_protocol(raw: &RawPacket) -> i32;
     fn login_start_name(raw: &RawPacket) -> String;
@@ -130,6 +135,24 @@ impl Fake for V1_8 {
             window_id: 0,
             action,
             accepted: false,
+        })
+    }
+    fn open_chest(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::OpenWindow {
+            window_id,
+            inventory_type: ByteString::from("minecraft:chest"),
+            window_title: ByteString::from(r#"{"text":"Vault"}"#),
+            slot_count: 27,
+            entity_id: None,
+        })
+    }
+    fn close_window(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::CloseWindow { window_id })
+    }
+    fn stone(x: i32, y: i32, z: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::BlockChange {
+            location: ghast_protocol::BlockPos::new(x, y, z),
+            r#type: 1 << 4,
         })
     }
     fn sb_play_name(raw: &RawPacket) -> &'static str {
@@ -246,6 +269,22 @@ impl Fake for V1_16_5 {
             window_id: 0,
             action,
             accepted: false,
+        })
+    }
+    fn open_chest(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_16_5::play::clientbound::OpenWindow {
+            window_id: i32::from(window_id),
+            inventory_type: 2, // generic_9x3
+            window_title: ByteString::from(r#"{"text":"Vault"}"#),
+        })
+    }
+    fn close_window(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_16_5::play::clientbound::CloseWindow { window_id })
+    }
+    fn stone(x: i32, y: i32, z: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_16_5::play::clientbound::BlockChange {
+            location: ghast_protocol::BlockPos::new(x, y, z),
+            r#type: 1,
         })
     }
     fn sb_play_name(raw: &RawPacket) -> &'static str {
@@ -733,6 +772,122 @@ async fn chat_reaches_the_behaviour<V: Fake>(v: GameVersion) {
     assert!(b.0[1].contains("Bob") && b.0[1].contains("hi"), "{:?}", b.0);
 }
 both!(chat_reaches_the_behaviour, chat_reaches_the_behaviour);
+
+/// A container the server opens holds the mouse (no digging) until it is closed — by the
+/// behaviour (`close_window`, the client's own close) or by the server — then the held left
+/// button digs again on the next movement step.
+async fn window_close_frees_the_buttons<V: Fake>(v: GameVersion, client_closes: bool) {
+    struct Miner {
+        client_closes: bool,
+        open_ticks: u32,
+        closed: bool,
+    }
+    impl Behavior for Miner {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            ctx.set_aim(90.0, 89.5);
+            ctx.set_buttons(ghast_client::Buttons {
+                left: true,
+                right: false,
+            });
+            if ctx.open_window().is_some() {
+                self.open_ticks += 1;
+                if self.client_closes && self.open_ticks == 20 {
+                    ctx.close_window().unwrap();
+                    assert_eq!(ctx.open_window(), None);
+                    assert!(!ctx.inventory().gui_open());
+                    self.closed = true;
+                }
+            } else if self.open_ticks > 0 && !self.client_closes {
+                self.closed = true;
+            }
+            if ctx.broken() > 0 || ctx.mining().is_some() {
+                ctx.disconnect("digging");
+            }
+        }
+    }
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V>("Tester", 128).await;
+        spawn::<V>(&mut c).await;
+        c.until::<V>("position_look").await;
+        // The floor under the player (the 1.16 test chunk is empty) and a container at once,
+        // before the bot has turned down to the floor.
+        c.send(&V::stone(8, 63, 8)).await;
+        c.send(&V::open_chest(5)).await;
+        let mut seen = Vec::new();
+        let mut moves_after_close: Option<u32> = None;
+        let mut server_closed = false;
+        let started = tokio::time::Instant::now();
+        loop {
+            if !client_closes && !server_closed && started.elapsed() > Duration::from_millis(1000) {
+                c.send(&V::close_window(5)).await;
+                server_closed = true;
+                moves_after_close = Some(0);
+            }
+            let Ok(p) = tokio::time::timeout(Duration::from_millis(100), c.recv()).await else {
+                continue;
+            };
+            let Some(p) = p else { break };
+            let n = V::sb_play_name(&p);
+            seen.push(n);
+            match n {
+                "close_window" => {
+                    assert!(
+                        client_closes,
+                        "the client closed a window the server closed"
+                    );
+                    moves_after_close = Some(0);
+                }
+                "block_dig" => {
+                    let m = moves_after_close
+                        .unwrap_or_else(|| panic!("dug with the window open: {seen:?}"));
+                    // The closing tick (client close) or the first tick after the server's
+                    // close already digs.
+                    assert!(m <= 2, "dig {m} movement packets after the close");
+                    // Until the bot disconnects.
+                    while c.recv().await.is_some() {}
+                    return;
+                }
+                "flying" | "position" | "look" | "position_look" => {
+                    if let Some(m) = moves_after_close.as_mut() {
+                        *m += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("no dig: {seen:?}");
+    };
+    let mut b = Miner {
+        client_closes,
+        open_ticks: 0,
+        closed: false,
+    };
+    let cl = client(addr, v, "Tester");
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Quit(_))), "{end:?}");
+    assert!(
+        b.open_ticks >= 15,
+        "the window was seen open ({} ticks)",
+        b.open_ticks
+    );
+    assert!(b.closed);
+}
+async fn client_close_frees_the_buttons<V: Fake>(v: GameVersion) {
+    window_close_frees_the_buttons::<V>(v, true).await;
+}
+async fn server_close_frees_the_buttons<V: Fake>(v: GameVersion) {
+    window_close_frees_the_buttons::<V>(v, false).await;
+}
+both!(
+    client_close_frees_the_buttons,
+    client_close_frees_the_buttons
+);
+both!(
+    server_close_frees_the_buttons,
+    server_close_frees_the_buttons
+);
 
 /// `Behavior::raw_packets`: a packet the core consumes (the position) and one it normally drops
 /// before decoding (update_time) both reach `TickEvents::raw` undecoded, in arrival order,

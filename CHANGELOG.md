@@ -2,6 +2,14 @@
 
 All crates share one version number.
 
+## 0.1.2 — 2026-11-05
+
+### ghast-client
+- Fix: after `TickContext::close_window()` the client still treated the server-opened window
+  as open, so held mouse buttons stayed blocked (no digging or placing) for the rest of the
+  session. Closing a window on the client side now clears it, and the buttons follow the
+  inventory's own screen state, as in vanilla.
+
 ## 0.1.1 — 2026-11-05
 
 ### ghast-client
