@@ -773,6 +773,132 @@ async fn chat_reaches_the_behaviour<V: Fake>(v: GameVersion) {
 }
 both!(chat_reaches_the_behaviour, chat_reaches_the_behaviour);
 
+/// The auth-lobby case (1.8, dimension 1 = the End, no sky light): the first map_chunk for
+/// the player's column announces one section (bit mask 1, ground-up) but carries only the
+/// 256 biome bytes. The session goes on: keep-alives are answered, a later valid chunk (no
+/// sky light, as in dimension 1) loads the column, and the bot stands on it and ticks.
+#[tokio::test]
+async fn malformed_chunk_keeps_the_session() {
+    struct Ticks(u32, f64);
+    impl Behavior for Ticks {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            self.0 += 1;
+            self.1 = ctx.pose().pos.y;
+            if self.0 == 10 {
+                ctx.disconnect("fine");
+            }
+        }
+    }
+    use ghast_protocol::v1_8::play::clientbound as cb;
+    let bad = |x, z| {
+        raw(&cb::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 1,
+            chunk_data: Bytes::from_static(&[1; 256]),
+        })
+    };
+    // A valid dimension-1 column: section 3 (y 48..63) with stone on top, block light,
+    // no sky light, biomes.
+    let good = |x, z| {
+        let mut d = BytesMut::with_capacity(10_496);
+        for i in 0..4096 {
+            d.put_u16_le(if i >> 8 == 15 { 1 << 4 } else { 0 });
+        }
+        d.put_bytes(0, 2048);
+        d.put_bytes(1, 256);
+        raw(&cb::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 1 << 3,
+            chunk_data: d.freeze(),
+        })
+    };
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V1_8>("Tester", 128).await;
+        c.send(&raw(&cb::Login {
+            entity_id: 1,
+            game_mode: 2, // adventure
+            dimension: 1,
+            difficulty: 1,
+            max_players: 1,
+            level_type: ByteString::from("default"),
+            reduced_debug_info: false,
+        }))
+        .await;
+        c.send(&bad(0, 0)).await;
+        c.send(&bad(5, 5)).await;
+        c.send(&V1_8::keep_alive(9)).await;
+        let before = c.until::<V1_8>("keep_alive").await;
+        assert!(!before.contains(&"position_look"), "{before:?}");
+        c.send(&good(0, 0)).await;
+        c.send(&V1_8::position(8.5, 64.0, 8.5, 1)).await;
+        // A malformed copy after the spawn drops the column again; a good one reloads it.
+        c.send(&bad(0, 0)).await;
+        c.send(&good(0, 0)).await;
+        while c.recv().await.is_some() {}
+    };
+    let mut b = Ticks(0, 0.0);
+    let cl = client(addr, GameVersion::V1_8_9, "Tester");
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Quit(_))), "{end:?}");
+    assert_eq!(b.0, 10);
+    assert_eq!(b.1, 64.0, "standing on the dimension-1 chunk's stone");
+}
+
+/// With only that malformed chunk for the player's column (the lobby never sends a good
+/// one), the bot still plays: vanilla keeps the column it created before the fill failed,
+/// so the behaviour ticks and can type its /login.
+#[tokio::test]
+async fn lobby_with_only_a_bad_chunk_still_ticks() {
+    struct Login(bool);
+    impl Behavior for Login {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            if !self.0 {
+                ctx.chat("/login secret");
+                self.0 = true;
+            }
+        }
+    }
+    use ghast_protocol::v1_8::play::clientbound as cb;
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V1_8>("Tester", 128).await;
+        c.send(&raw(&cb::Login {
+            entity_id: 1,
+            game_mode: 2,
+            dimension: 1,
+            difficulty: 1,
+            max_players: 1,
+            level_type: ByteString::from("default"),
+            reduced_debug_info: false,
+        }))
+        .await;
+        c.send(&raw(&cb::MapChunk {
+            x: 0,
+            z: 0,
+            ground_up: true,
+            bit_map: 1,
+            chunk_data: Bytes::from_static(&[1; 256]),
+        }))
+        .await;
+        c.send(&V1_8::position(8.5, 64.0, 8.5, 1)).await;
+        c.until::<V1_8>("chat").await;
+        c.send(&V1_8::kick(r#"{"text":"logged in"}"#)).await;
+        while c.recv().await.is_some() {}
+    };
+    let mut b = Login(false);
+    let cl = client(addr, GameVersion::V1_8_9, "Tester");
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Kicked { .. })), "{end:?}");
+    assert!(b.0);
+}
+
 /// A container the server opens holds the mouse (no digging) until it is closed — by the
 /// behaviour (`close_window`, the client's own close) or by the server — then the held left
 /// button digs again on the next movement step.

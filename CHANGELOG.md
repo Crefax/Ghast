@@ -2,6 +2,19 @@
 
 All crates share one version number.
 
+## 0.1.3 — 2026-11-05
+
+### ghast-client
+- A malformed chunk packet no longer ends the session: the error is logged (rate-limited) and
+  play continues, as the vanilla client does. `ClientError::World` is no longer returned.
+- Opt-in `GHAST_DUMP_BAD_CHUNK=<dir>` writes the first rejected chunk bodies for bug reports.
+
+### ghast-world
+- A truncated 1.8 `map_chunk` now leaves the world as vanilla's chunk fill does: a ground-up
+  chunk keeps a loaded column, blocks are filled up to the last complete pair, light and biome
+  arrays only when whole. (Seen on a real server's login lobby: mask 1 with only the 256 biome
+  bytes.)
+
 ## 0.1.2 — 2026-11-05
 
 ### ghast-client

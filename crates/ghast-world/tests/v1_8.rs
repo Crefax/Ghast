@@ -211,21 +211,93 @@ fn load_unload_partial() {
 }
 
 #[test]
-fn truncated_chunk_unloads_and_errors() {
-    let mut rng = Rng(5);
+fn truncated_ground_up_keeps_an_empty_column() {
+    // Seen on a real server (End auth lobby): ground-up, mask 1, only the 256 biome bytes.
     let mut w = World::new(WorldConfig::default());
-    let mut secs: [Option<LegacySection>; 16] = Default::default();
-    secs[0] = Some(section(&mut rng, 0));
-    let (mask, data) = encode_1_8(&secs, true, Some(&[0; 256]));
-    w.apply_map_chunk(&map_chunk(0, 0, true, mask, data.clone()))
-        .unwrap();
-    let short = data[..data.len() - 300].to_vec();
-    let r = w.apply_map_chunk(&map_chunk(0, 0, true, mask, short));
+    w.apply_login(&login(1));
+    let biomes: Vec<u8> = (0..=255u8).map(|i| i.wrapping_mul(7)).collect();
+    let r = w.apply_map_chunk(&map_chunk(0, 0, true, 1, biomes.clone()));
     assert!(matches!(r, Err(WorldError::Truncated { .. })), "{r:?}");
     assert!(
-        !w.is_column_loaded(0, 0),
-        "a bad chunk must not be kept or guessed as air"
+        w.is_column_loaded(0, 0),
+        "vanilla has already created the column"
     );
+    // The first 128 blocks of section 0 come from the bytes (as vanilla reads them), the rest is air.
+    for i in 0..4096usize {
+        let (x, y, z) = ((i & 15) as i32, (i >> 8) as i32, ((i >> 4) & 15) as i32);
+        let expect = if i < 128 {
+            BlockState::from_raw_vanilla(u16::from_le_bytes([biomes[2 * i], biomes[2 * i + 1]]))
+        } else {
+            BlockState::AIR
+        };
+        assert_eq!(w.block_state(x, y, z), Some(expect), "index {i}");
+    }
+    assert_eq!(w.block_state(0, 100, 0), Some(BlockState::AIR));
+    assert!(matches!(w.column(0, 0).unwrap().biomes(), Biomes::None));
+}
+
+/// Dense model of vanilla 1.8 `Chunk.fillChunk` block copying on short data.
+fn vanilla_fill(old: Option<&[u16]>, ground_up: bool, mask: u16, data: &[u8]) -> Vec<u16> {
+    let mut col = match (ground_up, old) {
+        (false, Some(o)) => o.to_vec(),
+        _ => vec![0u16; 65536],
+    };
+    let mut i = 0usize;
+    for j in 0..16 {
+        if mask & (1 << j) != 0 {
+            for k in 0..4096 {
+                if i + 1 >= data.len() {
+                    return col;
+                }
+                let raw = u16::from(data[i + 1]) << 8 | u16::from(data[i]);
+                col[j * 4096 + k] = BlockState::from_raw_vanilla(raw).raw();
+                i += 2;
+            }
+        } else if ground_up {
+            col[j * 4096..(j + 1) * 4096].fill(0);
+        }
+    }
+    col
+}
+
+#[test]
+fn truncated_chunks_match_vanilla_model() {
+    let mut rng = Rng(0xC0FFEE);
+    for round in 0..60 {
+        let mut w = World::new(WorldConfig::default());
+        let old = random_column(&mut rng);
+        let (omask, odata) = encode_1_8(&old, true, Some(&[0; 256]));
+        if omask == 0 {
+            continue;
+        }
+        w.apply_map_chunk(&map_chunk(0, 0, true, omask, odata))
+            .unwrap();
+        let before: Vec<u16> = (0..65536usize)
+            .map(|i| {
+                let (x, y, z) = ((i & 15) as i32, (i >> 8) as i32, ((i >> 4) & 15) as i32);
+                w.block_state(x, y, z).unwrap().raw()
+            })
+            .collect();
+        let new = random_column(&mut rng);
+        let (mask, data) = encode_1_8(&new, true, Some(&[0; 256]));
+        if mask == 0 {
+            continue;
+        }
+        let ground_up = round % 2 == 0;
+        let cut = rng.below(mask.count_ones() as u64 * 8192) as usize;
+        let short = &data[..cut];
+        let r = w.apply_map_chunk(&map_chunk(0, 0, ground_up, mask, short.to_vec()));
+        assert!(r.is_err());
+        let expect = vanilla_fill(Some(&before), ground_up, mask, short);
+        for (i, &e) in expect.iter().enumerate() {
+            let (x, y, z) = ((i & 15) as i32, (i >> 8) as i32, ((i >> 4) & 15) as i32);
+            assert_eq!(
+                w.block_state(x, y, z).map(BlockState::raw),
+                Some(e),
+                "round {round} ground_up {ground_up} cut {cut} index {i}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -543,6 +543,11 @@ impl<S: Sim> Engine<S> {
         self.core.last_inbound
     }
 
+    /// The bot's name (for logs).
+    pub(crate) fn name(&self) -> &str {
+        &self.core.opts.name
+    }
+
     /// Queues a raw packet copy for the behaviour's next tick.
     pub(crate) fn push_raw(&mut self, p: RawInbound) {
         let ev = &mut self.core.pending;

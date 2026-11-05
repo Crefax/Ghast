@@ -84,7 +84,10 @@ when data arrives. After `read_timeout` (30 s, vanilla's) the session fails with
 `ClientError::Timeout`.
 
 **Robustness:** decoding never panics (ghast-protocol); a packet the core needs that does not
-decode ends the session with `ClientError::Decode` (vanilla disconnects too); a behaviour
+decode ends the session with `ClientError::Decode` (vanilla disconnects too); malformed chunk
+data (e.g. a section mask the data does not cover) only drops that column, is logged
+(rate-limited) and play goes on, as vanilla's task runner does — `GHAST_DUMP_BAD_CHUNK=<dir>`
+writes the first rejected bodies there for a bug report; a behaviour
 panic is caught, the behaviour is stopped and the player keeps standing; sessions share no
 state, the session future is `Send` for `Send` behaviours, so many bots can run on one
 multi-threaded runtime or one bot per process on a `current_thread` runtime (examples).

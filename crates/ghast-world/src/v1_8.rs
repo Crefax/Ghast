@@ -164,7 +164,8 @@ impl World {
     /// Applies any world-relevant packet; other packets return [`Applied::NotWorldPacket`].
     ///
     /// # Errors
-    /// Malformed chunk data (the affected column is unloaded).
+    /// Malformed chunk data (1.8: applied as far as vanilla gets, see
+    /// [`World::apply_chunk_data`]).
     pub fn handle(&mut self, packet: &ClientboundPlayPacket) -> Result<Applied, WorldError> {
         match packet {
             ClientboundPlayPacket::Login(p) => Ok(self.apply_login(p)),
@@ -204,7 +205,9 @@ impl World {
     /// unloaded one.
     ///
     /// # Errors
-    /// Data too short for the mask (the column is unloaded).
+    /// Data too short for the mask. The error is returned after the column has been left the
+    /// way the vanilla client leaves it: a ground-up chunk still loads its column, and blocks
+    /// are copied up to the end of the data (see `apply_truncated` in the source).
     pub fn apply_map_chunk(&mut self, p: &MapChunk) -> Result<Applied, WorldError> {
         self.apply_chunk_data(p.x, p.z, p.ground_up, p.bit_map, &p.chunk_data)
     }
@@ -212,7 +215,9 @@ impl World {
     /// [`World::apply_map_chunk`] without the packet struct (`data` = the packet's chunk data).
     ///
     /// # Errors
-    /// Data too short for the mask (the column is unloaded).
+    /// Data too short for the mask. The error is returned after the column has been left the
+    /// way the vanilla client leaves it: a ground-up chunk still loads its column, and blocks
+    /// are copied up to the end of the data (see `apply_truncated` in the source).
     pub fn apply_chunk_data(
         &mut self,
         x: i32,
@@ -248,8 +253,94 @@ impl World {
                 Ok(Applied::Changed)
             }
             Err(e) => {
-                self.columns.remove(x, z);
+                self.apply_truncated(x, z, ground_up, mask, data, has_sky);
                 Err(e)
+            }
+        }
+    }
+
+    /// What vanilla 1.8 leaves behind for chunk data shorter than its mask needs. The client
+    /// first creates the (empty) column for a ground-up chunk, then `fillChunk` copies until it
+    /// runs past the end of the array; the exception is logged and the game goes on. So:
+    ///
+    /// - a ground-up chunk leaves a loaded column;
+    /// - masked sections are filled in order, block by block, up to the last complete
+    ///   little-endian pair, the rest of the failing section keeps what it had (air for a new
+    ///   section) and later sections are not touched;
+    /// - light arrays and the biome array are copied only whole (`System.arraycopy` checks the
+    ///   bounds first) and only when every earlier array was complete.
+    fn apply_truncated(
+        &mut self,
+        x: i32,
+        z: i32,
+        ground_up: bool,
+        mask: u16,
+        data: &[u8],
+        has_sky: bool,
+    ) {
+        if ground_up {
+            self.columns.insert(x, z, Column::empty());
+        }
+        let Some(col) = self.columns.get_mut(x, z) else {
+            return;
+        };
+        let len = data.len();
+        let mut k = 0usize;
+        for j in 0..SECTIONS {
+            if mask & (1 << j) == 0 {
+                continue;
+            }
+            let start = k * BLOCK_BYTES;
+            let count = (len.saturating_sub(start) / 2).min(SECTION_VOLUME);
+            let mut states = [0u16; SECTION_VOLUME];
+            if let Some(old) = &col.sections[j] {
+                old.for_each(|i, s| states[i] = s);
+            }
+            let bytes = &data[start.min(len)..];
+            for (s, pair) in states[..count].iter_mut().zip(bytes.as_chunks::<2>().0) {
+                *s = BlockState::from_raw_vanilla(u16::from_le_bytes(*pair)).raw();
+            }
+            col.sections[j] = self.builder.build(&states);
+            if count < SECTION_VOLUME {
+                return;
+            }
+            k += 1;
+        }
+        // Every block array was complete: whole light arrays, then biomes, while they fit.
+        let n = k;
+        let blocks = n * BLOCK_BYTES;
+        let arrays = if has_sky { 2 } else { 1 };
+        for a in 0..arrays {
+            let mut k = 0usize;
+            for j in 0..SECTIONS {
+                if mask & (1 << j) == 0 {
+                    continue;
+                }
+                let off = blocks + (a * n + k) * LIGHT_BYTES;
+                let Some(src) = data.get(off..off + LIGHT_BYTES) else {
+                    return;
+                };
+                if self.config.light {
+                    let light = col.light.get_or_insert_with(Default::default);
+                    let l = light[j].get_or_insert_with(|| SectionLight {
+                        block: Box::new([0; LIGHT_BYTES]),
+                        sky: None,
+                    });
+                    if a == 0 {
+                        l.block = nibbles(src);
+                    } else {
+                        l.sky = Some(nibbles(src));
+                    }
+                }
+                k += 1;
+            }
+        }
+        if ground_up && self.config.biomes {
+            let off = blocks + arrays * n * LIGHT_BYTES;
+            if let Some(src) = data.get(off..off + BIOME_BYTES) {
+                let mut b = Box::new([0u8; BIOME_BYTES]);
+                b.copy_from_slice(src);
+                col.biomes = Biomes::Legacy(b);
             }
         }
     }

@@ -16,8 +16,10 @@
 //!   are ignored, respawn into the same dimension keeps the world, ...). See each method.
 //! - **Cheap lookups.** A block lookup is one hash of the column position plus one or two array
 //!   reads; all-air sections are not stored.
-//! - **Never panics on server data.** Malformed chunk data returns a [`WorldError`] and leaves the
-//!   column unloaded (never half-applied, never guessed as air).
+//! - **Never panics on server data.** Malformed chunk data returns a [`WorldError`]. A 1.8 chunk
+//!   shorter than its mask is applied as far as the vanilla client gets before its copy fails
+//!   (a ground-up chunk still loads its column, as vanilla does); a malformed 1.16 section
+//!   unloads the column.
 //!
 //! ```
 //! # #[cfg(feature = "v1_8")] {

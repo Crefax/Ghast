@@ -19,10 +19,10 @@ default = []
 microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.1.2" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.1.2" }
-ghast-auth = { path = "../ghast-auth", version = "0.1.2" }
-ghast-data = { path = "../ghast-data", version = "0.1.2" }
+ghast-client = { path = "../ghast-client", version = "0.1.3" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.1.3" }
+ghast-auth = { path = "../ghast-auth", version = "0.1.3" }
+ghast-data = { path = "../ghast-data", version = "0.1.3" }
 
 [dev-dependencies]
 log = { workspace = true }

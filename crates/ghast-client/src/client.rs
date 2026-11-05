@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ghast_auth::connect::{Connector, TargetAddr};
 use ghast_auth::offline::OfflineProfile;
-use ghast_protocol::{FrameDecoder, FrameEncoder, PacketFilter, State};
+use ghast_protocol::{FrameDecoder, FrameEncoder, PacketFilter, RawPacket, State};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{Instant, MissedTickBehavior};
 
@@ -338,6 +338,7 @@ where
         interests: Interests::NONE,
         raw_ids: Vec::new(),
         raw_mask: [0; 4],
+        world_errors: 0,
         _v: std::marker::PhantomData,
     };
     let result = play.run(behavior, shutdown).await;
@@ -475,6 +476,8 @@ struct Play<V: HasSim, R, W> {
     /// Packet ids copied for the behaviour (`Behavior::raw_packets`), as a bit set.
     raw_ids: Vec<i32>,
     raw_mask: [u64; 4],
+    /// World packets the world rejected (malformed chunk data).
+    world_errors: u64,
     _v: std::marker::PhantomData<V>,
 }
 
@@ -513,6 +516,35 @@ where
         self.dec.set_filter(filter);
     }
 
+    /// Logs (rate-limited) and optionally dumps a world packet the world rejected.
+    fn bad_world_packet(&mut self, raw: &RawPacket, e: &ghast_world::WorldError) {
+        self.world_errors += 1;
+        let n = self.world_errors;
+        if n <= 3 || n.is_power_of_two() {
+            log::warn!(
+                "[{}] bad world packet 0x{:02x} ({} bytes), column unloaded: {e} ({n} so far)",
+                self.engine.name(),
+                raw.id,
+                raw.body.len()
+            );
+        }
+        // Opt-in capture for bug reports: GHAST_DUMP_BAD_CHUNK=<dir> writes the first few
+        // rejected bodies there.
+        if n <= 8
+            && let Some(dir) = std::env::var_os("GHAST_DUMP_BAD_CHUNK")
+        {
+            let path = std::path::Path::new(&dir).join(format!(
+                "ghast-bad-world-{}-0x{:02x}-{n}.bin",
+                std::process::id(),
+                raw.id
+            ));
+            match std::fs::write(&path, &raw.body) {
+                Ok(()) => log::warn!("[{}] wrote {}", self.engine.name(), path.display()),
+                Err(err) => log::warn!("cannot write {}: {err}", path.display()),
+            }
+        }
+    }
+
     /// Encodes the engine's outbound packets.
     fn encode_outbound(&mut self) -> Result<(), ClientError> {
         let out = self.engine.outbound();
@@ -541,14 +573,23 @@ where
                     at,
                 });
             }
-            self.engine.sim.world_packet(&raw).map_err(|e| match e {
-                SimError::Decode(source) => ClientError::Decode {
-                    state: State::Play,
-                    id: raw.id,
-                    source,
-                },
-                SimError::World(e) => ClientError::World(e),
-            })?;
+            match self.engine.sim.world_packet(&raw) {
+                Ok(()) => {}
+                Err(SimError::Decode(source)) => {
+                    return Err(ClientError::Decode {
+                        state: State::Play,
+                        id: raw.id,
+                        source,
+                    });
+                }
+                Err(SimError::World(e)) => {
+                    // Malformed chunk data for one column: the world has unloaded that column
+                    // (never guessed as air); the session goes on, like vanilla, which logs the
+                    // failed task and keeps playing.
+                    self.bad_world_packet(&raw, &e);
+                    continue;
+                }
+            }
             // The inventory answers window confirms itself (exactly once).
             let inv = V::inventory_packet(self.engine.inventory_mut(), &raw).map_err(|source| {
                 ClientError::Decode {

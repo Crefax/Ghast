@@ -33,7 +33,8 @@ mod v1_8 {
             w.apply_chunk_data(0, 0, true, 1, &[0; 8192 + 2048 + 2048 + 256]).unwrap();
             let r = w.apply_chunk_data(0, 0, ground_up, mask, &data);
             if r.is_err() {
-                prop_assert!(!w.is_column_loaded(0, 0));
+                // Vanilla keeps (ground-up: creates) the column and copies what it can.
+                prop_assert!(w.is_column_loaded(0, 0));
             }
             let _ = w.block_state(5, 5, 5);
         }
@@ -54,7 +55,7 @@ mod v1_8 {
             let mut w = World::new(WorldConfig { biomes: true, light: true });
             let r = w.apply_chunk_data(1, -1, true, mask ^ mask_flip, &data);
             if r.is_err() {
-                prop_assert!(!w.is_column_loaded(1, -1));
+                prop_assert!(w.is_column_loaded(1, -1));
             }
         }
 

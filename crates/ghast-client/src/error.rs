@@ -49,7 +49,9 @@ pub enum ClientError {
         #[source]
         source: DecodeError,
     },
-    /// Chunk data from the server was malformed.
+    /// Chunk data from the server was malformed. Since 0.1.3 a session no longer ends with
+    /// it: the column is dropped, the error logged and play goes on (like vanilla). Kept for
+    /// compatibility.
     #[error("bad chunk data: {0}")]
     World(#[source] ghast_world::WorldError),
     /// A packet could not be encoded (a value the protocol cannot carry).

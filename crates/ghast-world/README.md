@@ -119,9 +119,25 @@ through `BlockView::block`; the world keeps no connection state.
 
 ## Errors
 
-Malformed chunk data never panics and is never half-applied: decoding happens before any change,
-and on error the affected column is **unloaded** (unknown is safe; stale or guessed data is not)
-and a `WorldError` is returned for logging. A short `map_chunk_bulk` applies nothing.
+Malformed chunk data never panics and always returns a `WorldError` for logging.
+
+- 1.8 `map_chunk` shorter than its mask: the world ends up exactly as the vanilla client leaves
+  it.
+  - Vanilla first creates the empty column for a ground-up chunk, then `Chunk.fillChunk` copies
+    block pairs in order until it runs past the array. The exception is logged by the client's
+    task runner and play goes on.
+  - So a ground-up chunk leaves a **loaded** column. Its blocks are filled in order up to the last
+    complete little-endian pair; the rest of the failing section keeps what it had (air in a new
+    section), and later sections are untouched.
+  - Light and biome arrays are copied only whole and only while every earlier array was complete
+    (`System.arraycopy` checks bounds first).
+  - Seen on a real server: an End-dimension auth lobby sends a ground-up chunk with mask 1 and only
+    the 256 biome bytes. Vanilla, and now ghast, keep the column loaded, with the first 128 blocks
+    of section 0 decoded from those bytes.
+- A short `map_chunk_bulk` applies nothing: vanilla fails it while decoding the packet.
+- A malformed 1.16 section unloads the column. Vanilla only stores a new column after decoding
+  succeeds; for an already loaded column it would keep a half-updated chunk, which we do not
+  reproduce.
 
 ## Tests
 
@@ -144,7 +160,8 @@ cargo bench -p ghast-world
   oversized array palette / oversized hash palette / trailing bytes, full vs partial, view window,
   section-position multi block change (incl. negative section Y), explosion floor, respawn.
 - `tests/robustness.rs`: proptest random and mutated chunk data for both versions and random
-  bulk packets never panic, and a failed decode always leaves the column unloaded; a model check
+  bulk packets never panic; a failed 1.16 decode leaves the column unloaded; a property test
+  compares truncated 1.8 chunks with a direct model of vanilla `fillChunk`; a model check
   of 600k random block changes across all representations.
 - Hook for real captures: put clean lab packets (uncompressed `VarInt id + body`, one per file)
   into `tests/captured/1.8.9/*.bin` or `tests/captured/1.16.5/*.bin`; `captured_packets` applies
