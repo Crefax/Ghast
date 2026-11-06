@@ -73,6 +73,10 @@ public final class Main {
                 Path out = a.path("--out", golden.resolve("collision_boxes_far.jsonl.gz"));
                 write(out, sink -> CollisionDump.farLines().forEach(sink));
             }
+            case "faces" -> {
+                Path out = a.path("--out", golden.resolve("face_shapes.jsonl.gz"));
+                write(out, sink -> FaceDump.lines().forEach(sink));
+            }
             case "selection" -> {
                 Path out = a.path("--out", golden.resolve("selection_boxes.jsonl.gz"));
                 write(out, sink -> SelectionDump.lines().forEach(sink));
@@ -117,6 +121,7 @@ public final class Main {
                   boxes-far [--out FILE]               the same (alone/settled) at far positions, absolute
                   replay --in FILE [--out FILE]        rerun scenarios read from golden-format JSON lines
                                                        (header + tick inputs; states are ignored)
+                  faces [--out FILE]                   1.12 face shapes (BlockRenderLayer) of every id/meta + exclusion lists
                   selection [--out FILE]               ray-test bounds (selection boxes) for every block id/meta
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair raytrace vectors
                   recipes [--out FILE]                 crafting recipes in the client's match order
@@ -155,6 +160,7 @@ public final class Main {
             }
         });
         write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
+        write(dir.resolve("face_shapes.jsonl.gz"), sink -> FaceDump.lines().forEach(sink));
         write(dir.resolve("selection_boxes.jsonl.gz"), sink -> SelectionDump.lines().forEach(sink));
         write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(GOLDEN_RAY_SEED, GOLDEN_RAY_WORLDS, GOLDEN_RAYS, sink));
         write(dir.resolve("recipes.jsonl.gz"), RecipeDump::lines);

@@ -523,7 +523,7 @@ much of the movement code unnamed: `travel` is `LivingEntity.method_2657`, the i
 `Entity.method_2492`; see its "Names to read carefully" table). Output: `tests/golden/1.12.2/` with the
 same file names as 1.8.9 (`scenarios` 112 cases, `fuzz_seed1` and `fuzz_edges_seed1` 100 x 60,
 `collision_boxes`, `collision_boxes_far`, `selection_boxes`, `raytrace`, `entity_sizes`, `recipes`,
-`clicks_seed1`, `clicks_craft_seed1` 3000 cases each).
+`clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes`.
 
 Setup: the remapped jar needs `remap.stripParameterAnnotations` (javac rejects some inner-class
 constructor annotation tables), `remap.fixPackageAccess` and `remap.publicProtected` (protected members
@@ -599,6 +599,16 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
   server's result (`RecipeDispatcher.matches`) into the result slot once after filling the grid, as the
   server's set_slot would; it is not recomputed after clicks (a vanilla client keeps the stale result
   until the server answers).
+- `face_shapes.jsonl.gz` (`faces` command, 1.12.2 only): the face shape 1.12 fences / panes / walls
+  connect by. `{"type":"faces_block", "id", "name", "fence_excluded", "wall_excluded", "pane_excluded"}`
+  per registered block (the real static exclusion tests `FenceBlock.method_14325`,
+  `WallBlock.method_14353`, `PaneBlock.method_14348`, called by reflection), then
+  `{"type":"faces", "id", "meta", "config", "neighbours", "state", "faces":{"down", "up", "north",
+  "south", "west", "east"}}` for every id × meta `alone` (air neighbours, same position as the collision
+  dump) and for every `stair_neighbour` configuration of the collision dump (the centre stairs' faces).
+  Values are the enum names of `BlockState.getRenderLayer(view, pos, direction)` (Legacy Yarn calls
+  1.12's face-shape enum `BlockRenderLayer`: `SOLID`, `BOWL`, `CENTER_SMALL`, `MIDDLE_POLE_THIN`,
+  `CENTER`, `MIDDLE_POLE`, `CENTER_BIG`, `MIDDLE_POLE_THICK`, `UNDEFINED`).
 - `recipes.jsonl.gz`: `{"i", "name", "type":"shaped", "w", "h", "in":[[[id,data]…]…], "out":hex}`,
   `{"i", "name", "type":"shapeless", "in":…, "out":hex}`, `{"i", "name", "type":"special", "class"}` in
   `RecipeDispatcher.REGISTRY` order (the order `matches` tries); every ingredient is the list of stacks
