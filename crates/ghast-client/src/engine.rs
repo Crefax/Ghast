@@ -1727,6 +1727,75 @@ impl TickContext<'_> {
         self.core.hands.using_item()
     }
 
+    /// The version facts of an item stack (tool speeds, block item, food, usable), as the
+    /// hands use them for the held stack. `None` for ids outside the item id range.
+    ///
+    /// ```no_run
+    /// # fn f(ctx: &ghast_client::TickContext<'_>) {
+    /// if let Some(s) = ctx.inventory().hotbar(0) {
+    ///     let food = ctx.item_facts(s).is_some_and(|f| f.food);
+    /// }
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn item_facts(&self, stack: &ghast_inventory::Stack) -> Option<hands::HeldItem> {
+        let id = u16::try_from(stack.id).ok()?;
+        let count = u8::try_from(stack.count.clamp(0, 255)).unwrap_or(0);
+        Some(crate::sim::held_item_facts(
+            self.core.opts.version,
+            id,
+            count,
+            efficiency(stack),
+        ))
+    }
+
+    /// Break progress per tick (vanilla `calcBlockBreakingData`) of the block at `pos` dug
+    /// with `stack` (`None` = empty hand), with the factors the left button uses now: on
+    /// ground, eyes in water, aqua affinity, haste / mining fatigue. The block breaks once the
+    /// progress sums to 1, so it takes about `ceil(1 / speed)` ticks; 0 = unbreakable.
+    /// Creative mode breaks every block at once and is not reflected here. `None` when the
+    /// column is not loaded.
+    ///
+    /// ```no_run
+    /// # fn f(ctx: &ghast_client::TickContext<'_>, pos: ghast_client::BlockPos) {
+    /// // The hotbar slot that digs `pos` fastest.
+    /// let best = (0..9u8).max_by(|a, b| {
+    ///     let s = |k: u8| ctx.dig_speed(pos, ctx.inventory().hotbar(k.into())).unwrap_or(0.0);
+    ///     s(*a).total_cmp(&s(*b))
+    /// });
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn dig_speed(
+        &self,
+        pos: ghast_protocol::BlockPos,
+        stack: Option<&ghast_inventory::Stack>,
+    ) -> Option<f32> {
+        let b = self.world.block_query(pos.x, pos.y, pos.z)?;
+        if b.air {
+            return Some(0.0);
+        }
+        let c = &*self.core;
+        let eyes = self.eyes(&c.pose);
+        let in_water = self
+            .world
+            .block_query(
+                eyes.x.floor() as i32,
+                eyes.y.floor() as i32,
+                eyes.z.floor() as i32,
+            )
+            .is_some_and(|b| b.water);
+        let held = stack.and_then(|s| self.item_facts(s));
+        let factors = DigFactors {
+            on_ground: c.pose.on_ground,
+            in_water,
+            aqua_affinity: c.aqua_affinity,
+            haste: c.effects.get(&3).map_or(0, |a| (*a as u8).wrapping_add(1)),
+            fatigue: c.effects.get(&4).map_or(0, |a| (*a as u8).wrapping_add(1)),
+        };
+        Some(hands::relative_hardness(&b, held.as_ref(), factors))
+    }
+
     /// Starts digging `pos` on `face` (`block_dig` start, then an arm swing), breaking it at
     /// once when it is instant for the held item. Refused (nothing sent, `false`) unless the
     /// crosshair from the sent pose is on exactly that block face.
@@ -2241,6 +2310,54 @@ mod tests {
             "falls into the hole: {:?}",
             e.core.pose.pos
         );
+    }
+
+    /// `dig_speed` is the left button's per-tick progress; `item_facts` the hands' facts.
+    #[test]
+    fn dig_speed_and_item_facts() {
+        // 1.16.5 facts by name (its test chunk is empty).
+        let mut e = engine(GameVersion::V1_16_5);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            let id = |n: &str| i32::from(ghast_data::v1_16_5::Item::from_name(n).unwrap().id());
+            let bread = ctx.item_facts(&ghast_inventory::Stack::new(id("bread"), 3, 0));
+            assert!(bread.is_some_and(|f| f.food && f.usable && !f.places_block && f.count == 3));
+            let dirt = ctx.item_facts(&ghast_inventory::Stack::new(id("dirt"), 1, 0));
+            assert!(dirt.is_some_and(|f| f.places_block && !f.food));
+        });
+        e.tick(&mut b, t0);
+
+        let mut e = engine(GameVersion::V1_8_9);
+        join(&mut e);
+        e.note_inbound(t0);
+        let got = std::cell::Cell::new(None);
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            let stone = ghast_protocol::BlockPos::new(8, 63, 8);
+            let pick = ghast_inventory::Stack::new(278, 1, 0);
+            let facts = ctx.item_facts(&pick).unwrap();
+            assert!(!facts.places_block && !facts.food);
+            got.set(Some((
+                ctx.dig_speed(stone, None),
+                ctx.dig_speed(stone, Some(&pick)),
+                ctx.dig_speed(ghast_protocol::BlockPos::new(8, 64, 8), None),
+                ctx.dig_speed(ghast_protocol::BlockPos::new(500, 63, 8), None),
+            )));
+        });
+        // Land first (in the air the progress is ÷5).
+        for _ in 0..40 {
+            e.tick(&mut b, t0);
+        }
+        assert!(e.core.pose.on_ground, "{:?}", e.core.pose);
+        let (hand, pick, air, unloaded) = got.get().expect("ticked");
+        // Stone by hand: not harvestable, 1 / 1.5 / 100 per tick (the 150 ticks of
+        // `dig_with_the_left_button`).
+        assert_eq!(hand, Some(1.0 / 1.5 / 100.0));
+        // Diamond pickaxe: speed 8, harvestable: 8 / 1.5 / 30.
+        assert_eq!(pick, Some(8.0 / 1.5 / 30.0));
+        assert_eq!(air, Some(0.0));
+        assert_eq!(unloaded, None);
     }
 
     /// `place` is refused unless the sent look is on the face; then C08 + C0A before the

@@ -639,6 +639,8 @@ dependencies = [
  "ghast-auth",
  "ghast-client",
  "ghast-data",
+ "ghast-ext",
+ "ghast-pathfinder",
  "ghast-protocol",
  "log",
  "tokio",
@@ -718,6 +720,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghast-ext"
+version = "0.2.1"
+dependencies = [
+ "bytes",
+ "ghast-auth",
+ "ghast-client",
+ "ghast-data",
+ "ghast-pathfinder",
+ "ghast-protocol",
+ "log",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "ghast-inventory"
 version = "0.2.1"
 dependencies = [
@@ -729,6 +746,18 @@ dependencies = [
  "proptest",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "ghast-pathfinder"
+version = "0.2.1"
+dependencies = [
+ "criterion",
+ "ghast-client",
+ "ghast-data",
+ "ghast-physics",
+ "log",
+ "proptest",
 ]
 
 [[package]]

@@ -1,0 +1,35 @@
+[package]
+name = "ghast-ext"
+description = "Sequential, mineflayer-style async helpers (look, dig, place, equip, containers, chat, events, find) on top of the ghast bot library's deterministic tick model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "bot", "async", "mineflayer"]
+categories = ["game-development", "asynchronous"]
+readme = "README.md"
+documentation = "https://docs.rs/ghast-ext"
+
+[features]
+default = ["pathfinder"]
+# `Bot::goto`: physics-validated path finding and following (ghast-pathfinder).
+pathfinder = ["dep:ghast-pathfinder"]
+
+[dependencies]
+ghast-client = { path = "../ghast-client", version = "0.2.1" }
+ghast-data = { path = "../ghast-data", version = "0.2.1", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.1", optional = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+ghast-auth = { path = "../ghast-auth", version = "0.2.1" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.1" }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread"] }
+
+[package.metadata.docs.rs]
+all-features = true

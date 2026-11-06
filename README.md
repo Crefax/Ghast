@@ -37,6 +37,8 @@ All measurements are dated and described with their method in the crate READMEs 
 | [`ghast-physics`](crates/ghast-physics) | pure, deterministic player movement (no I/O, no clock) |
 | [`ghast-inventory`](crates/ghast-inventory) | windows, vanilla click prediction, the window confirm protocol, lazy-NBT stacks |
 | [`ghast-entity`](crates/ghast-entity) | entity tracking (opt-in), vanilla server positions, metadata |
+| [`ghast-ext`](crates/ghast-ext) | sequential async helpers on the tick model: look, dig, place, equip, containers, chat, events, `goto` (facade feature `ext`) |
+| [`ghast-pathfinder`](crates/ghast-pathfinder) | A* path planning with physics-measured costs, a path follower, every move checked in the vanilla-exact physics (facade feature `pathfinder`) |
 
 Dependencies point one way: the protocol crate knows nothing about the layers above it, so it
 can be used on its own.
@@ -72,7 +74,8 @@ let end = client.run(&mut Afk).await?;
 ```
 
 Other examples in `crates/ghast/examples/`: `chat`, `dig_place`, `use_item`, `attack`,
-`inventory_probe`, `movement_course`, `soak`.
+`inventory_probe`, `movement_course`, `soak`, and `goto` (`--features ext,pathfinder`: walks
+planned paths with the async helpers).
 
 ## Features per version
 
@@ -86,9 +89,10 @@ Other examples in `crates/ghast/examples/`: `chat`, `dig_place`, `use_item`, `at
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified |
 | entities: tracking, crosshair, attack / interact | yes | yes |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes |
+| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | simulation-tested |
 
 Planned: 1.12.2 and 1.21 / latest, one version at a time, each verified the same way. Not
-planned for now: pathfinding (it belongs above the library), rendering.
+planned for now: rendering.
 
 ## How verification works
 

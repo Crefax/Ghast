@@ -1,0 +1,36 @@
+[package]
+name = "ghast-pathfinder"
+description = "Physics-exact path planning and path following for the ghast Minecraft Java Edition bot library (1.8.9 and 1.16.5): every move type is validated against the vanilla-exact ghast-physics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["minecraft", "pathfinding", "bot", "astar", "physics"]
+categories = ["game-development", "algorithms"]
+documentation = "https://docs.rs/ghast-pathfinder"
+readme = "README.md"
+
+[features]
+default = ["client"]
+# `Follower`: drives a path from a `ghast_client::Behavior` through `TickContext`.
+client = ["dep:ghast-client", "dep:log"]
+
+[dependencies]
+ghast-data = { path = "../ghast-data", version = "0.2.1", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-physics = { path = "../ghast-physics", version = "0.2.1" }
+ghast-client = { path = "../ghast-client", version = "0.2.1", optional = true }
+log = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "plan"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true

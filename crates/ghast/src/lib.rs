@@ -9,6 +9,8 @@
 //! | [`protocol`] | `ghast-protocol` | packets per version, framing, compression, encryption, NBT |
 //! | [`auth`] | `ghast-auth` | offline identities, SOCKS5, login crypto, Microsoft accounts |
 //! | [`data`] | `ghast-data` | blocks, collision shapes, items, entities |
+//! | `ext` (feature `ext`) | `ghast-ext` | sequential async helpers: look, dig, place, equip, containers, chat, events |
+//! | `pathfinder` (feature `pathfinder`) | `ghast-pathfinder` | physics-validated A* path planning and following |
 //!
 //! Supported versions: 1.8.9 and 1.16.5. See the `afk` and `chat` examples:
 //!
@@ -29,3 +31,12 @@ pub use ghast_auth as auth;
 
 /// Static game data (`ghast-data`).
 pub use ghast_data as data;
+
+/// Sequential async helpers on the tick model (`ghast-ext`, feature `ext`). With the
+/// `pathfinder` feature too, `Bot::goto` walks planned paths.
+#[cfg(feature = "ext")]
+pub use ghast_ext as ext;
+
+/// Physics-validated path planning and following (`ghast-pathfinder`, feature `pathfinder`).
+#[cfg(feature = "pathfinder")]
+pub use ghast_pathfinder as pathfinder;

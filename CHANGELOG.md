@@ -2,6 +2,42 @@
 
 All crates share one version number.
 
+## Unreleased
+
+Additive: two new crates, behind facade features (the default build is unchanged).
+
+### ghast-pathfinder (new)
+- A* over feet blocks with move costs measured in `ghast-physics` per version: walks (step-ups
+  and drops up to 0.6: slabs, soul sand), diagonals, jumps up, drops (fall-damage free by
+  default, deeper into water), 1- and 2-block gap jumps, swimming, ladders / vines (also
+  onto a ladder from above), opt-in digging and hole filling. Unloaded blocks are never air:
+  goals beyond them give partial paths.
+- `Controller`: per-tick aim and keys with physics look-ahead (last-moment edge jumps,
+  landing control, never stepping off the floor where the path does not go); `simulate`
+  runs a path in the vanilla-exact physics, turning like the client; `plan_verified` plans
+  around moves the simulation fails.
+- `Follower` (feature `client`): plans, follows and replans from `Behavior::tick` through
+  `TickContext` only.
+- Validated on fake worlds for both versions (every move type, 96 fixed random terrains);
+  1.8 lab run: 63 legs, 0 Grim flags. Planning: ~0.3 ms for 100 blocks of open ground,
+  ~57 ms for a 193-step detour through rough terrain.
+
+### ghast-ext (new)
+- `Ext`, a `Behavior` with a tick-driven executor: write bots as sequential async code
+  (`Bot::with` runs a closure in the tick, before the movement packet). Helpers for looking,
+  digging, placing, using items, attacking, equipping, window clicks, containers, block /
+  entity search, chat, commands, events and walking; `goto` with ghast-pathfinder (feature
+  `pathfinder`, default on).
+
+### ghast-client
+- `TickContext::item_facts(&Stack)`: the hands' version facts of any stack (block item,
+  food, usable, tool speeds).
+- `TickContext::dig_speed(pos, Option<&Stack>)`: the left button's per-tick break progress
+  of a block with a given stack (tool, efficiency, haste / fatigue, water, on ground).
+
+### ghast
+- Features `ext` (`ghast::ext`) and `pathfinder` (`ghast::pathfinder`); example `goto`.
+
 ## 0.2.1 — 2026-11-05
 
 Additive fixes: public types that downstream crates could not name are now exported.

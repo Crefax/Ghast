@@ -12,6 +12,7 @@ use crate::common::{
     Abilities, Controls, EntityAction, MovePacket, Outbound, Pose, Teleport, Vec3,
 };
 use crate::hands::{BlockQuery, HeldItem};
+use crate::version::GameVersion;
 
 /// Why a world packet could not be applied.
 #[derive(Debug)]
@@ -341,6 +342,58 @@ const ACTIVATED_1_8: &[u8] = &[
 
 /// 1.8 items used by holding right click besides food: potion, milk, bow, swords.
 const USABLE_1_8: &[u16] = &[373, 335, 261, 267, 268, 272, 276, 283];
+
+/// A held item's version facts (tool speeds, block item, usable) from its id.
+pub(crate) fn held_item_facts(
+    version: GameVersion,
+    id: u16,
+    count: u8,
+    efficiency: u8,
+) -> HeldItem {
+    match version {
+        GameVersion::V1_8_9 => {
+            HeldItem {
+                id,
+                count,
+                efficiency,
+                places_block: id < 256,
+                usable: ghast_data::v1_8::food(id).is_some() || USABLE_1_8.contains(&id),
+                food: ghast_data::v1_8::food(id).is_some(),
+                // Golden apple.
+                always_edible: id == 322,
+                tool_speed: Some(ghast_data::v1_8::tool_multiplier),
+            }
+        }
+        _ => HeldItem {
+            id,
+            count,
+            efficiency,
+            places_block: ghast_data::v1_16_5::Item::from_id(id)
+                .is_some_and(|i| ghast_data::v1_16_5::Block::from_name(i.info().name).is_some()),
+            usable: ghast_data::v1_16_5::food(id).is_some()
+                || ghast_data::v1_16_5::Item::from_id(id).is_some_and(|i| {
+                    matches!(
+                        i.info().name,
+                        "potion"
+                            | "milk_bucket"
+                            | "honey_bottle"
+                            | "bow"
+                            | "crossbow"
+                            | "shield"
+                            | "trident"
+                    )
+                }),
+            food: ghast_data::v1_16_5::food(id).is_some(),
+            always_edible: ghast_data::v1_16_5::Item::from_id(id).is_some_and(|i| {
+                matches!(
+                    i.info().name,
+                    "golden_apple" | "enchanted_golden_apple" | "chorus_fruit"
+                )
+            }),
+            tool_speed: Some(ghast_data::v1_16_5::tool_multiplier),
+        },
+    }
+}
 
 /// Block-local `[min, max]` of a physics box.
 fn arr(b: &ghast_physics::math::Aabb) -> [f64; 6] {
@@ -738,17 +791,7 @@ impl Sim for Sim18 {
     }
 
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
-        HeldItem {
-            id,
-            count,
-            efficiency,
-            places_block: id < 256,
-            usable: ghast_data::v1_8::food(id).is_some() || USABLE_1_8.contains(&id),
-            food: ghast_data::v1_8::food(id).is_some(),
-            // Golden apple.
-            always_edible: id == 322,
-            tool_speed: Some(ghast_data::v1_8::tool_multiplier),
-        }
+        held_item_facts(GameVersion::V1_8_9, id, count, efficiency)
     }
 
     fn step(
@@ -1230,34 +1273,7 @@ impl Sim for Sim16 {
     }
 
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
-        HeldItem {
-            id,
-            count,
-            efficiency,
-            places_block: ghast_data::v1_16_5::Item::from_id(id)
-                .is_some_and(|i| ghast_data::v1_16_5::Block::from_name(i.info().name).is_some()),
-            usable: ghast_data::v1_16_5::food(id).is_some()
-                || ghast_data::v1_16_5::Item::from_id(id).is_some_and(|i| {
-                    matches!(
-                        i.info().name,
-                        "potion"
-                            | "milk_bucket"
-                            | "honey_bottle"
-                            | "bow"
-                            | "crossbow"
-                            | "shield"
-                            | "trident"
-                    )
-                }),
-            food: ghast_data::v1_16_5::food(id).is_some(),
-            always_edible: ghast_data::v1_16_5::Item::from_id(id).is_some_and(|i| {
-                matches!(
-                    i.info().name,
-                    "golden_apple" | "enchanted_golden_apple" | "chorus_fruit"
-                )
-            }),
-            tool_speed: Some(ghast_data::v1_16_5::tool_multiplier),
-        }
+        held_item_facts(GameVersion::V1_16_5, id, count, efficiency)
     }
 
     fn step(

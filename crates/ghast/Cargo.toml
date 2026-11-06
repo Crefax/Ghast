@@ -17,12 +17,18 @@ documentation = "https://docs.rs/ghast"
 default = []
 # Online-mode servers (Microsoft accounts).
 microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
+# `ghast::ext`: sequential async helpers (look, dig, place, equip, containers, chat, events).
+ext = ["dep:ghast-ext"]
+# `ghast::pathfinder`: physics-validated path planning and following (and `ext`'s `goto`).
+pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
 
 [dependencies]
 ghast-client = { path = "../ghast-client", version = "0.2.1" }
 ghast-protocol = { path = "../ghast-protocol", version = "0.2.1" }
 ghast-auth = { path = "../ghast-auth", version = "0.2.1" }
 ghast-data = { path = "../ghast-data", version = "0.2.1" }
+ghast-ext = { path = "../ghast-ext", version = "0.2.1", optional = true, default-features = false }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.1", optional = true }
 
 [dev-dependencies]
 log = { workspace = true }
@@ -51,6 +57,10 @@ name = "attack"
 
 [[example]]
 name = "inventory_probe"
+
+[[example]]
+name = "goto"
+required-features = ["ext", "pathfinder"]
 
 [package.metadata.docs.rs]
 all-features = true
