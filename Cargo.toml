@@ -13,6 +13,7 @@ members = [
     "crates/ghast-pathfinder",
     "crates/ghast-physics",
     "crates/ghast-protocol",
+    "crates/ghast-viewer",
     "crates/ghast-world",
     "codegen/data",
     "codegen/protocol",

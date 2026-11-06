@@ -6,6 +6,27 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## Unreleased
+
+Additive: one new crate, behind a facade feature (the default build is unchanged).
+
+### ghast-viewer (new)
+- Bot screen: a live 3D view of the bot's world in the browser (WebGL2: terrain, entities,
+  players with skins and armour, particles, weather, the HUD) in first person, third person or
+  a free camera. Read-only: it watches `after_tick` and never writes to the game connection.
+- Costs nothing while nobody watches; per-bot HTTP / WebSocket server on loopback by default,
+  optional token, idle stop.
+- Recordings (`FeedRecorder`), a dash cam that saves the last minutes on demand (`DashCam`),
+  and replays on the same page.
+- Textures and models are built at run time from the vanilla client jar, downloaded from
+  Mojang's servers into a git-ignored cache (feature `download`, on by default) or read from a
+  local copy. No game assets are in the repository or the crate.
+- Only 1.8.9 sessions are drawn for now.
+- The built web client (`web/dist`) is committed, so `cargo build` needs no Node.
+
+### ghast
+- New feature `viewer`: re-exports `ghast-viewer` as `ghast::viewer`. Not enabled by default.
+
 ## 0.2.2 — 2026-11-06
 
 Additive: two new crates, behind facade features (the default build is unchanged).

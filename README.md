@@ -39,6 +39,7 @@ All measurements are dated and described with their method in the crate READMEs 
 | [`ghast-entity`](crates/ghast-entity) | entity tracking (opt-in), vanilla server positions, metadata |
 | [`ghast-ext`](crates/ghast-ext) | sequential async helpers on the tick model: look, dig, place, equip, containers, chat, events, `goto` (facade feature `ext`) |
 | [`ghast-pathfinder`](crates/ghast-pathfinder) | A* path planning with physics-measured costs, a path follower, every move checked in the vanilla-exact physics (facade feature `pathfinder`) |
+| [`ghast-viewer`](crates/ghast-viewer) | bot screen: a live 3D view of the bot's world in the browser, recordings, dash cam, replays; textures are fetched from Mojang's client jar at run time (facade feature `viewer`) |
 
 Dependencies point one way: the protocol crate knows nothing about the layers above it, so it
 can be used on its own.
@@ -90,9 +91,11 @@ planned paths with the async helpers).
 | entities: tracking, crosshair, attack / interact | yes | yes |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes |
 | path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | simulation-tested |
+| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet |
 
 Planned: 1.12.2 and 1.21 / latest, one version at a time, each verified the same way. Not
-planned for now: rendering.
+planned for now: a game client with its own window (`ghast-viewer` only draws the bot's view
+in a browser page, read-only).
 
 ## How verification works
 

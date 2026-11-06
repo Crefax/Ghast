@@ -73,3 +73,14 @@ node_modules/
 /CLAUDE.md
 /private/
 /lab/private/
+
+# ghast-viewer: run-time caches (the vanilla client jar, extracted textures, built asset packs,
+# skins) and recordings. Mojang files are fetched at run time and never committed. The cache is
+# relative to the working directory, so it may appear at the root or in the crate directory.
+/crates/ghast-viewer/.cache/
+/crates/ghast-viewer/recordings/
+/recordings/
+*.rec
+# Local cargo overrides (e.g. a [patch] to a local checkout)
+/.cargo/config.toml
+/crates/ghast-viewer/.cargo/

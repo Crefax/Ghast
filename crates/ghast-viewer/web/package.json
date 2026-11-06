@@ -1,0 +1,23 @@
+{
+  "name": "ghast-viewer-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser client of ghast-viewer: WebGL2 renderer, mesher worker and replay UI",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

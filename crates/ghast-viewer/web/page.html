@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bot view</title>
+<style>
+  html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #0d1016; color: #f2f4f8;
+    font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #state { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: min(80vw, 420px);
+    padding: 12px 16px; border-radius: 10px; background: rgba(12, 14, 20, .84); text-align: center; pointer-events: none; font-size: 15px; }
+  #state[hidden] { display: none; }
+  .panel { position: fixed; padding: 4px 8px; border-radius: 6px; background: rgba(12, 14, 20, .5); pointer-events: none;
+    text-shadow: 0 1px 1px rgba(0,0,0,.6); }
+  #top { left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); max-width: 62vw; }
+  #top b { font-weight: 600; }
+  #status { display: block; color: #ffe08a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status:empty { display: none; }
+  #coords { display: block; font: 12px/1.35 ui-monospace, Menlo, Consolas, monospace; opacity: .85; }
+  #debug { left: calc(8px + env(safe-area-inset-left)); top: calc(70px + env(safe-area-inset-top)); white-space: pre;
+    font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; background: rgba(0,0,0,.55); }
+  #debug[hidden] { display: none; }
+  #modes { position: fixed; right: calc(8px + env(safe-area-inset-right)); top: calc(8px + env(safe-area-inset-top)); display: flex; gap: 4px; }
+  #modes button { appearance: none; border: 1px solid rgba(255,255,255,.18); background: rgba(12, 14, 20, .55); color: #e8ebf2;
+    padding: 5px 9px; border-radius: 999px; font: inherit; font-size: 12px; cursor: pointer; }
+  body.embedded #modes [data-mode=fp], body.embedded #modes [data-mode=tp] { display: none; }
+  #modes button.on { background: #e8ebf2; color: #10131a; border-color: #e8ebf2; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; mix-blend-mode: difference; }
+  #cross::before, #cross::after { content: ""; position: absolute; background: #fff; }
+  #cross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #cross::after { top: 8px; left: 0; height: 2px; width: 18px; }
+  #cross[hidden] { display: none; }
+  #hud { position: fixed; left: 50%; bottom: calc(4px + env(safe-area-inset-bottom)); transform: translateX(-50%); pointer-events: none; }
+  #hud-bar { display: block; image-rendering: pixelated; }
+  #rec-list { position: fixed; right: calc(8px + env(safe-area-inset-right)); z-index: 5; max-height: 60vh; overflow: auto; min-width: 230px;
+    max-width: calc(100vw - 16px); padding: 6px; border-radius: 10px; background: rgba(12, 14, 20, .92); box-sizing: border-box; }
+  #rec-list a { display: block; padding: 8px 10px; border-radius: 6px; color: #e8ebf2; text-decoration: none; }
+  #rec-list a:hover { background: rgba(255,255,255,.08); }
+  #rec-list a span { opacity: .65; font-size: 12px; }
+  #rec-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(122px + env(safe-area-inset-bottom)); width: min(640px, calc(100vw - 16px));
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: rgba(12, 14, 20, .78); box-sizing: border-box; }
+  #rec-bar input { flex: 1; min-width: 60px; accent-color: #ffcf4a; }
+  #rec-bar .time { font: 12px ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
+  #rec-bar button { appearance: none; border: 1px solid rgba(255,255,255,.18); background: transparent; color: #e8ebf2; border-radius: 999px;
+    padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  #rec-bar button.on { background: #e8ebf2; color: #10131a; }
+  #rec-bar .play { min-width: 34px; }
+  #rec-bar .speeds { display: flex; gap: 2px; }
+  @media (max-width: 520px) { #rec-bar { flex-wrap: wrap; border-radius: 12px; } #rec-bar input { order: 5; flex-basis: 100%; } }
+  @media (max-width: 420px) { #modes button { padding: 4px 7px; font-size: 11px; } body:not(.embedded) #bright-label { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="top" class="panel"><b id="info"></b><span id="status"></span><span id="coords"></span></div>
+<div id="debug" class="panel" hidden></div>
+<div id="modes">
+  <button data-mode="fp" title="Through the bot's eyes">1st person</button>
+  <button data-mode="tp" title="Orbit around the bot">3rd person</button>
+  <button data-mode="free" title="Free camera">Free</button>
+  <button id="bright" title="Brightness (the game's gamma setting): tap to change">☀<span id="bright-label"> Moody</span></button>
+  <button id="dbg" title="Frame rate, latency and bandwidth"><b>i</b></button>
+</div>
+<div id="cross" hidden></div>
+<div id="hud"></div>
+<div id="state">Loading…</div>
+<script>window.__VIEWER = { data: '%DATA%', pack: '%PACK%', worker: '%WORKER%' };</script>
+<script src="%APP%"></script>
+</body>
+</html>

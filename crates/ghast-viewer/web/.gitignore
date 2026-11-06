@@ -1,0 +1,4 @@
+node_modules/
+*.map
+# machine-local tools and screenshots (reference private checkouts): never committed
+local/

@@ -21,6 +21,9 @@ microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
 ext = ["dep:ghast-ext"]
 # `ghast::pathfinder`: physics-validated path planning and following (and `ext`'s `goto`).
 pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
+# `ghast::viewer`: the bot screen (a live 3D view of the bot's world in the browser, recordings
+# and replays). Textures are fetched from Mojang's client jar at run time.
+viewer = ["dep:ghast-viewer"]
 
 [dependencies]
 ghast-client = { path = "../ghast-client", version = "0.2.2" }
@@ -29,6 +32,7 @@ ghast-auth = { path = "../ghast-auth", version = "0.2.2" }
 ghast-data = { path = "../ghast-data", version = "0.2.2" }
 ghast-ext = { path = "../ghast-ext", version = "0.2.2", optional = true, default-features = false }
 ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.2", optional = true }
+ghast-viewer = { path = "../ghast-viewer", version = "0.2.2", optional = true }
 
 [dev-dependencies]
 log = { workspace = true }

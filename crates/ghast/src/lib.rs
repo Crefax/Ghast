@@ -11,6 +11,7 @@
 //! | [`data`] | `ghast-data` | blocks, collision shapes, items, entities |
 //! | `ext` (feature `ext`) | `ghast-ext` | sequential async helpers: look, dig, place, equip, containers, chat, events |
 //! | `pathfinder` (feature `pathfinder`) | `ghast-pathfinder` | physics-validated A* path planning and following |
+//! | `viewer` (feature `viewer`) | `ghast-viewer` | bot screen: live 3D view in the browser, recordings, replays |
 //!
 //! Supported versions: 1.8.9 and 1.16.5. See the `afk` and `chat` examples:
 //!
@@ -40,3 +41,9 @@ pub use ghast_ext as ext;
 /// Physics-validated path planning and following (`ghast-pathfinder`, feature `pathfinder`).
 #[cfg(feature = "pathfinder")]
 pub use ghast_pathfinder as pathfinder;
+
+/// The bot screen: a live 3D view of the bot's world in the browser, with recordings and
+/// replays (`ghast-viewer`, feature `viewer`). Textures come from Mojang's client jar, fetched
+/// at run time.
+#[cfg(feature = "viewer")]
+pub use ghast_viewer as viewer;
