@@ -57,6 +57,17 @@ See [oracle/README.md](oracle/README.md).
 5. Keep golden vectors small enough for the repository; large fuzz runs stay in
    `oracle/cache/`.
 
+## Versioning
+
+All crates share one version number and are released together. Before 1.0: 0.y.Z = additive
+(new crates, new API, fixes; existing code keeps compiling), 0.Y.0 = breaking changes, listed in
+CHANGELOG.md with a migration note. 1.0 is not a date but a checklist:
+- every supported version (at least 1.8.9, 1.12.2, 1.16.5 and a current release) verified against
+  the vanilla oracle with zero physics diffs, plus a live lab run with 0 anticheat flags;
+- no breaking API change for at least two months of releases, checked with cargo-semver-checks;
+- real bots running on it in production for at least a month;
+- a guide (mdBook) and examples for every public crate.
+
 ## Licence
 
 By contributing you agree that your contribution is dual licensed under MIT OR Apache-2.0,

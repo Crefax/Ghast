@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "ghast"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ghast-auth",
  "ghast-client",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-auth"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "md-5",
  "rand_core 0.6.4",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-client"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "flate2",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-codegen-data"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "flate2",
  "serde_json",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-codegen-protocol"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde_json",
  "sha2",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-data"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "flate2",
  "serde_json",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-entity"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "criterion",
@@ -721,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-ext"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "ghast-auth",
@@ -736,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-inventory"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "bytestring",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-pathfinder"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "criterion",
  "ghast-client",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-physics"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "criterion",
  "flate2",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-protocol"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "bytes",
@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "ghast-world"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytes",
  "criterion",
