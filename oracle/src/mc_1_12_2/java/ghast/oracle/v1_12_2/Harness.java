@@ -132,6 +132,10 @@ final class Harness {
             player.afterSpawn();
             world.spawnEntity(player);
             player.input = new KeyboardInput(options);
+            // ClientPlayerEntity.field_14951 is the per-tick copy of the auto-jump option. It starts TRUE
+            // and is only refreshed at the end of sendMovementPackets, so without this the first tick of
+            // every case would still auto-jump. Set it as if an earlier tick had copied the (off) option.
+            Reflect.set(ClientPlayerEntity.class, player, "field_14951", false);
             client.interactionManager.copyAbilities(player);
             Reflect.set(MinecraftClient.class, client, "cameraEntity", player);
             Reflect.set(Entity.class, player, "random", new Random(0L));

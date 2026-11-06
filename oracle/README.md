@@ -542,7 +542,9 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
 - 1.12 blocks keep no mutable bounds: there are no history-dependent shapes (anvils and chests are in
   the fuzz palette).
 - The auto-jump option is off (`GameOptions.field_14902 = false`; vanilla's default is on, bots never
-  auto-jump). The tutorial manager is set (no tutorial step: no effect).
+  auto-jump). `ClientPlayerEntity.field_14951`, the per-tick copy of that option, starts true and is only
+  refreshed at the end of `sendMovementPackets`; the harness sets it to false at setup (as if an earlier
+  tick had copied the option), otherwise the first tick of a case could still auto-jump. The tutorial manager is set (no tutorial step: no effect).
 - Teleport events: the position handler's reply is recorded as `teleport_confirm` (ids 1, 2, … per
   case) followed by `position_look` (`on_ground` false), before the tick's own packets. Positions are
   clamped to ±3.0E7 and the pitch to ±90 by `updatePositionAndAngles`.
@@ -579,7 +581,10 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
   stairs, trapdoors, shulker boxes, concrete: 1.12 connects fences / panes / walls by the neighbour's
   face shape), `self_south`, `self_north_south`, `self_all`, `self_north_south_stone_above`,
   `self_east_west_wall_above`, `stair_neighbour` (oak, stone, purpur stairs), `door_lower_with_upper` /
-  `door_upper_with_lower` (oak, iron, spruce), `chest_neighbour` / `chest_other_kind`,
+  `door_upper_with_lower` (oak, iron, spruce), `door_stack` (oak, iron, spruce: each of the 12 metas
+  with each of the 12 metas of the same door, and of another door kind, directly above and directly
+  below — the actual state reads the other half's decoded properties whenever the neighbour is the same
+  door, whatever half it is), `chest_neighbour` / `chest_other_kind`,
   `gate_between_walls` / `gate_between_walls_ns`, `chorus_sides` (all 64 combinations of chorus plants
   around a chorus plant) and `chorus_one_side`. No `shape_source` / `history_*` fields.
 - `collision_boxes_far.jsonl.gz`: `boxes_abs` lines for every id × meta `alone` (no "settled").

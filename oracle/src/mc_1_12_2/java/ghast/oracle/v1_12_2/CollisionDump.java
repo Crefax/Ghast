@@ -152,6 +152,24 @@ final class CollisionDump {
                 }
             }
         }
+        // Doors stacked on doors: every half of the centre door with every half of the same door above
+        // and (separately) below, and with a door of another kind above / below. 1.12's actual state
+        // reads the other half's decoded properties whenever the neighbour is the same door, whatever
+        // half it is (e.g. a lower half above a lower half gives the palette's default hinge).
+        int[][] doorPairs = {{OAK_DOOR, IRON_DOOR}, {IRON_DOOR, SPRUCE_DOOR}, {SPRUCE_DOOR, OAK_DOOR}};
+        for (int[] pair : doorPairs) {
+            int id = pair[0];
+            for (int meta = 0; meta < 12; meta++) {
+                for (int dy : new int[] {1, -1}) {
+                    for (int nm = 0; nm < 12; nm++) {
+                        out.add(boxes(id, meta, "door_stack", List.of(new int[] {0, dy, 0, id, nm}), false));
+                    }
+                    for (int nm = 0; nm < 12; nm++) {
+                        out.add(boxes(id, meta, "door_stack", List.of(new int[] {0, dy, 0, pair[1], nm}), false));
+                    }
+                }
+            }
+        }
         // Chests: a second chest on each side (1.9+ single chests shrink towards a neighbour chest).
         for (int id : new int[] {CHEST, TRAPPED_CHEST}) {
             for (int meta = 2; meta < 6; meta++) {
