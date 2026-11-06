@@ -19,16 +19,16 @@ default = ["pathfinder"]
 pathfinder = ["dep:ghast-pathfinder"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.2.2" }
-ghast-data = { path = "../ghast-data", version = "0.2.2", default-features = false, features = ["v1_8", "v1_16_5"] }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.2", optional = true }
+ghast-client = { path = "../ghast-client", version = "0.2.3" }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.3", optional = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }
-ghast-auth = { path = "../ghast-auth", version = "0.2.2" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.2" }
+ghast-auth = { path = "../ghast-auth", version = "0.2.3" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.3" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread"] }
 
 [package.metadata.docs.rs]

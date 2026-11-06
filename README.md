@@ -9,7 +9,7 @@ A headless Minecraft: Java Edition client / bot library in Rust.
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
   thread and a few MB of memory.
 
-Status: early (0.1, not on crates.io yet). APIs will change.
+Status: early (0.2, on crates.io). APIs will still change; see CONTRIBUTING.md for the versioning policy.
 
 ## Numbers
 

@@ -21,12 +21,12 @@ default = ["download"]
 download = ["dep:ureq"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.2.2" }
-ghast-entity = { path = "../ghast-entity", version = "0.2.2" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.2", default-features = false, features = ["v1_8", "v1_16_5"] }
-ghast-world = { path = "../ghast-world", version = "0.2.2", default-features = false, features = ["v1_8", "v1_16_5"] }
-ghast-inventory = { path = "../ghast-inventory", version = "0.2.2" }
-ghast-data = { path = "../ghast-data", version = "0.2.2", default-features = false, features = ["v1_8"] }
+ghast-client = { path = "../ghast-client", version = "0.2.3" }
+ghast-entity = { path = "../ghast-entity", version = "0.2.3" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-world = { path = "../ghast-world", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-inventory = { path = "../ghast-inventory", version = "0.2.3" }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8"] }
 bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net", "time", "sync", "macros"] }
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "ws", "query"] }

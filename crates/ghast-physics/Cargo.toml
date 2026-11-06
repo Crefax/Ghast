@@ -20,7 +20,7 @@ default = []
 oracle-cache = []
 
 [dependencies]
-ghast-data = { path = "../ghast-data", version = "0.2.2", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
 
 [dev-dependencies]
 ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_16_5"] }

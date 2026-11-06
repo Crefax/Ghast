@@ -6,7 +6,7 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## Unreleased
+## 0.2.3 — 2026-11-06
 
 Additive: one new crate, behind a facade feature (the default build is unchanged).
 
