@@ -56,6 +56,8 @@ oracle/
   src/setup/                 Setup (download, SHA-1, tiny-remapper), Coverage (report generator)
   src/common/                Scenario model, JSON writer (bit-exact floats), SplitMix64 RNG
   src/mc_1_8_9/              the 1.8.9 harness (Harness, Recorder, Scenarios, Fuzz, CollisionDump, …)
+  src/mc_1_12_2/             the 1.12.2 harness (same structure as 1.8.9, see "1.12.2" below)
+  src/mc_1_16_5/             the 1.16.5 harness
   cache/                     (git-ignored) jars, libraries, mappings, remapped jar, fuzz output
 tests/golden/1.8.9/
   scenarios.jsonl.gz         hand-written scenarios
@@ -70,8 +72,8 @@ tests/golden/1.8.9/
 
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
 version-agnostic, a version needs `versions/<mc>.properties` + `versions/<mc>.coverage` and its own
-harness source set (`src/mc_x_y_z`) compiled against that version's named jar. Implemented: 1.8.9 and
-1.16.5 (see "1.16.5" below).
+harness source set (`src/mc_x_y_z`) compiled against that version's named jar. Implemented: 1.8.9,
+1.16.5 (see "1.16.5" below) and 1.12.2 (see "1.12.2" below).
 
 ## How a run works (1.8.9)
 
@@ -512,6 +514,131 @@ so this file records the grids themselves, deduplicated:
 - Sliding down a honey wall caps the falling speed (`honey_wall_slide`); berry bushes / cobwebs set
   `movement_multiplier`, consumed by the next move.
 
+## 1.12.2 (third version)
+
+Run everything with `MC=1.12.2`, e.g. `MC=1.12.2 oracle/run.sh`, `MC=1.12.2 oracle/run.sh verify`,
+`MC=1.12.2 oracle/run.sh fuzz --seed 7 --count 1000`. Mappings: Legacy Fabric **Legacy Yarn**
+`1.12.2+build.604` (CC0, mergedv2). Name report: `YARN_COVERAGE_1.12.2.md` (1.12.2 Legacy Yarn leaves
+much of the movement code unnamed: `travel` is `LivingEntity.method_2657`, the input acceleration is
+`Entity.method_2492`; see its "Names to read carefully" table). Output: `tests/golden/1.12.2/` with the
+same file names as 1.8.9 (`scenarios` 112 cases, `fuzz_seed1` and `fuzz_edges_seed1` 100 x 60,
+`collision_boxes`, `collision_boxes_far`, `selection_boxes`, `raytrace`, `entity_sizes`, `recipes`,
+`clicks_seed1`, `clicks_craft_seed1` 3000 cases each).
+
+Setup: the remapped jar needs `remap.stripParameterAnnotations` (javac rejects some inner-class
+constructor annotation tables), `remap.fixPackageAccess` and `remap.publicProtected` (protected members
+become public: after moving the single official package into Yarn packages, protected calls on another
+instance from a subclass in a different package fail verification, e.g. horses at bootstrap).
+`Bootstrap.initialize` redirects `System.out` / `System.err` into its logger; the harness restores them.
+
+### How a 1.12.2 run works
+
+The harness is the 1.8.9 one (same structure, same scenario model) with these differences:
+- Blocks are written as states: a raw `id << 4 | meta` value goes through `Block.BLOCK_STATES.fromId`
+  and becomes air when no state has it — exactly what the chunk palette does on the wire (global palette
+  and section palettes both map an unknown id to air). The raw → state table is built from every state
+  of every block (`id << 4 | getData(state)`, the last state per raw value wins); tripwire registers
+  metas 0–14 only.
+- 1.12 blocks keep no mutable bounds: there are no history-dependent shapes (anvils and chests are in
+  the fuzz palette).
+- The auto-jump option is off (`GameOptions.field_14902 = false`; vanilla's default is on, bots never
+  auto-jump). The tutorial manager is set (no tutorial step: no effect).
+- Teleport events: the position handler's reply is recorded as `teleport_confirm` (ids 1, 2, … per
+  case) followed by `position_look` (`on_ground` false), before the tick's own packets. Positions are
+  clamped to ±3.0E7 and the pitch to ±90 by `updatePositionAndAngles`.
+- Item use (`use` key): a **shield** in the main hand (swords no longer block). Rising edge →
+  `interactItem` (`method_12234`, sends `use_item` with the hand); falling edge → `stopUsingItem`
+  (`block_dig` status 5). While the hand is active the input is ×0.2.
+- Effects are sent by id like 1.8.9; 25 = levitation (in the fuzz and the `levitation*` scenarios).
+- Not covered: elytra / fall flying (needs the server flag), vehicles, entity collisions (boats,
+  shulkers), frost walker, auto-jump on.
+
+### 1.12.2 format differences (vs 1.8.9)
+
+- Header `version` `"1.12.2"`; `fills` keep `[x0, y0, z0, x1, y1, z1, id, meta]` (1.12 ids 0–255).
+- `state` adds `width`, `height` (f32; 0.6 × 1.65 while sneaking, see quirks) and `upward_speed`
+  (Legacy Yarn `LivingEntity.forwardSpeed`, which is the vertical travel input, always 0);
+  `forward_speed` is `field_16513` (the forward input). `sprinting_ticks_left` keeps its key but holds
+  `ticksSinceSprintingChanged`, which **counts up** in 1.12 (reset to 0 by every sprint change).
+  `using_item` (only in cases using the `use` key) is "a hand is active" (`method_13061`).
+  `sent` adds `on_ground` (`field_13457`, the last on_ground sent).
+- `packets` use minecraft-data 1.12.2 names: `flying`, `position`, `look`, `position_look`,
+  `entity_action` (0 start_sneaking, 1 stop_sneaking, 3 start_sprinting, 4 stop_sprinting, 8
+  start_fall_flying), `abilities`, `teleport_confirm` (`teleport_id`), `use_item` (`hand`: 0 main,
+  1 off; Legacy Yarn calls the class `SwingHandC2SPacket`), `arm_animation` (`hand`), `held_item_slot`
+  (`slot`), `block_place` (`location`, `direction`, `hand`), `block_dig` (`status`, `status_name`).
+- `collision_boxes.jsonl.gz`: `{"type":"block", "id", "name", "slipperiness", "has_collision",
+  "material" (Yarn `Material` field name), "material_blocks_movement", "material_fluid",
+  "material_solid", "material_opaque", "material_replaceable", "climbable"}`; the per-state flags moved
+  to the `"alone"` box lines: `full_cube` (`method_11730`), `normal_cube` (`method_11734`, the
+  pushOutOfBlocks test), `block_normal_cube` (`method_11733`), `top_solid` (`method_11739`),
+  `opaque_cube` (`isFullBoundsCubeForCulling`), `full_block`, `causes_suffocation` (`method_13763`),
+  `material`. Every box line has `actual_state` (the neighbour-aware state) when registered. Boxes come
+  from `BlockState.appendCollisionBoxes(world, pos, mask, list, player, false)` — what the world's
+  collision query calls. Configs: `alone`, `stone_sides`, `one_side` (55 neighbour kinds, incl. slabs,
+  stairs, trapdoors, shulker boxes, concrete: 1.12 connects fences / panes / walls by the neighbour's
+  face shape), `self_south`, `self_north_south`, `self_all`, `self_north_south_stone_above`,
+  `self_east_west_wall_above`, `stair_neighbour` (oak, stone, purpur stairs), `door_lower_with_upper` /
+  `door_upper_with_lower` (oak, iron, spruce), `chest_neighbour` / `chest_other_kind`,
+  `gate_between_walls` / `gate_between_walls_ns`, `chorus_sides` (all 64 combinations of chorus plants
+  around a chorus plant) and `chorus_one_side`. No `shape_source` / `history_*` fields.
+- `collision_boxes_far.jsonl.gz`: `boxes_abs` lines for every id × meta `alone` (no "settled").
+- `selection_boxes.jsonl.gz`: same schema as 1.8.9; `bounds` = the state's outline box (Legacy Yarn
+  `BlockState.getCollisionBox(view, pos)`, which is NOT the collision box), `has_collision_box` =
+  `method_11726(view, pos) != null`. `raytrace.jsonl.gz` as 1.8.9.
+- `entity_sizes.jsonl.gz`: as 1.8.9, `name` is the registry identifier's path (`"zombie"`,
+  `"armor_stand"`; lightning `"lightning_bolt"`, players `"player"`); object types of 1.12 (3 area effect
+  cloud, 67 shulker bullet, 68 llama spit, 79 evoker fangs, 91 spectral arrow, 93 dragon fireball);
+  variants `baby` (passive mobs and zombies — 1.9+ clients resize zombies on the metadata too), slime
+  `size_1..4`, armor stand `small` / `marker` / `small_marker` (`next_tick`), players `sneaking`
+  (1.65 high, applied by the next tick's size update).
+- Clicks: `inv` has 41 entries (main 0–35, armor 36–39 feet first, offhand 40); window 0 has 46 slots
+  (45 = offhand, clickable directly). Mode numbers are `ItemAction` ordinals (0 pickup, 1 quick move,
+  2 swap, 4 throw, 6 pickup all). The 1.12 client **never computes crafting results itself**
+  (`ScreenHandler.method_14205` only runs on the server); in `--craft` cases the harness puts the
+  server's result (`RecipeDispatcher.matches`) into the result slot once after filling the grid, as the
+  server's set_slot would; it is not recomputed after clicks (a vanilla client keeps the stale result
+  until the server answers).
+- `recipes.jsonl.gz`: `{"i", "name", "type":"shaped", "w", "h", "in":[[[id,data]…]…], "out":hex}`,
+  `{"i", "name", "type":"shapeless", "in":…, "out":hex}`, `{"i", "name", "type":"special", "class"}` in
+  `RecipeDispatcher.REGISTRY` order (the order `matches` tries); every ingredient is the list of stacks
+  it accepts (empty list = empty cell), data 32767 = any.
+
+### 1.12.2 quirks (observed in the vectors)
+
+- No idle `flying` packets: a bare on-ground packet is sent only when `on_ground` changed
+  (`idle_on_ground_only`); the position is forced every **20** ticks (the counter is incremented before
+  the test; 1.8.9: 21).
+- Player size: at the end of `PlayerEntity.tick` (after the move, before the packets) the size follows
+  the sneak key: 0.6 × 1.65 sneaking, 0.6 × 1.8 standing, applied only if the new box is free
+  (`sneak_low_ceiling`: sneaking fits under a 1.75 gap, releasing sneak there keeps the small box).
+  The box is rebuilt from its min corner (`minX + width`, …), so the max corner gets new rounding.
+- Sneak edge guard probes `stepHeight` (0.6) down instead of 1.0: a sneaking player walks down a 0.5
+  drop (`sneak_edge_small_drop`).
+- Velocity cut-off 0.003 (1.8.9: 0.005); the input acceleration (`method_2492`) converts the yaw with `yaw * 0.017453292F`.
+- Above an unloaded column (`floor(x)`, `floor(z)`; 1.8.9 truncated) the client still ticks and gets
+  `velocityY = -0.1` (`unloaded_negative_column`).
+- Climbing also on an open trapdoor above a ladder with the same facing (`trapdoor_ladder_climb`).
+- Beds bounce (`vy = -vy * 0.66F` unless sneaking, `bed_bounce`); levitation replaces gravity
+  (`vy += (0.05 * (amp + 1) - vy) * 0.2`, `levitation`).
+- Creative flight while sneaking divides the input by 0.3 again (`flying_sneak_horizontal`).
+- Collision shapes: fences are a post plus one box per arm, panes/bars a post plus arms; ladders 3/16;
+  farmland and grass paths 15/16; lily pads 1/16 inset, 0.09375 high; piston head arms 1.25 long.
+
+Big fuzz runs (git-ignored `oracle/cache/1.12.2/`, replayed by the Rust large-fuzz test):
+
+```sh
+for s in 11 12 13 14 15; do MC=1.12.2 oracle/run.sh fuzz --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz/physics_s$s.jsonl.gz"; done
+MC=1.12.2 oracle/run.sh fuzz --seed 21 --count 2000 --ticks 100 --use-item true --out "$PWD/oracle/cache/1.12.2/fuzz/physics_use_s21.jsonl.gz"
+for s in 31 32 33 34 35; do MC=1.12.2 oracle/run.sh fuzz --edges true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-edges/edges_s$s.jsonl.gz"; done
+for s in 41 42 43 44 45; do MC=1.12.2 oracle/run.sh fuzz --extras true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-extras/extras_s$s.jsonl.gz"; done
+```
+
+The 1.12.2 fuzz palette is the 1.8.9 one plus frosted ice, grass paths, magma, bone blocks, concrete
+(powder), glazed terracotta, purpur blocks / slabs / stairs / pillars, observers, shulker boxes, end rods,
+chorus plants / flowers, beds, anvils, chests, doors, more fences / gates, hay, barriers, structure voids,
+open trapdoors above ladders, and the levitation effect.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or
@@ -591,7 +718,7 @@ cases to run: use `replay` (above), or ask the oracle maintainer.
 `Block.isFullCube` = opaque && normal render && not a power source, `isNormalBlock` = blocks movement &&
 normal render. Full list: YARN_COVERAGE.md, "Names to read carefully".
 
-## Window clicks (`clicks`, both versions)
+## Window clicks (`clicks`, every version; 1.12.2 specifics in its section)
 
 `ClickDump` reuses the movement harness' player (`Harness.Run`) and calls the real client click path:
 `ClientPlayerInteractionManager.clickSlot` → `ScreenHandler.getNextActionId` + `onSlotClick` → the

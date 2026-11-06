@@ -139,14 +139,15 @@ public final class Setup {
         Path named = dir.resolve("client-" + to + ".jar");
         boolean strip = Boolean.parseBoolean(cfg.getProperty("remap.stripParameterAnnotations", "false"));
         boolean fixAccess = Boolean.parseBoolean(cfg.getProperty("remap.fixPackageAccess", "false"));
+        boolean publicProtected = Boolean.parseBoolean(cfg.getProperty("remap.publicProtected", "false"));
         String stamp = clientSha1 + "|" + mappingSha1 + "|" + from + "->" + to + (strip ? "|strip-param-annotations" : "")
-                + (fixAccess ? "|fix-package-access" : "");
+                + (fixAccess ? "|fix-package-access" : "") + (publicProtected ? "|public-protected" : "");
         Path stampFile = dir.resolve("client-" + to + ".stamp");
         if (!Files.exists(named) || !Files.exists(stampFile) || !Files.readString(stampFile).equals(stamp)) {
             System.out.println("[setup] remapping " + clientJar.getFileName() + " " + from + " -> " + to);
             remap(clientJar, named, tiny, from, to, libs, fixAccess);
-            if (strip) {
-                stripParameterAnnotations(named);
+            if (strip || publicProtected) {
+                rewriteClasses(named, strip, publicProtected);
             }
             Files.writeString(stampFile, stamp);
         }
@@ -196,12 +197,20 @@ public final class Setup {
     }
 
     /**
-     * Removes the parameter annotation tables (@Nullable markers) from every class of the jar. Some
-     * classes carry tables whose length does not match the descriptor (the synthetic outer-instance
-     * parameter of inner-class constructors), and javac refuses to compile against them ("bad
+     * Rewrites every class of the jar.
+     *
+     * <p>{@code strip}: removes the parameter annotation tables (@Nullable markers). Some classes carry
+     * tables whose length does not match the descriptor (the synthetic outer-instance parameter of
+     * inner-class constructors), and javac refuses to compile against them ("bad
      * RuntimeInvisibleParameterAnnotations attribute"). Nothing in the game reads them at run time.
+     *
+     * <p>{@code publicProtected}: makes protected fields and methods public. The official jar has
+     * (almost) every class in one package, so a protected member was also package-visible; after
+     * remapping into Yarn packages the verifier rejects protected access on another instance's type
+     * from a subclass in a different package (e.g. 1.12.2's horses). Widening is what an access
+     * widener does; method bodies and dispatch are unchanged.
      */
-    private static void stripParameterAnnotations(Path jar) throws IOException {
+    private static void rewriteClasses(Path jar, boolean strip, boolean publicProtected) throws IOException {
         Path tmp = jar.resolveSibling("partial-strip-" + jar.getFileName());
         try (ZipInputStream in = new ZipInputStream(Files.newInputStream(jar));
              java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(tmp))) {
@@ -213,8 +222,17 @@ public final class Setup {
                     org.objectweb.asm.ClassWriter cw = new org.objectweb.asm.ClassWriter(0);
                     cr.accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9, cw) {
                         @Override
+                        public org.objectweb.asm.FieldVisitor visitField(int access, String name, String desc, String sig, Object value) {
+                            return super.visitField(widen(access, publicProtected), name, desc, sig, value);
+                        }
+
+                        @Override
                         public org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
-                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9, super.visitMethod(access, name, desc, sig, ex)) {
+                            org.objectweb.asm.MethodVisitor mv = super.visitMethod(widen(access, publicProtected), name, desc, sig, ex);
+                            if (!strip) {
+                                return mv;
+                            }
+                            return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9, mv) {
                                 @Override
                                 public void visitAnnotableParameterCount(int parameterCount, boolean visible) {
                                 }
@@ -236,6 +254,13 @@ public final class Setup {
             }
         }
         Files.move(tmp, jar, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    private static int widen(int access, boolean publicProtected) {
+        if (publicProtected && (access & org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0) {
+            return (access & ~org.objectweb.asm.Opcodes.ACC_PROTECTED) | org.objectweb.asm.Opcodes.ACC_PUBLIC;
+        }
+        return access;
     }
 
     private static boolean rulesAllow(JsonArray rules) {

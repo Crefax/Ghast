@@ -1,0 +1,153 @@
+# Classes covered by YARN_COVERAGE_1.12.2.md (Yarn names). "note <member> = <text>" lines feed the
+# "names to read carefully" table. Members are written Class.member with Yarn / intermediary names.
+
+[Player tick and input]
+net/minecraft/entity/player/ClientPlayerEntity
+net/minecraft/client/network/AbstractClientPlayerEntity
+net/minecraft/entity/player/PlayerEntity
+net/minecraft/entity/player/PlayerAbilities
+net/minecraft/entity/player/HungerManager
+net/minecraft/client/input/Input
+net/minecraft/client/input/KeyboardInput
+net/minecraft/client/option/KeyBinding
+net/minecraft/client/option/GameOptions
+net/minecraft/client/network/ClientPlayerInteractionManager
+
+[Living entity travel and entity move]
+net/minecraft/entity/LivingEntity
+net/minecraft/entity/Entity
+net/minecraft/entity/MovementType
+net/minecraft/entity/attribute/EntityAttributes
+net/minecraft/entity/attribute/EntityAttributeInstance
+net/minecraft/entity/attribute/EntityAttributeInstanceImpl
+net/minecraft/entity/attribute/AttributeModifier
+net/minecraft/entity/effect/StatusEffect
+net/minecraft/entity/effect/StatusEffectInstance
+net/minecraft/enchantment/EnchantmentHelper
+
+[Math and geometry]
+net/minecraft/util/math/Box
+net/minecraft/util/math/MathHelper
+net/minecraft/util/math/Vec3d
+net/minecraft/util/math/BlockPos
+net/minecraft/util/math/Vec3i
+
+[World access and collision query]
+net/minecraft/world/World
+net/minecraft/client/world/ClientWorld
+net/minecraft/world/BlockView
+net/minecraft/world/chunk/Chunk
+net/minecraft/world/chunk/EmptyChunk
+net/minecraft/world/chunk/ChunkSection
+net/minecraft/world/chunk/palette/PaletteContainer
+net/minecraft/world/chunk/ClientChunkProvider
+net/minecraft/world/border/WorldBorder
+
+[Blocks: shapes, slipperiness, contact effects]
+net/minecraft/block/Block
+net/minecraft/block/material/Material
+net/minecraft/block/SlabBlock
+net/minecraft/block/StairsBlock
+net/minecraft/block/FenceBlock
+net/minecraft/block/FenceGateBlock
+net/minecraft/block/PaneBlock
+net/minecraft/block/WallBlock
+net/minecraft/block/LadderBlock
+net/minecraft/block/VineBlock
+net/minecraft/block/CobwebBlock
+net/minecraft/block/SoulSandBlock
+net/minecraft/block/SlimeBlock
+net/minecraft/block/IceBlock
+net/minecraft/block/PackedIceBlock
+net/minecraft/block/SnowLayerBlock
+net/minecraft/block/CarpetBlock
+net/minecraft/block/CactusBlock
+net/minecraft/block/FarmlandBlock
+net/minecraft/block/AbstractFluidBlock
+net/minecraft/block/DoorBlock
+net/minecraft/block/TrapdoorBlock
+net/minecraft/block/ChestBlock
+net/minecraft/block/AnvilBlock
+net/minecraft/block/BedBlock
+net/minecraft/block/CakeBlock
+net/minecraft/block/LilyPadBlock
+net/minecraft/block/HopperBlock
+net/minecraft/block/CauldronBlock
+net/minecraft/block/BrewingStandBlock
+net/minecraft/block/EndPortalFrameBlock
+net/minecraft/block/SkullBlock
+net/minecraft/block/PistonBlock
+net/minecraft/block/PistonHeadBlock
+net/minecraft/block/PistonExtensionBlock
+net/minecraft/block/BaseBlockState
+net/minecraft/state/StateManager
+net/minecraft/block/EndRodBlock
+net/minecraft/block/ChorusPlantBlock
+net/minecraft/block/GrassPathBlock
+net/minecraft/block/FrostedIceBlock
+net/minecraft/block/MagmaBlock
+net/minecraft/block/ShulkerBoxBlock
+net/minecraft/block/ObserverBlock
+net/minecraft/block/PurpurSlab
+
+[Outgoing movement packets]
+net/minecraft/network/packet/c2s/play/PlayerMoveC2SPacket
+net/minecraft/network/packet/c2s/play/ClientCommandC2SPacket
+net/minecraft/network/packet/c2s/play/UpdatePlayerAbilitiesC2SPacket
+net/minecraft/network/packet/c2s/play/TeleportConfirmC2SPacket
+net/minecraft/network/packet/c2s/play/SwingHandC2SPacket
+
+note ClientPlayerEntity.field_1763 = unnamed: sprint double-tap window (set to 7 on the first forward press, sprint starts if forward is pressed again while > 0)
+note ClientPlayerEntity.ticksSinceSprintingChanged = 1.9+: counts UP every tick, reset to 0 by setSprinting; it no longer ends a sprint
+note ClientPlayerEntity.method_9719 = unnamed: "is open space" test of pushOutOfBlocks (block and block above are not normal cubes: BaseBlockState.method_11734)
+note ClientPlayerEntity.field_13457 = unnamed: last on_ground sent; a bare on_ground packet is sent only when it changes (1.9+)
+note ClientPlayerEntity.field_14952 = unnamed: auto-jump countdown; forces input.jumping while > 0
+note ClientPlayerEntity.field_14951 = unnamed: copy of the auto-jump option taken in sendMovementPackets
+note ClientPlayerEntity.method_13426 = unnamed: auto-jump check after a move (only with the auto-jump option on)
+note ClientPlayerEntity.method_13061 = unnamed: a hand is active (item in use); drives the 0.2 input slowdown
+note ClientPlayerEntity.lastIsHoldingSneakKey = last sneaking state sent with an entity action packet
+note ClientPlayerEntity.ticksSinceLastPositionPacketSent = incremented BEFORE the test in 1.9+: position packet forced when >= 20
+note PlayerEntity.abilityResyncCountdown = misleading: the creative double-tap-jump flight toggle window (7 ticks)
+note PlayerEntity.field_4006 = unnamed: base air acceleration (0.02); flyingSpeed is set from it (x1.3 when sprinting) AFTER travel, so a sprint change reaches the air acceleration one tick late
+note PlayerEntity.method_13266 = unnamed: size update at the end of PlayerEntity.tick (sneaking 0.6 x 1.65, standing 0.6 x 1.8, elytra 0.6 x 0.6), skipped when the new box collides
+note PlayerEntity.method_2657 = unnamed: travel override (creative flight: fly speed x2 sprinting, velocityY x0.6 afterwards)
+note PlayerEntity.getMovementSpeed = returns the movement speed attribute value directly (the LivingEntity.movementSpeed field is ignored for players)
+note LivingEntity.method_2657 = unnamed: travel(strafe, vertical, forward)
+note LivingEntity.forwardSpeed = misleading: the VERTICAL input passed to travel (0 for players); the forward input is field_16513
+note LivingEntity.field_16513 = unnamed: the forward input (set from Input.movementForward, decays x0.98)
+note LivingEntity.flyingSpeed = misleading: acceleration used by travel when not on ground; creative flight temporarily replaces it with the fly speed (x2 sprinting)
+note LivingEntity.jumpingCooldown = jump cooldown (10 ticks after a jump while jump is held, reset to 0 on release)
+note LivingEntity.initializeAttribute = misleading: it is a plain getter of the attribute instance
+note LivingEntity.method_2610 = unnamed: "movement blocked" (health <= 0 or sleeping)
+note LivingEntity.method_2634 = unnamed: jump while touching water (velocityY += 0.04)
+note LivingEntity.method_10979 = unnamed: jump while touching lava (velocityY += 0.04)
+note LivingEntity.method_13055 = unnamed: is fall flying (elytra)
+note LivingEntity.method_13494 = unnamed: water drag (0.8 for players)
+note LivingEntity.method_13073 = unnamed: elytra flag update before travel
+note LivingEntity.method_13063 = unnamed: active item (hand) tick
+note Entity.method_2492 = unnamed: applies the input acceleration (strafe, up, forward, friction); yaw is converted with yaw * 0.017453292F (1.8: yaw * PI_f / 180F)
+note Entity.velocityDirty = flag set by jump (and knockback); not read by client movement
+note Entity.field_3233 = unnamed: next step-sound distance (no effect on movement)
+note Entity.colliding = horizontal OR vertical collision this move
+note Entity.hasNoGravity = the no-gravity entity flag (1.10+); skips gravity in travel
+note BaseBlockState.method_11730 = unnamed: full cube (default true; false for partial shapes)
+note BaseBlockState.method_11734 = unnamed: normal cube (opaque material && full cube && not a power source); pushOutOfBlocks
+note BaseBlockState.method_11733 = unnamed: block-normal cube (movement-blocking material && full cube)
+note BaseBlockState.method_11739 = unnamed: top solid (opaque material && full cube)
+note BaseBlockState.method_11726 = unnamed: the COLLISION box (null = none)
+note BaseBlockState.getCollisionBox = misleading: the outline / selection box (what ray tests use), not the collision box
+note BaseBlockState.isFullBoundsCubeForCulling = opaque cube
+note Block.method_8640 = unnamed: collision box of a state (defaults to the outline box)
+note Block.method_11563 = unnamed: selected box offset to the position
+note KeyBinding.isPressed = key is held (not the "was pressed" counter, that is wasPressed)
+note Input.movementSideways = strafe input; positive = left
+note Box.method_583 = unnamed: clip a movement along X against this box (collision offset X)
+note Box.method_589 = unnamed: clip a movement along Y against this box (collision offset Y)
+note Box.method_594 = unnamed: clip a movement along Z against this box (collision offset Z)
+note World.doesBoxCollide = misleading: returns the LIST of block (and entity) collision boxes intersecting the box; Entity.move uses it
+note World.method_13689 = unnamed: the block part of the collision query (range, corner skipping, world border)
+note World.method_11488 = unnamed: "any block box intersects" test (size update, ignores entities)
+note World.method_3610 = unnamed: fluid current push (adds flow to velocity) and "box touches material"; drives touchingWater
+note GameOptions.field_14902 = unnamed: the auto-jump option (vanilla default true; the oracle sets it false)
+note SwingHandC2SPacket = misleading class name: it is the use-item packet (minecraft-data `use_item`); the arm swing is HandSwingC2SPacket
+note PlayerEntity.method_3209 = unnamed: movement statistics + exhaustion after travel (no effect on motion)
