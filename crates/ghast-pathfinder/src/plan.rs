@@ -13,7 +13,7 @@ use crate::moves::{
     climb_wall, spot,
 };
 use crate::sim::{SimOutcome, SimReport, simulate};
-use crate::world::{BlockSource, BuildKeyHasher, Grid};
+use crate::world::{BlockSource, BuildKeyHasher, Grid, Sections};
 
 /// Digging through blocks (off by default): cost per block in ticks
 /// `base + ticks_per_hardness * hardness`, blocks harder than `max_hardness` are never dug.
@@ -233,6 +233,7 @@ pub(crate) struct Edge {
     pub(crate) place: Option<Place>,
 }
 
+#[derive(Clone)]
 struct Rec {
     pos: [i32; 3],
     spot: Spot,
@@ -245,7 +246,7 @@ struct Rec {
     closed: bool,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Open {
     f: f64,
     h: f64,
@@ -328,134 +329,55 @@ impl Pathfinder {
         goal: &Goal,
         banned: &HashSet<([i32; 3], [i32; 3])>,
     ) -> Result<Path, PlanError> {
-        let mut g = Grid::new(world, version);
-        let costs = Costs::of(version);
-        let start_spot = start_spot(&mut g, from)?;
-        let heur = self.heuristic(costs);
-        let w = self.cfg.heuristic_weight;
-        let mut recs: Vec<Rec> = Vec::with_capacity(4096);
-        let mut index: HashMap<u64, u32, BuildKeyHasher> =
-            HashMap::with_capacity_and_hasher(4096, BuildKeyHasher);
-        let mut open = BinaryHeap::with_capacity(4096);
-        let h0 = goal.estimate(from, &heur);
-        recs.push(Rec {
-            pos: from,
-            spot: start_spot,
-            g: 0.0,
-            h: h0,
-            parent: u32::MAX,
-            kind: MoveKind::Start,
-            dig: [None; 3],
-            place: None,
-            closed: false,
-        });
-        index.insert(pack(from), 0);
-        open.push(Open {
-            f: h0 * w,
-            h: h0,
-            idx: 0,
-        });
-        let mut best = 0u32;
-        let mut expanded = 0usize;
-        let mut edges = Vec::with_capacity(32);
-        let mut found = None;
-        while let Some(Open { idx, .. }) = open.pop() {
-            let r = &mut recs[idx as usize];
-            if r.closed {
-                continue;
-            }
-            r.closed = true;
-            let (pos, sp, gcost) = (r.pos, r.spot, r.g);
-            if goal.is_reached(pos) {
-                found = Some(idx);
-                break;
-            }
-            expanded += 1;
-            if expanded > self.cfg.max_nodes {
-                break;
-            }
-            edges.clear();
-            successors(&mut g, &self.cfg, version, costs, pos, &sp, &mut edges);
-            for e in &edges {
-                if !banned.is_empty() && banned.contains(&(pos, e.to)) {
-                    continue;
-                }
-                let ng = gcost + e.cost;
-                let key = pack(e.to);
-                match index.get(&key) {
-                    Some(&i) => {
-                        let rr = &mut recs[i as usize];
-                        if rr.closed || ng >= rr.g - 1e-9 {
-                            continue;
-                        }
-                        rr.g = ng;
-                        rr.parent = idx;
-                        rr.spot = e.spot;
-                        rr.kind = e.kind;
-                        rr.dig = e.dig;
-                        rr.place = e.place;
-                        let h = rr.h;
-                        open.push(Open {
-                            f: ng + h * w,
-                            h,
-                            idx: i,
-                        });
-                    }
-                    None => {
-                        let h = goal.estimate(e.to, &heur);
-                        let i = recs.len() as u32;
-                        recs.push(Rec {
-                            pos: e.to,
-                            spot: e.spot,
-                            g: ng,
-                            h,
-                            parent: idx,
-                            kind: e.kind,
-                            dig: e.dig,
-                            place: e.place,
-                            closed: false,
-                        });
-                        index.insert(key, i);
-                        let b = &recs[best as usize];
-                        if h < b.h || (h == b.h && ng < b.g) {
-                            best = i;
-                        }
-                        open.push(Open {
-                            f: ng + h * w,
-                            h,
-                            idx: i,
-                        });
-                    }
-                }
-            }
+        let mut search = self.search(version, from, goal.clone(), banned.clone());
+        match search.step(world, Budget::UNLIMITED) {
+            Some(r) => r,
+            None => unreachable!("an unlimited slice finishes the search"),
         }
-        let (end, partial) = match found {
-            Some(i) => (i, false),
-            None if best != 0 => (best, true),
-            None => return Err(PlanError::NoPath),
-        };
-        let mut steps = Vec::new();
-        let mut i = end;
-        while i != u32::MAX {
-            let r = &recs[i as usize];
-            steps.push(Step {
-                pos: r.pos,
-                feet_y: r.spot.floor,
-                kind: r.kind,
-                node: r.spot.kind,
-                dig: r.dig.iter().flatten().copied().collect(),
-                place: r.place,
-            });
-            i = r.parent;
-        }
-        steps.reverse();
-        Ok(Path {
-            cost: recs[end as usize].g,
-            steps,
-            partial,
-            expanded,
+    }
+
+    /// The same search as [`Pathfinder::plan_avoiding`], run in slices: each
+    /// [`Search::step`] expands at most a [`Budget`] of nodes (and stops at its time limit),
+    /// so a long plan never blocks one tick. The result is identical to the one-shot plan on
+    /// the same world: the slices only pause the same A*. The world is read during the steps
+    /// (a slice may see blocks that changed since the previous one).
+    ///
+    /// ```
+    /// use std::collections::HashSet;
+    /// use ghast_pathfinder::{Budget, Config, Goal, Pathfinder, Version};
+    ///
+    /// let mut world = ghast_physics::v1_8::memory_world();
+    /// world.load_chunks(-2, -2, 2, 2);
+    /// world.fill_raw([-30, 63, -30], [30, 63, 30], 1 << 4);
+    /// world.fill_raw([5, 64, -20], [5, 66, 20], 1 << 4); // a wall to go around
+    /// let pf = Pathfinder::new(Config::default());
+    /// let mut search = pf.search(Version::V1_8, [0, 64, 0], Goal::Block([10, 64, 0]), HashSet::new());
+    /// let path = loop {
+    ///     // e.g. once per tick:
+    ///     if let Some(r) = search.step(&world, Budget::nodes(200)) {
+    ///         break r.unwrap();
+    ///     }
+    /// };
+    /// assert_eq!(path, pf.plan(Version::V1_8, &world, [0, 64, 0], &Goal::Block([10, 64, 0])).unwrap());
+    /// ```
+    #[must_use]
+    pub fn search(
+        &self,
+        version: Version,
+        from: [i32; 3],
+        goal: Goal,
+        banned: HashSet<([i32; 3], [i32; 3])>,
+    ) -> Search {
+        Search {
+            cfg: self.cfg.clone(),
+            heur: self.heuristic(Costs::of(version)),
             version,
-        })
+            from,
+            goal,
+            banned,
+            state: None,
+            result: None,
+        }
     }
 
     /// Plans, then runs the path through the vanilla-exact physics ([`crate::simulate`]) with
@@ -550,6 +472,309 @@ impl Pathfinder {
             per_up,
             per_down,
         }
+    }
+}
+
+/// How much work one [`Search::step`] may do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct Budget {
+    /// Most nodes to expand (at least 1).
+    pub nodes: usize,
+    /// Wall-clock limit, checked every 64 nodes (`None`: no limit).
+    pub time: Option<std::time::Duration>,
+}
+
+impl Budget {
+    /// No limit: the step finishes the search.
+    pub const UNLIMITED: Budget = Budget {
+        nodes: usize::MAX,
+        time: None,
+    };
+
+    /// At most `n` nodes.
+    #[must_use]
+    pub const fn nodes(n: usize) -> Budget {
+        Budget {
+            nodes: n,
+            time: None,
+        }
+    }
+
+    /// And at most `d` of wall-clock time.
+    #[must_use]
+    pub const fn with_time(mut self, d: std::time::Duration) -> Budget {
+        self.time = Some(d);
+        self
+    }
+}
+
+/// The open A* state of a [`Search`].
+#[derive(Clone)]
+struct SearchState {
+    cache: Sections,
+    recs: Vec<Rec>,
+    index: HashMap<u64, u32, BuildKeyHasher>,
+    open: BinaryHeap<Open>,
+    best: u32,
+    expanded: usize,
+    edges: Vec<Edge>,
+}
+
+/// A resumable path search ([`Pathfinder::search`]). Owns its state (`Send`, no borrows),
+/// so it can live in a behaviour between ticks.
+#[derive(Clone)]
+pub struct Search {
+    cfg: Config,
+    heur: Heuristic,
+    version: Version,
+    from: [i32; 3],
+    goal: Goal,
+    banned: HashSet<([i32; 3], [i32; 3])>,
+    state: Option<SearchState>,
+    result: Option<Result<Path, PlanError>>,
+}
+
+impl std::fmt::Debug for Search {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Search")
+            .field("from", &self.from)
+            .field("goal", &self.goal)
+            .field("expanded", &self.expanded())
+            .field("done", &self.result.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Search {
+    /// Nodes expanded so far.
+    #[must_use]
+    pub fn expanded(&self) -> usize {
+        self.state.as_ref().map_or(0, |s| s.expanded)
+    }
+
+    /// The start feet block.
+    #[must_use]
+    pub fn from(&self) -> [i32; 3] {
+        self.from
+    }
+
+    /// The goal.
+    #[must_use]
+    pub fn goal(&self) -> &Goal {
+        &self.goal
+    }
+
+    /// Whether the search has finished (the next [`Search::step`] returns the result).
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        self.result.is_some()
+    }
+
+    /// Runs the search for at most `budget` in `world`; the result once it is done (`None`:
+    /// call again). After the result, further steps return it again.
+    ///
+    /// # Errors
+    /// The result is the one of [`Pathfinder::plan`].
+    pub fn step<S: BlockSource + ?Sized>(
+        &mut self,
+        world: &S,
+        budget: Budget,
+    ) -> Option<Result<Path, PlanError>> {
+        if let Some(r) = &self.result {
+            return Some(r.clone());
+        }
+        let started = budget.time.map(|_| std::time::Instant::now());
+        let cache = self.state.as_mut().map(|s| std::mem::take(&mut s.cache));
+        let mut g = match cache {
+            Some(c) => Grid::with_cache(world, self.version, c),
+            None => Grid::new(world, self.version),
+        };
+        if self.state.is_none() {
+            let start = match start_spot(&mut g, self.from) {
+                Ok(s) => s,
+                Err(e) => {
+                    self.result = Some(Err(e));
+                    return self.result.clone();
+                }
+            };
+            let h0 = self.goal.estimate(self.from, &self.heur);
+            let mut st = SearchState {
+                cache: Sections::default(),
+                recs: Vec::with_capacity(4096),
+                index: HashMap::with_capacity_and_hasher(4096, BuildKeyHasher),
+                open: BinaryHeap::with_capacity(4096),
+                best: 0,
+                expanded: 0,
+                edges: Vec::with_capacity(32),
+            };
+            st.recs.push(Rec {
+                pos: self.from,
+                spot: start,
+                g: 0.0,
+                h: h0,
+                parent: u32::MAX,
+                kind: MoveKind::Start,
+                dig: [None; 3],
+                place: None,
+                closed: false,
+            });
+            st.index.insert(pack(self.from), 0);
+            st.open.push(Open {
+                f: h0 * self.cfg.heuristic_weight,
+                h: h0,
+                idx: 0,
+            });
+            self.state = Some(st);
+        }
+        let costs = Costs::of(self.version);
+        let w = self.cfg.heuristic_weight;
+        let st = self.state.as_mut().expect("initialised above");
+        let limit = budget.nodes.max(1);
+        let mut n = 0usize;
+        // `Some(found)` once the search ends.
+        let mut end: Option<Option<u32>> = None;
+        loop {
+            if n >= limit {
+                break;
+            }
+            if n % 64 == 63
+                && let (Some(t0), Some(max)) = (started, budget.time)
+                && t0.elapsed() >= max
+            {
+                break;
+            }
+            let Some(Open { idx, .. }) = st.open.pop() else {
+                end = Some(None);
+                break;
+            };
+            let r = &mut st.recs[idx as usize];
+            if r.closed {
+                continue;
+            }
+            r.closed = true;
+            let (pos, sp, gcost) = (r.pos, r.spot, r.g);
+            if self.goal.is_reached(pos) {
+                end = Some(Some(idx));
+                break;
+            }
+            st.expanded += 1;
+            n += 1;
+            if st.expanded > self.cfg.max_nodes {
+                end = Some(None);
+                break;
+            }
+            st.edges.clear();
+            successors(
+                &mut g,
+                &self.cfg,
+                self.version,
+                costs,
+                pos,
+                &sp,
+                &mut st.edges,
+            );
+            for e in &st.edges {
+                if !self.banned.is_empty() && self.banned.contains(&(pos, e.to)) {
+                    continue;
+                }
+                let ng = gcost + e.cost;
+                let key = pack(e.to);
+                match st.index.get(&key) {
+                    Some(&i) => {
+                        let rr = &mut st.recs[i as usize];
+                        if rr.closed || ng >= rr.g - 1e-9 {
+                            continue;
+                        }
+                        rr.g = ng;
+                        rr.parent = idx;
+                        rr.spot = e.spot;
+                        rr.kind = e.kind;
+                        rr.dig = e.dig;
+                        rr.place = e.place;
+                        let h = rr.h;
+                        st.open.push(Open {
+                            f: ng + h * w,
+                            h,
+                            idx: i,
+                        });
+                    }
+                    None => {
+                        let h = self.goal.estimate(e.to, &self.heur);
+                        let i = st.recs.len() as u32;
+                        st.recs.push(Rec {
+                            pos: e.to,
+                            spot: e.spot,
+                            g: ng,
+                            h,
+                            parent: idx,
+                            kind: e.kind,
+                            dig: e.dig,
+                            place: e.place,
+                            closed: false,
+                        });
+                        st.index.insert(key, i);
+                        let b = &st.recs[st.best as usize];
+                        if h < b.h || (h == b.h && ng < b.g) {
+                            st.best = i;
+                        }
+                        st.open.push(Open {
+                            f: ng + h * w,
+                            h,
+                            idx: i,
+                        });
+                    }
+                }
+            }
+        }
+        st.cache = g.into_cache();
+        let found = end?;
+        let r = st.finish(found, self.version);
+        // The search state is not needed any more.
+        let expanded = st.expanded;
+        self.state = Some(SearchState {
+            cache: Sections::default(),
+            recs: Vec::new(),
+            index: HashMap::default(),
+            open: BinaryHeap::new(),
+            best: 0,
+            expanded,
+            edges: Vec::new(),
+        });
+        self.result = Some(r);
+        self.result.clone()
+    }
+}
+
+impl SearchState {
+    fn finish(&self, found: Option<u32>, version: Version) -> Result<Path, PlanError> {
+        let (end, partial) = match found {
+            Some(i) => (i, false),
+            None if self.best != 0 => (self.best, true),
+            None => return Err(PlanError::NoPath),
+        };
+        let mut steps = Vec::new();
+        let mut i = end;
+        while i != u32::MAX {
+            let r = &self.recs[i as usize];
+            steps.push(Step {
+                pos: r.pos,
+                feet_y: r.spot.floor,
+                kind: r.kind,
+                node: r.spot.kind,
+                dig: r.dig.iter().flatten().copied().collect(),
+                place: r.place,
+            });
+            i = r.parent;
+        }
+        steps.reverse();
+        Ok(Path {
+            cost: self.recs[end as usize].g,
+            steps,
+            partial,
+            expanded: self.expanded,
+            version,
+        })
     }
 }
 

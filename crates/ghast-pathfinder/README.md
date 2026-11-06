@@ -47,6 +47,10 @@ solid.
 - `Pathfinder::new(Config)`; `plan(version, &world, from, &goal)`,
   `plan_avoiding(.., &banned_moves)`, `plan_verified(.., attempts)` (plan, simulate, plan
   around the move the simulation failed), `Pathfinder::start_block(feet_pos)`.
+- Incremental: `Pathfinder::search(..) -> Search` with `Search::step(&world, Budget)` (at most
+  `Budget::nodes(n)` expansions, optionally `.with_time(d)`), and `Simulation::new(&path,
+  &cfg)` with `Simulation::step(&world, ticks, time)`. Slices only pause the same algorithm:
+  the results equal `plan` / `simulate` on the same world (tested).
 - `Config` (`with_sprint`, `with_parkour`, `with_max_fall`, `with_swim`, `with_climb`,
   `with_dig(Some(DigCost))`, `with_place(Some(cost))`, `with_max_nodes`,
   `with_heuristic_weight`); `Goal::{Block, Near, Xz, Y, AnyOf}`.
@@ -63,7 +67,10 @@ solid.
 - `Follower` (feature `client`): `goto(goal)`, `tick(&mut TickContext) -> FollowStatus`,
   `stop`, `path`, `status`; plans (verified by default), follows, replans after teleports,
   stuck / off-path moves (that move is avoided from then on) and at the end of partial
-  paths. It acts only through the `TickContext`: aim in whole mouse counts, keys, the left
+  paths. Planning and verification are spread over ticks within `FollowConfig::budget`
+  (default 2000 nodes and 5 ms per tick) and `verify_ticks` (400 simulated ticks); while a
+  plan is in progress (`is_planning`) the player stands still with the keys released and no
+  turn, and the client sends its normal movement packet every tick. It acts only through the `TickContext`: aim in whole mouse counts, keys, the left
   button for digs, `place` for places, so the tick model of ghast-client holds (actions
   before the tick's single movement packet).
 
@@ -91,16 +98,29 @@ dug through a dirt wall, a trench filled with blocks, a goal beyond unloaded chu
 | rolling terrain with a long wall, 80 × 60 (detour) | 193 | 27,091 | 57 ms | 24 ms (1,708 ticks) |
 
 About 400–480 k nodes/s. The controller costs ~6–14 µs per tick (physics look-ahead
-included). Planning runs where it is called; a long detour through rough terrain can exceed
-one 50 ms tick, so plan nearer goals, cap `Config::max_nodes`, or raise
-`with_heuristic_weight` for long trips.
+included).
+
+Per game tick with the follower's default budget (2000 nodes, 5 ms; verification 400
+simulated ticks, 5 ms):
+
+| case | search | verification |
+|---|---|---|
+| flat, 100 blocks straight | 1 tick, 0.34 ms | 1 tick, 2.1 ms |
+| flat, ~71-block diagonal | 1 tick, 0.22 ms | 1 tick, 2.3 ms |
+| rolling terrain detour (27,091 nodes) | 14 ticks, worst 4.6 ms (a 2000-node slice: 3.7 ms) | 5 ticks, worst 5.3 ms |
+
+So the longest planning work in one tick stays near 5 ms (the clock is read every 64 nodes /
+16 simulated ticks); the detour costs ~19 ticks (~1 s) of standing still before the bot moves.
 
 ## Live check
 
 1.8 lab (Paper 1.8.8 + Grim 2.3.73, local, 2026-11-06): the `goto` example of the `ghast`
 crate (`--features ext,pathfinder`) walked the test pad's step-up course, wall, fence,
 water pool, soul sand, slime, ice and random points: 36 legs in 5 min (with
-`--grim-compat`) and 27 legs in 3 min (without), **0 Grim flags, 0 setbacks**.
+`--grim-compat`) and 27 legs in 3 min (without), **0 Grim flags, 0 setbacks**. A later run
+added a pocket of walls built with `/fill` (a ~60-block way out, 931 nodes) planned with 250
+nodes per tick: planned in 4 ticks standing still, then walked out; 23 legs in 3 min, 0 Grim
+flags.
 
 ## Known limits
 

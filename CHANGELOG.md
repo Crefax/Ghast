@@ -21,6 +21,12 @@ Additive: two new crates, behind facade features (the default build is unchanged
 - Validated on fake worlds for both versions (every move type, 96 fixed random terrains);
   1.8 lab run: 63 legs, 0 Grim flags. Planning: ~0.3 ms for 100 blocks of open ground,
   ~57 ms for a 193-step detour through rough terrain.
+- Incremental planning: `Pathfinder::search` returns a resumable `Search` whose `step(world,
+  Budget)` expands at most a node / time budget; `Simulation` runs `simulate` in slices. Both
+  give exactly the one-shot results. The `Follower` plans and verifies across ticks within
+  `FollowConfig::budget` (default 2000 nodes / 5 ms per tick) and `verify_ticks`, standing
+  still meanwhile; a 193-step detour plans in 14 ticks of at most ~5 ms instead of one 57 ms
+  tick. `Follower::is_planning`, `Follower::plan_ticks`.
 
 ### ghast-ext (new)
 - `Ext`, a `Behavior` with a tick-driven executor: write bots as sequential async code

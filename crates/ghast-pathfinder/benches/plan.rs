@@ -6,7 +6,9 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use ghast_pathfinder::{Config, ControllerConfig, Goal, Pathfinder, Version, simulate};
+use ghast_pathfinder::{
+    Budget, Config, ControllerConfig, FollowConfig, Goal, Pathfinder, Simulation, Version, simulate,
+};
 use ghast_physics::v1_8::{MemoryWorld, memory_world};
 
 fn flat() -> MemoryWorld {
@@ -85,6 +87,53 @@ fn bench(c: &mut Criterion) {
         );
         c.bench_function(&format!("plan/{name}"), |b| {
             b.iter(|| pf.plan(Version::V1_8, black_box(w), [0, 64, 0], &Goal::Block(to)))
+        });
+        // Per game tick with the follower's default budget.
+        let fc = FollowConfig::default();
+        let mut search = pf.search(
+            Version::V1_8,
+            [0, 64, 0],
+            Goal::Block(to),
+            Default::default(),
+        );
+        let (mut slices, mut worst) = (0, std::time::Duration::ZERO);
+        loop {
+            let t = std::time::Instant::now();
+            let r = search.step(w, fc.budget);
+            worst = worst.max(t.elapsed());
+            slices += 1;
+            if r.is_some() {
+                break;
+            }
+        }
+        let mut sim = Simulation::new(&p, &fc.controller);
+        let (mut sim_slices, mut sim_worst) = (0, std::time::Duration::ZERO);
+        loop {
+            let t = std::time::Instant::now();
+            let r = sim.step(w, fc.verify_ticks, fc.budget.time).is_some();
+            sim_worst = sim_worst.max(t.elapsed());
+            sim_slices += 1;
+            if r {
+                break;
+            }
+        }
+        eprintln!(
+            "{name}: follower budget {:?}: search {slices} ticks (worst {:.2} ms), \
+             verification {sim_slices} ticks (worst {:.2} ms)",
+            fc.budget,
+            worst.as_secs_f64() * 1e3,
+            sim_worst.as_secs_f64() * 1e3
+        );
+        c.bench_function(&format!("search_slice_2000/{name}"), |b| {
+            b.iter(|| {
+                let mut s = pf.search(
+                    Version::V1_8,
+                    [0, 64, 0],
+                    Goal::Block(to),
+                    Default::default(),
+                );
+                s.step(black_box(w), Budget::nodes(2000))
+            })
         });
         let cfg = ControllerConfig::default();
         let r = simulate(&p, w, &cfg);

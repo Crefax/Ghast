@@ -1,7 +1,8 @@
 //! Walks planned paths on the 1.8 lab test pad (`lab/reset-field.sh 1.8`) with the
 //! `ghast-ext` helpers and `ghast-pathfinder`: over the step-up course, around the wall and
-//! the fence, through the water pool, over soul sand and ice, then to random points of the
-//! pad until the time limit. Every path is checked in the vanilla-exact physics before the
+//! the fence, through the water pool, over soul sand and ice, around a long wall it builds
+//! with `/fill` (a plan spread over several ticks), then to random points of the pad until
+//! the time limit. Every path is checked in the vanilla-exact physics before the
 //! bot moves.
 //!
 //! The bot must be opped (it starts with `/tp <name> 0.5 4 0.5`). Grim alerts that reach the
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use ghast::Interests;
-use ghast::ext::pathfinder::Goal;
+use ghast::ext::pathfinder::{Budget, Config, FollowConfig, Follower, Goal, Pathfinder};
 use ghast::ext::{Error, Event, Ext, WhenDone};
 
 /// The fixed part of the course: (name, x, z).
@@ -124,6 +125,40 @@ fn main() {
             };
             for (label, x, z) in COURSE {
                 go(label.to_owned(), x, z).await?;
+            }
+            // A long detour: a 3-high U of walls around the bot, open to the south. The way
+            // out and around is ~60 blocks; with a small per-tick budget the plan spreads
+            // over several ticks while the bot stands still (the movement packet still goes
+            // out every tick).
+            go("into the pocket".to_owned(), 8, 26).await?;
+            const WALLS: [&str; 3] = [
+                "-14 4 30 30 6 30",
+                "-14 4 22 -14 6 30",
+                "30 4 22 30 6 30",
+            ];
+            for w in WALLS {
+                bot.chat(format!("/fill {w} minecraft:stone"));
+                bot.wait_ticks(5).await;
+            }
+            bot.wait_ticks(20).await;
+            let follower = Follower::new(
+                Pathfinder::new(Config::default()),
+                FollowConfig::default().with_budget(Budget::nodes(250)),
+            );
+            let t = Instant::now();
+            let r = bot.goto_with(follower, Goal::Xz { x: 8, z: 34 }).await;
+            let p = bot.pose().pos;
+            log::info!(
+                "out of the pocket (detour, 250 nodes per tick): {r:?} at {:.2} {:.2} {:.2} in {:.1} s",
+                p.x,
+                p.y,
+                p.z,
+                t.elapsed().as_secs_f64()
+            );
+            r?;
+            for w in WALLS {
+                bot.chat(format!("/fill {w} minecraft:air"));
+                bot.wait_ticks(5).await;
             }
             while limit.is_some_and(|l| started.elapsed() < l) {
                 let x = (next(&mut seed) % 62) as i32 - 15;

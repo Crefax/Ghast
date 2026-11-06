@@ -36,8 +36,9 @@ impl Bot {
     /// a goal beyond it is approached through partial paths. Dropping the future releases
     /// the keys.
     ///
-    /// Planning runs inside the tick: a long detour through rough terrain can take tens of
-    /// milliseconds (see the ghast-pathfinder README); keep goals within a few hundred blocks.
+    /// A long plan is spread over several ticks (by default at most 2000 nodes and 5 ms of
+    /// planning per tick, see [`FollowConfig::budget`]); the bot stands still meanwhile and
+    /// the client keeps sending its movement packet every tick.
     ///
     /// ```no_run
     /// use ghast_ext::pathfinder::Goal;

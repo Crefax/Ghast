@@ -118,20 +118,37 @@ const UNKNOWN: u16 = u16::MAX - 1;
 /// One 16×16×16 section of cached class indices.
 type Section = Box<[u16; 4096]>;
 
+/// The class cache of a planning run, kept between the slices of an incremental search.
+pub(crate) type Sections = HashMap<u64, Section, BuildKeyHasher>;
+
 /// Per-planning-run cache of block classes (1 lookup in the source per block at most).
 pub(crate) struct Grid<'w, S: ?Sized> {
     src: &'w S,
     table: &'static Table,
-    sections: HashMap<u64, Section, BuildKeyHasher>,
+    sections: Sections,
 }
 
 impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
     pub(crate) fn new(src: &'w S, version: Version) -> Self {
+        Self::with_cache(
+            src,
+            version,
+            HashMap::with_capacity_and_hasher(64, BuildKeyHasher),
+        )
+    }
+
+    /// A grid over `src` that continues an earlier run's cache.
+    pub(crate) fn with_cache(src: &'w S, version: Version, sections: Sections) -> Self {
         Grid {
             src,
             table: table(version),
-            sections: HashMap::with_capacity_and_hasher(64, BuildKeyHasher),
+            sections,
         }
+    }
+
+    /// The cache, for the next slice.
+    pub(crate) fn into_cache(self) -> Sections {
+        self.sections
     }
 
     /// Air's class index (always 0).

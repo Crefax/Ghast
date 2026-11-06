@@ -215,9 +215,14 @@ pub(crate) struct SourceView<'a, P: Physics, S: ?Sized> {
 
 impl<'a, P: Physics, S: BlockSource + ?Sized> SourceView<'a, P, S> {
     pub(crate) fn new(src: &'a S) -> Self {
+        Self::with_overrides(src, Vec::new())
+    }
+
+    /// A view with earlier overrides (a resumed simulation).
+    pub(crate) fn with_overrides(src: &'a S, overrides: Vec<([i32; 3], u32)>) -> Self {
         SourceView {
             src,
-            overrides: Vec::new(),
+            overrides,
             _p: std::marker::PhantomData,
         }
     }

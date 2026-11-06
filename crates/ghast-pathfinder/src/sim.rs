@@ -123,10 +123,9 @@ pub fn simulate<S: BlockSource + ?Sized>(
     world: &S,
     cfg: &ControllerConfig,
 ) -> SimReport {
-    match path.version {
-        Version::V1_8 => run::<P18, S>(path, world, cfg),
-        Version::V1_16_5 => run::<P16, S>(path, world, cfg),
-    }
+    let mut sim = Simulation::new(path, cfg);
+    while sim.step(world, u32::MAX, None).is_none() {}
+    sim.into_report()
 }
 
 /// The raw stone state of a version (what a simulated place puts down).
@@ -137,125 +136,261 @@ fn stone(version: Version) -> u32 {
     }
 }
 
-fn run<P: Physics, S: BlockSource + ?Sized>(
-    path: &Path,
-    world: &S,
-    cfg: &ControllerConfig,
-) -> SimReport {
-    let tbl = table(path.version);
-    let mut view = SourceView::<P, S>::new(world);
-    let start = path.steps[0].target();
-    let yaw0 = path.steps.get(1).map_or(0.0, |s| {
-        let t = s.target();
-        (-(t[0] - start[0])).atan2(t[2] - start[2]).to_degrees() as f32
-    });
-    let mut state = P::new_state(start, yaw0, 0.0);
-    let mut turner = Turner::default();
-    let mut ctrl = Controller::new(path.clone(), cfg.clone());
-    let max_ticks = (path.cost * 4.0) as u32 + 20 * path.steps.len() as u32 + 200;
-    let mut report = SimReport {
-        outcome: SimOutcome::Timeout,
-        ticks: 0,
-        reached: 0,
-        end: start,
-        collisions: 0,
-        first_collision: None,
-        max_fall: 0.0,
-        trace: Vec::with_capacity(max_ticks.min(4096) as usize),
-    };
-    let mut job: Option<([i32; 3], u32)> = None;
-    let class = |v: &SourceView<'_, P, S>, x: i32, y: i32, z: i32| {
-        v.raw(x, y, z).map_or(crate::class::Class::UNKNOWN, |r| {
-            tbl.classes[tbl.index(r) as usize]
-        })
-    };
-    for tick in 0..max_ticks {
-        let mut obs: Observation = P::observe(&state);
-        obs.food = 20;
-        let want = ctrl.aim(&obs, &view);
-        let look = turner.step(obs.yaw, obs.pitch, want);
-        let cmd = ctrl.keys(&obs, look, &view);
-        report.reached = ctrl.reached();
-        match ctrl.progress() {
-            Progress::Arrived => {
-                report.outcome = SimOutcome::Arrived;
-                break;
-            }
-            Progress::Stuck => {
-                report.outcome = SimOutcome::Stuck;
-                break;
-            }
-            Progress::OffPath => {
-                report.outcome = SimOutcome::OffPath;
-                break;
-            }
-            Progress::Moving | Progress::Working => {}
-        }
-        // Jobs: a dig or place takes a while, then the block changes.
-        let target = cmd.dig.or(cmd.place.map(|p| p.pos));
-        match (target, job) {
-            (Some(p), Some((q, n))) if p == q => {
-                let need = match cmd.dig {
-                    Some(d) => {
-                        5 + (f64::from(class(&view, d[0], d[1], d[2]).hardness.max(0.0)) * 30.0)
-                            as u32
-                    }
-                    None => 4,
-                };
-                if n + 1 >= need {
-                    view.set(
-                        p,
-                        if cmd.dig.is_some() {
-                            0
-                        } else {
-                            stone(path.version)
-                        },
-                    );
-                    job = None;
-                } else {
-                    job = Some((q, n + 1));
-                }
-            }
-            (Some(p), _) => job = Some((p, 0)),
-            (None, _) => job = None,
-        }
-        let keys = if target.is_some() {
-            Keys::NONE
-        } else {
-            cmd.keys
+/// The simulated player of either version.
+#[derive(Clone, Debug)]
+enum Body {
+    V18(<P18 as Physics>::State),
+    V16(<P16 as Physics>::State),
+}
+
+/// A resumable [`simulate`]: [`Simulation::step`] runs a slice of ticks, so a follower can
+/// verify a long path across several game ticks. Owns its state (no borrows).
+///
+/// ```
+/// use ghast_pathfinder::{Config, ControllerConfig, Goal, Pathfinder, SimOutcome, Simulation, Version};
+///
+/// let mut world = ghast_physics::v1_8::memory_world();
+/// world.load_chunks(-1, -1, 1, 1);
+/// world.fill_raw([-10, 63, -10], [10, 63, 10], 1 << 4);
+/// let path = Pathfinder::new(Config::default())
+///     .plan(Version::V1_8, &world, [0, 64, 0], &Goal::Block([8, 64, 3]))
+///     .unwrap();
+/// let mut sim = Simulation::new(&path, &ControllerConfig::default());
+/// let outcome = loop {
+///     if let Some(r) = sim.step(&world, 20, None) {
+///         break r.outcome;
+///     }
+/// };
+/// assert_eq!(outcome, SimOutcome::Arrived);
+/// ```
+#[derive(Clone, Debug)]
+pub struct Simulation {
+    body: Body,
+    run: Run,
+}
+
+/// Everything of a simulation but the player.
+#[derive(Clone, Debug)]
+struct Run {
+    version: Version,
+    turner: Turner,
+    ctrl: Controller,
+    overrides: Vec<([i32; 3], u32)>,
+    job: Option<([i32; 3], u32)>,
+    tick: u32,
+    max_ticks: u32,
+    report: SimReport,
+    done: bool,
+}
+
+impl Simulation {
+    /// A simulation of `path` from its first step (standing at the centre, facing the
+    /// second), not started yet.
+    #[must_use]
+    pub fn new(path: &Path, cfg: &ControllerConfig) -> Simulation {
+        let start = path.steps[0].target();
+        let yaw0 = path.steps.get(1).map_or(0.0, |s| {
+            let t = s.target();
+            (-(t[0] - start[0])).atan2(t[2] - start[2]).to_degrees() as f32
+        });
+        let body = match path.version {
+            Version::V1_8 => Body::V18(P18::new_state(start, yaw0, 0.0)),
+            Version::V1_16_5 => Body::V16(P16::new_state(start, yaw0, 0.0)),
         };
-        let kind = path
-            .steps
-            .get(ctrl.reached() + 1)
-            .map_or(MoveKind::Start, |s| s.kind);
-        let fall_before = P::fall_distance(&state);
-        P::tick(&mut state, keys, look.0, look.1, &view);
-        let o = P::observe(&state);
-        report.ticks = tick + 1;
-        report.end = o.pos;
-        report.trace.push(o.pos);
-        if o.on_ground {
-            report.max_fall = report.max_fall.max(fall_before);
-        }
-        if P::horizontal_collision(&state)
-            && matches!(
-                kind,
-                MoveKind::Walk | MoveKind::Diagonal | MoveKind::Descend | MoveKind::Parkour { .. }
-            )
-        {
-            report.collisions += 1;
-            report.first_collision.get_or_insert(tick);
-        }
-        // Hazards in the body's column.
-        let (x, z) = (o.pos[0].floor() as i32, o.pos[2].floor() as i32);
-        let y0 = o.pos[1].floor() as i32;
-        let y1 = (o.pos[1] + 1.79).floor() as i32;
-        if (y0..=y1).any(|y| class(&view, x, y, z).has(flag::LAVA | flag::AVOID)) {
-            report.outcome = SimOutcome::Hazard;
-            break;
+        let max_ticks = (path.cost * 4.0) as u32 + 20 * path.steps.len() as u32 + 200;
+        Simulation {
+            body,
+            run: Run {
+                version: path.version,
+                turner: Turner::default(),
+                ctrl: Controller::new(path.clone(), cfg.clone()),
+                overrides: Vec::new(),
+                job: None,
+                tick: 0,
+                max_ticks,
+                report: SimReport {
+                    outcome: SimOutcome::Timeout,
+                    ticks: 0,
+                    reached: 0,
+                    end: start,
+                    collisions: 0,
+                    first_collision: None,
+                    max_fall: 0.0,
+                    trace: Vec::with_capacity(max_ticks.min(4096) as usize),
+                },
+                done: false,
+            },
         }
     }
-    report
+
+    /// The path being simulated.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        self.run.ctrl.path()
+    }
+
+    /// Runs at most `ticks` simulated ticks (and stops after `time`, checked every 16
+    /// ticks); the report once the run has ended (`None`: call again).
+    pub fn step<S: BlockSource + ?Sized>(
+        &mut self,
+        world: &S,
+        ticks: u32,
+        time: Option<std::time::Duration>,
+    ) -> Option<&SimReport> {
+        if !self.run.done {
+            let done = match &mut self.body {
+                Body::V18(s) => self.run.advance::<P18, S>(s, world, ticks, time),
+                Body::V16(s) => self.run.advance::<P16, S>(s, world, ticks, time),
+            };
+            self.run.done = done;
+        }
+        self.run.done.then_some(&self.run.report)
+    }
+
+    /// The report so far (final once [`Simulation::step`] returned it).
+    #[must_use]
+    pub fn report(&self) -> &SimReport {
+        &self.run.report
+    }
+
+    /// The report.
+    #[must_use]
+    pub fn into_report(self) -> SimReport {
+        self.run.report
+    }
+}
+
+impl Run {
+    /// Runs up to `ticks` ticks; `true` once the run ended.
+    fn advance<P: Physics, S: BlockSource + ?Sized>(
+        &mut self,
+        state: &mut P::State,
+        world: &S,
+        ticks: u32,
+        time: Option<std::time::Duration>,
+    ) -> bool {
+        let tbl = table(self.version);
+        let started = time.map(|_| std::time::Instant::now());
+        let mut view =
+            SourceView::<P, S>::with_overrides(world, std::mem::take(&mut self.overrides));
+        let class = |v: &SourceView<'_, P, S>, x: i32, y: i32, z: i32| {
+            v.raw(x, y, z).map_or(crate::class::Class::UNKNOWN, |r| {
+                tbl.classes[tbl.index(r) as usize]
+            })
+        };
+        let report = &mut self.report;
+        let ctrl = &mut self.ctrl;
+        let mut done = false;
+        let mut n = 0u32;
+        while !done {
+            if self.tick >= self.max_ticks {
+                done = true;
+                break;
+            }
+            if n >= ticks
+                || (n % 16 == 15
+                    && started
+                        .zip(time)
+                        .is_some_and(|(t0, max)| t0.elapsed() >= max))
+            {
+                break;
+            }
+            n += 1;
+            let tick = self.tick;
+            self.tick += 1;
+            let mut obs: Observation = P::observe(state);
+            obs.food = 20;
+            let want = ctrl.aim(&obs, &view);
+            let look = self.turner.step(obs.yaw, obs.pitch, want);
+            let cmd = ctrl.keys(&obs, look, &view);
+            report.reached = ctrl.reached();
+            match ctrl.progress() {
+                Progress::Arrived => {
+                    report.outcome = SimOutcome::Arrived;
+                    done = true;
+                    break;
+                }
+                Progress::Stuck => {
+                    report.outcome = SimOutcome::Stuck;
+                    done = true;
+                    break;
+                }
+                Progress::OffPath => {
+                    report.outcome = SimOutcome::OffPath;
+                    done = true;
+                    break;
+                }
+                Progress::Moving | Progress::Working => {}
+            }
+            // Jobs: a dig or place takes a while, then the block changes.
+            let target = cmd.dig.or(cmd.place.map(|p| p.pos));
+            match (target, self.job) {
+                (Some(p), Some((q, k))) if p == q => {
+                    let need = match cmd.dig {
+                        Some(d) => {
+                            5 + (f64::from(class(&view, d[0], d[1], d[2]).hardness.max(0.0)) * 30.0)
+                                as u32
+                        }
+                        None => 4,
+                    };
+                    if k + 1 >= need {
+                        let raw = if cmd.dig.is_some() {
+                            0
+                        } else {
+                            stone(self.version)
+                        };
+                        view.set(p, raw);
+                        self.job = None;
+                    } else {
+                        self.job = Some((q, k + 1));
+                    }
+                }
+                (Some(p), _) => self.job = Some((p, 0)),
+                (None, _) => self.job = None,
+            }
+            let keys = if target.is_some() {
+                Keys::NONE
+            } else {
+                cmd.keys
+            };
+            let kind = ctrl
+                .path()
+                .steps
+                .get(ctrl.reached() + 1)
+                .map_or(MoveKind::Start, |s| s.kind);
+            let fall_before = P::fall_distance(state);
+            P::tick(state, keys, look.0, look.1, &view);
+            let o = P::observe(state);
+            report.ticks = tick + 1;
+            report.end = o.pos;
+            report.trace.push(o.pos);
+            if o.on_ground {
+                report.max_fall = report.max_fall.max(fall_before);
+            }
+            if P::horizontal_collision(state)
+                && matches!(
+                    kind,
+                    MoveKind::Walk
+                        | MoveKind::Diagonal
+                        | MoveKind::Descend
+                        | MoveKind::Parkour { .. }
+                )
+            {
+                report.collisions += 1;
+                report.first_collision.get_or_insert(tick);
+            }
+            // Hazards in the body's column.
+            let (x, z) = (o.pos[0].floor() as i32, o.pos[2].floor() as i32);
+            let y0 = o.pos[1].floor() as i32;
+            let y1 = (o.pos[1] + 1.79).floor() as i32;
+            if (y0..=y1).any(|y| class(&view, x, y, z).has(flag::LAVA | flag::AVOID)) {
+                report.outcome = SimOutcome::Hazard;
+                done = true;
+            }
+        }
+        self.overrides = view.overrides;
+        done
+    }
 }
 
 #[cfg(all(test, feature = "client"))]

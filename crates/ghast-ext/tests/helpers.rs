@@ -365,3 +365,72 @@ async fn goto_walks_a_planned_path_around_a_wall() {
         (16, 8)
     );
 }
+
+/// A plan spread over ticks: the player stands still (keys released, no turning) while the
+/// follower plans, and the client sends its movement packet every tick meanwhile.
+#[tokio::test]
+async fn planning_over_several_ticks_holds_still() {
+    use ghast_ext::pathfinder::{
+        Budget, Config, FollowConfig, FollowStatus, Follower, Goal, Pathfinder,
+    };
+    let ticks = Arc::new(Mutex::new((0u64, 0u64)));
+    let t = ticks.clone();
+    let mut ext = Ext::new(move |bot| {
+        let t = t.clone();
+        async move {
+            bot.wait_ticks(5).await;
+            let start = bot.tick();
+            let cfg = FollowConfig::default().with_budget(Budget::nodes(15));
+            let mut f = Follower::new(Pathfinder::new(Config::default()), cfg);
+            f.goto(Goal::Block([16, 64, 8]));
+            let p0 = bot.pose();
+            let mut planning = 0u32;
+            loop {
+                let (ff, status, still) = bot
+                    .with(move |ctx| {
+                        let mut f = f;
+                        let s = f.tick(ctx);
+                        let still = f
+                            .is_planning()
+                            .then(|| (*ctx.pose(), ctx.controls(), ctx.planned_look()));
+                        (f, s, still)
+                    })
+                    .await?;
+                f = ff;
+                if let Some((pose, controls, look)) = still {
+                    planning += 1;
+                    assert_eq!(pose.pos, p0.pos);
+                    assert_eq!(controls, ghast_client::Controls::NONE);
+                    assert_eq!(look, (p0.yaw, p0.pitch));
+                }
+                match status {
+                    FollowStatus::Arrived => break,
+                    FollowStatus::Failed(e) => panic!("{e}"),
+                    _ => {}
+                }
+                bot.next_tick().await;
+            }
+            assert!(planning >= 3, "planned in {planning} ticks");
+            assert_eq!(f.plan_ticks(), planning + 1);
+            let p = bot.pose().pos;
+            assert_eq!((p.x.floor() as i32, p.z.floor() as i32), (16, 8), "{p:?}");
+            *t.lock().unwrap() = (start, bot.tick());
+            Ok(())
+        }
+    });
+    let mut setup = Setup::flat();
+    for z in 0..=14 {
+        for y in 64..=65 {
+            setup.blocks.insert([12, y, z], STONE);
+        }
+    }
+    let (_, log) = support::run(setup, &mut ext, 40).await;
+    ok(&ext);
+    // One movement packet per tick, planning ticks included.
+    let (start, end) = *ticks.lock().unwrap();
+    let moves = log.packets.iter().filter(|n| is_move(n)).count() as u64;
+    assert!(
+        moves >= end,
+        "{moves} movement packets for {end} ticks ({start} before planning)"
+    );
+}

@@ -49,8 +49,8 @@ pub use follower::{FollowConfig, FollowError, FollowStatus, Follower};
 pub use goal::Goal;
 pub use moves::{MoveKind, NodeKind};
 pub use physics::Observation;
-pub use plan::{Config, DigCost, Path, Pathfinder, Place, PlanError, Step};
-pub use sim::{SimOutcome, SimReport, simulate};
+pub use plan::{Budget, Config, DigCost, Path, Pathfinder, Place, PlanError, Search, Step};
+pub use sim::{SimOutcome, SimReport, Simulation, simulate};
 pub use world::BlockSource;
 
 /// The protocol version whose blocks and physics a plan uses.

@@ -1,13 +1,15 @@
 //! Following a path from a `ghast_client::Behavior`: plan, follow, replan.
 
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 use ghast_client::{BlockPos, Buttons, Controls, Face, TickContext};
 
 use crate::control::{Controller, ControllerConfig, Progress};
 use crate::goal::Goal;
 use crate::physics::Observation;
-use crate::plan::{Pathfinder, PlanError};
+use crate::plan::{Budget, Path, Pathfinder, PlanError, Search};
+use crate::sim::{SimOutcome, Simulation};
 
 /// Options of the [`Follower`]. Build with [`FollowConfig::default`] and the `with_*`
 /// methods.
@@ -22,6 +24,14 @@ pub struct FollowConfig {
     /// Simulate each plan in `ghast-physics` before moving and plan around moves the
     /// simulation fails (see [`Pathfinder::plan_verified`]). Default on.
     pub verify: bool,
+    /// Planning work per game tick: the search expands at most `budget.nodes` nodes and
+    /// planning plus verification stop after `budget.time`. Default 2000 nodes and 5 ms
+    /// (about 4 ms of A* on a desktop core), so a long plan spreads over several ticks
+    /// while the player stands still.
+    pub budget: Budget,
+    /// Most simulated ticks of the verification per game tick (also bounded by
+    /// `budget.time`). Default 400.
+    pub verify_ticks: u32,
 }
 
 impl Default for FollowConfig {
@@ -30,6 +40,8 @@ impl Default for FollowConfig {
             controller: ControllerConfig::default(),
             max_replans: 8,
             verify: true,
+            budget: Budget::nodes(2000).with_time(Duration::from_millis(5)),
+            verify_ticks: 400,
         }
     }
 }
@@ -53,6 +65,20 @@ impl FollowConfig {
     #[must_use]
     pub fn with_verify(mut self, on: bool) -> Self {
         self.verify = on;
+        self
+    }
+
+    /// Planning work per game tick ([`Budget::UNLIMITED`]: plan in one tick).
+    #[must_use]
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// Simulated verification ticks per game tick.
+    #[must_use]
+    pub fn with_verify_ticks(mut self, ticks: u32) -> Self {
+        self.verify_ticks = ticks.max(1);
         self
     }
 }
@@ -138,7 +164,32 @@ pub struct Follower {
     place_wait: u32,
     digging: bool,
     plans: u64,
+    /// A plan in progress (spread over ticks).
+    planning: Option<Planning>,
+    /// Ticks the current (or last) plan took.
+    plan_ticks: u32,
 }
+
+/// A plan in progress: the search, then the simulated check.
+#[derive(Clone, Debug)]
+enum Planning {
+    Search {
+        search: Box<Search>,
+        /// Moves the verification failed (on top of [`Follower::banned`]).
+        bans: HashSet<([i32; 3], [i32; 3])>,
+        attempt: u32,
+        /// The previous attempt's path (followed if a later search fails).
+        last: Option<Path>,
+    },
+    Verify {
+        sim: Box<Simulation>,
+        bans: HashSet<([i32; 3], [i32; 3])>,
+        attempt: u32,
+    },
+}
+
+/// Plans per goal and replan: the first one and two repairs after failed simulations.
+const VERIFY_ATTEMPTS: u32 = 3;
 
 impl Follower {
     /// A follower without a goal.
@@ -156,6 +207,8 @@ impl Follower {
             place_wait: 0,
             digging: false,
             plans: 0,
+            planning: None,
+            plan_ticks: 0,
         }
     }
 
@@ -163,6 +216,7 @@ impl Follower {
     pub fn goto(&mut self, goal: Goal) {
         self.goal = Some(goal);
         self.ctrl = None;
+        self.planning = None;
         self.status = FollowStatus::Moving;
         self.replans = 0;
         self.banned.clear();
@@ -173,6 +227,7 @@ impl Follower {
     pub fn stop(&mut self, ctx: &mut TickContext<'_>) {
         self.goal = None;
         self.ctrl = None;
+        self.planning = None;
         self.status = FollowStatus::Idle;
         self.release(ctx);
     }
@@ -201,6 +256,20 @@ impl Follower {
         self.plans
     }
 
+    /// A plan is in progress: the player stands still (keys released, no turning) and the
+    /// client keeps sending its normal movement packet every tick.
+    #[must_use]
+    pub fn is_planning(&self) -> bool {
+        self.planning.is_some()
+    }
+
+    /// Ticks the current (or the last) plan took, verification included (1 = planned within
+    /// the tick it started).
+    #[must_use]
+    pub fn plan_ticks(&self) -> u32 {
+        self.plan_ticks
+    }
+
     /// The planner.
     #[must_use]
     pub fn pathfinder(&self) -> &Pathfinder {
@@ -217,41 +286,136 @@ impl Follower {
 
     fn fail(&mut self, ctx: &mut TickContext<'_>, e: FollowError) -> FollowStatus {
         self.ctrl = None;
+        self.planning = None;
         self.status = FollowStatus::Failed(e);
         self.release(ctx);
         self.status
     }
 
-    fn plan(&mut self, ctx: &TickContext<'_>) -> Result<Controller, PlanError> {
-        let goal = self.goal.as_ref().expect("planning without a goal");
+    /// Starts a plan from the player's feet block.
+    fn start_plan(&mut self, ctx: &TickContext<'_>) {
+        let goal = self.goal.clone().expect("planning without a goal");
         let p = ctx.pose().pos;
         let start = Pathfinder::start_block([p.x, p.y, p.z]);
         let version = crate::Version::from(ctx.version());
         self.plans += 1;
-        let path = if self.cfg.verify {
-            let mut banned = self.banned.clone();
-            let (path, _) = self.pf.plan_verified_avoiding(
-                version,
-                ctx.world(),
-                start,
-                goal,
-                &mut banned,
-                3,
-                &self.cfg.controller,
-            )?;
-            path
-        } else {
-            self.pf
-                .plan_avoiding(version, ctx.world(), start, goal, &self.banned)?
-        };
+        self.plan_ticks = 0;
+        self.planning = Some(Planning::Search {
+            search: Box::new(self.pf.search(version, start, goal, self.banned.clone())),
+            bans: HashSet::new(),
+            attempt: 0,
+            last: None,
+        });
+    }
+
+    /// This tick's share of the plan in progress: the controller once the path is ready.
+    fn work(&mut self, ctx: &TickContext<'_>) -> Result<Option<Controller>, PlanError> {
+        self.plan_ticks += 1;
+        let t0 = Instant::now();
+        let left = |budget: Option<Duration>| budget.map(|b| b.saturating_sub(t0.elapsed()));
+        loop {
+            if let Some(max) = self.cfg.budget.time
+                && t0.elapsed() >= max
+            {
+                return Ok(None);
+            }
+            let Some(phase) = self.planning.take() else {
+                return Ok(None);
+            };
+            match phase {
+                Planning::Search {
+                    mut search,
+                    bans,
+                    attempt,
+                    last,
+                } => {
+                    let budget = Budget {
+                        nodes: self.cfg.budget.nodes,
+                        time: left(self.cfg.budget.time),
+                    };
+                    match search.step(ctx.world(), budget) {
+                        None => {
+                            self.planning = Some(Planning::Search {
+                                search,
+                                bans,
+                                attempt,
+                                last,
+                            });
+                            return Ok(None);
+                        }
+                        Some(Err(e)) => match last {
+                            // A repair failed: follow the previous path after all.
+                            Some(p) => return Ok(Some(self.ready(p))),
+                            None => return Err(e),
+                        },
+                        Some(Ok(path)) => {
+                            if !self.cfg.verify {
+                                return Ok(Some(self.ready(path)));
+                            }
+                            let sim = Simulation::new(&path, &self.cfg.controller);
+                            self.planning = Some(Planning::Verify {
+                                sim: Box::new(sim),
+                                bans,
+                                attempt,
+                            });
+                        }
+                    }
+                }
+                Planning::Verify {
+                    mut sim,
+                    mut bans,
+                    attempt,
+                } => {
+                    let Some((outcome, reached)) = sim
+                        .step(
+                            ctx.world(),
+                            self.cfg.verify_ticks,
+                            left(self.cfg.budget.time),
+                        )
+                        .map(|r| (r.outcome, r.reached))
+                    else {
+                        self.planning = Some(Planning::Verify { sim, bans, attempt });
+                        return Ok(None);
+                    };
+                    let path = sim.path();
+                    if outcome == SimOutcome::Arrived {
+                        let path = path.clone();
+                        return Ok(Some(self.ready(path)));
+                    }
+                    // Plan around the move the simulation failed.
+                    let k = (reached + 1).min(path.steps.len() - 1);
+                    let m = (path.steps[k.saturating_sub(1)].pos, path.steps[k].pos);
+                    log::debug!("pathfinder: simulation {outcome:?} on move {m:?}");
+                    if k == 0 || attempt + 1 >= VERIFY_ATTEMPTS || !bans.insert(m) {
+                        let path = path.clone();
+                        return Ok(Some(self.ready(path)));
+                    }
+                    let goal = self.goal.clone().expect("planning without a goal");
+                    let mut all = self.banned.clone();
+                    all.extend(bans.iter().copied());
+                    let search = self.pf.search(path.version, path.steps[0].pos, goal, all);
+                    self.planning = Some(Planning::Search {
+                        search: Box::new(search),
+                        bans,
+                        attempt: attempt + 1,
+                        last: Some(path.clone()),
+                    });
+                }
+            }
+        }
+    }
+
+    fn ready(&mut self, path: Path) -> Controller {
         log::debug!(
-            "pathfinder: {} steps, cost {:.0} ticks, {} nodes{}",
+            "pathfinder: {} steps, cost {:.0} ticks, {} nodes{}, planned in {} ticks",
             path.steps.len(),
             path.cost,
             path.expanded,
-            if path.partial { ", partial" } else { "" }
+            if path.partial { ", partial" } else { "" },
+            self.plan_ticks
         );
-        Ok(Controller::new(path, self.cfg.controller.clone()))
+        self.planning = None;
+        Controller::new(path, self.cfg.controller.clone())
     }
 
     /// One tick: plans when needed, then aims and sets the keys (and digs / places). Returns
@@ -262,14 +426,23 @@ impl Follower {
         }
         if !ctx.events().teleports.is_empty() || ctx.events().respawned {
             self.ctrl = None;
+            self.planning = None;
         }
         if ctx.is_dead() {
             self.release(ctx);
             return self.status;
         }
         if self.ctrl.is_none() {
-            match self.plan(ctx) {
-                Ok(c) => self.ctrl = Some(c),
+            if self.planning.is_none() {
+                self.start_plan(ctx);
+            }
+            match self.work(ctx) {
+                Ok(Some(c)) => self.ctrl = Some(c),
+                Ok(None) => {
+                    // Still planning: stand still; the movement packet goes out as usual.
+                    self.release(ctx);
+                    return self.status;
+                }
                 Err(e) => return self.fail(ctx, FollowError::Plan(e)),
             }
         }
