@@ -19,6 +19,7 @@ use ghast_physics::Keys;
 
 use crate::Version;
 use crate::class::{Class, Table, flag, table};
+use crate::jump::{self, Jumps, Mode};
 use crate::moves::{MoveKind, NodeKind};
 use crate::physics::{Observation, P16, P18, Physics, SourceView};
 use crate::plan::{Path, Pathfinder, Place, Step};
@@ -26,8 +27,6 @@ use crate::world::BlockSource;
 
 /// Eye height of a standing player.
 const EYES: f64 = 1.62;
-/// Largest sideways offset from the take-off block's axis a gap jump starts with.
-const PARKOUR_LATERAL: f64 = 0.15;
 
 /// Options of the [`Controller`]. Build with [`ControllerConfig::default`] and the `with_*`
 /// methods.
@@ -149,6 +148,17 @@ enum Job {
     Place(Place),
 }
 
+/// A gap jump in progress (see [`crate::jump`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Leap {
+    /// Lining up and coming to rest on the take-off block; ticks since the last key.
+    Settle(Mode, u32),
+    /// Running with the yaw fixed; the jump not pressed yet.
+    Run(Mode, f32),
+    /// The jump was pressed: in the air.
+    Air(Mode, f32),
+}
+
 /// Result of running the physics ahead with fixed keys.
 #[derive(Clone, Copy, Debug)]
 struct Roll {
@@ -212,10 +222,8 @@ pub struct Controller {
     /// This tick's aim target and the distance to the point it looks at.
     want: (f32, f32),
     aim_dist: f64,
-    /// Parkour: the jump of the current move was pressed.
-    jumped: bool,
-    /// Parkour: backing up to the run-up block (`Some(false)`), running (`Some(true)`).
-    runup: Option<bool>,
+    /// The gap jump of the current move.
+    leap: Option<Leap>,
     /// The move's keys would have left the floor: back to the centre of the last step first.
     recover: bool,
     /// This tick walks toward the last step's centre to line up for the move.
@@ -242,8 +250,7 @@ impl Controller {
             work: 0,
             want: (0.0, 0.0),
             aim_dist: 0.0,
-            jumped: false,
-            runup: None,
+            leap: None,
             recover: false,
             aligning: false,
         }
@@ -449,8 +456,7 @@ impl Controller {
                 self.best = f64::INFINITY;
                 self.idle = 0;
                 self.off = 0;
-                self.jumped = false;
-                self.runup = None;
+                self.leap = None;
                 self.recover = false;
                 break;
             }
@@ -490,22 +496,8 @@ impl Controller {
     }
 
     fn off_path(&self, obs: &Observation) -> bool {
-        let mut a = self.path.steps[self.reached].target();
+        let a = self.path.steps[self.reached].target();
         let b = self.path.steps[self.reached + 1].target();
-        if self.runup.is_some() {
-            // The run-up block behind the take-off belongs to the move.
-            let sign = |v: f64| {
-                if v > 0.0 {
-                    1.0
-                } else if v < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
-            };
-            a[0] -= sign(b[0] - a[0]);
-            a[2] -= sign(b[2] - a[2]);
-        }
         let swim = self.path.steps[self.reached].node == NodeKind::Swim
             || self.path.steps[self.reached + 1].node == NodeKind::Swim;
         if obs.pos[1] < a[1].min(b[1]) - if swim { 3.0 } else { 1.0 } {
@@ -560,33 +552,12 @@ impl Controller {
                 }
                 return obs.yaw;
             }
-            MoveKind::Parkour { gap } => {
-                let fc = f.target();
-                let (ux, uz) = (dx.signum(), dz.signum());
-                let axis = dir_yaw(ux, uz);
-                if !obs.on_ground || self.jumped {
-                    return axis;
-                }
-                // Line up on the take-off block's axis first.
-                if self.runup.is_none() && over(obs.pos, f.pos, 0.3) && needs_align(obs, fc, ux, uz)
-                {
-                    self.aligning = true;
-                    return yaw_to(obs.pos, fc);
-                }
-                // A long jump needs speed: walk backwards onto the run-up block first.
-                if gap >= 2 {
-                    let (fx, fz) = (f64::from(ux), f64::from(uz));
-                    let speed = obs.vel[0] * fx + obs.vel[2] * fz;
-                    if self.runup.is_none() && speed < 0.2 {
-                        self.runup = Some(false);
-                    }
-                    let along = obs.pos[0] * fx + obs.pos[2] * fz;
-                    let back = (fc[0] - fx) * fx + (fc[2] - fz) * fz;
-                    if self.runup == Some(false) && along <= back + 0.1 {
-                        self.runup = Some(true);
-                    }
-                }
-                return axis;
+            MoveKind::Parkour { .. } => {
+                // Facing along the axis; once running, the yaw stays where the run began.
+                return match self.leap {
+                    Some(Leap::Run(_, yaw) | Leap::Air(_, yaw)) => yaw,
+                    _ => dir_yaw(dx.signum(), dz.signum()),
+                };
             }
             _ => {}
         }
@@ -685,23 +656,35 @@ impl Controller {
                 }
                 if k.forward && obs.on_ground {
                     // Never step off the floor where the path does not go: this tick's keys,
-                    // then braking, must keep the player on a floor or over the path.
+                    // then braking, must keep the player on a floor or over the path. And
+                    // brake before a wall rather than slide along it (corners of narrow
+                    // corridors) when braking avoids it.
                     let back = Keys {
                         back: true,
                         ..Keys::NONE
                     };
                     let cands = [k, Keys { sprint: false, ..k }, Keys::NONE, back];
-                    for (i, c) in cands.into_iter().enumerate() {
-                        if self.safe::<P, S>(&view, obs, c, look) {
-                            if i >= 2 && !self.recover && hdist(obs.pos, f.target()) > 0.3 {
-                                // Only braking is safe here: go back to the last step's
-                                // centre and try the move again from there.
-                                self.recover = true;
-                            }
-                            return c;
-                        }
+                    let checks = cands.map(|c| self.safe::<P, S>(&view, obs, c, look));
+                    let first_on_floor = checks.iter().position(|c| c.0);
+                    // Braking only helps when moving: slowly, a touch is unavoidable (a box
+                    // grazing a wall), and standing still would never get anywhere.
+                    let moving = obs.vel[0].hypot(obs.vel[2]) > 0.03;
+                    let pick = checks
+                        .iter()
+                        .position(|&(floor, clear)| floor && (clear || !moving))
+                        .or(first_on_floor);
+                    let Some(i) = pick else {
+                        return back;
+                    };
+                    if first_on_floor.is_some_and(|j| j >= 2)
+                        && !self.recover
+                        && hdist(obs.pos, f.target()) > 0.3
+                    {
+                        // Only braking keeps to the floor here: go back to the last step's
+                        // centre and try the move again from there.
+                        self.recover = true;
                     }
-                    return back;
+                    return cands[i];
                 }
                 k
             }
@@ -737,7 +720,7 @@ impl Controller {
                         ..Keys::NONE
                     };
                     for c in [fwd, Keys::NONE, back] {
-                        if self.safe::<P, S>(&view, obs, c, look) {
+                        if self.safe::<P, S>(&view, obs, c, look).0 {
                             return c;
                         }
                     }
@@ -745,57 +728,7 @@ impl Controller {
                 }
                 self.steer::<P, S>(&view, obs, look, t, fwd)
             }
-            MoveKind::Parkour { gap } => {
-                // On the take-off block: the box (0.3 either side) overlapped it at the start
-                // of the last move (the ground flag comes from the vertical move, which runs
-                // before the horizontal one).
-                // (The stored motion is after ground friction: a tick moves up to ~0.4.)
-                let reach = 0.3 + 0.45;
-                let in_from = over(obs.pos, f.pos, reach) && (obs.pos[1] - f.feet_y).abs() < 0.3;
-                if obs.on_ground && in_from {
-                    self.jumped = false;
-                }
-                let run = Keys {
-                    forward: true,
-                    // A 1-block gap is a walking jump: sprinting would overshoot the landing.
-                    sprint: gap >= 2 && obs.food > 6,
-                    ..Keys::NONE
-                };
-                if self.runup == Some(false) {
-                    // Walking backwards to the run-up block (facing the jump).
-                    return Keys {
-                        back: err < 35.0,
-                        ..Keys::NONE
-                    };
-                }
-                let in_runup = self.runup == Some(true);
-                if obs.on_ground && (in_from || in_runup) && !self.jumped {
-                    let fc = f.target();
-                    if self.aligning {
-                        // Lining up: inch toward the centre.
-                        let slow = obs.vel[0].hypot(obs.vel[2]) < 0.06;
-                        return Keys {
-                            forward: err < 35.0 && (slow || hdist(obs.pos, fc) > 0.3),
-                            ..Keys::NONE
-                        };
-                    }
-                    if err > 4.0 {
-                        return Keys::NONE;
-                    }
-                    // Jump at the last moment: when one more tick would leave the edge.
-                    let r = rollout::<P, S>(&view, obs, run, look, 1);
-                    if !r.on_ground {
-                        self.jumped = true;
-                        return Keys { jump: true, ..run };
-                    }
-                    return run;
-                }
-                if obs.on_ground {
-                    // Landed short / elsewhere: off-path detection takes over.
-                    return Keys::NONE;
-                }
-                self.steer::<P, S>(&view, obs, look, t, run)
-            }
+            MoveKind::Parkour { gap } => self.leap_keys::<P, S>(&view, obs, look, world, gap),
             MoveKind::Swim => {
                 let horiz = dx != 0 || dz != 0;
                 let down = t.pos[1] < f.pos[1] && t.node == NodeKind::Swim;
@@ -837,6 +770,177 @@ impl Controller {
                 best.1
             }
         }
+    }
+
+    /// The keys of a gap jump (see [`crate::jump`] for the policy): settle on the take-off
+    /// block, check the jump in the physics from there, run, jump at the edge (or at once),
+    /// steer the landing.
+    fn leap_keys<P: Physics, S: BlockSource + ?Sized>(
+        &mut self,
+        view: &SourceView<'_, P, S>,
+        obs: &Observation,
+        look: (f32, f32),
+        world: &S,
+        gap: u8,
+    ) -> Keys {
+        let f = self.path.steps[self.reached].clone();
+        let t = self.path.steps[self.reached + 1].clone();
+        let dir = (
+            (t.pos[0] - f.pos[0]).signum(),
+            (t.pos[2] - f.pos[2]).signum(),
+        );
+        let leap = match self.leap {
+            Some(l) => l,
+            None => {
+                let dy = (t.feet_y - f.feet_y).round() as i8;
+                let jumps = Jumps::of(self.path.version);
+                let spec = jump::select(&jumps, f.pos, dir, gap, dy, self.cfg.sprint, |q| {
+                    self.class(world, q)
+                });
+                match spec {
+                    Some(spec) => Leap::Settle(spec.mode, 0),
+                    None => {
+                        // The world changed since planning: plan again.
+                        self.progress = Progress::Stuck;
+                        return Keys::NONE;
+                    }
+                }
+            }
+        };
+        self.leap = Some(leap);
+        match leap {
+            Leap::Settle(mode, quiet) => {
+                if mode.sprint() && obs.food <= 6 {
+                    self.progress = Progress::Stuck;
+                    return Keys::NONE;
+                }
+                if !obs.on_ground {
+                    return Keys::NONE;
+                }
+                let fc = f.target();
+                let (along, side) = axis_offsets(obs.pos, fc, dir);
+                let axis = dir_yaw(dir.0, dir.1);
+                let ready = wrap(look.0 - axis).abs() <= jump::YAW_ERR - 0.01
+                    && obs.vel[0].hypot(obs.vel[2]) < jump::REST
+                    && along.abs() <= jump::ALONG - 0.01
+                    && side.abs() <= jump::LATERAL - 0.01
+                    && (obs.pos[1] - f.feet_y).abs() < 1e-6
+                    && quiet >= 2;
+                if ready {
+                    // The last word: the jump from exactly here, in the physics.
+                    let start = P::from_observation(obs);
+                    if jump::attempt::<P, S>(view, start, mode, look.0, t.pos).is_none() {
+                        self.progress = Progress::Stuck;
+                        return Keys::NONE;
+                    }
+                    self.leap = Some(Leap::Run(mode, look.0));
+                    return self.leap_run::<P, S>(view, obs, look, mode, look.0);
+                }
+                let k = self.inch::<P, S>(view, obs, look, &f, dir);
+                self.leap = Some(Leap::Settle(
+                    mode,
+                    if k == Keys::NONE { quiet + 1 } else { 0 },
+                ));
+                k
+            }
+            Leap::Run(mode, yaw) => {
+                if !obs.on_ground {
+                    self.leap = Some(Leap::Air(mode, yaw));
+                    return self.steer::<P, S>(view, obs, look, &t, mode.keys());
+                }
+                self.leap_run::<P, S>(view, obs, look, mode, yaw)
+            }
+            Leap::Air(mode, _) => {
+                if obs.on_ground {
+                    // Landed short or elsewhere: off-path detection takes over.
+                    return Keys::NONE;
+                }
+                self.steer::<P, S>(view, obs, look, &t, mode.keys())
+            }
+        }
+    }
+
+    /// One tick of the run: the run keys, plus jump on the tick that would leave the floor (or
+    /// at once).
+    fn leap_run<P: Physics, S: BlockSource + ?Sized>(
+        &mut self,
+        view: &SourceView<'_, P, S>,
+        obs: &Observation,
+        look: (f32, f32),
+        mode: Mode,
+        yaw: f32,
+    ) -> Keys {
+        let keys = mode.keys();
+        let leave = mode.at_once() || !rollout::<P, S>(view, obs, keys, look, 1).on_ground;
+        if leave {
+            self.leap = Some(Leap::Air(mode, yaw));
+            return Keys { jump: true, ..keys };
+        }
+        keys
+    }
+
+    /// Lining up on the take-off block: the key tap (one tick, then nothing until at rest)
+    /// whose resting point is closest to the block's centre in the jump's start envelope, never
+    /// leaving the floor. `Keys::NONE` when no tap does better than coasting.
+    fn inch<P: Physics, S: BlockSource + ?Sized>(
+        &self,
+        view: &SourceView<'_, P, S>,
+        obs: &Observation,
+        look: (f32, f32),
+        f: &Step,
+        dir: (i32, i32),
+    ) -> Keys {
+        let fc = f.target();
+        let rest = |keys: Keys| -> Option<f64> {
+            let mut s = P::from_observation(obs);
+            let mut o = *obs;
+            for i in 0..20 {
+                P::tick(
+                    &mut s,
+                    if i == 0 { keys } else { Keys::NONE },
+                    look.0,
+                    look.1,
+                    view,
+                );
+                o = P::observe(&s);
+                if !o.on_ground || (o.pos[1] - f.feet_y).abs() > 1e-6 {
+                    return None;
+                }
+                if i > 0 && o.vel[0].hypot(o.vel[2]) < jump::REST {
+                    break;
+                }
+            }
+            let (a, l) = axis_offsets(o.pos, fc, dir);
+            Some((a / jump::ALONG).powi(2) + (l / jump::LATERAL).powi(2))
+        };
+        let mut best = (rest(Keys::NONE).unwrap_or(f64::INFINITY), Keys::NONE);
+        for sneak in [true, false] {
+            for (fw, bk, lf, rt) in [
+                (true, false, false, false),
+                (false, true, false, false),
+                (false, false, true, false),
+                (false, false, false, true),
+                (true, false, true, false),
+                (true, false, false, true),
+                (false, true, true, false),
+                (false, true, false, true),
+            ] {
+                let k = Keys {
+                    forward: fw,
+                    back: bk,
+                    left: lf,
+                    right: rt,
+                    sneak,
+                    ..Keys::NONE
+                };
+                if let Some(sc) = rest(k)
+                    && sc < best.0 - 1e-9
+                {
+                    best = (sc, k);
+                }
+            }
+        }
+        best.1
     }
 
     /// Bang-bang landing control: tries "`primary` for n ticks, then nothing" (and, in the
@@ -920,28 +1024,30 @@ impl Controller {
         steps.get(self.reached + 2).is_some_and(|n| col(n.pos))
     }
 
-    /// `keys` this tick, then braking until at rest (at most 12 ticks), never leave the floor
-    /// outside the move's columns.
+    /// `keys` this tick, then braking until at rest (at most 12 ticks): (never leaves the
+    /// floor outside the move's columns, never collides horizontally).
     fn safe<P: Physics, S: BlockSource + ?Sized>(
         &self,
         view: &SourceView<'_, P, S>,
         obs: &Observation,
         keys: Keys,
         look: (f32, f32),
-    ) -> bool {
+    ) -> (bool, bool) {
         let mut s = P::from_observation(obs);
+        let mut clear = true;
         for i in 0..12 {
             let k = if i == 0 { keys } else { Keys::NONE };
             P::tick(&mut s, k, look.0, look.1, view);
             let o = P::observe(&s);
+            clear &= !P::horizontal_collision(&s);
             if !o.on_ground && !self.allowed_column(o.pos) {
-                return false;
+                return (false, clear);
             }
             if i > 0 && o.on_ground && o.vel[0].hypot(o.vel[2]) < 0.003 {
                 break;
             }
         }
-        true
+        (true, clear)
     }
 }
 
@@ -1028,9 +1134,12 @@ fn segment_dist(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
     (p[0] - (ax + t * vx)).hypot(p[2] - (az + t * vz))
 }
 
-/// A gap jump from `fc`'s block along (`ux`, `uz`) has to line up first.
-fn needs_align(obs: &Observation, fc: [f64; 3], ux: i32, uz: i32) -> bool {
-    lateral(obs.pos, fc, ux, uz) > PARKOUR_LATERAL && hdist(obs.pos, fc) > 0.12
+/// Offsets of `p` from `c` along the direction (`dx`, `dz`) and to its right.
+fn axis_offsets(p: [f64; 3], c: [f64; 3], (dx, dz): (i32, i32)) -> (f64, f64) {
+    let (ex, ez) = (p[0] - c[0], p[2] - c[2]);
+    let (fx, fz) = (f64::from(dx), f64::from(dz));
+    // Right-hand side of (dx, dz) is (-dz, dx).
+    (ex * fx + ez * fz, -ex * fz + ez * fx)
 }
 
 /// Whether a box `r` either side of `p` overlaps block column `b`.

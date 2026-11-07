@@ -4,12 +4,132 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use ghast_client::{BlockPos, Buttons, Controls, Face, TickContext};
+use ghast_physics::Keys;
 
+use crate::Version;
 use crate::control::{Controller, ControllerConfig, Progress};
 use crate::goal::Goal;
 use crate::physics::Observation;
 use crate::plan::{Budget, Path, Pathfinder, PlanError, Search};
 use crate::sim::{SimOutcome, Simulation};
+use crate::world::BlockSource;
+
+/// What the follower reads and does in one tick. Implemented for ghast-client's
+/// [`TickContext`]; the tests drive the same follower with a simulated player.
+pub(crate) trait Io {
+    /// The world type.
+    type World<'w>: BlockSource + ?Sized
+    where
+        Self: 'w;
+    /// The world as the client knows it.
+    fn world(&self) -> &Self::World<'_>;
+    /// The protocol version.
+    fn version(&self) -> Version;
+    /// The player.
+    fn observation(&self) -> Observation;
+    /// The server moved the player this tick (teleport, respawn).
+    fn moved_by_server(&self) -> bool;
+    /// Dead.
+    fn is_dead(&self) -> bool;
+    /// Aim target.
+    fn set_aim(&mut self, yaw: f32, pitch: f32);
+    /// The look this tick's movement uses (after turning toward the aim).
+    fn planned_look(&self) -> (f32, f32);
+    /// Movement keys from now on.
+    fn set_keys(&mut self, keys: Keys);
+    /// The left button is held.
+    fn left_button(&self) -> bool;
+    /// Holds or releases the left button (and the right one).
+    fn set_left_button(&mut self, on: bool);
+    /// The crosshair is on this block (as the server judges it).
+    fn targets(&self, block: [i32; 3]) -> bool;
+    /// Right-clicks the top face of `against` with the held item if the crosshair is on it;
+    /// `true` when the place was sent.
+    fn place_on_top(&mut self, against: [i32; 3]) -> bool;
+}
+
+impl Io for TickContext<'_> {
+    type World<'w>
+        = dyn ghast_client::WorldView + 'w
+    where
+        Self: 'w;
+
+    fn world(&self) -> &Self::World<'_> {
+        TickContext::world(self)
+    }
+
+    fn version(&self) -> Version {
+        Version::from(TickContext::version(self))
+    }
+
+    fn observation(&self) -> Observation {
+        let pose = *self.pose();
+        Observation {
+            pos: [pose.pos.x, pose.pos.y, pose.pos.z],
+            vel: [pose.motion.x, pose.motion.y, pose.motion.z],
+            on_ground: pose.on_ground,
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            sprinting: pose.sprinting,
+            food: self.health().food,
+        }
+    }
+
+    fn moved_by_server(&self) -> bool {
+        !self.events().teleports.is_empty() || self.events().respawned
+    }
+
+    fn is_dead(&self) -> bool {
+        TickContext::is_dead(self)
+    }
+
+    fn set_aim(&mut self, yaw: f32, pitch: f32) {
+        TickContext::set_aim(self, yaw, pitch);
+    }
+
+    fn planned_look(&self) -> (f32, f32) {
+        TickContext::planned_look(self)
+    }
+
+    fn set_keys(&mut self, k: Keys) {
+        self.set_controls(Controls {
+            forward: k.forward,
+            back: k.back,
+            left: k.left,
+            right: k.right,
+            jump: k.jump,
+            sneak: k.sneak,
+            sprint: k.sprint,
+        });
+    }
+
+    fn left_button(&self) -> bool {
+        self.buttons().left
+    }
+
+    fn set_left_button(&mut self, on: bool) {
+        self.set_buttons(Buttons {
+            left: on,
+            right: false,
+        });
+    }
+
+    fn targets(&self, block: [i32; 3]) -> bool {
+        let pos = BlockPos::new(block[0], block[1], block[2]);
+        self.target().is_some_and(|t| t.pos == pos)
+    }
+
+    fn place_on_top(&mut self, against: [i32; 3]) -> bool {
+        let against = BlockPos::new(against[0], against[1], against[2]);
+        match self
+            .target()
+            .filter(|t| t.pos == against && t.face == Face::Up)
+        {
+            Some(hit) => self.place(against, Face::Up, hit.hit),
+            None => false,
+        }
+    }
+}
 
 /// Options of the [`Follower`]. Build with [`FollowConfig::default`] and the `with_*`
 /// methods.
@@ -158,8 +278,11 @@ pub struct Follower {
     status: FollowStatus,
     replans: u32,
     banned: HashSet<([i32; 3], [i32; 3])>,
-    /// Where the last partial path ended (no progress beyond it = blocked).
-    partial_end: Option<[i32; 3]>,
+    /// Closest a partial path has come to the goal so far (no progress beyond it = blocked).
+    partial_best: f64,
+    /// The path being followed is partial and final: no path to the goal exists through the
+    /// loaded terrain (the search was exhausted), it ends as close to the goal as possible.
+    unreachable: bool,
     /// Ticks to wait after a place was sent.
     place_wait: u32,
     digging: bool,
@@ -168,6 +291,8 @@ pub struct Follower {
     planning: Option<Planning>,
     /// Ticks the current (or last) plan took.
     plan_ticks: u32,
+    /// Whether the goal lay in loaded terrain when the current plan started.
+    goal_loaded: Option<bool>,
 }
 
 /// A plan in progress: the search, then the simulated check.
@@ -178,18 +303,31 @@ enum Planning {
         /// Moves the verification failed (on top of [`Follower::banned`]).
         bans: HashSet<([i32; 3], [i32; 3])>,
         attempt: u32,
-        /// The previous attempt's path (followed if a later search fails).
-        last: Option<Path>,
+        /// The previous attempt's path (followed if a later search fails) and whether its
+        /// search was exhausted.
+        last: Option<(Path, bool)>,
     },
     Verify {
         sim: Box<Simulation>,
         bans: HashSet<([i32; 3], [i32; 3])>,
         attempt: u32,
+        /// The search of the path was exhausted.
+        exhausted: bool,
     },
 }
 
 /// Plans per goal and replan: the first one and two repairs after failed simulations.
 const VERIFY_ATTEMPTS: u32 = 3;
+
+/// Whether the goal's place lies in loaded terrain (goals without one: no).
+fn goal_loaded<W: BlockSource + ?Sized>(goal: &Goal, world: &W) -> bool {
+    match goal {
+        Goal::Block(p) | Goal::Near { pos: p, .. } => world.is_column_loaded(p[0] >> 4, p[2] >> 4),
+        Goal::Xz { x, z } => world.is_column_loaded(x >> 4, z >> 4),
+        Goal::Y(_) => false,
+        Goal::AnyOf(gs) => !gs.is_empty() && gs.iter().all(|g| goal_loaded(g, world)),
+    }
+}
 
 impl Follower {
     /// A follower without a goal.
@@ -203,12 +341,14 @@ impl Follower {
             status: FollowStatus::Idle,
             replans: 0,
             banned: HashSet::new(),
-            partial_end: None,
+            partial_best: f64::INFINITY,
+            unreachable: false,
             place_wait: 0,
             digging: false,
             plans: 0,
             planning: None,
             plan_ticks: 0,
+            goal_loaded: None,
         }
     }
 
@@ -220,7 +360,8 @@ impl Follower {
         self.status = FollowStatus::Moving;
         self.replans = 0;
         self.banned.clear();
-        self.partial_end = None;
+        self.partial_best = f64::INFINITY;
+        self.unreachable = false;
     }
 
     /// Drops the goal and releases the keys and buttons (in this tick).
@@ -276,15 +417,15 @@ impl Follower {
         &self.pf
     }
 
-    fn release(&mut self, ctx: &mut TickContext<'_>) {
-        ctx.set_controls(Controls::NONE);
-        if self.digging || ctx.buttons().left {
-            ctx.set_buttons(Buttons::default());
+    fn release<I: Io + ?Sized>(&mut self, ctx: &mut I) {
+        ctx.set_keys(Keys::NONE);
+        if self.digging || ctx.left_button() {
+            ctx.set_left_button(false);
         }
         self.digging = false;
     }
 
-    fn fail(&mut self, ctx: &mut TickContext<'_>, e: FollowError) -> FollowStatus {
+    fn fail<I: Io + ?Sized>(&mut self, ctx: &mut I, e: FollowError) -> FollowStatus {
         self.ctrl = None;
         self.planning = None;
         self.status = FollowStatus::Failed(e);
@@ -293,11 +434,10 @@ impl Follower {
     }
 
     /// Starts a plan from the player's feet block.
-    fn start_plan(&mut self, ctx: &TickContext<'_>) {
+    fn start_plan<I: Io + ?Sized>(&mut self, ctx: &I) {
         let goal = self.goal.clone().expect("planning without a goal");
-        let p = ctx.pose().pos;
-        let start = Pathfinder::start_block([p.x, p.y, p.z]);
-        let version = crate::Version::from(ctx.version());
+        let start = Pathfinder::start_block(ctx.observation().pos);
+        let version = ctx.version();
         self.plans += 1;
         self.plan_ticks = 0;
         self.planning = Some(Planning::Search {
@@ -309,7 +449,7 @@ impl Follower {
     }
 
     /// This tick's share of the plan in progress: the controller once the path is ready.
-    fn work(&mut self, ctx: &TickContext<'_>) -> Result<Option<Controller>, PlanError> {
+    fn work<I: Io + ?Sized>(&mut self, ctx: &I) -> Result<Option<Controller>, PlanError> {
         self.plan_ticks += 1;
         let t0 = Instant::now();
         let left = |budget: Option<Duration>| budget.map(|b| b.saturating_sub(t0.elapsed()));
@@ -345,18 +485,20 @@ impl Follower {
                         }
                         Some(Err(e)) => match last {
                             // A repair failed: follow the previous path after all.
-                            Some(p) => return Ok(Some(self.ready(p))),
+                            Some((p, ex)) => return Ok(Some(self.ready(p, ex))),
                             None => return Err(e),
                         },
                         Some(Ok(path)) => {
+                            let exhausted = search.exhausted();
                             if !self.cfg.verify {
-                                return Ok(Some(self.ready(path)));
+                                return Ok(Some(self.ready(path, exhausted)));
                             }
                             let sim = Simulation::new(&path, &self.cfg.controller);
                             self.planning = Some(Planning::Verify {
                                 sim: Box::new(sim),
                                 bans,
                                 attempt,
+                                exhausted,
                             });
                         }
                     }
@@ -365,6 +507,7 @@ impl Follower {
                     mut sim,
                     mut bans,
                     attempt,
+                    exhausted,
                 } => {
                     let Some((outcome, reached)) = sim
                         .step(
@@ -374,13 +517,18 @@ impl Follower {
                         )
                         .map(|r| (r.outcome, r.reached))
                     else {
-                        self.planning = Some(Planning::Verify { sim, bans, attempt });
+                        self.planning = Some(Planning::Verify {
+                            sim,
+                            bans,
+                            attempt,
+                            exhausted,
+                        });
                         return Ok(None);
                     };
                     let path = sim.path();
                     if outcome == SimOutcome::Arrived {
                         let path = path.clone();
-                        return Ok(Some(self.ready(path)));
+                        return Ok(Some(self.ready(path, exhausted)));
                     }
                     // Plan around the move the simulation failed.
                     let k = (reached + 1).min(path.steps.len() - 1);
@@ -388,7 +536,7 @@ impl Follower {
                     log::debug!("pathfinder: simulation {outcome:?} on move {m:?}");
                     if k == 0 || attempt + 1 >= VERIFY_ATTEMPTS || !bans.insert(m) {
                         let path = path.clone();
-                        return Ok(Some(self.ready(path)));
+                        return Ok(Some(self.ready(path, exhausted)));
                     }
                     let goal = self.goal.clone().expect("planning without a goal");
                     let mut all = self.banned.clone();
@@ -398,20 +546,29 @@ impl Follower {
                         search: Box::new(search),
                         bans,
                         attempt: attempt + 1,
-                        last: Some(path.clone()),
+                        last: Some((path.clone(), exhausted)),
                     });
                 }
             }
         }
     }
 
-    fn ready(&mut self, path: Path) -> Controller {
+    fn ready(&mut self, path: Path, exhausted: bool) -> Controller {
+        // An exhausted search knows every block reachable through the loaded terrain: if the
+        // goal lies in loaded terrain too, its partial path is as close as one gets.
+        self.unreachable = path.partial && exhausted && self.goal_loaded.unwrap_or(false);
         log::debug!(
             "pathfinder: {} steps, cost {:.0} ticks, {} nodes{}, planned in {} ticks",
             path.steps.len(),
             path.cost,
             path.expanded,
-            if path.partial { ", partial" } else { "" },
+            if self.unreachable {
+                ", partial (goal unreachable)"
+            } else if path.partial {
+                ", partial"
+            } else {
+                ""
+            },
             self.plan_ticks
         );
         self.planning = None;
@@ -421,10 +578,15 @@ impl Follower {
     /// One tick: plans when needed, then aims and sets the keys (and digs / places). Returns
     /// the status after this tick.
     pub fn tick(&mut self, ctx: &mut TickContext<'_>) -> FollowStatus {
+        self.step(ctx)
+    }
+
+    /// [`Follower::tick`] over any [`Io`].
+    pub(crate) fn step<I: Io + ?Sized>(&mut self, ctx: &mut I) -> FollowStatus {
         if self.goal.is_none() || !matches!(self.status, FollowStatus::Moving) {
             return self.status;
         }
-        if !ctx.events().teleports.is_empty() || ctx.events().respawned {
+        if ctx.moved_by_server() {
             self.ctrl = None;
             self.planning = None;
         }
@@ -434,6 +596,7 @@ impl Follower {
         }
         if self.ctrl.is_none() {
             if self.planning.is_none() {
+                self.goal_loaded = self.goal.as_ref().map(|g| goal_loaded(g, ctx.world()));
                 self.start_plan(ctx);
             }
             match self.work(ctx) {
@@ -446,16 +609,7 @@ impl Follower {
                 Err(e) => return self.fail(ctx, FollowError::Plan(e)),
             }
         }
-        let pose = *ctx.pose();
-        let obs = Observation {
-            pos: [pose.pos.x, pose.pos.y, pose.pos.z],
-            vel: [pose.motion.x, pose.motion.y, pose.motion.z],
-            on_ground: pose.on_ground,
-            yaw: pose.yaw,
-            pitch: pose.pitch,
-            sprinting: pose.sprinting,
-            food: ctx.health().food,
-        };
+        let obs = ctx.observation();
         let ctrl = self.ctrl.as_mut().expect("planned above");
         let (yaw, pitch) = ctrl.aim(&obs, ctx.world());
         let done = matches!(
@@ -475,12 +629,22 @@ impl Follower {
                     self.status = FollowStatus::Arrived;
                     return self.status;
                 }
-                // The end of a partial path: plan the rest from here.
-                let end = path.steps.last().map(|s| s.pos);
-                if end.is_some() && end == self.partial_end {
+                if self.unreachable {
+                    // As close as it gets: no path exists through the loaded terrain.
+                    return self.fail(ctx, FollowError::Plan(PlanError::NoPath));
+                }
+                // The end of a partial path: plan the rest from here. Count it against the
+                // replan budget unless it got closer to the goal than any partial path before.
+                let goal = self.goal.as_ref().expect("following without a goal");
+                let d = path
+                    .steps
+                    .last()
+                    .map_or(f64::INFINITY, |s| goal.distance(s.pos));
+                if d < self.partial_best - 0.5 {
+                    self.partial_best = d;
+                } else {
                     self.replans += 1;
                 }
-                self.partial_end = end;
                 self.ctrl = None;
                 self.release(ctx);
                 if self.replans > self.cfg.max_replans {
@@ -506,44 +670,421 @@ impl Follower {
             }
             Progress::Moving | Progress::Working => {}
         }
-        let k = cmd.keys;
-        ctx.set_controls(Controls {
-            forward: k.forward,
-            back: k.back,
-            left: k.left,
-            right: k.right,
-            jump: k.jump,
-            sneak: k.sneak,
-            sprint: k.sprint,
-        });
+        ctx.set_keys(cmd.keys);
         if let Some(d) = cmd.dig {
-            let pos = BlockPos::new(d[0], d[1], d[2]);
-            let on = ctx.target().is_some_and(|t| t.pos == pos);
-            ctx.set_buttons(Buttons {
-                left: on,
-                right: false,
-            });
+            let on = ctx.targets(d);
+            ctx.set_left_button(on);
             self.digging = true;
         } else if self.digging {
-            ctx.set_buttons(Buttons::default());
+            ctx.set_left_button(false);
             self.digging = false;
         }
         if let Some(p) = cmd.place {
             if self.place_wait > 0 {
                 self.place_wait -= 1;
-            } else {
-                let against = BlockPos::new(p.against[0], p.against[1], p.against[2]);
-                if let Some(hit) = ctx
-                    .target()
-                    .filter(|t| t.pos == against && t.face == Face::Up)
-                    && ctx.place(against, Face::Up, hit.hit)
-                {
-                    self.place_wait = 10;
-                }
+            } else if ctx.place_on_top(p.against) {
+                self.place_wait = 10;
             }
         } else {
             self.place_wait = 0;
         }
         self.status
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    //! The follower driven tick by tick in the physics (a simulated client): mazes, unreachable
+    //! goals, gap jumps.
+
+    use std::time::{Duration, Instant};
+
+    use ghast_physics::Keys;
+
+    use super::{FollowConfig, FollowError, FollowStatus, Follower, Io};
+    use crate::physics::{Observation, P16, P18, Physics, SourceView};
+    use crate::plan::{Config, Pathfinder, PlanError};
+    use crate::sim::Turner;
+    use crate::world::BlockSource;
+    use crate::{Goal, Version};
+
+    /// A simulated client: the player in `ghast-physics`, turning in whole mouse counts.
+    pub(crate) struct SimIo<'w, P: Physics, W: BlockSource> {
+        pub(crate) world: &'w W,
+        pub(crate) state: P::State,
+        turner: Turner,
+        aim: (f32, f32),
+        keys: Keys,
+    }
+
+    impl<'w, P: Physics, W: BlockSource> SimIo<'w, P, W> {
+        pub(crate) fn new(world: &'w W, feet: [f64; 3]) -> Self {
+            let mut state = P::new_state(feet, 0.0, 0.0);
+            let view = SourceView::<P, W>::new(world);
+            for _ in 0..3 {
+                P::tick(&mut state, Keys::NONE, 0.0, 0.0, &view);
+            }
+            SimIo {
+                world,
+                state,
+                turner: Turner::default(),
+                aim: (0.0, 0.0),
+                keys: Keys::NONE,
+            }
+        }
+
+        /// Runs this tick's movement with what the follower asked for.
+        pub(crate) fn advance(&mut self) {
+            let o = P::observe(&self.state);
+            let look = self.turner.step(o.yaw, o.pitch, self.aim);
+            let view = SourceView::<P, W>::new(self.world);
+            P::tick(&mut self.state, self.keys, look.0, look.1, &view);
+        }
+
+        pub(crate) fn feet(&self) -> [f64; 3] {
+            P::observe(&self.state).pos
+        }
+    }
+
+    impl<P: Physics, W: BlockSource> Io for SimIo<'_, P, W> {
+        type World<'a>
+            = W
+        where
+            Self: 'a;
+
+        fn world(&self) -> &W {
+            self.world
+        }
+
+        fn version(&self) -> Version {
+            P::VERSION
+        }
+
+        fn observation(&self) -> Observation {
+            let mut o = P::observe(&self.state);
+            o.food = 20;
+            o
+        }
+
+        fn moved_by_server(&self) -> bool {
+            false
+        }
+
+        fn is_dead(&self) -> bool {
+            false
+        }
+
+        fn set_aim(&mut self, yaw: f32, pitch: f32) {
+            self.aim = (yaw, pitch);
+        }
+
+        fn planned_look(&self) -> (f32, f32) {
+            let o = P::observe(&self.state);
+            let mut t = self.turner;
+            t.step(o.yaw, o.pitch, self.aim)
+        }
+
+        fn set_keys(&mut self, keys: Keys) {
+            self.keys = keys;
+        }
+
+        fn left_button(&self) -> bool {
+            false
+        }
+
+        fn set_left_button(&mut self, _: bool) {}
+
+        fn targets(&self, _: [i32; 3]) -> bool {
+            false
+        }
+
+        fn place_on_top(&mut self, _: [i32; 3]) -> bool {
+            false
+        }
+    }
+
+    /// How a drive went.
+    #[derive(Debug)]
+    pub(crate) struct Drive {
+        pub(crate) status: FollowStatus,
+        pub(crate) ticks: u32,
+        /// Ticks the follower stood still planning.
+        pub(crate) planning_ticks: u32,
+        /// The longest follower tick (wall clock).
+        pub(crate) worst_tick: Duration,
+        pub(crate) plans: u64,
+        pub(crate) end: [f64; 3],
+    }
+
+    /// Drives `follower` to `goal` from standing at `feet`, at most `max` ticks.
+    pub(crate) fn drive<P: Physics, W: BlockSource>(
+        world: &W,
+        feet: [f64; 3],
+        mut follower: Follower,
+        goal: Goal,
+        max: u32,
+    ) -> Drive {
+        let mut io = SimIo::<P, W>::new(world, feet);
+        follower.goto(goal);
+        let mut d = Drive {
+            status: FollowStatus::Moving,
+            ticks: 0,
+            planning_ticks: 0,
+            worst_tick: Duration::ZERO,
+            plans: 0,
+            end: feet,
+        };
+        while d.ticks < max {
+            let t0 = Instant::now();
+            d.status = follower.step(&mut io);
+            // The first tick of a process also measures the move costs once.
+            if d.ticks > 0 {
+                d.worst_tick = d.worst_tick.max(t0.elapsed());
+            }
+            if follower.is_planning() {
+                d.planning_ticks += 1;
+            }
+            d.ticks += 1;
+            if d.status != FollowStatus::Moving {
+                break;
+            }
+            io.advance();
+        }
+        d.plans = follower.plans();
+        d.end = io.feet();
+        d
+    }
+
+    const STONE18: u16 = 1 << 4;
+
+    fn rng(s: &mut u64) -> u64 {
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
+    }
+
+    /// A perfect maze (recursive backtracker) of `n` × `n` cells with `h`-high stone walls on
+    /// a stone floor at y = 63; grid (2n + 1)², corner (ox, oz). Cell (i, j) has its feet
+    /// block at (ox + 2i + 1, 64, oz + 2j + 1). Entrances: west of cell (0, 0), east of
+    /// cell (n - 1, n - 1).
+    pub(crate) fn maze(
+        w: &mut ghast_physics::v1_8::MemoryWorld,
+        (ox, oz): (i32, i32),
+        n: i32,
+        h: i32,
+        seed: u64,
+    ) {
+        let size = 2 * n + 1;
+        w.fill_raw(
+            [ox, 64, oz],
+            [ox + size - 1, 63 + h, oz + size - 1],
+            STONE18,
+        );
+        let carve = |w: &mut ghast_physics::v1_8::MemoryWorld, gx: i32, gz: i32| {
+            w.fill_raw([ox + gx, 64, oz + gz], [ox + gx, 63 + h, oz + gz], 0);
+        };
+        let mut s = seed | 1;
+        let mut seen = vec![false; (n * n) as usize];
+        let mut stack = vec![(0, 0)];
+        seen[0] = true;
+        carve(w, 1, 1);
+        while let Some(&(cx, cz)) = stack.last() {
+            let nb: Vec<(i32, i32)> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| (cx + dx, cz + dz))
+                .filter(|&(x, z)| x >= 0 && z >= 0 && x < n && z < n && !seen[(z * n + x) as usize])
+                .collect();
+            if nb.is_empty() {
+                stack.pop();
+                continue;
+            }
+            let (nx, nz) = nb[(rng(&mut s) % nb.len() as u64) as usize];
+            seen[(nz * n + nx) as usize] = true;
+            carve(w, 2 * nx + 1, 2 * nz + 1);
+            carve(w, cx + nx + 1, cz + nz + 1);
+            stack.push((nx, nz));
+        }
+        carve(w, 0, 1);
+        carve(w, size - 1, size - 2);
+    }
+
+    /// A flat stone world over chunks -r..=r.
+    pub(crate) fn flat(r: i32) -> ghast_physics::v1_8::MemoryWorld {
+        let mut w = ghast_physics::v1_8::memory_world();
+        w.load_chunks(-r, -r, r, r);
+        w.fill_raw(
+            [-16 * r, 63, -16 * r],
+            [16 * r + 15, 63, 16 * r + 15],
+            STONE18,
+        );
+        w
+    }
+
+    fn follower() -> Follower {
+        Follower::new(Pathfinder::new(Config::default()), FollowConfig::default())
+    }
+
+    /// Mazes of 15, 31 and 63 blocks: the bot starts outside, the goal is the centre cell,
+    /// whose way through the maze is many times the straight distance.
+    #[test]
+    fn mazes_are_solved() {
+        for (n, seed) in [(7, 3u64), (15, 5), (31, 7)] {
+            let mut w = flat(6);
+            maze(&mut w, (-n, -n), n, 2, seed);
+            let centre = [
+                if n % 2 == 1 { 0 } else { 1 },
+                64,
+                if n % 2 == 1 { 0 } else { 1 },
+            ];
+            let from = [f64::from(-n - 4) + 0.5, 64.0, f64::from(n + 4) + 0.5];
+            let d = drive::<P18, _>(
+                &w,
+                from,
+                follower(),
+                Goal::Near {
+                    pos: centre,
+                    radius: 1.0,
+                },
+                20_000,
+            );
+            eprintln!("maze {}: {d:?}", 2 * n + 1);
+            assert_eq!(d.status, FollowStatus::Arrived, "maze {}", 2 * n + 1);
+            let end = Pathfinder::start_block(d.end);
+            assert!(
+                Goal::Near {
+                    pos: centre,
+                    radius: 1.0
+                }
+                .is_reached(end)
+            );
+        }
+    }
+
+    /// Unreachable goals end cleanly: the bot walks to the reachable block closest to the
+    /// goal, then fails with `NoPath`, after a single search (no second full search from the
+    /// closest block).
+    #[test]
+    fn unreachable_goals_end_after_one_search() {
+        // A goal in the air (a flying player) and a goal sealed inside a maze.
+        let w = flat(4);
+        let d = drive::<P18, _>(
+            &w,
+            [-20.5, 64.0, 3.5],
+            follower(),
+            Goal::Near {
+                pos: [10, 70, -4],
+                radius: 2.0,
+            },
+            3000,
+        );
+        assert_eq!(
+            d.status,
+            FollowStatus::Failed(FollowError::Plan(PlanError::NoPath)),
+            "{d:?}"
+        );
+        assert_eq!(d.plans, 1, "{d:?}");
+        let end = Pathfinder::start_block(d.end);
+        assert!((end[0] - 10).abs() <= 1 && (end[2] + 4).abs() <= 1, "{d:?}");
+        let mut w = flat(4);
+        maze(&mut w, (-15, -15), 15, 2, 11);
+        w.fill_raw([-2, 64, -2], [2, 65, 2], STONE18);
+        w.fill_raw([0, 64, 0], [0, 65, 0], 0);
+        let d = drive::<P18, _>(
+            &w,
+            [-18.5, 64.0, 18.5],
+            follower(),
+            Goal::Block([0, 64, 0]),
+            20_000,
+        );
+        assert_eq!(
+            d.status,
+            FollowStatus::Failed(FollowError::Plan(PlanError::NoPath)),
+            "{d:?}"
+        );
+        assert_eq!(d.plans, 1, "{d:?}");
+    }
+
+    /// A node budget far below what the maze needs: partial paths into dead ends must not make
+    /// the bot wander (and search) forever.
+    #[test]
+    fn capped_searches_give_up() {
+        let mut w = flat(4);
+        maze(&mut w, (-31, -31), 31, 2, 13);
+        let f = Follower::new(
+            Pathfinder::new(Config::default().with_max_nodes(1500)),
+            FollowConfig::default(),
+        );
+        let d = drive::<P18, _>(&w, [-34.5, 64.0, -29.5], f, Goal::Block([0, 64, 0]), 40_000);
+        eprintln!("{d:?}");
+        assert_ne!(d.status, FollowStatus::Moving, "still wandering: {d:?}");
+        assert!(d.plans <= 20, "{d:?}");
+    }
+
+    /// The per-tick work stays in the budget on the biggest maze. The wall-clock check runs
+    /// only with `GHAST_TIMING` set, in release builds (debug builds are ~10 times slower,
+    /// and a loaded machine stretches any tick).
+    #[test]
+    fn per_tick_budget_on_a_big_maze() {
+        let mut w = flat(10);
+        maze(&mut w, (-63, -63), 63, 2, 17);
+        let budget = FollowConfig::default().budget;
+        let d = drive::<P18, _>(
+            &w,
+            [-67.5, 64.0, 67.5],
+            follower(),
+            Goal::Near {
+                pos: [1, 64, 1],
+                radius: 1.0,
+            },
+            40_000,
+        );
+        eprintln!("maze 127, view distance 10: {d:?}");
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
+        if !cfg!(debug_assertions) && std::env::var_os("GHAST_TIMING").is_some() {
+            let max = budget.time.unwrap() + Duration::from_millis(3);
+            assert!(d.worst_tick <= max, "{d:?}");
+        }
+        let _ = P16::VERSION;
+    }
+
+    /// The parkour corridor of `lab/pathfinder-course.sh` (superflat: grass y 3, feet y 4),
+    /// east and back west, driven by the follower.
+    #[test]
+    fn the_lab_parkour_corridor() {
+        let mut w = ghast_physics::v1_8::memory_world();
+        w.load_chunks(0, -2, 9, 2);
+        w.fill_raw([0, 0, -32], [159, 0, 47], 7 << 4);
+        w.fill_raw([0, 1, -32], [159, 2, 47], 3 << 4);
+        w.fill_raw([0, 3, -32], [159, 3, 47], 2 << 4);
+        for z in [-2, 2] {
+            w.fill_raw([60, 1, z], [123, 7, z], STONE18);
+        }
+        w.fill_raw([123, 4, -2], [123, 7, 2], STONE18);
+        let trench = |w: &mut ghast_physics::v1_8::MemoryWorld, a: i32, b: i32| {
+            w.fill_raw([a, 1, -1], [b, 3, 1], 0);
+        };
+        trench(&mut w, 66, 66);
+        trench(&mut w, 71, 72);
+        trench(&mut w, 77, 79);
+        trench(&mut w, 84, 84);
+        w.fill_raw([85, 4, -1], [89, 4, 1], STONE18);
+        trench(&mut w, 90, 91);
+        trench(&mut w, 96, 111);
+        for (x, top) in [(98, 3), (100, 3), (104, 3), (107, 4), (109, 3)] {
+            w.fill_raw([x, 1, 0], [x, top, 0], STONE18);
+        }
+        let d = drive::<P18, _>(
+            &w,
+            [62.5, 4.0, 0.5],
+            follower(),
+            Goal::Xz { x: 119, z: 0 },
+            4000,
+        );
+        eprintln!("east: {d:?}");
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
+        let d = drive::<P18, _>(&w, d.end, follower(), Goal::Xz { x: 62, z: 0 }, 4000);
+        eprintln!("west: {d:?}");
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
     }
 }

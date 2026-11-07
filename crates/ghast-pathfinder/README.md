@@ -30,7 +30,7 @@ From a bot, use `Follower` (feature `client`, on by default) in `Behavior::tick`
 | `Diagonal` | both side columns clear **and floored** (a stray box never drops into a hole) | √2 × straight |
 | `Ascend` | jump onto a block 0.6–1.0 higher, with headroom for the arc | measured standing jump |
 | `Descend` | walk off an edge and fall, at most `max_fall` (3: no fall damage) or `max_water_fall` into deep water | measured fall table |
-| `Parkour { gap }` | jump over a 1-block gap (walking), or a 2-block gap with a sprint run-up from the block behind | measured jump |
+| `Parkour { gap }` | jump along an axis over 1–3 blocks on the level, onto a block one higher, or one or two lower (4 when two lower); from and onto 1×1 pillars | measured jump |
 | `Swim` | in water, up, down, out onto land | measured swim speeds |
 | `ClimbUp` / `ClimbDown` / `ClimbExit` | ladders and vines, also onto a ladder from above | measured climb speeds |
 | dig / place (opt-in) | tunnel through blocks (`Config::with_dig`), fill one-deep holes (`Config::with_place`) | `DigCost`, place cost |
@@ -42,13 +42,59 @@ Lava, fire, cobwebs, berry bushes, portals, magma / campfires / cactus as floors
 doors, fence gates, scaffolding and other shapes the planner does not model are treated as
 solid.
 
+## Gap jumps
+
+A jump is offered only where the vanilla-exact physics lands it, checked twice:
+
+- **Planning** reads a table (`src/jump_table.rs`) measured in `ghast-physics` on canonical
+  terrain: only the take-off and landing blocks exist, so the landing is a 1×1 pillar. Each
+  run follows the controller's exact key policy (stand still on the take-off block, hold
+  forward and maybe sprint along the axis with the yaw fixed, jump at the edge or at once,
+  release the keys in the air at the tick that lands closest to the centre) from 153 start
+  states (±0.2 along, ±0.15 across the axis, ±0.5° yaw). A mode is kept only if every start
+  lands on the block and comes to rest on it without touching anything else. The planner
+  then requires every cell the body swept in any of those runs to be free (no collision,
+  fluid, ladder or hazard), so along the jump the world is, to the physics, the canonical
+  terrain. Take-off and landing need full-height floors with ordinary friction (no ice,
+  slime, soul sand, slabs).
+- **Before jumping**, standing still on the take-off block, the controller runs the jump in
+  the physics from its actual state in the actual world and jumps only if that lands;
+  otherwise it reports `Stuck` and the follower plans around the jump.
+
+Jumps in the table (both versions; some need sprinting, some jump at once from the centre):
+
+| gap | one up | level | one down | two down |
+|---|---|---|---|---|
+| 1 | ✓ | ✓ | ✓ | ✓ |
+| 2 | ✓ | ✓ | ✓ | ✓ |
+| 3 | ✓ | ✓ | ✓ | ✓ |
+| 4 | — | — | — | ✓ |
+
+The table is regenerated (after a physics or controller change) with
+`GHAST_UPDATE_JUMPS=1 cargo test --release -p ghast-pathfinder --lib -- --ignored jump_table`;
+a normal test run re-checks every entry from the centre and two corners of the envelope.
+
+## Mazes and unreachable goals
+
+A* with an admissible heuristic must expand every block whose estimate is below the real
+cost, and in a maze the real way is many times the straight line: the search floods the
+open terrain around the maze before it goes deep. The node budget (`Config::max_nodes`,
+default 250 000) covers all terrain a client loads at view distance 10 on a flat world; the
+follower spreads the search over ticks (2000 nodes / 5 ms per tick by default). A search out
+of nodes returns a partial path; the follower walks it and plans again, and gives up after
+`max_replans` partial paths that do not get closer to the goal.
+
+When the goal cannot be reached through the loaded terrain (a flying player, a sealed room),
+the search expands everything reachable (`Search::exhausted`): the follower walks to the
+reachable block closest to the goal and then fails with `NoPath`, after that single search.
+
 ## API
 
 - `Pathfinder::new(Config)`; `plan(version, &world, from, &goal)`,
   `plan_avoiding(.., &banned_moves)`, `plan_verified(.., attempts)` (plan, simulate, plan
   around the move the simulation failed), `Pathfinder::start_block(feet_pos)`.
 - Incremental: `Pathfinder::search(..) -> Search` with `Search::step(&world, Budget)` (at most
-  `Budget::nodes(n)` expansions, optionally `.with_time(d)`), and `Simulation::new(&path,
+  `Budget::nodes(n)` expansions, optionally `.with_time(d)`), `Search::exhausted`, and `Simulation::new(&path,
   &cfg)` with `Simulation::step(&world, ticks, time)`. Slices only pause the same algorithm:
   the results equal `plan` / `simulate` on the same world (tested).
 - `Config` (`with_sprint`, `with_parkour`, `with_max_fall`, `with_swim`, `with_climb`,
@@ -87,6 +133,19 @@ dug through a dirt wall, a trench filled with blocks, a goal beyond unloaded chu
 (heights 0–3 per block, slabs, soul sand, holes). An ignored proptest fuzzes more terrains:
 `cargo test --release -p ghast-pathfinder -- --ignored`.
 
+`tests/parkour.rs`: trenches 1, 2 and 3 wide (4 deep, no way around), one up and one down,
+up onto a one-wide ledge and down again, stepping stones (1×1 pillars over lava) with gaps of
+1, 2, 3 and one up, all four directions, a jump between the glass walls of a closed corridor,
+a superflat ditch (jumped, not climbed through), and the jumps that must not happen: 4 wide,
+4 wide and one up, under a low ceiling, without the option.
+
+`tests/maze.rs` and the follower's unit tests: generated perfect mazes 15, 31 and 63 blocks
+wide (corner to corner, and from outside to the centre, whose way is 3–6 times the straight
+line), one-shot and in 2000-node slices (the same path), run in the physics; a 127-block maze
+in terrain loaded at view distance 10 driven by the `Follower` itself through a simulated
+client; a sealed cell and a goal in the air (one search, then `NoPath` at the closest
+block); a node budget far too small (ends instead of wandering).
+
 ## Performance
 
 `cargo bench -p ghast-pathfinder` (x86_64 WSL, release, 1.8.9, 2026-11-06):
@@ -112,6 +171,18 @@ simulated ticks, 5 ms):
 So the longest planning work in one tick stays near 5 ms (the clock is read every 64 nodes /
 16 simulated ticks); the detour costs ~19 ticks (~1 s) of standing still before the bot moves.
 
+Mazes, driven by the `Follower` with the default budget (x86_64 WSL, release, 1.8.9,
+2026-11-07; the bot stands still while it plans):
+
+| maze, loaded terrain | nodes | planned in | worst tick |
+|---|---|---|---|
+| 31 blocks, view distance 6 | ~12 k | 3 ticks | 5.1 ms |
+| 63 blocks, view distance 6 | ~40 k | 19 ticks | 5.2 ms |
+| 127 blocks, view distance 10 | ~110 k | 67 ticks | 6.1 ms |
+
+Before this release the last one ran out of its 100 000 nodes and followed partial paths into
+dead ends next to the goal.
+
 ## Live check
 
 1.8 lab (Paper 1.8.8 + Grim 2.3.73, local, 2026-11-06): the `goto` example of the `ghast`
@@ -122,11 +193,23 @@ added a pocket of walls built with `/fill` (a ~60-block way out, 931 nodes) plan
 nodes per tick: planned in 4 ticks standing still, then walked out; 23 legs in 3 min, 0 Grim
 flags.
 
+Gap jumps and mazes (1.8 lab, Paper 1.8.8 + Grim 2.3.73, local, 2026-11-07,
+`lab/pathfinder-course.sh` + `ghast-ext`'s `lab_course` example, vanilla step behaviour):
+a closed corridor with trenches 1, 2 and 3 wide (3 deep), a gap one up and one down, and
+stepping stones on 1×1 pillars (gaps 2, 1, 3, 2 up, 1 down, 2), run east and west; a
+31-block maze (centre, out, centre again); then `Bot::follow_path` after an armor stand moved
+through the maze every 15 s, once hanging out of reach in the air (the bot waited under it
+after one search). Five sessions, 27 legs, **0 failed, 0 Grim flags, 0 setbacks**; the
+corridor takes ~15 s each way.
+
 ## Known limits
 
 - About 1 in 300 fuzzed rough terrains still ends `Stuck` / `OffPath` in the simulation
   (awkward lines of slabs and soul sand between holes). `plan_verified` and the follower
   plan around such moves.
+- Gap jumps go along the four axes only (no diagonal jumps), from and onto full-height
+  floors with ordinary friction; sprint jumps need food above 6 (the controller reports
+  `Stuck` otherwise and the follower plans around them).
 - Not modelled: doors and gates (solid), trapdoors, entities in the way, flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
 - 1.16.5 is validated in the simulation only; digging and placing are validated in the

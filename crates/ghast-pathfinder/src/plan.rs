@@ -8,6 +8,7 @@ use crate::class::flag;
 use crate::control::ControllerConfig;
 use crate::cost::Costs;
 use crate::goal::{Goal, Heuristic};
+use crate::jump;
 use crate::moves::{
     HEIGHT, JUMP_APEX, JUMP_MARGIN, MAX_JUMP_UP, MoveKind, NodeKind, STEP, Spot, ceiling, clear,
     climb_wall, spot,
@@ -43,7 +44,9 @@ impl Default for DigCost {
 pub struct Config {
     /// Sprint on straight runs (costs assume sprinting; needs food > 6). Default on.
     pub sprint: bool,
-    /// Jump over 1-block gaps (and 2-block gaps when sprinting). Default on.
+    /// Jump over gaps: up to 3 blocks on the level, onto a block one higher or up to two
+    /// lower, each only where the vanilla-exact physics lands the jump (some need sprinting).
+    /// Default on.
     pub parkour: bool,
     /// Highest drop onto a floor, in blocks (3 = no fall damage). Default 3.
     pub max_fall: f64,
@@ -58,7 +61,10 @@ pub struct Config {
     /// Place a block to fill a one-deep hole, at this cost in ticks (default off). The
     /// follower places the held item: the caller keeps a block in hand.
     pub place: Option<f64>,
-    /// Node budget per plan; when exhausted the best partial path is returned.
+    /// Node budget per plan; when exhausted the best partial path is returned. Default
+    /// 250 000: enough to search all the terrain a client loads at view distance 10 on a
+    /// flat world (a maze whose way is far longer than the straight line needs that); at
+    /// most some 30–40 MB while it runs and half a second of one desktop core.
     pub max_nodes: usize,
     /// Heuristic weight (1 = optimal; larger plans faster, slightly longer paths).
     pub heuristic_weight: f64,
@@ -75,7 +81,7 @@ impl Default for Config {
             climb: true,
             dig: None,
             place: None,
-            max_nodes: 100_000,
+            max_nodes: 250_000,
             heuristic_weight: 1.0,
         }
     }
@@ -185,7 +191,8 @@ pub struct Path {
     /// Estimated cost in ticks.
     pub cost: f64,
     /// The goal was not reached (node budget, unknown terrain, or unreachable): the path ends
-    /// at the node closest to the goal. Replan from there.
+    /// at the node closest to the goal (or, when the node budget ran out with no node closer
+    /// than the start, at the most promising node not expanded yet). Replan from there.
     pub partial: bool,
     /// Nodes expanded.
     pub expanded: usize,
@@ -233,6 +240,7 @@ pub(crate) struct Edge {
     pub(crate) place: Option<Place>,
 }
 
+/// A search node (kept small: a large search holds a few hundred thousand of them).
 #[derive(Clone)]
 struct Rec {
     pos: [i32; 3],
@@ -240,11 +248,17 @@ struct Rec {
     g: f64,
     h: f64,
     parent: u32,
+    /// Index into [`SearchState::work`] of the digs / place of the move here, or `NO_WORK`.
+    work: u32,
     kind: MoveKind,
-    dig: [Option<[i32; 3]>; 3],
-    place: Option<Place>,
     closed: bool,
 }
+
+/// [`Rec::work`] of a move without digs or places.
+const NO_WORK: u32 = u32::MAX;
+
+/// Digs and place of a move.
+type Work = ([Option<[i32; 3]>; 3], Option<Place>);
 
 #[derive(Clone, PartialEq)]
 struct Open {
@@ -377,6 +391,7 @@ impl Pathfinder {
             banned,
             state: None,
             result: None,
+            exhausted: false,
         }
     }
 
@@ -514,6 +529,7 @@ impl Budget {
 struct SearchState {
     cache: Sections,
     recs: Vec<Rec>,
+    work: Vec<Work>,
     index: HashMap<u64, u32, BuildKeyHasher>,
     open: BinaryHeap<Open>,
     best: u32,
@@ -533,6 +549,8 @@ pub struct Search {
     banned: HashSet<([i32; 3], [i32; 3])>,
     state: Option<SearchState>,
     result: Option<Result<Path, PlanError>>,
+    /// The open set ran out (every reachable node was expanded).
+    exhausted: bool,
 }
 
 impl std::fmt::Debug for Search {
@@ -571,6 +589,16 @@ impl Search {
         self.result.is_some()
     }
 
+    /// Whether the search ended because every node reachable from the start through known
+    /// (loaded) terrain was expanded, not because of the node budget
+    /// ([`Config::max_nodes`]). A partial result of an exhausted search is final for the
+    /// world as it is: no path to the goal exists through the loaded terrain, and the path
+    /// ends at the reachable node closest to the goal.
+    #[must_use]
+    pub fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+
     /// Runs the search for at most `budget` in `world`; the result once it is done (`None`:
     /// call again). After the result, further steps return it again.
     ///
@@ -602,6 +630,7 @@ impl Search {
             let mut st = SearchState {
                 cache: Sections::default(),
                 recs: Vec::with_capacity(4096),
+                work: Vec::new(),
                 index: HashMap::with_capacity_and_hasher(4096, BuildKeyHasher),
                 open: BinaryHeap::with_capacity(4096),
                 best: 0,
@@ -614,9 +643,8 @@ impl Search {
                 g: 0.0,
                 h: h0,
                 parent: u32::MAX,
+                work: NO_WORK,
                 kind: MoveKind::Start,
-                dig: [None; 3],
-                place: None,
                 closed: false,
             });
             st.index.insert(pack(self.from), 0);
@@ -645,6 +673,7 @@ impl Search {
                 break;
             }
             let Some(Open { idx, .. }) = st.open.pop() else {
+                self.exhausted = true;
                 end = Some(None);
                 break;
             };
@@ -680,6 +709,14 @@ impl Search {
                 }
                 let ng = gcost + e.cost;
                 let key = pack(e.to);
+                let work = |w: &mut Vec<Work>| {
+                    if e.dig[0].is_none() && e.place.is_none() {
+                        NO_WORK
+                    } else {
+                        w.push((e.dig, e.place));
+                        (w.len() - 1) as u32
+                    }
+                };
                 match st.index.get(&key) {
                     Some(&i) => {
                         let rr = &mut st.recs[i as usize];
@@ -690,9 +727,9 @@ impl Search {
                         rr.parent = idx;
                         rr.spot = e.spot;
                         rr.kind = e.kind;
-                        rr.dig = e.dig;
-                        rr.place = e.place;
                         let h = rr.h;
+                        let wk = work(&mut st.work);
+                        st.recs[i as usize].work = wk;
                         st.open.push(Open {
                             f: ng + h * w,
                             h,
@@ -702,15 +739,15 @@ impl Search {
                     None => {
                         let h = self.goal.estimate(e.to, &self.heur);
                         let i = st.recs.len() as u32;
+                        let wk = work(&mut st.work);
                         st.recs.push(Rec {
                             pos: e.to,
                             spot: e.spot,
                             g: ng,
                             h,
                             parent: idx,
+                            work: wk,
                             kind: e.kind,
-                            dig: e.dig,
-                            place: e.place,
                             closed: false,
                         });
                         st.index.insert(key, i);
@@ -729,12 +766,13 @@ impl Search {
         }
         st.cache = g.into_cache();
         let found = end?;
-        let r = st.finish(found, self.version);
+        let r = st.finish(found, self.exhausted, self.version);
         // The search state is not needed any more.
         let expanded = st.expanded;
         self.state = Some(SearchState {
             cache: Sections::default(),
             recs: Vec::new(),
+            work: Vec::new(),
             index: HashMap::default(),
             open: BinaryHeap::new(),
             best: 0,
@@ -747,23 +785,43 @@ impl Search {
 }
 
 impl SearchState {
-    fn finish(&self, found: Option<u32>, version: Version) -> Result<Path, PlanError> {
+    fn finish(
+        &self,
+        found: Option<u32>,
+        exhausted: bool,
+        version: Version,
+    ) -> Result<Path, PlanError> {
         let (end, partial) = match found {
             Some(i) => (i, false),
             None if self.best != 0 => (self.best, true),
+            // Out of nodes with nothing closer than the start (a dead end of a maze): the
+            // most promising node not expanded yet, where the search would have gone on.
+            None if !exhausted => match self
+                .open
+                .iter()
+                .filter(|o| !self.recs[o.idx as usize].closed)
+                .min_by(|a, b| a.f.total_cmp(&b.f).then(a.h.total_cmp(&b.h)))
+            {
+                Some(o) => (o.idx, true),
+                None => return Err(PlanError::NoPath),
+            },
             None => return Err(PlanError::NoPath),
         };
         let mut steps = Vec::new();
         let mut i = end;
         while i != u32::MAX {
             let r = &self.recs[i as usize];
+            let (dig, place) = match self.work.get(r.work as usize) {
+                Some((d, p)) => (d.iter().flatten().copied().collect(), *p),
+                None => (Vec::new(), None),
+            };
             steps.push(Step {
                 pos: r.pos,
                 feet_y: r.spot.floor,
                 kind: r.kind,
                 node: r.spot.kind,
-                dig: r.dig.iter().flatten().copied().collect(),
-                place: r.place,
+                dig,
+                place,
             });
             i = r.parent;
         }
@@ -1123,7 +1181,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
             fill_hole(g, pc, per_block, p, f0, (dx, dz), out);
         }
         if cfg.parkour && !swimming && !climbing && s.kind == NodeKind::Ground && !s.water {
-            parkour(g, cfg, c, p, s, (dx, dz), out);
+            parkour(g, cfg, version, p, s, (dx, dz), out);
         }
     }
 
@@ -1208,75 +1266,67 @@ fn jump_room<S: BlockSource + ?Sized>(
     apex >= (t.floor - f0) + JUMP_MARGIN
 }
 
-/// Gap jumps from `p` in direction `d`.
+/// Gap jumps from `p` in direction `d`: over 1 to 4 columns onto a block up to one higher or
+/// two lower, each only in a mode validated in the physics (see [`crate::jump`]) and only
+/// where every cell the body sweeps in that mode is free.
 fn parkour<S: BlockSource + ?Sized>(
     g: &mut Grid<'_, S>,
     cfg: &Config,
-    c: &Costs,
+    version: Version,
     p: [i32; 3],
     s: &Spot,
     (dx, dz): (i32, i32),
     out: &mut Vec<Edge>,
 ) {
     let [x, y, z] = p;
-    let f0 = s.floor;
-    // Standing jumps need exact floors (no slabs or soul sand at take-off).
-    if (f0 - f64::from(y)).abs() > 1e-6
-        || s.floor_flags & (flag::SLOW | flag::SLIPPERY | flag::BOUNCY) != 0
-    {
+    // Exact full-block floors with ordinary friction at the take-off.
+    if (s.floor - f64::from(y)).abs() > 1e-6 || !jump::plain_floor(g.class(x, y - 1, z)) {
         return;
     }
-    let arc_top = f0 + HEIGHT + JUMP_APEX;
-    if !clear(g, x, z, f0 + HEIGHT, arc_top) {
+    // Something to walk onto (or step up onto) next to the take-off: no gap.
+    let walkable = |g: &mut Grid<'_, S>, cx: i32, cz: i32| {
+        [y + 1, y].iter().any(|&yy| {
+            spot(g, cx, yy, cz).is_some_and(|t| (t.floor - s.floor).abs() <= STEP + 1e-6)
+        })
+    };
+    if walkable(g, x + dx, z + dz) {
         return;
     }
-    // A 2-block gap needs a sprint run-up: a block to stand on behind the take-off.
-    let runup = spot(g, x - dx, y, z - dz)
-        .is_some_and(|r| r.kind == NodeKind::Ground && (r.floor - f0).abs() < 1e-6 && !r.water)
-        && clear(g, x - dx, z - dz, f0 + HEIGHT, arc_top);
-    let max_gap = if cfg.sprint && runup { 2 } else { 1 };
-    for gap in 1..=max_gap {
-        // The gap columns: no floor at the take-off level and room for the arc.
-        let (gx, gz) = (x + dx * gap, z + dz * gap);
-        let below = g.class(gx, y - 1, gz);
-        if below.has(flag::SUPPORT) || below.has(flag::LAVA) || g.unknown(gx, y - 1, gz) {
+    let jumps = jump::Jumps::of(version);
+    for gap in 1..=jumps.widest() {
+        // A floor at the take-off level ends the run of gaps: walk there, jump from there.
+        if gap > 1 && walkable(g, x + dx * i32::from(gap), z + dz * i32::from(gap)) {
             return;
         }
-        if !clear(g, gx, gz, f0 - 1.0, arc_top) {
-            return;
-        }
-        let (tx, tz) = (x + dx * (gap + 1), z + dz * (gap + 1));
-        for yt in [y, y - 1] {
-            let Some(t) = spot(g, tx, yt, tz) else {
+        let a = i32::from(gap) + 1;
+        let (tx, tz) = (x + dx * a, z + dz * a);
+        for dy in jump::DYS {
+            let ty = y + i32::from(dy);
+            let Some(t) = spot(g, tx, ty, tz) else {
                 continue;
             };
-            if t.kind != NodeKind::Ground || t.water {
-                break;
+            if t.kind != NodeKind::Ground
+                || t.water
+                || (t.floor - f64::from(ty)).abs() > 1e-6
+                || !jump::plain_floor(g.class(tx, ty - 1, tz))
+            {
+                continue;
             }
-            let dh = t.floor - f0;
-            if dh > 1e-6 || dh < -1.0 - 1e-6 {
-                break;
+            let Some(spec) = jump::select(&jumps, p, (dx, dz), gap, dy, cfg.sprint, |q| {
+                g.class(q[0], q[1], q[2])
+            }) else {
+                continue;
+            };
+            if f64::from(spec.fall) > cfg.max_fall + 1e-6 {
+                continue;
             }
-            if t.floor_flags & (flag::FRAGILE | flag::BOUNCY | flag::SLIPPERY) != 0 {
-                break;
-            }
-            if !clear(g, tx, tz, t.floor + HEIGHT, arc_top) {
-                break;
-            }
-            let cost =
-                6.0 + c.jump_air + 1.0 / c.walk_speed + floor_penalty(&t, 1.0 / c.walk_speed);
             push(
                 out,
-                [tx, yt, tz],
+                [tx, ty, tz],
                 t,
-                MoveKind::Parkour { gap: gap as u8 },
-                cost,
+                MoveKind::Parkour { gap },
+                f64::from(spec.cost),
             );
-            break;
-        }
-        // A floor in the next column ends the run of gaps.
-        if spot(g, tx, y, tz).is_some() || spot(g, tx, y - 1, tz).is_some() {
-            return;
         }
     }
 }

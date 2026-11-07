@@ -60,7 +60,8 @@ look and the movement keys at a time.
   `Block` names raw states), `find_entities`, `nearest_entity`, `entity`, `player`.
 - Chat and events: `chat`, `command`, `wait_for_chat`, `wait_for`, `events` (`Event`
   stream), `respawn`, `disconnect`.
-- Moving: `walk_straight_to`, `follow`, `set_controls`; `goto` / `goto_with` (feature
+- Moving: `walk_straight_to`, `follow` (straight line), `set_controls`; `goto` / `goto_with`,
+  `follow_path` / `follow_path_with` (feature
   `pathfinder`, on by default: ghast-pathfinder's planner and follower, re-exported as
   `ghast_ext::pathfinder`).
 

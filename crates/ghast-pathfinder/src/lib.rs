@@ -1,8 +1,9 @@
 //! Physics-exact path planning and following for the ghast Minecraft Java Edition bot library.
 //!
 //! - [`Pathfinder`]: A* over feet blocks. Moves: walk (incl. step-ups onto slabs and partial
-//!   blocks), diagonal, jump up, drop down (configurable maximum fall), 1- and 2-block gap
-//!   jumps, swimming, ladder / vine climbing, and optionally digging and placing. Costs are
+//!   blocks), diagonal, jump up, drop down (configurable maximum fall), gap jumps (up to 3
+//!   blocks, also one up or down; each validated in the physics), swimming, ladder / vine
+//!   climbing, and optionally digging and placing. Costs are
 //!   ticks **measured with `ghast-physics`** (see [`Costs`]). Unknown (unloaded) blocks are
 //!   never treated as air: they are impassable, and a goal beyond them yields a partial path.
 //! - [`Controller`]: turns a path into per-tick keys and aim. It picks the keys by simulating
@@ -36,6 +37,7 @@ mod cost;
 #[cfg(feature = "client")]
 mod follower;
 mod goal;
+mod jump;
 mod moves;
 mod physics;
 mod plan;

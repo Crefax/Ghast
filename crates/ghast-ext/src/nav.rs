@@ -97,7 +97,8 @@ impl Bot {
     }
 
     /// Follows entity `id`, staying within `range` blocks of it, with the straight walker
-    /// (see [`Bot::walk_straight_to`]). Runs until the entity is gone
+    /// (see [`Bot::walk_straight_to`]): for open ground. To follow through mazes, over gaps
+    /// and around walls use `Bot::follow_path` (feature `pathfinder`). Runs until the entity is gone
     /// ([`Error::NoSuchEntity`]), the walker is stuck, or the task is cancelled (e.g. with
     /// [`Bot::timeout`] or [`crate::JoinHandle::abort`]). Needs
     /// [`ghast_client::Interests::ENTITIES`].

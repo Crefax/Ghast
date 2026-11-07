@@ -119,7 +119,23 @@ const UNKNOWN: u16 = u16::MAX - 1;
 type Section = Box<[u16; 4096]>;
 
 /// The class cache of a planning run, kept between the slices of an incremental search.
-pub(crate) type Sections = HashMap<u64, Section, BuildKeyHasher>;
+#[derive(Clone)]
+pub(crate) struct Sections {
+    index: HashMap<u64, u32, BuildKeyHasher>,
+    secs: Vec<Section>,
+    /// The last section looked up (most lookups hit the same section in a row).
+    last: (u64, u32),
+}
+
+impl Default for Sections {
+    fn default() -> Self {
+        Sections {
+            index: HashMap::with_capacity_and_hasher(64, BuildKeyHasher),
+            secs: Vec::with_capacity(64),
+            last: (u64::MAX, u32::MAX),
+        }
+    }
+}
 
 /// Per-planning-run cache of block classes (1 lookup in the source per block at most).
 pub(crate) struct Grid<'w, S: ?Sized> {
@@ -130,11 +146,7 @@ pub(crate) struct Grid<'w, S: ?Sized> {
 
 impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
     pub(crate) fn new(src: &'w S, version: Version) -> Self {
-        Self::with_cache(
-            src,
-            version,
-            HashMap::with_capacity_and_hasher(64, BuildKeyHasher),
-        )
+        Self::with_cache(src, version, Sections::default())
     }
 
     /// A grid over `src` that continues an earlier run's cache.
@@ -170,11 +182,19 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
         }
         let key = Self::key(x, y, z);
         let i = (((y & 15) as usize) << 8) | (((z & 15) as usize) << 4) | ((x & 15) as usize);
-        let sec = self
-            .sections
-            .entry(key)
-            .or_insert_with(|| Box::new([NOT_CACHED; 4096]));
-        let v = sec[i];
+        let c = &mut self.sections;
+        let si = if c.last.0 == key {
+            c.last.1
+        } else {
+            let n = c.secs.len() as u32;
+            let si = *c.index.entry(key).or_insert(n);
+            if si == n {
+                c.secs.push(Box::new([NOT_CACHED; 4096]));
+            }
+            c.last = (key, si);
+            si
+        };
+        let v = c.secs[si as usize][i];
         if v != NOT_CACHED {
             return v;
         }
@@ -182,7 +202,7 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
             Some(raw) => self.table.index(raw),
             None => UNKNOWN,
         };
-        sec[i] = v;
+        self.sections.secs[si as usize][i] = v;
         v
     }
 

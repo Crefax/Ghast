@@ -38,6 +38,21 @@ impl Goal {
         }
     }
 
+    /// Distance in blocks from feet block `p` to the nearest block that satisfies the goal
+    /// (0 when reached; `Y`: the height difference).
+    pub(crate) fn distance(&self, p: [i32; 3]) -> f64 {
+        match self {
+            Goal::Block(b) => dist2(*b, p).sqrt(),
+            Goal::Near { pos, radius } => (dist2(*pos, p).sqrt() - radius).max(0.0),
+            Goal::Xz { x, z } => f64::from(x - p[0]).hypot(f64::from(z - p[2])),
+            Goal::Y(y) => f64::from(y - p[1]).abs(),
+            Goal::AnyOf(gs) => gs
+                .iter()
+                .map(|g| g.distance(p))
+                .fold(f64::INFINITY, f64::min),
+        }
+    }
+
     /// Admissible estimate of the remaining cost (ticks) from `p`.
     pub(crate) fn estimate(&self, p: [i32; 3], h: &Heuristic) -> f64 {
         match self {

@@ -42,9 +42,10 @@ pub enum MoveKind {
     Ascend,
     /// Walk off an edge and fall (drop > 0.6).
     Descend,
-    /// Jump over a gap of 1 or 2 blocks (2 needs sprinting).
+    /// Jump over a gap along one axis, onto a block up to one higher or two lower (the
+    /// height change is the steps' `feet_y` difference). Only where the physics lands it.
     Parkour {
-        /// Gap width in blocks.
+        /// Gap width in blocks (the landing block is `gap + 1` blocks away).
         gap: u8,
     },
     /// Swim (horizontally, up or down) or wade through water.
