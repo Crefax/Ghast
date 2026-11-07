@@ -61,6 +61,8 @@ pub use world::BlockSource;
 pub enum Version {
     /// 1.8.9 (protocol 47).
     V1_8,
+    /// 1.12.2 (protocol 340).
+    V1_12,
     /// 1.16.5 (protocol 754).
     V1_16_5,
 }
@@ -70,6 +72,7 @@ impl From<ghast_client::GameVersion> for Version {
     fn from(v: ghast_client::GameVersion) -> Self {
         match v {
             ghast_client::GameVersion::V1_8_9 => Version::V1_8,
+            ghast_client::GameVersion::V1_12_2 => Version::V1_12,
             _ => Version::V1_16_5,
         }
     }

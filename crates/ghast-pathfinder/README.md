@@ -1,7 +1,7 @@
 # ghast-pathfinder
 
-Path planning and path following for the ghast Minecraft Java Edition bot library, 1.8.9 and
-1.16.5. The planner is an A* over feet blocks; the follower drives the vanilla-exact
+Path planning and path following for the ghast Minecraft Java Edition bot library, 1.8.9,
+1.12.2 and 1.16.5. The planner is an A* over feet blocks; the follower drives the vanilla-exact
 `ghast-physics` player. Every move type is checked by running it in that physics, both in
 the tests and (by default) before the bot moves.
 
@@ -54,14 +54,18 @@ A jump is offered only where the vanilla-exact physics lands it, checked twice:
   states (±0.2 along, ±0.15 across the axis, ±0.5° yaw). A mode is kept only if every start
   lands on the block and comes to rest on it without touching anything else. The planner
   then requires every cell the body swept in any of those runs to be free (no collision,
-  fluid, ladder or hazard), so along the jump the world is, to the physics, the canonical
-  terrain. Take-off and landing need full-height floors with ordinary friction (no ice,
-  slime, soul sand, slabs).
+  fluid, ladder or hazard), up to the landing nothing within 0.3 under the body (it would
+  catch the player early), and no soul sand or honey half a block under the feet (1.16
+  applies their velocity multiplier from there, even in the air), so along the jump the
+  world is, to the physics, the canonical terrain. Take-off and landing need full-height
+  floors with ordinary friction (no ice, slime, soul sand, slabs).
 - **Before jumping**, standing still on the take-off block, the controller runs the jump in
   the physics from its actual state in the actual world and jumps only if that lands;
-  otherwise it reports `Stuck` and the follower plans around the jump.
+  otherwise it reports `Stuck` and the follower plans around the jump. It then replays
+  exactly the keys of that run (ground ticks, jump tick, air ticks with the keys held).
 
-Jumps in the table (both versions; some need sprinting, some jump at once from the centre):
+Jumps in the table (all three versions; some need sprinting, some jump at once from the
+centre):
 
 | gap | one up | level | one down | two down |
 |---|---|---|---|---|
@@ -122,7 +126,7 @@ reachable block closest to the goal and then fails with `NoPath`, after that sin
 
 ## Validation
 
-`tests/validation.rs`, for both versions, plans on fake worlds and runs each path through
+`tests/validation.rs`, for all three versions, plans on fake worlds and runs each path through
 the physics with the controller, asserting the goal block is reached with no unexpected
 horizontal collision and no fall damage: flat runs (straight, diagonal, no sprint), a wall
 with one opening, glass corridors, staircases up, drops of up to 3, slabs / soul sand
@@ -202,17 +206,22 @@ through the maze every 15 s, once hanging out of reach in the air (the bot waite
 after one search). Five sessions, 27 legs, **0 failed, 0 Grim flags, 0 setbacks**; the
 corridor takes ~15 s each way.
 
+The same course on the 1.12 lab (Paper 1.12.2 + Grim 2.3.73, local, 2026-11-07, `GhastBot12`,
+`... lab_course ... 1.12.2`): two sessions, 16 legs (the corridor 5 times each way, the maze
+three times) and `follow_path` after the armor stand, **0 failed, 0 Grim flags, 0 setbacks**.
+
 ## Known limits
 
-- About 1 in 300 fuzzed rough terrains still ends `Stuck` / `OffPath` in the simulation
-  (awkward lines of slabs and soul sand between holes). `plan_verified` and the follower
+- About 1 in 1000 fuzzed rough terrains still ends `Stuck` / `OffPath` in the simulation
+  (walking down onto a slab next to holes; none on a gap jump in 3000 terrains). `plan_verified` and the follower
   plan around such moves.
 - Gap jumps go along the four axes only (no diagonal jumps), from and onto full-height
   floors with ordinary friction; sprint jumps need food above 6 (the controller reports
   `Stuck` otherwise and the follower plans around them).
 - Not modelled: doors and gates (solid), trapdoors, entities in the way, flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
-- 1.16.5 is validated in the simulation only; digging and placing are validated in the
+- 1.16.5 is validated in the simulation only (1.8.9 and 1.12.2 also live); digging and
+  placing are validated in the
   simulation only (no live run yet).
 
 Licensed under MIT OR Apache-2.0.

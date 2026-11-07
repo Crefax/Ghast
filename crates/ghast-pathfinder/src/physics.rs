@@ -56,6 +56,7 @@ pub(crate) trait Physics: 'static {
 }
 
 pub(crate) struct P18;
+pub(crate) struct P12;
 pub(crate) struct P16;
 
 impl Physics for P18 {
@@ -127,6 +128,78 @@ impl Physics for P18 {
 
     fn air() -> Self::Block {
         ghast_data::v1_8::BlockState::AIR
+    }
+}
+
+impl Physics for P12 {
+    type State = ghast_physics::v1_12::PlayerState;
+    type Block = ghast_data::v1_12::BlockState;
+    const VERSION: Version = Version::V1_12;
+
+    fn new_state(pos: [f64; 3], yaw: f32, pitch: f32) -> Self::State {
+        let mut s = ghast_physics::v1_12::PlayerState::new(pos, yaw, pitch);
+        s.sent.pos = pos;
+        s.sent.yaw = yaw;
+        s.sent.pitch = pitch;
+        s
+    }
+
+    fn from_observation(o: &Observation) -> Self::State {
+        let mut s = Self::new_state(o.pos, o.yaw, o.pitch);
+        s.vel = o.vel;
+        s.on_ground = o.on_ground;
+        // Through the setter: sprinting also carries the speed modifier.
+        s.set_sprinting(o.sprinting);
+        s.sent.sprinting = o.sprinting;
+        s.food_level = o.food;
+        s
+    }
+
+    fn observe(s: &Self::State) -> Observation {
+        Observation {
+            pos: [s.pos[0], s.bb.min_y, s.pos[2]],
+            vel: s.vel,
+            on_ground: s.on_ground,
+            yaw: s.yaw,
+            pitch: s.pitch,
+            sprinting: s.sprinting,
+            food: s.food_level,
+        }
+    }
+
+    #[inline]
+    fn tick<W: BlockView<State = Self::Block>>(
+        s: &mut Self::State,
+        keys: Keys,
+        yaw: f32,
+        pitch: f32,
+        world: &W,
+    ) {
+        let mut out = Packets::new();
+        let input = TickInput {
+            keys,
+            yaw,
+            pitch,
+            using_item: false,
+        };
+        ghast_physics::v1_12::tick(s, &input, world, &mut out);
+    }
+
+    fn horizontal_collision(s: &Self::State) -> bool {
+        s.horizontal_collision
+    }
+
+    fn fall_distance(s: &Self::State) -> f32 {
+        s.fall_distance
+    }
+
+    #[inline]
+    fn decode(raw: u32) -> Self::Block {
+        ghast_data::v1_12::BlockState::from_raw_vanilla(raw as u16)
+    }
+
+    fn air() -> Self::Block {
+        ghast_data::v1_12::BlockState::AIR
     }
 }
 

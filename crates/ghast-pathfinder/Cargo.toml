@@ -1,6 +1,6 @@
 [package]
 name = "ghast-pathfinder"
-description = "Physics-exact path planning and path following for the ghast Minecraft Java Edition bot library (1.8.9 and 1.16.5): every move type is validated against the vanilla-exact ghast-physics"
+description = "Physics-exact path planning and path following for the ghast Minecraft Java Edition bot library (1.8.9, 1.12.2 and 1.16.5): every move type is validated against the vanilla-exact ghast-physics"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,7 +19,7 @@ default = ["client"]
 client = ["dep:ghast-client", "dep:log"]
 
 [dependencies]
-ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 ghast-physics = { path = "../ghast-physics", version = "0.2.3" }
 ghast-client = { path = "../ghast-client", version = "0.2.3", optional = true }
 log = { workspace = true, optional = true }

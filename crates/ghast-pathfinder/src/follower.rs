@@ -702,7 +702,7 @@ pub(crate) mod tests {
     use ghast_physics::Keys;
 
     use super::{FollowConfig, FollowError, FollowStatus, Follower, Io};
-    use crate::physics::{Observation, P16, P18, Physics, SourceView};
+    use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
     use crate::plan::{Config, Pathfinder, PlanError};
     use crate::sim::Turner;
     use crate::world::BlockSource;
@@ -868,8 +868,8 @@ pub(crate) mod tests {
     /// a stone floor at y = 63; grid (2n + 1)², corner (ox, oz). Cell (i, j) has its feet
     /// block at (ox + 2i + 1, 64, oz + 2j + 1). Entrances: west of cell (0, 0), east of
     /// cell (n - 1, n - 1).
-    pub(crate) fn maze(
-        w: &mut ghast_physics::v1_8::MemoryWorld,
+    pub(crate) fn maze<B: Copy>(
+        w: &mut ghast_physics::MemoryWorld<B>,
         (ox, oz): (i32, i32),
         n: i32,
         h: i32,
@@ -881,7 +881,7 @@ pub(crate) mod tests {
             [ox + size - 1, 63 + h, oz + size - 1],
             STONE18,
         );
-        let carve = |w: &mut ghast_physics::v1_8::MemoryWorld, gx: i32, gz: i32| {
+        let carve = |w: &mut ghast_physics::MemoryWorld<B>, gx: i32, gz: i32| {
             w.fill_raw([ox + gx, 64, oz + gz], [ox + gx, 63 + h, oz + gz], 0);
         };
         let mut s = seed | 1;
@@ -911,7 +911,14 @@ pub(crate) mod tests {
 
     /// A flat stone world over chunks -r..=r.
     pub(crate) fn flat(r: i32) -> ghast_physics::v1_8::MemoryWorld {
-        let mut w = ghast_physics::v1_8::memory_world();
+        flat_in(ghast_physics::v1_8::memory_world(), r)
+    }
+
+    /// [`flat`] in a world of any version with 1.8 raw ids (1.8 and 1.12).
+    pub(crate) fn flat_in<B: Copy>(
+        mut w: ghast_physics::MemoryWorld<B>,
+        r: i32,
+    ) -> ghast_physics::MemoryWorld<B> {
         w.load_chunks(-r, -r, r, r);
         w.fill_raw(
             [-16 * r, 63, -16 * r],
@@ -1052,7 +1059,39 @@ pub(crate) mod tests {
     /// east and back west, driven by the follower.
     #[test]
     fn the_lab_parkour_corridor() {
-        let mut w = ghast_physics::v1_8::memory_world();
+        let w = corridor(ghast_physics::v1_8::memory_world());
+        run_corridor::<P18, _>(&w);
+        let w = corridor(ghast_physics::v1_12::memory_world());
+        run_corridor::<P12, _>(&w);
+    }
+
+    /// The 1.12 rules through mazes and an unreachable goal as well.
+    #[test]
+    fn mazes_on_1_12() {
+        let n = 15;
+        let mut w = flat_in(ghast_physics::v1_12::memory_world(), 6);
+        maze(&mut w, (-n, -n), n, 2, 5);
+        let from = [f64::from(-n - 4) + 0.5, 64.0, f64::from(n + 4) + 0.5];
+        let goal = Goal::Near {
+            pos: [1, 64, 1],
+            radius: 1.0,
+        };
+        let d = drive::<P12, _>(&w, from, follower(), goal, 20_000);
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
+        let air = Goal::Near {
+            pos: [1, 70, 1],
+            radius: 2.0,
+        };
+        let d = drive::<P12, _>(&w, from, follower(), air, 20_000);
+        assert_eq!(
+            d.status,
+            FollowStatus::Failed(FollowError::Plan(PlanError::NoPath)),
+            "{d:?}"
+        );
+        assert_eq!(d.plans, 1, "{d:?}");
+    }
+
+    fn corridor<B: Copy>(mut w: ghast_physics::MemoryWorld<B>) -> ghast_physics::MemoryWorld<B> {
         w.load_chunks(0, -2, 9, 2);
         w.fill_raw([0, 0, -32], [159, 0, 47], 7 << 4);
         w.fill_raw([0, 1, -32], [159, 2, 47], 3 << 4);
@@ -1061,7 +1100,7 @@ pub(crate) mod tests {
             w.fill_raw([60, 1, z], [123, 7, z], STONE18);
         }
         w.fill_raw([123, 4, -2], [123, 7, 2], STONE18);
-        let trench = |w: &mut ghast_physics::v1_8::MemoryWorld, a: i32, b: i32| {
+        let trench = |w: &mut ghast_physics::MemoryWorld<B>, a: i32, b: i32| {
             w.fill_raw([a, 1, -1], [b, 3, 1], 0);
         };
         trench(&mut w, 66, 66);
@@ -1074,17 +1113,21 @@ pub(crate) mod tests {
         for (x, top) in [(98, 3), (100, 3), (104, 3), (107, 4), (109, 3)] {
             w.fill_raw([x, 1, 0], [x, top, 0], STONE18);
         }
-        let d = drive::<P18, _>(
-            &w,
+        w
+    }
+
+    fn run_corridor<P: Physics, W: BlockSource>(w: &W) {
+        let d = drive::<P, _>(
+            w,
             [62.5, 4.0, 0.5],
             follower(),
             Goal::Xz { x: 119, z: 0 },
             4000,
         );
-        eprintln!("east: {d:?}");
+        eprintln!("{:?} east: {d:?}", P::VERSION);
         assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
-        let d = drive::<P18, _>(&w, d.end, follower(), Goal::Xz { x: 62, z: 0 }, 4000);
-        eprintln!("west: {d:?}");
+        let d = drive::<P, _>(w, d.end, follower(), Goal::Xz { x: 62, z: 0 }, 4000);
+        eprintln!("{:?} west: {d:?}", P::VERSION);
         assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
     }
 }

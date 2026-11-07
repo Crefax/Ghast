@@ -7,7 +7,7 @@ use crate::Version;
 use crate::class::{flag, table};
 use crate::control::{Controller, ControllerConfig, Progress};
 use crate::moves::MoveKind;
-use crate::physics::{Observation, P16, P18, Physics, SourceView};
+use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
 use crate::plan::Path;
 use crate::world::BlockSource;
 
@@ -131,7 +131,7 @@ pub fn simulate<S: BlockSource + ?Sized>(
 /// The raw stone state of a version (what a simulated place puts down).
 fn stone(version: Version) -> u32 {
     match version {
-        Version::V1_8 => 1 << 4,
+        Version::V1_8 | Version::V1_12 => 1 << 4,
         Version::V1_16_5 => u32::from(ghast_data::v1_16_5::Block::STONE.default_state().id()),
     }
 }
@@ -140,6 +140,7 @@ fn stone(version: Version) -> u32 {
 #[derive(Clone, Debug)]
 enum Body {
     V18(<P18 as Physics>::State),
+    V12(<P12 as Physics>::State),
     V16(<P16 as Physics>::State),
 }
 
@@ -195,6 +196,7 @@ impl Simulation {
         });
         let body = match path.version {
             Version::V1_8 => Body::V18(P18::new_state(start, yaw0, 0.0)),
+            Version::V1_12 => Body::V12(P12::new_state(start, yaw0, 0.0)),
             Version::V1_16_5 => Body::V16(P16::new_state(start, yaw0, 0.0)),
         };
         let max_ticks = (path.cost * 4.0) as u32 + 20 * path.steps.len() as u32 + 200;
@@ -240,6 +242,7 @@ impl Simulation {
         if !self.run.done {
             let done = match &mut self.body {
                 Body::V18(s) => self.run.advance::<P18, S>(s, world, ticks, time),
+                Body::V12(s) => self.run.advance::<P12, S>(s, world, ticks, time),
                 Body::V16(s) => self.run.advance::<P16, S>(s, world, ticks, time),
             };
             self.run.done = done;

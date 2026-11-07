@@ -114,9 +114,11 @@ impl Table {
 /// The table of a version (built on first use: ~1 ms).
 pub(crate) fn table(version: Version) -> &'static Table {
     static T18: OnceLock<Table> = OnceLock::new();
+    static T12: OnceLock<Table> = OnceLock::new();
     static T16: OnceLock<Table> = OnceLock::new();
     match version {
         Version::V1_8 => T18.get_or_init(build_1_8),
+        Version::V1_12 => T12.get_or_init(build_1_12),
         Version::V1_16_5 => T16.get_or_init(build_1_16_5),
     }
 }
@@ -236,7 +238,9 @@ fn classify(f: &Facts<'_>) -> Class {
         "fire" | "soul_fire" | "web" | "cobweb" | "sweet_berry_bush" | "wither_rose" | "portal"
         | "nether_portal" | "end_portal" | "end_gateway" | "scaffolding" | "powder_snow"
         | "tripwire" | "bubble_column" => flags |= AVOID,
-        "magma_block" | "campfire" | "soul_campfire" | "cactus" => flags |= AVOID_FLOOR | AVOID,
+        "magma_block" | "magma" | "campfire" | "soul_campfire" | "cactus" => {
+            flags |= AVOID_FLOOR | AVOID;
+        }
         "farmland" | "turtle_egg" => flags |= FRAGILE,
         "sand" | "red_sand" | "gravel" | "anvil" | "chipped_anvil" | "damaged_anvil"
         | "dragon_egg" => flags |= FALLING,
@@ -294,6 +298,38 @@ fn build_1_8() -> Table {
 }
 
 fn classify_1_8(s: ghast_data::v1_8::BlockState) -> Class {
+    let block = s.block();
+    let info = block.info();
+    let physics = block.physics();
+    let collision = s.collision();
+    let fluid = s.fluid();
+    classify(&Facts {
+        name: info.name,
+        boxes: collision.boxes,
+        dependency: collision.dependency,
+        physics: physics.flags,
+        slipperiness: physics.slipperiness,
+        speed_factor: physics.speed_factor,
+        fluid_water: fluid.is_some_and(|f| f.kind == ghast_data::common::FluidKind::Water),
+        fluid_lava: fluid.is_some_and(|f| f.kind == ghast_data::common::FluidKind::Lava),
+        hardness: info.hardness,
+        diggable: info.diggable,
+    })
+}
+
+fn build_1_12() -> Table {
+    use ghast_data::v1_12::BlockState;
+    let mut classes = Vec::new();
+    let mut map = vec![0u16; 1 << 12];
+    intern(&mut classes, classify_1_12(BlockState::AIR));
+    for (raw, slot) in map.iter_mut().enumerate() {
+        let s = BlockState::from_raw_vanilla(raw as u16);
+        *slot = intern(&mut classes, classify_1_12(s));
+    }
+    Table { classes, map }
+}
+
+fn classify_1_12(s: ghast_data::v1_12::BlockState) -> Class {
     let block = s.block();
     let info = block.info();
     let physics = block.physics();
@@ -385,6 +421,31 @@ mod tests {
         assert!(class_1_8(12, 0).has(flag::FALLING)); // sand
         assert!(class_1_8(64, 0).has(flag::IRREGULAR)); // door
         assert!(!class_1_8(7, 0).has(flag::DIGGABLE)); // bedrock
+    }
+
+    #[test]
+    fn basic_1_12() {
+        let t = table(Version::V1_12);
+        let c = |id: u32, meta: u32| t.classes[t.index(id << 4 | meta) as usize];
+        assert_eq!(c(0, 0).flags & flag::SOLID, 0);
+        assert!(c(1, 0).has(flag::SOLID | flag::SUPPORT | flag::DIGGABLE));
+        assert_eq!(c(44, 0).top, 0.5);
+        assert_eq!(c(44, 8).bottom, 0.5);
+        assert_eq!(c(88, 0).top, 0.875);
+        assert!(c(88, 0).has(flag::SLOW));
+        assert_eq!(c(85, 0).top, 1.5);
+        let ladder = c(65, 2);
+        assert!(ladder.has(flag::THIN | flag::CLIMB));
+        assert_eq!(ladder.wall, 2);
+        assert!(c(9, 0).has(flag::WATER));
+        assert!(c(11, 0).has(flag::LAVA));
+        assert!(c(30, 0).has(flag::AVOID)); // web
+        assert!(c(213, 0).has(flag::AVOID_FLOOR)); // magma
+        assert!(c(165, 0).has(flag::BOUNCY)); // slime
+        assert!(c(79, 0).has(flag::SLIPPERY)); // ice
+        assert!(c(64, 0).has(flag::IRREGULAR)); // door
+        assert!(c(252, 0).has(flag::FALLING)); // concrete powder
+        assert!(!c(7, 0).has(flag::DIGGABLE)); // bedrock
     }
 
     #[test]

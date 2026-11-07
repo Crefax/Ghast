@@ -32,7 +32,7 @@ read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to
 ./console.sh 1.8 "list" "tp GhastBot 0.5 4 0.5"   # prints the log lines produced; no args = one command per stdin line
 ./alerts.sh 1.8              # follow Grim flags/setbacks/kicks; --all = all such lines in latest.log; --count = flags per player+check
 ./reset-field.sh 1.8 [--tp] [--fly]   # rules (time 6000, clear weather, no ticks) + rebuild the test pad
-./pathfinder-course.sh 1.8 build|tp NAME|follow|clear   # parkour corridor + maze for the pathfinder (see the script)
+./pathfinder-course.sh 1.8|1.12 build|tp NAME|follow|clear   # parkour corridor + maze for the pathfinder (see the script)
 ```
 
 Test pad (`reset-field.sh`): `x -16..47, z -16..47` cleared to grass; floor strips at y=3, `z 8..23`:

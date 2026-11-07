@@ -21,7 +21,7 @@ use crate::Version;
 use crate::class::{Class, Table, flag, table};
 use crate::jump::{self, Jumps, Mode};
 use crate::moves::{MoveKind, NodeKind};
-use crate::physics::{Observation, P16, P18, Physics, SourceView};
+use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
 use crate::plan::{Path, Pathfinder, Place, Step};
 use crate::world::BlockSource;
 
@@ -153,10 +153,12 @@ enum Job {
 enum Leap {
     /// Lining up and coming to rest on the take-off block; ticks since the last key.
     Settle(Mode, u32),
-    /// Running with the yaw fixed; the jump not pressed yet.
-    Run(Mode, f32),
-    /// The jump was pressed: in the air.
-    Air(Mode, f32),
+    /// Running with the yaw fixed, replaying the checked run: ground ticks before the jump
+    /// tick and air ticks with the keys held after it, ground ticks done so far.
+    Run(Mode, f32, (u32, u32), u32),
+    /// The jump was pressed: in the air; (air ticks with the keys held, air ticks so far),
+    /// or `None` (the run went differently than checked) to steer the landing instead.
+    Air(Mode, f32, Option<(u32, u32)>),
 }
 
 /// Result of running the physics ahead with fixed keys.
@@ -386,6 +388,7 @@ impl Controller {
         }
         let keys = match self.path.version {
             Version::V1_8 => self.move_keys::<P18, S>(obs, look, world),
+            Version::V1_12 => self.move_keys::<P12, S>(obs, look, world),
             Version::V1_16_5 => self.move_keys::<P16, S>(obs, look, world),
         };
         Command {
@@ -555,7 +558,7 @@ impl Controller {
             MoveKind::Parkour { .. } => {
                 // Facing along the axis; once running, the yaw stays where the run began.
                 return match self.leap {
-                    Some(Leap::Run(_, yaw) | Leap::Air(_, yaw)) => yaw,
+                    Some(Leap::Run(_, yaw, ..) | Leap::Air(_, yaw, _)) => yaw,
                     _ => dir_yaw(dx.signum(), dz.signum()),
                 };
             }
@@ -829,12 +832,13 @@ impl Controller {
                 if ready {
                     // The last word: the jump from exactly here, in the physics.
                     let start = P::from_observation(obs);
-                    if jump::attempt::<P, S>(view, start, mode, look.0, t.pos).is_none() {
+                    let Some(run) = jump::attempt::<P, S>(view, start, mode, look.0, t.pos) else {
                         self.progress = Progress::Stuck;
                         return Keys::NONE;
-                    }
-                    self.leap = Some(Leap::Run(mode, look.0));
-                    return self.leap_run::<P, S>(view, obs, look, mode, look.0);
+                    };
+                    // Replay exactly the keys of the run that landed.
+                    let plan = (run.run_ticks, run.release);
+                    return self.leap_run(mode, look.0, plan, 0);
                 }
                 let k = self.inch::<P, S>(view, obs, look, &f, dir);
                 self.leap = Some(Leap::Settle(
@@ -843,39 +847,39 @@ impl Controller {
                 ));
                 k
             }
-            Leap::Run(mode, yaw) => {
+            Leap::Run(mode, yaw, plan, done) => {
                 if !obs.on_ground {
-                    self.leap = Some(Leap::Air(mode, yaw));
+                    // Left the floor early: steer the landing.
+                    self.leap = Some(Leap::Air(mode, yaw, None));
                     return self.steer::<P, S>(view, obs, look, &t, mode.keys());
                 }
-                self.leap_run::<P, S>(view, obs, look, mode, yaw)
+                self.leap_run(mode, yaw, plan, done)
             }
-            Leap::Air(mode, _) => {
+            Leap::Air(mode, yaw, replay) => {
                 if obs.on_ground {
                     // Landed short or elsewhere: off-path detection takes over.
                     return Keys::NONE;
                 }
-                self.steer::<P, S>(view, obs, look, &t, mode.keys())
+                match replay {
+                    Some((hold, done)) => {
+                        self.leap = Some(Leap::Air(mode, yaw, Some((hold, done + 1))));
+                        if done < hold { mode.keys() } else { Keys::NONE }
+                    }
+                    None => self.steer::<P, S>(view, obs, look, &t, mode.keys()),
+                }
             }
         }
     }
 
-    /// One tick of the run: the run keys, plus jump on the tick that would leave the floor (or
-    /// at once).
-    fn leap_run<P: Physics, S: BlockSource + ?Sized>(
-        &mut self,
-        view: &SourceView<'_, P, S>,
-        obs: &Observation,
-        look: (f32, f32),
-        mode: Mode,
-        yaw: f32,
-    ) -> Keys {
+    /// One ground tick of the replayed run: the run keys, plus jump on its last ground tick
+    /// (the one the check found would leave the floor, or the first one).
+    fn leap_run(&mut self, mode: Mode, yaw: f32, (ground, hold): (u32, u32), done: u32) -> Keys {
         let keys = mode.keys();
-        let leave = mode.at_once() || !rollout::<P, S>(view, obs, keys, look, 1).on_ground;
-        if leave {
-            self.leap = Some(Leap::Air(mode, yaw));
+        if done + 1 >= ground {
+            self.leap = Some(Leap::Air(mode, yaw, Some((hold, 0))));
             return Keys { jump: true, ..keys };
         }
+        self.leap = Some(Leap::Run(mode, yaw, (ground, hold), done + 1));
         keys
     }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live check of ghast-pathfinder's gap jumps and maze solving on the local lab:
+# Live check of ghast-pathfinder's gap jumps and maze solving on the local 1.8 or 1.12 lab:
 #   ./pathfinder-course.sh 1.8 build    build the course (below) and summon the armor stand
 #   ./pathfinder-course.sh 1.8 tp NAME  teleport NAME to the corridor start (62.5 4 0.5)
 #   ./pathfinder-course.sh 1.8 follow   move the armor stand through the maze (every 15 s, ~2 min)
@@ -16,13 +16,18 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 lab_select "${1:-}"; shift || true
 cmd=${1:-build}
-[ "$VER" = 1.8 ] || { echo "only the 1.8 lab (1.8 block and entity names)" >&2; exit 2; }
+case "$VER" in
+  1.8) STAND=ArmorStand ;;
+  1.12) STAND=armor_stand ;;
+  *) echo "only the 1.8 and 1.12 labs (their block and entity names)" >&2; exit 2 ;;
+esac
 console() { CMD_GAP=${CMD_GAP:-0.02} "$here/console.sh" "$VER" | grep -vE 'blocks? (filled|placed)|filled [0-9]+ blocks|No blocks were filled' || true; }
 
 course() { # $1 = block for walls/floors (minecraft:stone, or minecraft:air to clear)
-  python3 - "$1" <<'PY'
+  python3 - "$1" "$STAND" <<'PY'
 import random, sys
 b = sys.argv[1]
+stand = sys.argv[2]
 clear = b == "minecraft:air"
 out = []
 f = lambda x1, y1, z1, x2, y2, z2, blk: out.append(f"fill {x1} {y1} {z1} {x2} {y2} {z2} {blk}")
@@ -74,10 +79,10 @@ if not clear:
         stack.append((nx, nz))
     carve(0, 1)
     carve(size - 1, size - 2)
-    out.append("kill @e[type=ArmorStand]")
-    out.append("summon ArmorStand 35.5 4 75.5 {NoGravity:1,Invulnerable:1}")
+    out.append(f"kill @e[type={stand}]")
+    out.append(f"summon {stand} 35.5 4 75.5 {{NoGravity:1b,Invulnerable:1b}}")
 else:
-    out.append("kill @e[type=ArmorStand]")
+    out.append(f"kill @e[type={stand}]")
 print("\n".join(out))
 PY
 }
@@ -91,8 +96,8 @@ case "$cmd" in
     # the air (out of reach: the bot waits under it).
     for p in "21 4 61" "49 4 89" "27 4 83" "43 4 67" "35 9 75" "35 4 75" "21 4 89" "49 4 61" "35 4 75"; do
       set -- $p
-      printf 'tp @e[type=ArmorStand] %s.5 %s %s.5\n' "$1" "$2" "$3" | console
+      printf 'tp @e[type=%s] %s.5 %s %s.5\n' "$STAND" "$1" "$2" "$3" | console
       sleep "${FOLLOW_GAP:-15}"
     done ;;
-  *) echo "usage: $0 1.8 build|tp NAME|follow|clear" >&2; exit 2 ;;
+  *) echo "usage: $0 1.8|1.12 build|tp NAME|follow|clear" >&2; exit 2 ;;
 esac

@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use ghast_physics::Keys;
 
 use crate::Version;
-use crate::physics::{P16, P18, Physics, SourceView};
+use crate::physics::{P12, P16, P18, Physics, SourceView};
 
 /// Measured movement facts of one version (ticks and blocks per tick).
 #[derive(Clone, Debug, PartialEq)]
@@ -38,9 +38,11 @@ impl Costs {
     #[must_use]
     pub fn of(version: Version) -> &'static Costs {
         static C18: OnceLock<Costs> = OnceLock::new();
+        static C12: OnceLock<Costs> = OnceLock::new();
         static C16: OnceLock<Costs> = OnceLock::new();
         match version {
             Version::V1_8 => C18.get_or_init(measure::<P18>),
+            Version::V1_12 => C12.get_or_init(measure::<P12>),
             Version::V1_16_5 => C16.get_or_init(measure::<P16>),
         }
     }
@@ -66,7 +68,7 @@ impl Costs {
 /// Stone, air, ladder and water raw states of a version.
 fn raws(version: Version) -> (u32, u32, u32) {
     match version {
-        Version::V1_8 => (1 << 4, 65 << 4 | 2, 9 << 4),
+        Version::V1_8 | Version::V1_12 => (1 << 4, 65 << 4 | 2, 9 << 4),
         Version::V1_16_5 => {
             use ghast_data::v1_16_5::{Block, Property};
             let ladder = Block::LADDER
@@ -276,7 +278,7 @@ mod tests {
 
     #[test]
     fn measured_values_are_vanilla_like() {
-        for v in [Version::V1_8, Version::V1_16_5] {
+        for v in [Version::V1_8, Version::V1_12, Version::V1_16_5] {
             let c = Costs::of(v);
             eprintln!("{v:?}: {c:?}");
             assert!(

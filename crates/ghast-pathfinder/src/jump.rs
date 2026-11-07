@@ -15,7 +15,8 @@
 //!    real world is, to the physics, the canonical terrain.
 //! 2. **Before jumping**, standing still at the take-off, the controller runs the same policy
 //!    in the physics from its actual state in the actual world ([`attempt`]) and jumps only if
-//!    that run lands; otherwise it reports `Stuck` and the follower plans around the jump.
+//!    that run lands, replaying exactly its keys; otherwise it reports `Stuck` and the
+//!    follower plans around the jump.
 //!
 //! # Policy
 //! 1. stand still on the take-off block within [`ALONG`] / [`LATERAL`] of its centre, facing
@@ -90,7 +91,9 @@ impl Mode {
 }
 
 /// A cell the body passes through, relative to the take-off feet block: `along` the jump,
-/// `side` to the right of it, `up`; with the cell-local height range the body occupies.
+/// `side` to the right of it, `up`; with the cell-local height range the body occupies. A
+/// `speed` cell is instead the block half a block under the feet (1.16 takes the velocity
+/// multiplier of soul sand or honey from there, even in the air): it must not slow.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Cell {
     pub(crate) along: i8,
@@ -98,6 +101,7 @@ pub(crate) struct Cell {
     pub(crate) up: i8,
     pub(crate) lo: f32,
     pub(crate) hi: f32,
+    pub(crate) speed: bool,
 }
 
 /// A validated jump.
@@ -127,6 +131,7 @@ impl Jumps {
         Jumps {
             specs: match version {
                 Version::V1_8 => jump_table::V1_8,
+                Version::V1_12 => jump_table::V1_12,
                 Version::V1_16_5 => jump_table::V1_16_5,
             },
         }
@@ -196,10 +201,14 @@ pub(crate) fn select(
 ) -> Option<&'static Spec> {
     jumps.get(gap, dy).find(|spec| {
         (sprint || !spec.mode.sprint())
-            && spec
-                .cells
-                .iter()
-                .all(|c| cell_free(class(at(p, dir, c.along, c.side, c.up)), c.lo, c.hi))
+            && spec.cells.iter().all(|c| {
+                let k = class(at(p, dir, c.along, c.side, c.up));
+                if c.speed {
+                    !k.has(flag::SLOW)
+                } else {
+                    cell_free(k, c.lo, c.hi)
+                }
+            })
     })
 }
 
@@ -213,6 +222,10 @@ pub(crate) struct Landed {
     pub(crate) fall: f32,
     /// Ticks from the start to the landing.
     pub(crate) ticks: u32,
+    /// Ticks on the ground, the last of them with the jump pressed.
+    pub(crate) run_ticks: u32,
+    /// Air ticks the run keys stay held after the jump tick.
+    pub(crate) release: u32,
 }
 
 /// Runs the [policy](self#policy) in the physics: from `start` (standing on the take-off
@@ -318,6 +331,7 @@ pub(crate) fn attempt<P: Physics, S: BlockSource + ?Sized>(
     if score >= 1000.0 {
         return None;
     }
+    let run_ticks = ticks;
     let r = if n == full.ticks { full } else { air(n) };
     let mut st = r.state;
     if (P::observe(&st).pos[1] - land_y).abs() > 1e-6 {
@@ -344,6 +358,8 @@ pub(crate) fn attempt<P: Physics, S: BlockSource + ?Sized>(
         trace,
         fall: r.fall,
         ticks,
+        run_ticks,
+        release: n,
     })
 }
 
@@ -354,7 +370,7 @@ pub(crate) mod measure {
     use std::fmt::Write as _;
 
     use super::*;
-    use crate::physics::{P16, P18};
+    use crate::physics::{P12, P16, P18};
 
     /// Stone blocks at the given positions, air elsewhere.
     pub(crate) struct Pillars {
@@ -381,7 +397,7 @@ pub(crate) mod measure {
 
     pub(crate) fn stone(version: Version) -> u32 {
         match version {
-            Version::V1_8 => 1 << 4,
+            Version::V1_8 | Version::V1_12 => 1 << 4,
             Version::V1_16_5 => u32::from(ghast_data::v1_16_5::Block::STONE.default_state().id()),
         }
     }
@@ -488,6 +504,7 @@ pub(crate) mod measure {
     pub(crate) fn table(version: Version, dense: bool) -> Vec<Measured> {
         match version {
             Version::V1_8 => measure::<P18>(dense),
+            Version::V1_12 => measure::<P12>(dense),
             Version::V1_16_5 => measure::<P16>(dense),
         }
     }
@@ -500,12 +517,22 @@ pub(crate) mod measure {
         const E: f64 = 1e-6;
         let floors = [(0, 0, -1), (i32::from(gap) + 1, 0, i32::from(dy) - 1)];
         let mut cells: HashMap<(i32, i32, i32), (f32, f32)> = HashMap::new();
+        let mut speed: Vec<(i32, i32, i32)> = Vec::new();
         let positions = traces.iter().flat_map(|(t, landing)| {
             t.iter()
                 .enumerate()
                 .map(move |(i, p)| (p, (i as u32) < *landing))
         });
         for (p, flying) in positions {
+            // The block whose velocity multiplier applies (1.16: half a block under the feet).
+            let key = (
+                p[2].floor() as i32,
+                -(p[0].floor() as i32),
+                (p[1] - 0.500_000_1).floor() as i32 - 64,
+            );
+            if !floors.contains(&key) && !speed.contains(&key) {
+                speed.push(key);
+            }
             let (x0, x1) = (p[0] - 0.3 + E, p[0] + 0.3 - E);
             let (z0, z1) = (p[2] - 0.3 + E, p[2] + 0.3 - E);
             let below = if flying { BELOW } else { -E };
@@ -536,22 +563,33 @@ pub(crate) mod measure {
                 up: u as i8,
                 lo,
                 hi,
+                speed: false,
             })
+            .chain(speed.into_iter().map(|(a, s, u)| Cell {
+                along: a as i8,
+                side: s as i8,
+                up: u as i8,
+                lo: 0.0,
+                hi: 0.0,
+                speed: true,
+            }))
             .collect();
-        v.sort_by_key(|c| (c.along, c.side, c.up));
+        v.sort_by_key(|c| (c.speed, c.along, c.side, c.up));
         v
     }
 
     /// The source of `jump_table.rs`.
-    pub(crate) fn source(t18: &[Measured], t16: &[Measured]) -> String {
+    pub(crate) fn source(t18: &[Measured], t12: &[Measured], t16: &[Measured]) -> String {
         let mut s = String::from(
             "//! Generated by `GHAST_UPDATE_JUMPS=1 cargo test --release -p ghast-pathfinder --lib \
              -- --ignored jump_table`\n//! from the physics (see `jump.rs`); do not edit.\n\n\
              use super::{Cell, Mode, Spec};\n\n\
              const fn c(along: i8, side: i8, up: i8, lo: f32, hi: f32) -> Cell {\n    \
-             Cell { along, side, up, lo, hi }\n}\n",
+             Cell { along, side, up, lo, hi, speed: false }\n}\n\n\
+             const fn v(along: i8, side: i8, up: i8) -> Cell {\n    \
+             Cell { along, side, up, lo: 0.0, hi: 0.0, speed: true }\n}\n",
         );
-        for (name, t) in [("V1_8", t18), ("V1_16_5", t16)] {
+        for (name, t) in [("V1_8", t18), ("V1_12", t12), ("V1_16_5", t16)] {
             let _ = write!(s, "\npub(super) static {name}: &[Spec] = &[\n");
             for m in t {
                 let _ = write!(
@@ -561,11 +599,15 @@ pub(crate) mod measure {
                     m.gap, m.dy, m.mode, m.cost, m.fall
                 );
                 for c in &m.cells {
-                    let _ = writeln!(
-                        s,
-                        "            c({}, {}, {}, {:?}, {:?}),",
-                        c.along, c.side, c.up, c.lo, c.hi
-                    );
+                    let _ = if c.speed {
+                        writeln!(s, "            v({}, {}, {}),", c.along, c.side, c.up)
+                    } else {
+                        writeln!(
+                            s,
+                            "            c({}, {}, {}, {:?}, {:?}),",
+                            c.along, c.side, c.up, c.lo, c.hi
+                        )
+                    };
                 }
                 s.push_str("        ],\n    },\n");
             }
@@ -595,7 +637,7 @@ pub(crate) mod measure {
 mod tests {
     use super::measure::*;
     use super::*;
-    use crate::physics::{P16, P18};
+    use crate::physics::{P12, P16, P18};
 
     /// The committed table is the dense measurement of the current physics and policy.
     /// Regenerate with `GHAST_UPDATE_JUMPS=1 cargo test --release -p ghast-pathfinder --lib
@@ -604,13 +646,15 @@ mod tests {
     #[ignore = "measures ~150 starts per jump; run in release on demand"]
     fn jump_table_is_current() {
         let t18 = table(Version::V1_8, true);
+        let t12 = table(Version::V1_12, true);
         let t16 = table(Version::V1_16_5, true);
         if std::env::var_os("GHAST_UPDATE_JUMPS").is_some() {
             let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/jump_table.rs");
-            std::fs::write(path, source(&t18, &t16)).expect("write jump_table.rs");
+            std::fs::write(path, source(&t18, &t12, &t16)).expect("write jump_table.rs");
             return;
         }
         assert_eq!(t18, committed(Version::V1_8), "1.8 table out of date");
+        assert_eq!(t12, committed(Version::V1_12), "1.12 table out of date");
         assert_eq!(t16, committed(Version::V1_16_5), "1.16.5 table out of date");
     }
 
@@ -618,7 +662,7 @@ mod tests {
     /// the committed cost (cheap enough for every test run).
     #[test]
     fn committed_jumps_land() {
-        for v in [Version::V1_8, Version::V1_16_5] {
+        for v in [Version::V1_8, Version::V1_12, Version::V1_16_5] {
             let rows = committed(v);
             assert!(!rows.is_empty());
             for m in rows {
@@ -629,6 +673,7 @@ mod tests {
                 ] {
                     let r = match v {
                         Version::V1_8 => canonical::<P18>(m.gap, m.dy, m.mode, st),
+                        Version::V1_12 => canonical::<P12>(m.gap, m.dy, m.mode, st),
                         Version::V1_16_5 => canonical::<P16>(m.gap, m.dy, m.mode, st),
                     };
                     let r = r.unwrap_or_else(|| panic!("{v:?} {m:?} from {st:?} does not land"));
@@ -644,7 +689,7 @@ mod tests {
     #[test]
     fn coverage() {
         // What the tests and the README promise.
-        for v in [Version::V1_8, Version::V1_16_5] {
+        for v in [Version::V1_8, Version::V1_12, Version::V1_16_5] {
             let j = Jumps::of(v);
             for (gap, dy) in [
                 (1, 0),

@@ -48,6 +48,21 @@ impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_8::BlockState> {
     }
 }
 
+impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_12::BlockState> {
+    #[inline]
+    fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+        use ghast_physics::BlockView;
+        if !(0..256).contains(&y) || !self.is_chunk_loaded(x >> 4, z >> 4) {
+            return None;
+        }
+        Some(u32::from(self.block(x, y, z).raw()))
+    }
+
+    fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        ghast_physics::BlockView::is_chunk_loaded(self, chunk_x, chunk_z)
+    }
+}
+
 impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_16_5::BlockState> {
     #[inline]
     fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -92,6 +107,20 @@ mod client_impls {
 
         fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
             ghast_client::world::v1_8::World::is_column_loaded(self, chunk_x, chunk_z)
+        }
+    }
+
+    impl BlockSource for ghast_client::world::v1_12::World {
+        #[inline]
+        fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+            if !(0..256).contains(&y) {
+                return None;
+            }
+            self.block_state(x, y, z).map(|s| u32::from(s.raw()))
+        }
+
+        fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+            ghast_client::world::v1_12::World::is_column_loaded(self, chunk_x, chunk_z)
         }
     }
 

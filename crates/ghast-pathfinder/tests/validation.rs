@@ -1,6 +1,6 @@
 //! Plans on small fake worlds, then runs each path through the vanilla-exact physics with the
 //! controller (`simulate`): the player must reach the goal block without unexpected
-//! collisions, hazards or fall damage. Both versions.
+//! collisions, hazards or fall damage. All three versions.
 
 use ghast_pathfinder::{
     Config, ControllerConfig, DigCost, Goal, MoveKind, Path, Pathfinder, SimOutcome, SimReport,
@@ -26,7 +26,7 @@ enum B {
 
 fn raw(v: Version, b: B) -> u16 {
     match v {
-        Version::V1_8 => match b {
+        Version::V1_8 | Version::V1_12 => match b {
             B::Air => 0,
             B::Stone => 1 << 4,
             B::Dirt => 3 << 4,
@@ -62,6 +62,7 @@ fn raw(v: Version, b: B) -> u16 {
 /// A world of either version.
 enum World {
     V18(ghast_physics::v1_8::MemoryWorld),
+    V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
 }
 
@@ -70,10 +71,12 @@ impl World {
     fn flat(v: Version) -> World {
         let mut w = match v {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
+            Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
             World::V18(m) => m.load_chunks(-4, -4, 4, 4),
+            World::V12(m) => m.load_chunks(-4, -4, 4, 4),
             World::V16(m) => m.load_chunks(-4, -4, 4, 4),
         }
         w.fill([-64, 63, -64], [79, 63, 79], B::Stone);
@@ -83,6 +86,7 @@ impl World {
     fn version(&self) -> Version {
         match self {
             World::V18(_) => Version::V1_8,
+            World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
         }
     }
@@ -91,6 +95,7 @@ impl World {
         let r = raw(self.version(), blk);
         match self {
             World::V18(m) => m.fill_raw(a, b, r),
+            World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
         }
     }
@@ -103,6 +108,7 @@ impl World {
         let pf = Pathfinder::new(cfg);
         let r = match self {
             World::V18(m) => pf.plan(Version::V1_8, m, from, goal),
+            World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
         };
         r.unwrap_or_else(|e| panic!("{:?}: no plan {from:?} -> {goal:?}: {e}", self.version()))
@@ -112,12 +118,13 @@ impl World {
         let cfg = ControllerConfig::default();
         match self {
             World::V18(m) => simulate(path, m, &cfg),
+            World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
         }
     }
 }
 
-const VERSIONS: [Version; 2] = [Version::V1_8, Version::V1_16_5];
+const VERSIONS: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
 
 /// Plans and simulates; asserts the run reached the goal block cleanly.
 fn check(w: &World, cfg: Config, from: [i32; 3], to: [i32; 3]) -> (Path, SimReport) {
@@ -260,6 +267,7 @@ fn gap_jumps() {
         let pf = Pathfinder::new(Config::default().with_parkour(false));
         let r = match &w {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
+            World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
@@ -287,6 +295,7 @@ fn water() {
         let pf = Pathfinder::new(Config::default().with_swim(false));
         let r = match &w {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
+            World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
@@ -349,6 +358,7 @@ fn goals() {
         let pf = Pathfinder::new(Config::default());
         let plan = |g: &Goal| match &w {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
+            World::V12(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
         };
         let p = plan(&Goal::Near {
@@ -385,6 +395,7 @@ fn verified_plans_repair_failed_moves() {
         let pf = Pathfinder::new(Config::default());
         let (path, sim) = match &w {
             World::V18(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
+            World::V12(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
             World::V16(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
         }
         .unwrap();
@@ -432,6 +443,7 @@ fn run_terrain(seed: u64, v: Version) -> Result<(), String> {
     let pf = Pathfinder::new(Config::default());
     let r = match &w {
         World::V18(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
+        World::V12(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
         World::V16(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
     };
     let Ok(path) = r else { return Ok(()) };
@@ -464,7 +476,7 @@ fn random_terrain_paths_run_in_the_physics() {
     }
     assert!(
         fails.is_empty(),
-        "{} of 96 failed:\n{}",
+        "{} of 144 failed:\n{}",
         fails.len(),
         fails.join("\n")
     );
@@ -477,8 +489,8 @@ proptest! {
     /// random terrains still fails (see the crate README).
     #[test]
     #[ignore = "fuzzing; run on demand"]
-    fn fuzz_random_terrain(seed in any::<u64>(), v16 in any::<bool>()) {
-        let v = if v16 { Version::V1_16_5 } else { Version::V1_8 };
+    fn fuzz_random_terrain(seed in any::<u64>(), vi in 0usize..3) {
+        let v = VERSIONS[vi];
         if let Err(e) = run_terrain(seed, v) {
             prop_assert!(false, "{}", e);
         }

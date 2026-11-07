@@ -18,7 +18,7 @@ pub enum B {
 
 pub fn raw(v: Version, b: B) -> u16 {
     match v {
-        Version::V1_8 => match b {
+        Version::V1_8 | Version::V1_12 => match b {
             B::Air => 0,
             B::Stone => 1 << 4,
             B::Lava => 11 << 4,
@@ -40,20 +40,23 @@ pub fn raw(v: Version, b: B) -> u16 {
 /// A world of either version.
 pub enum World {
     V18(ghast_physics::v1_8::MemoryWorld),
+    V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
 }
 
-pub const VERSIONS: [Version; 2] = [Version::V1_8, Version::V1_16_5];
+pub const VERSIONS: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
 
 impl World {
     /// Chunks -r..=r loaded, a stone floor at y = 63 over all of them.
     pub fn flat(v: Version, r: i32) -> World {
         let mut w = match v {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
+            Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
             World::V18(m) => m.load_chunks(-r, -r, r, r),
+            World::V12(m) => m.load_chunks(-r, -r, r, r),
             World::V16(m) => m.load_chunks(-r, -r, r, r),
         }
         w.fill(
@@ -67,6 +70,7 @@ impl World {
     pub fn version(&self) -> Version {
         match self {
             World::V18(_) => Version::V1_8,
+            World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
         }
     }
@@ -75,6 +79,7 @@ impl World {
         let r = raw(self.version(), blk);
         match self {
             World::V18(m) => m.fill_raw(a, b, r),
+            World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
         }
     }
@@ -87,6 +92,7 @@ impl World {
         let pf = Pathfinder::new(cfg);
         match self {
             World::V18(m) => pf.plan(Version::V1_8, m, from, goal),
+            World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
         }
     }
@@ -100,6 +106,7 @@ impl World {
         let cfg = ControllerConfig::default();
         match self {
             World::V18(m) => simulate(path, m, &cfg),
+            World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
         }
     }

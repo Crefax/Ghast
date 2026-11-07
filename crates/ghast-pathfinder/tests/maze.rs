@@ -71,6 +71,7 @@ fn plan_sliced(
         let before = search.expanded();
         let r = match w {
             World::V18(m) => search.step(m, Budget::nodes(nodes)),
+            World::V12(m) => search.step(m, Budget::nodes(nodes)),
             World::V16(m) => search.step(m, Budget::nodes(nodes)),
         };
         assert!(search.expanded() - before <= nodes);
