@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run console command(s) and print the log lines they produced:
-#   ./console.sh <1.8|1.16> "list" "fly GhastBot on"     (no commands: one per stdin line)
+#   ./console.sh <1.8|1.12|1.16> "list" "fly GhastBot on"     (no commands: one per stdin line)
 # Env: CMD_GAP (s between commands, default 0.02), CMD_WAIT (s to collect output, default 0.7).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"

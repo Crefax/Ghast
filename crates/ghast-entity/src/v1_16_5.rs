@@ -125,7 +125,7 @@ impl Tracker {
         }
         Tracker {
             store: Entities {
-                modern: true,
+                era: crate::entity::Era::V1_16,
                 ..Entities::new(config)
             },
             world_name: String::new(),

@@ -6,6 +6,41 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## Unreleased
+
+### Minecraft 1.12.2 (protocol 340)
+A third supported version, end to end: the same bot runs unchanged on 1.8.9, 1.12.2 and 1.16.5
+(`GameVersion::V1_12_2`, `--version 1.12.2` / `340`). Structured as the first member of a
+1.9 – 1.12 family (shared chunk format, physics rules and pre-flattening block ids), so 1.9 –
+1.12.1 can follow as small deltas.
+
+- **ghast-protocol**: `v1_12_2` (feature `v1_12_2`), generated from minecraft-data; byte-exact
+  against node-minecraft-protocol in both directions.
+- **ghast-data**: `v1_12` (feature `v1_12`): blocks, items, entities, biomes, effects,
+  enchantments, foods. Every collision box, per-state shape flag (normal cube, full cube, …),
+  material, ray-test bound and 1.12 face shape (what fences, walls and panes connect to) comes
+  from the vanilla 1.12.2 oracle. `NeighbourShape::ChorusPlant` is new.
+- **ghast-world**: `v1_12::World`: 1.9 – 1.12 paletted sections (values spanning longs, the
+  13-bit global palette), light, biomes, block entities, `unload_chunk`, block changes,
+  explosions, world border.
+- **ghast-physics**: `v1_12`: vanilla-exact 1.12.2 player movement, 0 diffs against the oracle
+  (122 scenarios, the committed fuzz, and 4.16 M ticks of randomized fuzz). What changed since
+  1.8.9 is in the crate README.
+- **ghast-inventory**: `Version::V1_12`: vanilla 1.12.2 click prediction (offhand slot 45,
+  shield shift-click, damage-value stacking, server-side crafting results), 0 diffs against
+  the oracle's click vectors.
+- **ghast-entity**: `v1_12::Tracker` with vanilla 1.12.2 position fixed-point rules, 1.9+
+  metadata, passengers, one-slot equipment.
+- **ghast-client**: `GameVersion::V1_12_2`, `GameVersion::combat_1_9()`; teleport confirms,
+  1.9+ hands (swing after the click, off hand), attack cooldown, no idle on-ground packets.
+- **ghast-ext**: block / item / entity names for 1.12.2.
+- **oracle**: `MC=1.12.2 oracle/run.sh …` (vanilla 1.12.2 + Legacy Yarn 1.12.2+build.604,
+  fetched at run time), golden vectors in `tests/golden/1.12.2/`.
+- **lab**: `lab/start.sh 1.12` (Paper 1.12.2 build 1620 + GrimAC 2.3.73, Java 17, port 25612).
+
+Breaking for code that matches exhaustively: `ghast_inventory::Version` and
+`ghast_data::NeighbourShape` gained variants, and `GameVersion::ALL` is now `[GameVersion; 3]`.
+
 ## 0.2.3 — 2026-11-06
 
 Additive: one new crate, behind a facade feature (the default build is unchanged).

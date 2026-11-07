@@ -1,7 +1,7 @@
 # ghast-entity
 
-Entity tracking for the ghast Minecraft Java Edition client library, 1.8.9 (protocol 47) and
-1.16.5 (protocol 754). It keeps what the vanilla client knows about every entity the server
+Entity tracking for the ghast Minecraft Java Edition client library, 1.8.9 (protocol 47),
+1.12.2 (protocol 340) and 1.16.5 (protocol 754). It keeps what the vanilla client knows about every entity the server
 announced, parsed by hand straight from the packet bodies.
 
 ```rust
@@ -18,13 +18,13 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
 
 ## API
 
-- `v1_8::Tracker`, `v1_16_5::Tracker`:
+- `v1_8::Tracker`, `v1_12::Tracker`, `v1_16_5::Tracker`:
   - setup and packets: `new(Config)`, `apply(&RawPacket)` / `apply_body(id, &Bytes)` returning
     `Result<Applied, DecodeError>`;
   - packet filter: `wants(id)`, `packet_ids()`;
   - store access: `store_mut()` (for `drain_events`).
 
-  Both deref to `Entities`:
+  All deref to `Entities`:
   - lookups: `get(id)`, `iter()` (skips the bot), `within(pos, r)`, `len()`;
   - the bot: `me()`, `self_id()`;
   - tab list: `player_info(&uuid)`, `players()`, `player_name(id)`;
@@ -35,9 +35,9 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
   - motion: `yaw()`, `pitch()`, `head_yaw()` (degrees), `velocity()`, `on_ground()`, `data()`;
   - links: `vehicle()`, `passengers()`, `leash_holder()`;
   - state: `metadata()`, `equipment(slot)`, `effects()` / `effect(id)`.
-- `EntityType`: `Player`, `LegacyMob(u8)`, `LegacyObject(u8)`, `ExperienceOrb`, `Painting` (1.8),
-  `Registry(u16)` (1.16). Static info (name, size) via `v1_8::info` / `v1_16_5::info` from
-  ghast-data.
+- `EntityType`: `Player`, `LegacyMob(u8)`, `LegacyObject(u8)`, `ExperienceOrb`, `Painting` (1.8
+  and 1.12: mobs by entity registry id, objects by spawn-object type), `Registry(u16)` (1.16).
+  Static info (name, size) via `v1_8::info` / `v1_12::info` / `v1_16_5::info` from ghast-data.
 - Version-free helpers on `Entity`: `class()` (`EntityClass::{Player, Item, ExperienceOrb, Mob,
   Object, Painting}`), `item()` (stack of an item entity), `dimensions()` / `size()` / `bounding_box()` (vanilla, see below);
   `Entities::near` is an alias of `within`.
@@ -56,32 +56,35 @@ are ignored.
 
 ## Vanilla behaviour reproduced
 
-Checked with javap against the local 1.8.9 client (`ClientPlayNetworkHandler`, `EntitySpawnS2CPacket`)
-and the official 1.16.5 client jar (`ClientPlayNetworkHandler`, `EntityS2CPacket`). Only
-these conclusions are in this repository; no Mojang-derived files are.
+Checked with javap against the local 1.8.9 client (`ClientPlayNetworkHandler`, `EntitySpawnS2CPacket`),
+the official 1.16.5 client jar (`ClientPlayNetworkHandler`, `EntityS2CPacket`), and the 1.12.2
+client read with Legacy Yarn names in the oracle's git-ignored cache. Only these conclusions are
+in this repository; no Mojang-derived files are.
 
-| | 1.8.9 | 1.16.5 |
-|---|---|---|
-| server position | `int` 1/32 (`serverPos`); `pos = serverPos / 32.0` | packet coordinates (`f64`) |
-| spawn / teleport | sets `serverPos` | sets the exact doubles |
-| relative move | `serverPos += byte delta` | per axis: delta 0 keeps the double, else `(floor(x*4096) + d) / 4096` |
-| bare `entity` packet | `on_ground = false` | `on_ground = false` |
-| angles | `(float)(b * 360) / 256.0F` | same |
-| velocity packet | `v / 8000.0` (double) | same |
-| mob spawn velocity | `(double)((float) v / 8000.0F)` | same |
-| object spawn velocity | read only when data **> 0** | always present |
-| pickup (`collect`) | removes the entity | item: stack shrinks, removed when empty; others removed |
-| riding | `attach_entity`; one rider; an unknown vehicle id dismounts | `set_passengers` (eject all, then mount), `attach_entity` = leash (0 = none) |
-| login | clears everything | clears everything |
-| respawn | clears on a dimension change; bot: effects, metadata, equipment reset | clears on a world-name change; bot: effects reset, metadata kept |
+| | 1.8.9 | 1.12.2 | 1.16.5 |
+|---|---|---|---|
+| server position | `int` 1/32 (`serverPos`); `pos = serverPos / 32.0` | spawn / teleport doubles, after a move `tracked / 4096.0` | packet coordinates (`f64`) |
+| spawn / teleport | sets `serverPos` | sets the exact doubles and `tracked = floor(x*4096)` | sets the exact doubles |
+| relative move | `serverPos += byte delta` | `tracked += short delta`, **every** axis becomes `tracked / 4096` | per axis: delta 0 keeps the double, else `(floor(x*4096) + d) / 4096` |
+| bare `entity` packet | `on_ground = false` | `on_ground = false`, position snaps to `tracked / 4096` | `on_ground = false` |
+| angles | `(float)(b * 360) / 256.0F` | same | same |
+| velocity packet | `v / 8000.0` (double) | same | same |
+| mob spawn velocity | `(double)((float) v / 8000.0F)` | same | same |
+| object spawn velocity | read only when data **> 0** | always sent, applied when the (partly reset) data is > 0; llama spit always | always present |
+| pickup (`collect`) | removes the entity | removes the entity (the count only feeds the animation) | item: stack shrinks, removed when empty; others removed |
+| riding | `attach_entity`; one rider; an unknown vehicle id dismounts | `set_passengers`, `attach_entity` = leash of a mob (unknown holder = none) | `set_passengers` (eject all, then mount), `attach_entity` = leash (0 = none) |
+| login | clears everything | clears everything | clears everything |
+| respawn | clears on a dimension change; bot: effects, metadata, equipment reset | clears on a dimension change; bot: effects, equipment reset, metadata kept | clears on a world-name change; bot: effects reset, metadata kept |
 
 In both versions a spawn with an existing id replaces it, and unknown types spawn nothing (1.8: also
 the abstract mob ids 48/49 and object ids vanilla does not create). Moves for unknown ids are
-ignored, and removing an entity detaches its vehicle, passenger and leash links. 1.8 lightning
-is a weather effect, not tracked by id.
+ignored, and removing an entity detaches its vehicle, passenger and leash links. 1.8 and 1.12
+lightning is a weather effect, not tracked by id. 1.12 fishing bobbers spawn only when the
+owner (object data) is a known player, and effects are kept for living entities only.
 
-The 1.16 rule "a vehicle the local player controls ignores position packets"
-(`isControlledByLocalInstance`) is modelled only for boats (the bot is the first passenger).
+The 1.12 / 1.16 rule "a vehicle the local player controls ignores position packets"
+(`canPassengerSteer` / `isControlledByLocalInstance`) is modelled only for boats (the bot is the
+first passenger); in 1.12 the tracked 1/4096 value keeps following the packets meanwhile.
 Horses, pigs and striders are not modelled.
 
 The rendered (interpolated) position is not computed: vanilla moves towards the server position
@@ -94,6 +97,8 @@ vanilla centred box at the server position. On top of the type's spawn size, the
 variants come from metadata:
 - 1.8: slime / magma cube size, wither skeleton, elder guardian, baby ageable mobs, baby zombies
   (the 1.8 client keeps the adult box), small / marker armor stands;
+- 1.12: slime / magma cube size (VarInt at 12), baby flag (boolean at 12: ageable mobs and
+  zombies), armor stand flags (byte at 11), sneaking players (0.6 × 1.65);
 - 1.16: slime / magma cube size, baby flag (piglin index 16, else 15), armor stand flags, and
   the player pose table.
 
@@ -140,16 +145,17 @@ cargo test -p ghast-entity
 cargo bench -p ghast-entity
 ```
 
-- `tests/v1_8.rs`, `tests/v1_16_5.rs`: known answers for every packet type, from hand-built bodies:
+- `tests/v1_8.rs`, `tests/v1_12.rs`, `tests/v1_16_5.rs`: known answers for every packet type,
+  from hand-built bodies:
   - fixed-point positions and float-vs-double velocity cases;
   - the data > 0 velocity rule;
-  - all 19 1.16 metadata serializers;
+  - all 14 1.12 and 19 1.16 metadata serializers;
   - riding, leash and pickup rules;
   - the controlled boat;
   - login / respawn rules;
   - the tab list (properties skipped);
   - configuration filters.
-- `tests/robustness.rs`, both versions:
+- `tests/robustness.rs`, every version:
   - every wanted packet id × 300 seeds of the protocol's `testgen` values (encoded by the
     generated codecs, which are checked against node-minecraft-protocol) is accepted;
   - metadata is equal to the generated codec's decoding for 500 seeds;

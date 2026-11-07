@@ -79,6 +79,7 @@ pub fn item_id(version: GameVersion, name: &str) -> Option<i32> {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
     match version {
         GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_name(n).map(|i| i32::from(i.id())),
+        GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_name(n).map(|i| i32::from(i.id())),
         _ => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
     }
 }
@@ -96,6 +97,7 @@ pub fn item_name(version: GameVersion, id: i32) -> &'static str {
     };
     match version {
         GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_id(id).map_or("", |i| i.info().name),
+        GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_id(id).map_or("", |i| i.info().name),
         _ => ghast_data::v1_16_5::Item::from_id(id).map_or("", |i| i.info().name),
     }
 }

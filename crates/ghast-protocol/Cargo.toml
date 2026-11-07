@@ -14,9 +14,10 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-protocol"
 
 [features]
-default = ["v1_8", "v1_16_5", "tokio", "libdeflate"]
+default = ["v1_8", "v1_12_2", "v1_16_5", "tokio", "libdeflate"]
 # Protocol versions (generated packet modules).
 v1_8 = []
+v1_12_2 = []
 v1_16_5 = []
 # Inflate/deflate whole packets with libdeflate (C, ~2.4x faster inflate than zlib-rs in
 # the `inflate_chunk` bench). Without it everything uses flate2 + zlib-rs (pure Rust).

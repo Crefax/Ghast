@@ -34,6 +34,59 @@ pub fn unpack_be(bits: u32, data: &[u8], count: usize, mut put: impl FnMut(usize
     }
 }
 
+/// Number of `u64` words for `count` values of `bits` bits in the 1.9 – 1.15 layout, where a
+/// value may span two words (`ceil(count * bits / 64)`).
+#[must_use]
+pub const fn words_needed_spanning(bits: u32, count: usize) -> usize {
+    (count * bits as usize).div_ceil(64)
+}
+
+/// Unpacks `count` values of `bits` (`1..=32`) bits from big-endian words in the 1.9 – 1.15
+/// layout (vanilla `PaletteData`): value `i` starts at bit `i * bits` of the word stream, lowest
+/// bits first, and may continue in the next word.
+///
+/// `data` must hold at least [`words_needed_spanning`] words (checked by the caller).
+#[inline]
+pub fn unpack_spanning_be(bits: u32, data: &[u8], count: usize, mut put: impl FnMut(usize, u32)) {
+    debug_assert!((1..=32).contains(&bits));
+    let mask = (1u64 << bits) - 1;
+    let word = |w: usize| -> u64 {
+        let b = &data[w * 8..w * 8 + 8];
+        u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+    };
+    let bits = bits as usize;
+    for i in 0..count {
+        let start = i * bits;
+        let (w, off) = (start / 64, start % 64);
+        let lo = word(w) >> off;
+        let v = if off + bits > 64 {
+            lo | (word(w + 1) << (64 - off))
+        } else {
+            lo
+        };
+        put(i, (v & mask) as u32);
+    }
+}
+
+/// Packs values into native `u64` words with the 1.9 – 1.15 spanning layout (inverse of
+/// [`unpack_spanning_be`] apart from byte order; used by tests and encoders).
+#[must_use]
+pub fn pack_spanning(bits: u32, values: &[u32]) -> Vec<u64> {
+    let mask = (1u64 << bits) - 1;
+    let bits = bits as usize;
+    let mut out = vec![0u64; words_needed_spanning(bits as u32, values.len())];
+    for (i, &v) in values.iter().enumerate() {
+        let v = u64::from(v) & mask;
+        let start = i * bits;
+        let (w, off) = (start / 64, start % 64);
+        out[w] |= v << off;
+        if off + bits > 64 {
+            out[w + 1] |= v >> (64 - off);
+        }
+    }
+    out
+}
+
 /// Packs values into native `u64` words with the 1.16+ layout (inverse of [`unpack_be`] apart
 /// from byte order; used by tests and encoders).
 #[must_use]
@@ -103,6 +156,34 @@ mod tests {
         assert_eq!(words_needed(10, 4096), 683);
         assert_eq!(words_needed(11, 4096), 820);
         assert_eq!(words_needed(12, 4096), 820);
+    }
+
+    #[test]
+    fn spanning_round_trip_and_known_answer() {
+        // bits 13: the fifth value starts at bit 52 and spans into word 1.
+        let vals: Vec<u32> = vec![1, 2, 3, 4, 0x1FFF];
+        let words = pack_spanning(13, &vals);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0] >> 52, 0xFFF);
+        assert_eq!(words[1] & 1, 1);
+        let mut out = vec![0u32; 5];
+        unpack_spanning_be(13, &be(&words), 5, |i, v| out[i] = v);
+        assert_eq!(out, vals);
+        for bits in 1..=32u32 {
+            let max = if bits == 32 {
+                u32::MAX
+            } else {
+                (1u32 << bits) - 1
+            };
+            let vals: Vec<u32> = (0..4096u32)
+                .map(|i| i.wrapping_mul(2_654_435_761) & max)
+                .collect();
+            let words = pack_spanning(bits, &vals);
+            assert_eq!(words.len(), (4096 * bits as usize) / 64, "bits {bits}");
+            let mut out = vec![0u32; 4096];
+            unpack_spanning_be(bits, &be(&words), 4096, |i, v| out[i] = v);
+            assert_eq!(out, vals, "bits {bits}");
+        }
     }
 
     #[test]

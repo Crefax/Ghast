@@ -32,6 +32,7 @@ access to Mojang's and Fabric's servers (~25 MB, cached in the git-ignored `orac
 ```sh
 export JAVA_HOME=/path/to/jdk-21
 oracle/run.sh verify                  # 1.8.9: regenerate and compare with tests/golden/1.8.9/
+MC=1.12.2 oracle/run.sh verify        # the same for 1.12.2
 MC=1.16.5 oracle/run.sh verify        # the same for 1.16.5
 oracle/run.sh help                    # fuzz, replay, clicks, boxes, ...
 ```

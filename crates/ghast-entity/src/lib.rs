@@ -1,6 +1,7 @@
-//! Entity tracking for the ghast Minecraft Java Edition client library (1.8.9 and 1.16.5).
+//! Entity tracking for the ghast Minecraft Java Edition client library (1.8.9, 1.12.2 and
+//! 1.16.5).
 //!
-//! [`v1_8::Tracker`] / [`v1_16_5::Tracker`] take raw clientbound play packets
+//! [`v1_8::Tracker`] / [`v1_12::Tracker`] / [`v1_16_5::Tracker`] take raw clientbound play packets
 //! ([`ghast_protocol::RawPacket`]) and keep every entity the server announced, keyed by id:
 //! type, UUID, **server position** (exactly as the vanilla client tracks it from the packets,
 //! with each version's fixed-point rules), rotation, last velocity, on-ground, riding / leash
@@ -27,6 +28,7 @@
 mod common;
 mod entity;
 mod store;
+pub mod v1_12;
 pub mod v1_16_5;
 pub mod v1_8;
 

@@ -1,5 +1,5 @@
-//! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/` and
-//! `oracle/cache/1.16.5/fuzz/` (or the file / directory in `GHAST_FUZZ`) produced by
+//! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/`,
+//! `oracle/cache/1.16.5/fuzz/` and `oracle/cache/1.12.2/fuzz{,-edges,-extras}/` (or the file / directory in `GHAST_FUZZ`) produced by
 //! `oracle/run.sh fuzz`, compared bit for bit. The version is taken from the path.
 //!
 //! Needs the git-ignored oracle cache, so it is behind the `oracle-cache` feature:
@@ -26,6 +26,9 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/1.8.9/fuzz-edges"),
             repo_root().join("oracle/cache/1.8.9/fuzz-extras"),
             repo_root().join("oracle/cache/1.16.5/fuzz"),
+            repo_root().join("oracle/cache/1.12.2/fuzz"),
+            repo_root().join("oracle/cache/1.12.2/fuzz-edges"),
+            repo_root().join("oracle/cache/1.12.2/fuzz-extras"),
         ],
     };
     let mut files = Vec::new();
@@ -49,6 +52,8 @@ fn inputs() -> Vec<PathBuf> {
 fn replay_any(path: &std::path::Path) -> Summary {
     if path.to_string_lossy().contains("1.16.5") {
         common::v116::replay_file(path)
+    } else if path.to_string_lossy().contains("1.12.2") {
+        common::v112::replay_file(path)
     } else {
         replay_file(path)
     }

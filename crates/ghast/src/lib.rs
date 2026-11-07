@@ -13,7 +13,7 @@
 //! | `pathfinder` (feature `pathfinder`) | `ghast-pathfinder` | physics-validated A* path planning and following |
 //! | `viewer` (feature `viewer`) | `ghast-viewer` | bot screen: live 3D view in the browser, recordings, replays |
 //!
-//! Supported versions: 1.8.9 and 1.16.5. See the `afk` and `chat` examples:
+//! Supported versions: 1.8.9, 1.12.2 and 1.16.5. See the `afk` and `chat` examples:
 //!
 //! ```text
 //! cargo run -p ghast --example afk -- --host localhost --port 25565 --username Bot --version 1.8.9

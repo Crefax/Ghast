@@ -153,6 +153,28 @@ impl Stack {
     }
 }
 
+impl Stack {
+    /// 1.12 `EnchantmentHelper.hasBindingCurse`: the first `ench` entry whose short `id` is 10
+    /// (binding curse) decides, by its short `lvl` > 0.
+    pub(crate) fn has_binding_curse_1_12(&self) -> bool {
+        let Some(Ok(Some(tree))) = self.nbt.as_ref().map(RawNbt::parse) else {
+            return false;
+        };
+        let Some(Tag::List(list)) = tree.tag.as_compound().and_then(|c| last(c, "ench")) else {
+            return false;
+        };
+        for e in &list.items {
+            // `getList("ench", 10)`: a list of anything but compounds reads as empty
+            let Tag::Compound(e) = e else { return false };
+            let short = |k: &str| last(e, k).and_then(number).unwrap_or(0) as i16;
+            if short("id") == 10 {
+                return short("lvl") > 0;
+            }
+        }
+        false
+    }
+}
+
 /// The value of the last entry named `key` (a Java `HashMap` keeps the last duplicate).
 fn last<'a>(c: &'a ghast_protocol::nbt::Compound, key: &str) -> Option<&'a Tag> {
     c.0.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v)

@@ -17,13 +17,13 @@ pub enum WindowKind {
     Generic3x3,
     /// Hopper (5 slots).
     Hopper,
-    /// 1.16.5 shulker box (27 slots that refuse shulker boxes).
+    /// 1.12 / 1.16.5 shulker box (27 slots that refuse shulker boxes).
     ShulkerBox,
     /// Crafting table: result slot 0, grid 1..=9.
     Crafting,
     /// Furnace (also 1.16.5 smoker and blast furnace): input 0, fuel 1, output 2.
     Furnace,
-    /// Brewing stand (1.8: 4 slots; 1.16.5: 5 with the blaze powder slot).
+    /// Brewing stand (1.8: 4 slots; 1.12 / 1.16.5: 5 with the blaze powder slot).
     BrewingStand,
     /// Enchanting table (item, lapis).
     Enchanting,
@@ -59,13 +59,13 @@ pub enum SlotKind {
     Normal,
     /// Window 0 armor slot (0 head … 3 feet): its armor type only, one item.
     Armor(u8),
-    /// 1.16.5 offhand slot (window 0 slot 45): any item.
+    /// 1.12 / 1.16.5 offhand slot (window 0 slot 45): any item.
     Offhand,
     /// Crafting result: nothing can be put in; taking it consumes the grid.
     CraftResult,
     /// Output slot without side effects on the client (furnace output): nothing can be put in.
     Output,
-    /// 1.16.5 shulker box slot: any item but shulker boxes.
+    /// 1.12 / 1.16.5 shulker box slot: any item but shulker boxes.
     Shulker,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
@@ -102,6 +102,16 @@ impl WindowKind {
                 rows: slot_count / 9,
             },
         })
+    }
+
+    /// The window type of a 1.12.2 `open_window` (`inventoryType`, `slotCount`): the 1.8 rules
+    /// plus `minecraft:shulker_box`.
+    #[must_use]
+    pub fn from_v1_12_2(inventory_type: &str, slot_count: u8) -> Option<WindowKind> {
+        if inventory_type == "minecraft:shulker_box" && slot_count > 0 {
+            return Some(WindowKind::ShulkerBox);
+        }
+        WindowKind::from_v1_8(inventory_type, slot_count)
     }
 
     /// The window type of a 1.16.5 `open_window` (menu type registry id).
@@ -143,7 +153,7 @@ impl WindowKind {
             WindowKind::Furnace => 3,
             WindowKind::BrewingStand => match version {
                 Version::V1_8 => 4,
-                Version::V1_16_5 => 5,
+                Version::V1_12 | Version::V1_16_5 => 5,
             },
             WindowKind::Enchanting => 2,
             WindowKind::Anvil => 3,

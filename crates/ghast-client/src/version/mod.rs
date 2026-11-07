@@ -1,6 +1,7 @@
 //! Per-version glue between the generated packets of `ghast-protocol` and the common layer.
 //!
-//! [`ClientVersion`] is implemented for the protocol marker types ([`V1_8`], [`V1_16_5`]).
+//! [`ClientVersion`] is implemented for the protocol marker types ([`V1_8`], [`V1_12_2`],
+//! [`V1_16_5`]).
 //! The connection and its tick loop are generic over it, so every hot path is monomorphised
 //! per version (no trait objects); the bot API above it only sees [`crate::common`] types.
 
@@ -12,10 +13,12 @@ use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, PacketFilter, RawPa
 use crate::common::{Inbound, LoginInbound, Outbound, Pose, Teleport};
 use crate::interest::Interests;
 
+mod v1_12_2;
 mod v1_16_5;
 mod v1_8;
 
 pub use ghast_protocol::v1_8::V1_8;
+pub use ghast_protocol::v1_12_2::V1_12_2;
 pub use ghast_protocol::v1_16_5::V1_16_5;
 
 /// A protocol version the client supports, chosen at run time.
@@ -24,30 +27,45 @@ pub use ghast_protocol::v1_16_5::V1_16_5;
 pub enum GameVersion {
     /// 1.8 – 1.8.9 (protocol 47).
     V1_8_9,
+    /// 1.12.2 (protocol 340).
+    V1_12_2,
     /// 1.16.4 – 1.16.5 (protocol 754).
     V1_16_5,
 }
 
 impl GameVersion {
     /// Every supported version.
-    pub const ALL: [GameVersion; 2] = [GameVersion::V1_8_9, GameVersion::V1_16_5];
+    pub const ALL: [GameVersion; 3] = [
+        GameVersion::V1_8_9,
+        GameVersion::V1_12_2,
+        GameVersion::V1_16_5,
+    ];
 
     /// Protocol number.
     #[must_use]
     pub const fn protocol(self) -> i32 {
         match self {
             Self::V1_8_9 => <V1_8 as Version>::PROTOCOL,
+            Self::V1_12_2 => <V1_12_2 as Version>::PROTOCOL,
             Self::V1_16_5 => <V1_16_5 as Version>::PROTOCOL,
         }
     }
 
-    /// Display name (`"1.8.9"`, `"1.16.5"`).
+    /// Display name (`"1.8.9"`, `"1.12.2"`, `"1.16.5"`).
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::V1_8_9 => "1.8.9",
+            Self::V1_12_2 => "1.12.2",
             Self::V1_16_5 => "1.16.5",
         }
+    }
+
+    /// `true` for 1.9 and later: the attack cooldown, the off hand, swinging after the click,
+    /// no 0.1 targeting border on entity boxes.
+    #[must_use]
+    pub const fn combat_1_9(self) -> bool {
+        !matches!(self, Self::V1_8_9)
     }
 
     /// Eye height above the feet while standing: `1.62F` widened to double (every supported
@@ -57,13 +75,13 @@ impl GameVersion {
         f64::from(1.62_f32)
     }
 
-    /// Eye height while sneaking: 1.54 in 1.8 (`getEyeHeight` − 0.08), 1.27 in 1.16 (the
-    /// crouching pose).
+    /// Eye height while sneaking: 1.54 in 1.8 – 1.12 (`getEyeHeight` − 0.08), 1.27 in 1.16
+    /// (the crouching pose).
     #[must_use]
     pub fn sneak_eye_height(self) -> f64 {
         match self {
             // `1.62F - 0.08F` in float.
-            Self::V1_8_9 => f64::from(1.62_f32 - 0.08_f32),
+            Self::V1_8_9 | Self::V1_12_2 => f64::from(1.62_f32 - 0.08_f32),
             Self::V1_16_5 => f64::from(1.27_f32),
         }
     }
@@ -77,17 +95,18 @@ impl fmt::Display for GameVersion {
 
 /// Error parsing a [`GameVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.16.5)")]
+#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5)")]
 pub struct UnknownVersion(pub String);
 
 impl FromStr for GameVersion {
     type Err = UnknownVersion;
 
-    /// Accepts `1.8`, `1.8.x`, `47`, `1.16.4`, `1.16.5` and `754`.
+    /// Accepts `1.8`, `1.8.x`, `47`, `1.12.2`, `340`, `1.16.4`, `1.16.5` and `754`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "1.8" | "1.8.0" | "1.8.1" | "1.8.2" | "1.8.3" | "1.8.4" | "1.8.5" | "1.8.6"
             | "1.8.7" | "1.8.8" | "1.8.9" | "47" => Ok(Self::V1_8_9),
+            "1.12.2" | "340" => Ok(Self::V1_12_2),
             "1.16.4" | "1.16.5" | "754" => Ok(Self::V1_16_5),
             other => Err(UnknownVersion(other.to_owned())),
         }
@@ -96,7 +115,7 @@ impl FromStr for GameVersion {
 
 /// What a protocol version needs to provide to the client.
 ///
-/// Sealed: implemented for [`V1_8`] and [`V1_16_5`] only.
+/// Sealed: implemented for [`V1_8`], [`V1_12_2`] and [`V1_16_5`] only.
 pub trait ClientVersion: Version + sealed::Sealed {
     /// The run-time tag of this version.
     const GAME: GameVersion;
@@ -152,6 +171,7 @@ mod sealed {
     #[allow(unnameable_types, reason = "sealed trait pattern")]
     pub trait Sealed {}
     impl Sealed for super::V1_8 {}
+    impl Sealed for super::V1_12_2 {}
     impl Sealed for super::V1_16_5 {}
 }
 
@@ -211,8 +231,14 @@ mod tests {
     fn parse_versions() {
         assert_eq!("1.8.8".parse::<GameVersion>().unwrap(), GameVersion::V1_8_9);
         assert_eq!("754".parse::<GameVersion>().unwrap(), GameVersion::V1_16_5);
-        assert!("1.12.2".parse::<GameVersion>().is_err());
+        assert_eq!(
+            "1.12.2".parse::<GameVersion>().unwrap(),
+            GameVersion::V1_12_2
+        );
+        assert_eq!("340".parse::<GameVersion>().unwrap(), GameVersion::V1_12_2);
+        assert!("1.12.1".parse::<GameVersion>().is_err());
         assert_eq!(GameVersion::V1_8_9.protocol(), 47);
+        assert_eq!(GameVersion::V1_12_2.protocol(), 340);
         assert_eq!(GameVersion::V1_16_5.protocol(), 754);
     }
 

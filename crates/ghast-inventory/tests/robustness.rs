@@ -74,7 +74,7 @@ fn op_strategy(wild: bool) -> impl Strategy<Value = Op> {
     ]
 }
 
-const TYPES_1_8: [&str; 14] = [
+const TYPES_1_8: [&str; 15] = [
     "minecraft:chest",
     "minecraft:container",
     "minecraft:crafting_table",
@@ -89,6 +89,7 @@ const TYPES_1_8: [&str; 14] = [
     "minecraft:villager",
     "EntityHorse",
     "plugin:custom",
+    "minecraft:shulker_box",
 ];
 
 /// The item's stack size (64 for unknown ids).
@@ -97,6 +98,9 @@ fn max_count(v: Version, id: i32) -> i32 {
     let n = match v {
         Version::V1_8 => id
             .and_then(ghast_data::v1_8::Item::from_id)
+            .map(|i| i.info().stack_size),
+        Version::V1_12 => id
+            .and_then(ghast_data::v1_12::Item::from_id)
             .map(|i| i.info().stack_size),
         Version::V1_16_5 => id
             .and_then(ghast_data::v1_16_5::Item::from_id)
@@ -117,7 +121,7 @@ fn mk(v: Version, t: (i32, i32, i16, Option<u8>), valid: bool) -> Stack {
             t.1
         },
         // 1.16.5 slots carry no damage field
-        damage: if v == Version::V1_8 { t.2 } else { 0 },
+        damage: if v == Version::V1_16_5 { 0 } else { t.2 },
         nbt: t.3.map(nbt),
     }
 }
@@ -160,11 +164,12 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
             Op::SetSlot(w, s, st) => inv.on_set_slot(i32::from(w), s, st.map(|t| mk(v, t, !wild))),
             Op::Open8(t, n) => {
                 let t = TYPES_1_8[usize::from(t) % TYPES_1_8.len()];
-                inv.on_open_window(
-                    1 + i32::from(n % 3),
-                    WindowKind::from_v1_8(t, n),
-                    "{}".into(),
-                );
+                let kind = if v == Version::V1_12 {
+                    WindowKind::from_v1_12_2(t, n)
+                } else {
+                    WindowKind::from_v1_8(t, n)
+                };
+                inv.on_open_window(1 + i32::from(n % 3), kind, "{}".into());
             }
             Op::Open16(t) => inv.on_open_window(2, WindowKind::from_v1_16_5(t), "{}".into()),
             Op::CloseServer => inv.on_close_window(),
@@ -236,12 +241,12 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
             }
             Op::Reset => inv.reset(),
         }
-        if v == Version::V1_16_5 {
+        if v != Version::V1_8 {
             for i in 0..inv.slot_count() {
                 if let Some(s) = inv.slot(i) {
                     assert!(
                         s.count > 0 && s.id != 0,
-                        "1.16 stores no empty stacks: {s:?}"
+                        "1.12 / 1.16 store no empty stacks: {s:?}"
                     );
                 }
             }
@@ -291,6 +296,16 @@ proptest! {
     #[test]
     fn never_panics_1_8(ops in prop::collection::vec(op_strategy(true), 0..200)) {
         run(Version::V1_8, ops, true);
+    }
+
+    #[test]
+    fn never_panics_1_12(ops in prop::collection::vec(op_strategy(true), 0..200)) {
+        run(Version::V1_12, ops, true);
+    }
+
+    #[test]
+    fn clicks_conserve_items_1_12(ops in prop::collection::vec(op_strategy(false), 0..200)) {
+        run(Version::V1_12, ops, false);
     }
 
     #[test]

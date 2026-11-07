@@ -412,6 +412,39 @@ pub(crate) fn remainders_1_8(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
     Err(())
 }
 
+/// 1.12 `RecipeDispatcher.getRemainders` for a grid that a recipe is known to match (the caller
+/// only asks for a result the server computed for this grid). Every 1.12 recipe hands back the
+/// item's recipe remainder (buckets for the three filled buckets, a glass bottle for dragon's
+/// breath) except book cloning (a copy of the written book stays) and the banner recipes (a
+/// patterned banner may stay); grids with a banner carrying NBT are refused.
+pub(crate) fn remainders_1_12(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
+    const BANNER: i32 = 425;
+    const DRAGON_BREATH: i32 = 437;
+    const GLASS_BOTTLE: i32 = 374;
+    if g.items().any(|s| s.id == BANNER && s.nbt.is_some()) {
+        return Err(());
+    }
+    let mut v: Vec<Rem> = g
+        .stacks
+        .iter()
+        .map(|s| match s {
+            Some(s) if matches!(s.id, 326 | 327 | 335) => Rem::Item(Stack::new(BUCKET, 1, 0)),
+            Some(s) if s.id == DRAGON_BREATH => Rem::Item(Stack::new(GLASS_BOTTLE, 1, 0)),
+            _ => Rem::None,
+        })
+        .collect();
+    if let Some(i) = g
+        .stacks
+        .iter()
+        .position(|s| s.as_ref().is_some_and(|s| s.id == WRITTEN_BOOK))
+    {
+        // only book cloning takes a written book: its remainders are the book copy alone
+        v = vec![Rem::None; g.stacks.len()];
+        v[i] = Rem::Item(g.stacks[i].as_ref().map(|s| s.with_count(1)).ok_or(())?);
+    }
+    Ok(v)
+}
+
 // ---------------------------------------------------------------- NBT helpers
 
 fn tree(s: &Stack) -> Option<Compound> {

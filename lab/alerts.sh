@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Grim output from a lab server's log.
-#   ./alerts.sh <1.8|1.16>          follow new Grim lines (alerts, verbose flags, setbacks, kicks)
-#   ./alerts.sh <1.8|1.16> --all    every such line of the last 24 h, then exit
-#   ./alerts.sh <1.8|1.16> --count  Grim flag lines per player and check, last 24 h (no output = clean)
+#   ./alerts.sh <1.8|1.12|1.16>          follow new Grim lines (alerts, verbose flags, setbacks, kicks)
+#   ./alerts.sh <1.8|1.12|1.16> --all    every such line of the last 24 h, then exit
+#   ./alerts.sh <1.8|1.12|1.16> --count  Grim flag lines per player and check, last 24 h (no output = clean)
 # --all/--count read latest.log plus the rotated logs/*.log.gz of the last 24 h (Paper rotates at midnight),
 # so a run crossing 00:00 is counted whole; lines from rotated files are prefixed with their date.
 # Narrow with --since HH:MM[:SS] (today's latest.log only), e.g. ./alerts.sh 1.8 --count --since 23:50

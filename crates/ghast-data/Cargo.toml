@@ -14,9 +14,10 @@ documentation = "https://docs.rs/ghast-data"
 readme = "README.md"
 
 [features]
-default = ["v1_8", "v1_16_5"]
+default = ["v1_8", "v1_12", "v1_16_5"]
 # Per-version tables. Each one is independent; enable only what you use to cut compile time.
 v1_8 = []
+v1_12 = []
 v1_16_5 = []
 
 [dependencies]

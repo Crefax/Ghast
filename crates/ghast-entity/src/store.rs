@@ -197,8 +197,8 @@ pub struct Entities {
     pub(crate) scratch: Vec<(u8, MetaValue)>,
     /// Set once any leash link exists (skips the leash scan on removal otherwise).
     pub(crate) any_leash: bool,
-    /// 1.16 tracker (selects the vanilla size table).
-    pub(crate) modern: bool,
+    /// The tracker's protocol family (selects the vanilla size table).
+    pub(crate) era: crate::entity::Era,
 }
 
 impl Entities {
@@ -326,22 +326,25 @@ impl Entities {
         }
         self.self_id = Some(id);
         let mut me = Entity::new(id, EntityType::Player);
-        me.sizer = if self.modern {
-            crate::v1_16_5::vanilla_size(&me).map(|v| (v, true))
-        } else {
-            crate::v1_8::vanilla_size(&me).map(|v| (v, false))
-        };
+        self.resolve(&mut me);
         self.map.insert(id, me);
+    }
+
+    /// Stamps the protocol family and resolves the vanilla size entry.
+    fn resolve(&self, e: &mut Entity) {
+        use crate::entity::Era;
+        e.era = self.era;
+        e.sizer = match self.era {
+            Era::V1_8 => crate::v1_8::vanilla_size(e),
+            Era::V1_12 => crate::v1_12::vanilla_size(e),
+            Era::V1_16 => crate::v1_16_5::vanilla_size(e),
+        };
     }
 
     /// Adds an entity, replacing (and unlinking) any entity with the same id, as vanilla does.
     pub(crate) fn spawn(&mut self, mut e: Entity) {
         let id = e.id;
-        e.sizer = if self.modern {
-            crate::v1_16_5::vanilla_size(&e).map(|v| (v, true))
-        } else {
-            crate::v1_8::vanilla_size(&e).map(|v| (v, false))
-        };
+        self.resolve(&mut e);
         if Some(id) == self.self_id {
             return;
         }

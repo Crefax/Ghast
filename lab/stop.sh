@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Graceful stop (console "stop" -> worlds saved), SIGTERM/SIGKILL fallback: ./stop.sh <1.8|1.16|all>
+# Graceful stop (console "stop" -> worlds saved), SIGTERM/SIGKILL fallback: ./stop.sh <1.8|1.12|1.16|all>
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 stop_one() {
@@ -12,6 +12,6 @@ stop_one() {
   rm -f "$DIR/server.pid"
 }
 case "${1:-all}" in
-  all) stop_one 1.8; stop_one 1.16 ;;
+  all) stop_one 1.8; stop_one 1.12; stop_one 1.16 ;;
   *) stop_one "$1" ;;
 esac

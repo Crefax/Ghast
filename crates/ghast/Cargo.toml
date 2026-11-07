@@ -1,6 +1,6 @@
 [package]
 name = "ghast"
-description = "Headless Minecraft Java Edition client / bot library (1.8.9 and 1.16.5) with vanilla-exact behaviour: facade crate re-exporting the ghast-* crates"
+description = "Headless Minecraft Java Edition client / bot library (1.8.9, 1.12.2 and 1.16.5) with vanilla-exact behaviour: facade crate re-exporting the ghast-* crates"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

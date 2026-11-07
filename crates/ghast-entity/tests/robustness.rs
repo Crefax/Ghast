@@ -225,6 +225,33 @@ fn conv_1_16(v: &ghast_protocol::v1_16_5::types::EntityMetadataValue) -> MetaVal
     }
 }
 
+fn conv_1_12(v: &ghast_protocol::v1_12_2::types::EntityMetadataValue) -> MetaValue {
+    use ghast_protocol::v1_12_2::types::EntityMetadataValue as V;
+    let s = |s: &bytestring_like::B| Box::<str>::from(&**s);
+    match v {
+        V::Byte(b) => MetaValue::Byte(*b),
+        V::VarInt(b) => MetaValue::VarInt(*b),
+        V::Float(f) => MetaValue::Float(*f),
+        V::String(x) => MetaValue::String(s(x)),
+        V::Chat(x) => MetaValue::Chat(s(x)),
+        V::Slot(sl) => MetaValue::Item(sl.0.as_ref().map(|i| ghast_entity::Item {
+            id: i32::from(i.id),
+            count: i.count,
+            damage: i.damage,
+            nbt: nbt_copy(&i.nbt),
+        })),
+        V::Boolean(b) => MetaValue::Bool(*b),
+        V::Rotation(r) => MetaValue::Rotation([r.pitch, r.yaw, r.roll]),
+        V::Position(p) => MetaValue::BlockPos([p.x, p.y, p.z]),
+        V::OptPosition(p) => MetaValue::OptBlockPos(p.map(|p| [p.x, p.y, p.z])),
+        V::Direction(d) => MetaValue::Direction(*d),
+        V::OptUuid(u) => MetaValue::OptUuid(*u),
+        V::BlockState(b) => MetaValue::BlockState(*b),
+        V::Nbt(n) => MetaValue::Nbt(Bytes::copy_from_slice(n.as_bytes())),
+        V::Other => unreachable!(),
+    }
+}
+
 mod bytestring_like {
     pub type B = ghast_protocol::types::ByteString;
 }
@@ -289,4 +316,36 @@ version!(
         .i16(0)
         .raw(ghast_protocol::v1_16_5::play::clientbound::id::SPAWN_ENTITY),
     conv_1_16
+);
+
+version!(
+    v1_12_2,
+    ghast_entity::v1_12::Tracker,
+    ghast_protocol::v1_12_2::play::clientbound::ClientboundPlayPacket,
+    {
+        use ghast_protocol::v1_12_2::play::clientbound::id;
+        [
+            id::ENTITY_DESTROY,
+            id::REL_ENTITY_MOVE,
+            id::ATTACH_ENTITY,
+            id::COLLECT,
+            id::SET_PASSENGERS,
+        ]
+    },
+    |eid| W::new()
+        .varint(eid)
+        .uuid(0)
+        .varint(54)
+        .f64(0.0)
+        .f64(0.0)
+        .f64(0.0)
+        .i8(0)
+        .i8(0)
+        .i8(0)
+        .i16(0)
+        .i16(0)
+        .i16(0)
+        .u8(0xFF)
+        .raw(ghast_protocol::v1_12_2::play::clientbound::id::SPAWN_ENTITY_LIVING),
+    conv_1_12
 );

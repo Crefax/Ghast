@@ -61,6 +61,10 @@ impl Block {
                 .ok()
                 .and_then(ghast_data::v1_8::Block::from_id)
                 .map_or("", ghast_data::v1_8::Block::name),
+            GameVersion::V1_12_2 => u8::try_from(self.raw >> 4)
+                .ok()
+                .and_then(ghast_data::v1_12::Block::from_id)
+                .map_or("", ghast_data::v1_12::Block::name),
             _ => u16::try_from(self.raw)
                 .ok()
                 .and_then(ghast_data::v1_16_5::BlockState::from_id)
@@ -68,7 +72,7 @@ impl Block {
         }
     }
 
-    /// The 1.8 metadata (`raw & 15`); 0 on 1.16 (use ghast-data's properties there).
+    /// The 1.8 / 1.12 metadata (`raw & 15`); 0 on 1.16 (use ghast-data's properties there).
     ///
     /// ```
     /// # use ghast_client::GameVersion;
@@ -77,7 +81,7 @@ impl Block {
     #[must_use]
     pub fn meta(self) -> u8 {
         match self.version {
-            GameVersion::V1_8_9 => (self.raw & 15) as u8,
+            GameVersion::V1_8_9 | GameVersion::V1_12_2 => (self.raw & 15) as u8,
             _ => 0,
         }
     }
@@ -294,11 +298,15 @@ pub struct EntityInfo {
     pub item: Option<(i32, i32)>,
 }
 
-/// The name of an entity type.
-fn entity_name(ty: EntityType) -> &'static str {
+/// The name of an entity type (1.8 and 1.12 share the legacy mob / object id spaces but not
+/// the names).
+fn entity_name(version: GameVersion, ty: EntityType) -> &'static str {
     match ty {
         EntityType::Player => "player",
         EntityType::Registry(_) => ghast_client::entity::v1_16_5::info(ty).map_or("", |i| i.name),
+        _ if version == GameVersion::V1_12_2 => {
+            ghast_client::entity::v1_12::info(ty).map_or("", |i| i.name)
+        }
         _ => ghast_client::entity::v1_8::info(ty).map_or("", |i| i.name),
     }
 }
@@ -309,7 +317,7 @@ pub(crate) fn entity_info(ctx: &TickContext<'_>, id: i32) -> Option<EntityInfo> 
     let [x, y, z] = e.position();
     Some(EntityInfo {
         id,
-        name: entity_name(e.entity_type()),
+        name: entity_name(ctx.version(), e.entity_type()),
         class: e.class(),
         pos: Vec3::new(x, y, z),
         player_name: es.player_name(id).map(str::to_owned),

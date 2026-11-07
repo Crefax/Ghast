@@ -191,7 +191,7 @@ fn classify(f: &Facts<'_>) -> Class {
                 flags |= IRREGULAR;
             }
         }
-        ShapeDependency::Neighbours(NeighbourShape::Door)
+        ShapeDependency::Neighbours(NeighbourShape::Door | NeighbourShape::ChorusPlant)
         | ShapeDependency::EntityContext
         | ShapeDependency::BlockEntity
         | ShapeDependency::PositionOffset => {

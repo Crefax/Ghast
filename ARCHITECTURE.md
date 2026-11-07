@@ -5,8 +5,8 @@ crate's README.
 
 ## Goals
 
-1. **Old and popular versions first.** 1.8.9 first, then 1.16.5; 1.12.2 and 1.21 / latest
-   later. One repository, multi-version by design.
+1. **Old and popular versions first.** 1.8.9 first, then 1.16.5 and 1.12.2 (the first member
+   of a 1.9 – 1.12 family); 1.21 / latest later. One repository, multi-version by design.
 2. **Vanilla-exact behaviour, proven.** Movement, collisions, the crosshair and window clicks
    are checked bit for bit against the real vanilla code running as an oracle.
 3. **Light.** CPU first (many bots on a small machine such as a Raspberry Pi 5), then
@@ -45,7 +45,7 @@ Dependencies point one way: the protocol crate knows nothing about the layers ab
   tick) does no I/O and can be driven by tests directly.
 - **Two-layer versioning.** At the bottom, version-specific packet types are generated per
   version. On top, a version-agnostic "common" layer of inbound events and outbound actions.
-  The bot API only sees the common layer, so one behaviour runs on 1.8.9 and on 1.16.5.
+  The bot API only sees the common layer, so one behaviour runs on 1.8.9, 1.12.2 and 1.16.5.
   Version dispatch happens once per session and is monomorphised: version differences are
   checked at compile time.
 - **Decode only what is needed.** The play-state packet filter is built from the core's needs

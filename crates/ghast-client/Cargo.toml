@@ -1,6 +1,6 @@
 [package]
 name = "ghast-client"
-description = "Headless Minecraft Java Edition client for the ghast library: connection, login, fixed 50 ms tick loop and a version-agnostic bot API (1.8.9 and 1.16.5)"
+description = "Headless Minecraft Java Edition client for the ghast library: connection, login, fixed 50 ms tick loop and a version-agnostic bot API (1.8.9, 1.12.2 and 1.16.5)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,13 +19,13 @@ default = []
 microsoft = ["ghast-auth/microsoft"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5", "tokio", "libdeflate", "chat-json"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "tokio", "libdeflate", "chat-json"] }
 ghast-auth = { path = "../ghast-auth", version = "0.2.3" }
-ghast-world = { path = "../ghast-world", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5", "physics"] }
+ghast-world = { path = "../ghast-world", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "physics"] }
 ghast-physics = { path = "../ghast-physics", version = "0.2.3" }
 ghast-inventory = { path = "../ghast-inventory", version = "0.2.3" }
 ghast-entity = { path = "../ghast-entity", version = "0.2.3" }
-ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

@@ -350,7 +350,7 @@ impl Inventory {
     }
 
     /// `PlayerInventory` slot by vanilla index: 0..=8 hotbar, 9..=35 main, 36..=39 armor
-    /// (feet, legs, chest, head), 40 offhand (1.16.5).
+    /// (feet, legs, chest, head), 40 offhand (1.12 / 1.16.5).
     #[must_use]
     pub fn player(&self, index: usize) -> Option<&Stack> {
         self.m.player.get(index)?.as_ref()
@@ -380,7 +380,7 @@ impl Inventory {
         if a < 4 { self.player(39 - a) } else { None }
     }
 
-    /// The offhand stack (1.16.5).
+    /// The offhand stack (1.12 / 1.16.5).
     #[must_use]
     pub fn offhand(&self) -> Option<&Stack> {
         self.player(40)
@@ -416,7 +416,7 @@ impl Inventory {
     }
 
     /// Number of slots of the current screen (window 0 when no container is open: 45 on 1.8,
-    /// 46 on 1.16.5).
+    /// 46 on 1.12 / 1.16.5).
     #[must_use]
     pub fn slot_count(&self) -> usize {
         self.layout().len
@@ -482,7 +482,9 @@ impl Inventory {
     /// Whether the current screen's crafting result (window 0 slot 0, crafting table slot 0)
     /// is what the vanilla client shows. The 1.8 client computes results from its recipe book
     /// (ghast does not) and the server never sends them except in `window_items`; on 1.16.5 the
-    /// server sends each new result as `set_slot`. While unknown, result clicks are
+    /// server sends each new result as `set_slot`. The 1.12 client never computes results: the
+    /// slot always holds what the server last sent (taking a result whose grid changed since is
+    /// refused, its remainders depend on the recipes). While unknown, result clicks are
     /// [`ClickError::Unpredictable`].
     #[must_use]
     pub fn result_known(&self) -> bool {
@@ -492,6 +494,23 @@ impl Inventory {
             }
             ScreenState::Window(_) => true,
             _ => self.m.craft_result_known,
+        }
+    }
+
+    /// Whether the current screen's crafting result belongs to the grid as it is now. 1.12: the
+    /// server sent it and the grid has not changed since (a click that changes the grid leaves
+    /// the old result in the slot until the server's `set_slot`; taking such a stale result is
+    /// [`ClickError::Unpredictable`]). 1.8 / 1.16.5: the same as
+    /// [`result_known`](Inventory::result_known).
+    #[must_use]
+    pub fn result_current(&self) -> bool {
+        if self.version != Version::V1_12 {
+            return self.result_known();
+        }
+        match &self.screen {
+            ScreenState::Window(w) if w.kind == WindowKind::Crafting => self.m.container_fresh,
+            ScreenState::Window(_) => true,
+            _ => self.m.craft_fresh,
         }
     }
 
@@ -606,8 +625,20 @@ impl Inventory {
         if old.cursor != self.m.cursor {
             self.events.cursor_changed = true;
         }
-        // 1.8: the simulation recomputed the result itself; 1.16.5: the server sends it.
+        // 1.8: the simulation recomputed the result itself; 1.16.5: the server sends it; 1.12:
+        // the client keeps the result it has, which no longer belongs to a changed grid.
         if self.version == Version::V1_8 {
+            return;
+        }
+        if self.version == Version::V1_12 {
+            if old.craft != self.m.craft {
+                self.m.craft_fresh = false;
+            }
+            if lay.screen == Screen::Container(WindowKind::Crafting)
+                && old.container.get(1..10) != self.m.container.get(1..10)
+            {
+                self.m.container_fresh = false;
+            }
             return;
         }
         if old.craft != self.m.craft {
@@ -621,7 +652,7 @@ impl Inventory {
     }
 
     /// Opens the player inventory GUI (key E). Returns the packet to send (1.8: the "open
-    /// inventory achievement" client command; 1.16.5: nothing). No-op when already open.
+    /// inventory achievement" client command; 1.12 / 1.16.5: nothing). No-op when already open.
     pub fn open_inventory(&mut self) -> Result<Option<Outgoing>, ClickError> {
         match self.screen {
             ScreenState::Inventory => return Ok(None),
@@ -670,11 +701,13 @@ impl Inventory {
                     self.m.craft = Default::default();
                 }
                 self.m.craft_result = None;
-                self.m.craft_result_known = self.version == Version::V1_8;
+                self.m.craft_result_known = self.version != Version::V1_16_5;
+                self.m.craft_fresh = false;
             }
             ScreenState::Window(_) => {
                 self.m.container.clear();
                 self.m.container_result_known = true;
+                self.m.container_fresh = true;
             }
             ScreenState::None => {}
         }
@@ -694,9 +727,10 @@ impl Inventory {
         self.consume(usize::from(self.m.selected.min(8)), n)
     }
 
-    /// [`consume_held`](Inventory::consume_held) for the offhand stack (1.16.5; no-op on 1.8).
+    /// [`consume_held`](Inventory::consume_held) for the offhand stack (1.12 / 1.16.5; no-op on
+    /// 1.8).
     pub fn consume_offhand(&mut self, n: u8) -> bool {
-        self.version == Version::V1_16_5 && self.consume(40, n)
+        self.version != Version::V1_8 && self.consume(40, n)
     }
 
     fn consume(&mut self, k: usize, n: u8) -> bool {
@@ -738,6 +772,7 @@ impl Inventory {
         let n = kind.container_len(self.version);
         self.m.container = vec![None; n];
         self.m.container_result_known = true;
+        self.m.container_fresh = true;
         self.screen = ScreenState::Window(Window {
             id,
             kind,
@@ -801,8 +836,10 @@ impl Inventory {
         }
         if lay.screen == Screen::Player {
             self.m.craft_result_known = true;
+            self.m.craft_fresh = true;
         } else {
             self.m.container_result_known = true;
+            self.m.container_fresh = true;
         }
         // 1.8: setting the grid slots made the client compute the result itself
         if self.version == Version::V1_8 && touched_grid {
@@ -815,7 +852,7 @@ impl Inventory {
         }
     }
 
-    /// `set_slot` (`window_id` as received, signed byte): -1 sets the cursor, 1.16.5's -2 a
+    /// `set_slot` (`window_id` as received, signed byte): -1 sets the cursor, 1.12 / 1.16.5 -2 a
     /// `PlayerInventory` index, window 0 slots 36..45 always reach window 0, others only the
     /// current screen.
     pub fn on_set_slot(&mut self, window_id: i32, slot: i16, item: Option<Stack>) {
@@ -827,7 +864,7 @@ impl Inventory {
             }
             return;
         }
-        let loc = if window_id == -2 && self.version == Version::V1_16_5 {
+        let loc = if window_id == -2 && self.version != Version::V1_8 {
             usize::try_from(slot)
                 .ok()
                 .filter(|&k| k < 41)
@@ -846,15 +883,23 @@ impl Inventory {
         if self.layout().clamps(l) {
             crate::sim::clamp(&mut item);
         }
+        let crafting_table = matches!(
+            self.layout().screen,
+            Screen::Container(WindowKind::Crafting)
+        );
         match l {
-            Loc::CraftResult => self.m.craft_result_known = true,
-            Loc::Container(0)
-                if matches!(
-                    self.layout().screen,
-                    Screen::Container(WindowKind::Crafting)
-                ) =>
-            {
+            Loc::CraftResult => {
+                self.m.craft_result_known = true;
+                self.m.craft_fresh = true;
+            }
+            Loc::Container(0) if crafting_table => {
                 self.m.container_result_known = true;
+                self.m.container_fresh = true;
+            }
+            // 1.12: a grid slot changed under the result the client holds
+            Loc::Craft(_) if self.version == Version::V1_12 => self.m.craft_fresh = false,
+            Loc::Container(1..=9) if crafting_table && self.version == Version::V1_12 => {
+                self.m.container_fresh = false;
             }
             _ => {}
         }
@@ -935,10 +980,12 @@ impl Inventory {
         (known && !accepted).then_some(Outgoing::Confirm { window_id, action })
     }
 
-    /// 1.16.5 drops empty stacks; 1.8 keeps zero-count stacks.
+    /// 1.12 / 1.16.5 drop empty stacks (1.16.5 also has no damage field); 1.8 keeps zero-count
+    /// stacks.
     fn normalize(&self, s: Option<Stack>) -> Option<Stack> {
         match self.version {
             Version::V1_8 => s,
+            Version::V1_12 => s.filter(|s| s.count > 0 && s.id != 0),
             Version::V1_16_5 => s
                 .filter(|s| s.count > 0 && s.id != 0)
                 .map(|s| Stack { damage: 0, ..s }),

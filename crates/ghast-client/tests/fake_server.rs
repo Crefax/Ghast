@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use ghast_client::connect::TargetAddr;
-use ghast_client::version::{ClientVersion, V1_8, V1_16_5};
+use ghast_client::version::{ClientVersion, V1_8, V1_12_2, V1_16_5};
 use ghast_client::{
     Account, Behavior, Client, ClientError, Controls, GameVersion, Idle, Interests, SessionEnd,
     TickContext,
@@ -180,6 +180,149 @@ impl Fake for V1_8 {
     }
     fn login_start_name(raw: &RawPacket) -> String {
         raw.decode_as::<ghast_protocol::v1_8::login::serverbound::LoginStart>()
+            .unwrap()
+            .username
+            .to_string()
+    }
+}
+
+impl Fake for V1_12_2 {
+    fn login_compress(threshold: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::login::clientbound::Compress { threshold })
+    }
+    fn login_success(name: &str) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::login::clientbound::Success {
+            uuid: ByteString::from(ghast_auth::offline::offline_uuid(name).to_string()),
+            username: ByteString::from(name),
+        })
+    }
+    fn login_disconnect(json: &str) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::login::clientbound::Disconnect {
+            reason: ByteString::from(json),
+        })
+    }
+    fn encryption_request() -> RawPacket {
+        raw(
+            &ghast_protocol::v1_12_2::login::clientbound::EncryptionBegin {
+                server_id: ByteString::from(""),
+                public_key: Bytes::from_static(&[1, 2, 3]),
+                verify_token: Bytes::from_static(&[4, 5, 6, 7]),
+            },
+        )
+    }
+    fn join(entity_id: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::Login {
+            entity_id,
+            game_mode: 0,
+            dimension: 0,
+            difficulty: 1,
+            max_players: 20,
+            level_type: ByteString::from("default"),
+            reduced_debug_info: false,
+        })
+    }
+    fn position(x: f64, y: f64, z: f64, teleport_id: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::Position {
+            x,
+            y,
+            z,
+            yaw: 45.0,
+            pitch: 10.0,
+            flags: 0,
+            teleport_id,
+        })
+    }
+    fn keep_alive(id: i64) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::KeepAlive { keep_alive_id: id })
+    }
+    fn kick(json: &str) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_12_2::play::clientbound::KickDisconnect {
+                reason: ByteString::from(json),
+            },
+        )
+    }
+    fn chat(json: &str) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::Chat {
+            message: ByteString::from(json),
+            position: 1,
+        })
+    }
+    /// One section (y 48–63, linear palette) with a stone top layer.
+    fn chunk(x: i32, z: i32) -> RawPacket {
+        let mut d = BytesMut::new();
+        d.put_u8(4);
+        d.put_u8(2);
+        d.put_u8(0);
+        d.put_u8(1 << 4);
+        d.put_u8(0x80);
+        d.put_u8(0x02);
+        for w in 0..256 {
+            d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+        }
+        d.put_bytes(0, 2048);
+        d.put_bytes(0xff, 2048);
+        d.put_bytes(1, 256);
+        raw(&ghast_protocol::v1_12_2::play::clientbound::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 1 << 3,
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+        })
+    }
+    fn play_compress(_threshold: i32) -> Option<RawPacket> {
+        None
+    }
+    fn transaction(action: i16) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::Transaction {
+            window_id: 0,
+            action,
+            accepted: false,
+        })
+    }
+    fn open_chest(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::OpenWindow {
+            window_id,
+            inventory_type: ByteString::from("minecraft:chest"),
+            window_title: ByteString::from(r#"{"text":"Vault"}"#),
+            slot_count: 27,
+            entity_id: None,
+        })
+    }
+    fn close_window(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::CloseWindow { window_id })
+    }
+    fn stone(x: i32, y: i32, z: i32) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::BlockChange {
+            location: ghast_protocol::BlockPos::new(x, y, z),
+            r#type: 1 << 4,
+        })
+    }
+    fn xp_orb(entity_id: i32) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_12_2::play::clientbound::SpawnEntityExperienceOrb {
+                entity_id,
+                x: 8.0,
+                y: 64.0,
+                z: 8.0,
+                count: 1,
+            },
+        )
+    }
+    fn sb_play_name(raw: &RawPacket) -> &'static str {
+        ghast_protocol::v1_12_2::play::serverbound::ServerboundPlayPacket::decode_raw(raw)
+            .expect("valid serverbound packet")
+            .name()
+    }
+    fn handshake_protocol(raw: &RawPacket) -> i32 {
+        raw.decode_as::<ghast_protocol::v1_12_2::handshaking::serverbound::SetProtocol>()
+            .unwrap()
+            .protocol_version
+    }
+    fn login_start_name(raw: &RawPacket) -> String {
+        raw.decode_as::<ghast_protocol::v1_12_2::login::serverbound::LoginStart>()
             .unwrap()
             .username
             .to_string()
@@ -434,7 +577,7 @@ async fn spawn<V: Fake>(c: &mut Conn) {
 
 // ---- tests ------------------------------------------------------------------------------
 
-/// Runs a test body for both versions.
+/// Runs a test body for every version.
 macro_rules! both {
     ($name:ident, $body:ident) => {
         mod $name {
@@ -442,6 +585,10 @@ macro_rules! both {
             #[tokio::test]
             async fn v1_8() {
                 $body::<V1_8>(GameVersion::V1_8_9).await;
+            }
+            #[tokio::test]
+            async fn v1_12_2() {
+                $body::<V1_12_2>(GameVersion::V1_12_2).await;
             }
             #[tokio::test]
             async fn v1_16_5() {
@@ -695,9 +842,19 @@ async fn tick_order_on_the_wire<V: Fake>(v: GameVersion) {
         "{end:?}"
     );
     assert_eq!(ticks.load(Ordering::Relaxed), 40);
-    // 40 behaviour ticks = 40 movement packets.
-    assert_eq!(movement, 40, "{order:?}");
-    assert_eq!(order, [(4, "chat"), (4, "entity_action")]);
+    if v == GameVersion::V1_12_2 {
+        // 1.9+ physics: standing still sends no idle packets (moves until the sent position
+        // matches, then a refresh every 20 ticks); the chat still precedes the tick's sneak
+        // entity_action.
+        assert!((1..40).contains(&movement), "{movement} {order:?}");
+        assert_eq!(order.len(), 2, "{order:?}");
+        assert_eq!((order[0].1, order[1].1), ("chat", "entity_action"));
+        assert_eq!(order[0].0, order[1].0);
+    } else {
+        // 40 behaviour ticks = 40 movement packets.
+        assert_eq!(movement, 40, "{order:?}");
+        assert_eq!(order, [(4, "chat"), (4, "entity_action")]);
+    }
     // ~50 ms per tick.
     assert!(
         elapsed >= Duration::from_millis(40 * 50 - 100),
@@ -723,7 +880,9 @@ async fn silent_server_freezes_behaviour<V: Fake>(v: GameVersion) {
                 moves += 1;
             }
         }
-        assert!(moves >= 15, "movement continues while silent: {moves}");
+        // 1.9+ physics standing still: only the 20-tick position refresh.
+        let min = if v == GameVersion::V1_12_2 { 1 } else { 15 };
+        assert!(moves >= min, "movement continues while silent: {moves}");
         c.send(&V::kick(r#"{"text":"x"}"#)).await;
     };
     let mut b = Counter {
@@ -1153,6 +1312,10 @@ async fn raw_packets_reach_the_behaviour<V: Fake>(v: GameVersion) {
         GameVersion::V1_8_9 => (
             ghast_protocol::v1_8::play::clientbound::id::POSITION,
             ghast_protocol::v1_8::play::clientbound::id::UPDATE_TIME,
+        ),
+        GameVersion::V1_12_2 => (
+            ghast_protocol::v1_12_2::play::clientbound::id::POSITION,
+            ghast_protocol::v1_12_2::play::clientbound::id::UPDATE_TIME,
         ),
         _ => (
             ghast_protocol::v1_16_5::play::clientbound::id::POSITION,

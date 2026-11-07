@@ -10,6 +10,8 @@
 //! | module | version | status |
 //! |---|---|---|
 //! | [`v1_8`] | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle |
+//! | [`v1_12`] | 1.12.2 (protocol 340) | bit-exact against the vanilla oracle |
+//! | [`v1_16_5`] | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle |
 //!
 //! Code that is generic over versions uses the [`Ruleset`] trait (static dispatch, no runtime
 //! cost).
@@ -38,6 +40,7 @@ pub mod attribute;
 mod input;
 pub mod math;
 pub mod rotation;
+pub mod v1_12;
 pub mod v1_16_5;
 pub mod v1_8;
 pub mod voxel;

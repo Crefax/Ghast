@@ -1,8 +1,8 @@
 //! Chunk storage for the ghast Minecraft Java Edition client library.
 //!
-//! One world type per protocol version ([`v1_8::World`], [`v1_16_5::World`]) decodes the
-//! version's chunk and block-change packets into a version-independent [`ColumnMap`] of
-//! [`Column`]s made of compact [`Section`]s.
+//! One world type per protocol version ([`v1_8::World`], [`v1_12::World`], [`v1_16_5::World`])
+//! decodes the version's chunk and block-change packets into a version-independent
+//! [`ColumnMap`] of [`Column`]s made of compact [`Section`]s.
 //!
 //! - **Loaded vs unloaded is explicit.** [`v1_8::World::block_state`] returns `None` for a
 //!   column the server has not sent (or has unloaded); it never reports air there. Behaviour code
@@ -38,6 +38,8 @@ mod error;
 pub mod packed;
 mod section;
 
+#[cfg(feature = "v1_12")]
+pub mod v1_12;
 #[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]

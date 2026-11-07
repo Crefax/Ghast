@@ -497,11 +497,7 @@ fn entity_pick<W: WorldView + ?Sized>(
     let ents = w.entities()?;
     let riding = ents.me().and_then(ghast_entity::Entity::vehicle);
     // 1.8 grows entity boxes by the 0.1 collision border; 1.9+ does not.
-    let border = if version == GameVersion::V1_8_9 {
-        0.1
-    } else {
-        0.0
-    };
+    let border = if !version.combat_1_9() { 0.1 } else { 0.0 };
     let cands = ents
         .within([eyes.x, eyes.y, eyes.z], 8.0)
         .filter(|e| collidable(e))
@@ -777,7 +773,7 @@ impl<S: Sim> Engine<S> {
                     c.pending.game_mode_changed = true;
                 }
                 // 1.15+: "immediate respawn" gamerule (1 = no respawn screen).
-                11 if c.opts.version != GameVersion::V1_8_9 => c.respawn_screen = value == 0.0,
+                11 if c.opts.version == GameVersion::V1_16_5 => c.respawn_screen = value == 0.0,
                 _ => {}
             },
             // Window confirms are answered by the inventory (exactly once).
@@ -996,7 +992,7 @@ impl<S: Sim> Engine<S> {
                 held,
                 held_stack: c.inv.held().cloned(),
                 food: c.health.food,
-                modern: c.opts.version != GameVersion::V1_8_9,
+                modern: c.opts.version.combat_1_9(),
                 off_held: off_held_item(&c.inv, sim),
                 off_stack: c.inv.offhand().cloned(),
                 entity,
@@ -1670,7 +1666,7 @@ impl TickContext<'_> {
         let world = self.world;
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
         let c = &mut *self.core;
-        let modern = c.opts.version != GameVersion::V1_8_9;
+        let modern = c.opts.version.combat_1_9();
         let mut placed = false;
         let mut io = HandsIo {
             blocks: &blocks,
@@ -1702,10 +1698,10 @@ impl TickContext<'_> {
     /// axes 0.8–1.0); 1.0 on 1.8 (no cooldown).
     #[must_use]
     pub fn attack_strength(&self, attack_speed: f64) -> f32 {
-        if self.core.opts.version == GameVersion::V1_8_9 {
-            1.0
-        } else {
+        if self.core.opts.version.combat_1_9() {
             self.core.hands.attack_strength(attack_speed)
+        } else {
+            1.0
         }
     }
 
@@ -1816,7 +1812,7 @@ impl TickContext<'_> {
             held: self.held,
             held_stack: c.inv.held().cloned(),
             food: c.health.food,
-            modern: c.opts.version != GameVersion::V1_8_9,
+            modern: c.opts.version.combat_1_9(),
             off_held: None,
             off_stack: None,
             entity: None,
@@ -1863,7 +1859,7 @@ impl TickContext<'_> {
             held: self.held,
             held_stack: c.inv.held().cloned(),
             food: c.health.food,
-            modern: c.opts.version != GameVersion::V1_8_9,
+            modern: c.opts.version.combat_1_9(),
             off_held: None,
             off_stack: None,
             entity: None,
@@ -1957,6 +1953,7 @@ mod tests {
             hold_turn_on_action: true,
             inventory: match version {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
+                GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
                 _ => ghast_inventory::Version::V1_16_5,
             },
         }
@@ -1966,6 +1963,7 @@ mod tests {
     fn engine(version: GameVersion) -> Engine<Box<dyn Sim>> {
         let sim: Box<dyn Sim> = match version {
             GameVersion::V1_8_9 => Box::new(crate::sim::Sim18::new()),
+            GameVersion::V1_12_2 => Box::new(crate::sim::Sim12::new()),
             _ => Box::new(crate::sim::Sim16::new()),
         };
         Engine::new(opts(version), sim)
@@ -1975,6 +1973,7 @@ mod tests {
     fn load(e: &mut Engine<Box<dyn Sim>>, x: i32, z: i32) {
         let raw = match e.core.opts.version {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
+            GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),
         };
         e.sim.world_packet(&raw).unwrap();
@@ -2420,7 +2419,7 @@ mod tests {
     #[test]
     fn block_updates_per_version() {
         use ghast_protocol::BlockPos;
-        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+        for v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             e.sim.collect_block_updates(true);
@@ -2429,6 +2428,26 @@ mod tests {
             let raws = match v {
                 GameVersion::V1_8_9 => {
                     use ghast_protocol::v1_8::play::clientbound as cb;
+                    vec![
+                        RawPacket::from_packet(&cb::BlockChange {
+                            location: BlockPos::new(3, 63, 4),
+                            r#type: 59 << 4 | 7,
+                        })
+                        .unwrap(),
+                        RawPacket::from_packet(&cb::MultiBlockChange {
+                            chunk_x: 0,
+                            chunk_z: 0,
+                            records: vec![cb::MultiBlockChangeRecords {
+                                horizontal_pos: 5 << 4 | 6,
+                                y: 62,
+                                block_id: 60 << 4 | 7,
+                            }],
+                        })
+                        .unwrap(),
+                    ]
+                }
+                GameVersion::V1_12_2 => {
+                    use ghast_protocol::v1_12_2::play::clientbound as cb;
                     vec![
                         RawPacket::from_packet(&cb::BlockChange {
                             location: BlockPos::new(3, 63, 4),
@@ -2481,7 +2500,7 @@ mod tests {
             e.tick(&mut b, t0);
             let _ = b;
             let want = match v {
-                GameVersion::V1_8_9 => vec![
+                GameVersion::V1_8_9 | GameVersion::V1_12_2 => vec![
                     (BlockPos::new(3, 63, 4), 59 << 4 | 7),
                     (BlockPos::new(5, 62, 6), 60 << 4 | 7),
                 ],
@@ -2503,7 +2522,7 @@ mod tests {
     /// `set_flying` sends the abilities packet before the move, only when allowed and changed.
     #[test]
     fn set_flying_needs_may_fly() {
-        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+        for v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();
@@ -2545,6 +2564,59 @@ mod tests {
             assert!(!names(e.outbound()).contains(&"abilities"));
             let _ = b;
         }
+    }
+
+    /// 1.12.2 runs the vanilla-exact physics: the player is added to its chunk on the first
+    /// tick (nothing sent), then walks on the stone floor and sends its moves; standing still
+    /// sends no idle on-ground packets (1.9+).
+    #[test]
+    fn v1_12_2_walks_with_physics() {
+        let mut e = engine(GameVersion::V1_12_2);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut idle = Script(|_: &mut TickContext<'_>| {});
+        e.tick(&mut idle, t0);
+        assert!(
+            !names(e.outbound())
+                .iter()
+                .any(|n| matches!(*n, "C04" | "C06"))
+        );
+        for _ in 0..5 {
+            e.tick(&mut idle, t0);
+        }
+        e.outbound().clear();
+        let start = e.core.pose.pos;
+        assert!(e.core.pose.on_ground, "{:?}", e.core.pose);
+        let mut walk = Script(|ctx: &mut TickContext<'_>| {
+            ctx.set_controls(crate::common::Controls {
+                forward: true,
+                ..Default::default()
+            });
+        });
+        for _ in 0..10 {
+            e.tick(&mut walk, t0);
+        }
+        let _ = walk;
+        let moved = names(e.outbound());
+        assert!(
+            moved.iter().any(|n| matches!(*n, "C04" | "C06")),
+            "{moved:?}"
+        );
+        // Yaw 90 faces -X.
+        assert!(e.core.pose.pos.x < start.x - 0.5, "{:?}", e.core.pose.pos);
+        assert_eq!(e.core.pose.pos.y, 64.0);
+        for _ in 0..30 {
+            e.tick(&mut idle, t0);
+        }
+        e.outbound().clear();
+        for _ in 0..5 {
+            e.tick(&mut idle, t0);
+        }
+        let _ = idle;
+        // No idle on-ground packets; at most the position refresh every 20 ticks.
+        let still = names(e.outbound());
+        assert!(still.len() <= 1 && !still.contains(&"C03"), "{still:?}");
     }
 
     /// A behaviour that reports `running() == false` is not ticked again.
@@ -2759,7 +2831,7 @@ mod tests {
     /// resolved pose.
     #[test]
     fn teleport_event_has_the_sent_pose_before() {
-        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+        for v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();
@@ -2799,7 +2871,7 @@ mod tests {
     /// buttons are up.
     #[test]
     fn closed_window_frees_the_buttons() {
-        for v in [GameVersion::V1_8_9, GameVersion::V1_16_5] {
+        for v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();

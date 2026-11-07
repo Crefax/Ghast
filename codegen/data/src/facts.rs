@@ -120,6 +120,103 @@ pub const V1_8: Facts = Facts {
     dependency_exclude: &["*_fence_gate"],
 };
 
+/// 1.12.2 (protocol 340). Block identities and the movement constants are checked against the
+/// 1.12.2 oracle's `block` lines (slipperiness, climbable) by the generator.
+pub const V1_12: Facts = Facts {
+    slipperiness: &[
+        ("ice", 0.98),
+        ("packed_ice", 0.98),
+        ("frosted_ice", 0.98),
+        ("slime", 0.8),
+    ],
+    // Soul sand: velocity x / z *= 0.4D while the entity box touches the block (as in 1.8).
+    speed_factor: &[("soul_sand", 0.4)],
+    jump_factor: &[],
+    stuck: &[("web", [0.25, F32_0_05, 0.25])],
+    flags: &[
+        ("ladder", CLIMBABLE),
+        ("vine", CLIMBABLE),
+        ("water", WATER),
+        ("flowing_water", WATER),
+        ("lava", LAVA),
+        ("flowing_lava", LAVA),
+        ("web", STUCK),
+        ("slime", SLIME),
+        // 1.12: landing on a bed bounces (BedBlock.onLanded).
+        ("bed", BED_BOUNCE),
+        ("soul_sand", COLLIDE_SLOWDOWN),
+        ("fence", FENCE),
+        ("*_fence", FENCE),
+        ("cobblestone_wall", WALL),
+        ("fence_gate", FENCE_GATE),
+        ("*_fence_gate", FENCE_GATE),
+        ("trapdoor", TRAPDOOR),
+        ("iron_trapdoor", TRAPDOOR),
+    ],
+    // 1.12 blocks whose collision comes from the actual state (neighbours) or a block entity.
+    dependency: &[
+        ("fence", Dep::Neighbours("Fence")),
+        ("*_fence", Dep::Neighbours("Fence")),
+        ("glass_pane", Dep::Neighbours("Pane")),
+        ("stained_glass_pane", Dep::Neighbours("Pane")),
+        ("iron_bars", Dep::Neighbours("Pane")),
+        ("cobblestone_wall", Dep::Neighbours("Wall")),
+        ("*_stairs", Dep::Neighbours("Stairs")),
+        ("*_door", Dep::Neighbours("Door")),
+        ("chest", Dep::Neighbours("Chest")),
+        ("trapped_chest", Dep::Neighbours("Chest")),
+        ("chorus_plant", Dep::Neighbours("ChorusPlant")),
+        ("piston_extension", Dep::BlockEntity),
+        // Shulker boxes: the box follows the lid of the block entity (full cube when closed).
+        ("*_shulker_box", Dep::BlockEntity),
+    ],
+    dependency_exclude: &["*_fence_gate"],
+};
+
+/// 1.12.2 oracle dumps (`oracle/README.md`, 1.12.2 section).
+pub const V1_12_ORACLE_BOXES: &str = "tests/golden/1.12.2/collision_boxes.jsonl.gz";
+pub const V1_12_ORACLE_SELECTION: &str = "tests/golden/1.12.2/selection_boxes.jsonl.gz";
+pub const V1_12_ORACLE_ENTITIES: &str = "tests/golden/1.12.2/entity_sizes.jsonl.gz";
+pub const V1_12_ORACLE_FACES: &str = "tests/golden/1.12.2/face_shapes.jsonl.gz";
+
+/// 1.12.2 entity default sizes where minecraft-data differs from the oracle (filled from the
+/// generator's report; each is checked against the dump).
+pub const V1_12_ENTITY_SIZE_FIXES: &[(&str, f32, f32)] = &[
+    // minecraft-data has no or rounded sizes for these.
+    ("area_effect_cloud", 6.0, 0.5),
+    ("item_frame", 0.5, 0.5),
+    ("leash_knot", 0.5, 0.5),
+    ("illusion_illager", 0.6, 1.95),
+    ("parrot", 0.5, 0.9),
+    ("boat", 1.375, 0.5625),
+    ("armor_stand", 0.5, 1.975),
+    // vanilla computes 0.6F * 6.0F and 1.8F * 6.0F in float.
+    ("giant", 3.600_000_1, 10.799_999),
+    // The horse family's width is 1.3964844F (minecraft-data rounds it).
+    ("horse", 1.396_484_4, 1.6),
+    ("donkey", 1.396_484_4, 1.6),
+    ("mule", 1.396_484_4, 1.6),
+    ("skeleton_horse", 1.396_484_4, 1.6),
+    ("zombie_horse", 1.396_484_4, 1.6),
+    // Llama: the horse size is applied at construction; the llama's own 0.9 x 1.87 only takes
+    // effect with the next age-based rescale (oracle: spawn size).
+    ("llama", 1.396_484_4, 1.6),
+    // The client-side llama spit constructors never set a size (Entity default 0.6 x 1.8).
+    ("llama_spit", 0.6, 1.8),
+    // Slimes: the constructor size; the real size comes from metadata (`slime_dimensions`).
+    ("slime", 0.6, 1.8),
+    ("magma_cube", 0.6, 1.8),
+];
+
+/// minecraft-data 1.12 block names that differ from the vanilla 1.12.2 registry names
+/// (minecraft-data name, vanilla name). The tables keep minecraft-data's names.
+pub const V1_12_NAME_ALIASES: &[(&str, &str)] = &[
+    ("light_gray_shulker_box", "silver_shulker_box"),
+    ("light_gray_glazed_terracotta", "silver_glazed_terracotta"),
+];
+
+pub const V1_12_ITEM_FIXES: &[ItemFix] = &[];
+
 /// 1.16.5 (protocol 754).
 pub const V1_16_5: Facts = Facts {
     slipperiness: &[

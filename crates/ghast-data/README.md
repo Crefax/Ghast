@@ -7,6 +7,7 @@ and tool speed multipliers.
 | module | feature | version | block state model |
 |---|---|---|---|
 | `v1_8` | `v1_8` | 1.8.x (protocol 47) | `id << 4 \| meta` (`u16`, wire / chunk value) |
+| `v1_12` | `v1_12` | 1.12.x (protocol 335 – 340) | `id << 4 \| meta`; every shape, flag and face shape from the 1.12.2 oracle |
 | `v1_16_5` | `v1_16_5` | 1.16.5 (protocol 754) | global palette id with properties |
 
 Both features are on by default; disable the ones you do not need.
@@ -55,6 +56,10 @@ data quirks it worked around (listed below).
 
 ## Data quirks found in minecraft-data 3.119.0
 
+- 1.12: minecraft-data names two blocks with their 1.13 names (`light_gray_shulker_box`,
+  `light_gray_glazed_terracotta`; vanilla 1.12.2 says `silver_*`); the tables keep
+  minecraft-data's names. Ids 253 and 254 are not blocks (`Block::from_id` is `None`, they
+  read as air). Several entity sizes differ from the oracle and are fixed in `facts.rs`.
 - 1.16.5 `blockCollisionShapes` resolve to `pc/1.16.1` while `blocks` resolve to `pc/1.16.2`; the
   per-block state counts were checked and match (incl. chain `axis`, lantern `waterlogged`).
 - 1.16.5 `foods.json` (`pc/1.16.1`) uses 1.16.1 item ids, which differ from the 1.16.2 item ids

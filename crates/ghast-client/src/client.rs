@@ -16,7 +16,7 @@ use crate::engine::{Behavior, CoreOptions, Engine};
 use crate::error::{ClientError, SessionEnd};
 use crate::interest::Interests;
 use crate::sim::{Sim, SimError};
-use crate::version::{ClientVersion, GameVersion, HasSim, V1_8, V1_16_5};
+use crate::version::{ClientVersion, GameVersion, HasSim, V1_8, V1_12_2, V1_16_5};
 
 /// Length of one client tick.
 pub const TICK: Duration = Duration::from_millis(50);
@@ -255,6 +255,7 @@ impl Client {
         let shutdown = std::pin::pin!(shutdown);
         match self.version {
             GameVersion::V1_8_9 => session::<V1_8, B, S>(self, behavior, shutdown).await,
+            GameVersion::V1_12_2 => session::<V1_12_2, B, S>(self, behavior, shutdown).await,
             GameVersion::V1_16_5 => session::<V1_16_5, B, S>(self, behavior, shutdown).await,
         }
     }

@@ -1,5 +1,5 @@
-//! Click prediction against hand-derived vanilla expectations (1.8.9 `ScreenHandler.onSlotClick`
-//! and 1.16.5 `ScreenHandler.onSlotClick` traced by hand for each case), and the confirm
+//! Click prediction against hand-derived vanilla expectations (1.8.9, 1.12.2 and 1.16.5
+//! `ScreenHandler.onSlotClick` traced by hand for each case), and the confirm
 //! protocol.
 
 use ghast_inventory::{
@@ -98,13 +98,13 @@ fn item(p: &ClickPacket) -> Option<(i32, i32)> {
     p.item.as_ref().map(|s| (s.id, s.count))
 }
 
-const BOTH: [Version; 2] = [Version::V1_8, Version::V1_16_5];
+const ALL: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
 
 // ------------------------------------------------------------------ PICKUP (mode 0)
 
 #[test]
 fn pickup_take_split_place() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(v, &[(36, s(STONE, 7)), (37, s(STONE, 60))]);
         // right click takes half rounded up
         let p = click(
@@ -169,7 +169,7 @@ fn pickup_take_split_place() {
 
 #[test]
 fn pickup_merge_overflow_and_swap() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(
             v,
             &[(9, s(STONE, 60)), (10, s(STONE, 10)), (11, s(DIRT, 5))],
@@ -259,7 +259,7 @@ fn v1_8_damage_matters_when_merging() {
 
 #[test]
 fn pickup_outside_drops() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(v, &[(9, s(STONE, 3))]);
         click(
             &mut inv,
@@ -365,7 +365,7 @@ fn armor_slots() {
 
 #[test]
 fn shift_click_window0() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(
             v,
             &[
@@ -417,7 +417,7 @@ fn shift_click_window0() {
 fn shift_click_partial_returns_the_stack_on_both() {
     // Hotbar full except room for 4 stone: 4 move, 60 stay. 1.8 returns the first transfer's
     // copy; 1.16 loops while the slot still holds stone and returns that copy. Both: 64 stone.
-    for v in BOTH {
+    for v in ALL {
         let mut slots = vec![(9, s(STONE, 64))];
         for i in 36..44 {
             slots.push((i, s(DIRT, 64)));
@@ -524,7 +524,7 @@ fn shift_click_armor() {
 
 #[test]
 fn shift_click_chest() {
-    for v in BOTH {
+    for v in ALL {
         let kind = if v == Version::V1_8 {
             WindowKind::from_v1_8("minecraft:chest", 27).unwrap()
         } else {
@@ -679,7 +679,7 @@ fn shulker_box_refuses_shulker_boxes() {
 
 #[test]
 fn furnace() {
-    for v in BOTH {
+    for v in ALL {
         let kind = if v == Version::V1_8 {
             WindowKind::from_v1_8("minecraft:furnace", 3).unwrap()
         } else {
@@ -745,7 +745,7 @@ fn furnace() {
 
 #[test]
 fn number_key_swap_window0() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(v, &[(9, s(STONE, 5)), (36, s(DIRT, 7))]);
         let p = click(&mut inv, Click::Swap { slot: 9, hotbar: 0 });
         assert_eq!((p.button, p.mode, item(&p)), (0, 2, None));
@@ -827,7 +827,7 @@ fn offhand_swap_key() {
 
 #[test]
 fn drop_keys() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(v, &[(9, s(STONE, 5)), (10, s(DIRT, 5))]);
         let p = click(
             &mut inv,
@@ -861,7 +861,7 @@ fn drop_keys() {
 
 #[test]
 fn double_click_gathers() {
-    for v in BOTH {
+    for v in ALL {
         let mut inv = player_inv(
             v,
             &[
@@ -1421,4 +1421,195 @@ fn consume_held_and_offhand() {
     let mut inv = player_inv(Version::V1_16_5, &[(45, s16("torch", 3))]);
     assert!(inv.consume_offhand(1));
     assert_eq!(inv.offhand().map(|s| s.count), Some(2));
+}
+
+// ------------------------------------------------------------------ 1.12.2 specifics
+
+const SHIELD_12: i32 = 442;
+const BUCKET: i32 = 325;
+const MILK_BUCKET: i32 = 335;
+const CAKE: i32 = 354;
+const WHEAT: i32 = 296;
+const SUGAR: i32 = 353;
+const EGG: i32 = 344;
+
+#[test]
+fn v1_12_offhand_slot_and_shield_shift_click() {
+    let v = Version::V1_12;
+    let mut inv = player_inv(v, &[(36, s(SHIELD_12, 1)), (45, s(STONE, 3))]);
+    assert_eq!(inv.slot_count(), 46);
+    assert_eq!(inv.offhand().map(|s| (s.id, s.count)), Some((STONE, 3)));
+    // the offhand is occupied: the shield goes from the hotbar into the main inventory
+    click(
+        &mut inv,
+        Click::QuickMove {
+            slot: 36,
+            right: false,
+        },
+    );
+    assert_eq!(count(&inv, 9), Some((SHIELD_12, 1)));
+    // offhand slot 45 is a plain slot: pick the stone up, then shift the shield there
+    click(
+        &mut inv,
+        Click::Pickup {
+            slot: 45,
+            right: false,
+        },
+    );
+    click(
+        &mut inv,
+        Click::Pickup {
+            slot: 36,
+            right: false,
+        },
+    );
+    click(
+        &mut inv,
+        Click::QuickMove {
+            slot: 9,
+            right: false,
+        },
+    );
+    assert_eq!(inv.offhand().map(|s| s.id), Some(SHIELD_12));
+    // 1.12 has no offhand number-key swap (button 40)
+    inv.tick();
+    assert_eq!(
+        inv.click(Click::Swap {
+            slot: 10,
+            hotbar: 40
+        }),
+        Err(ClickError::InvalidButton)
+    );
+}
+
+#[test]
+fn v1_12_damage_variants_do_not_merge() {
+    let v = Version::V1_12;
+    // wool (subtypes): white and orange stay apart; planks:0 onto planks:0 merges
+    let mut inv = player_inv(v, &[(36, sd(WOOL, 4, 0)), (37, sd(WOOL, 4, 1))]);
+    click(
+        &mut inv,
+        Click::Pickup {
+            slot: 36,
+            right: false,
+        },
+    );
+    click(
+        &mut inv,
+        Click::Pickup {
+            slot: 37,
+            right: false,
+        },
+    );
+    // different damage: swapped
+    assert_eq!(inv.slot(37).map(|s| s.damage), Some(0));
+    assert_eq!(inv.cursor().map(|s| s.damage), Some(1));
+}
+
+#[test]
+fn v1_12_crafting_result_from_server_only() {
+    let v = Version::V1_12;
+    // cake: 3 milk, 2 sugar, 1 egg, 3 wheat in a crafting table
+    let grid = [
+        (1, s(MILK_BUCKET, 1)),
+        (2, s(MILK_BUCKET, 1)),
+        (3, s(MILK_BUCKET, 1)),
+        (4, s(SUGAR, 1)),
+        (5, s(EGG, 1)),
+        (6, s(SUGAR, 1)),
+        (7, s(WHEAT, 2)),
+        (8, s(WHEAT, 1)),
+        (9, s(WHEAT, 1)),
+        (0, s(CAKE, 1)),
+    ];
+    let mut inv = window_inv(v, WindowKind::Crafting, &grid, &[]);
+    assert!(inv.result_known() && inv.result_current());
+    // taking the server's result consumes the grid, hands back buckets, and the client does not
+    // compute a new result
+    let p = click(
+        &mut inv,
+        Click::Pickup {
+            slot: 0,
+            right: false,
+        },
+    );
+    assert_eq!(item(&p), Some((CAKE, 1)));
+    assert_eq!(cursor(&inv), Some((CAKE, 1)));
+    for k in 1..=3 {
+        assert_eq!(count(&inv, k), Some((BUCKET, 1)));
+    }
+    assert_eq!(count(&inv, 7), Some((WHEAT, 1)));
+    assert_eq!(count(&inv, 0), None);
+    assert!(inv.result_known() && !inv.result_current());
+    // the server's next result makes it current again
+    inv.on_set_slot(1, 0, Some(s(STONE, 1)));
+    assert!(inv.result_current());
+    // a grid change leaves the result stale: taking it is refused
+    click(
+        &mut inv,
+        Click::Pickup {
+            slot: 7,
+            right: false,
+        },
+    );
+    assert!(!inv.result_current());
+    inv.tick();
+    assert_eq!(
+        inv.click(Click::QuickMove {
+            slot: 0,
+            right: false
+        }),
+        Err(ClickError::Unpredictable)
+    );
+}
+
+#[test]
+fn v1_12_set_slot_player_inventory_and_window_types() {
+    let v = Version::V1_12;
+    let mut inv = Inventory::new(v);
+    inv.on_set_slot(-2, 40, Some(s(STONE, 2)));
+    assert_eq!(inv.offhand().map(|s| s.count), Some(2));
+    inv.on_set_slot(-2, 3, Some(sd(WOOL, 1, 5)));
+    assert_eq!(
+        inv.hotbar(3).map(|s| s.damage),
+        Some(5),
+        "1.12 keeps the damage"
+    );
+    inv.on_set_slot(-2, 4, Some(s(STONE, 0)));
+    assert_eq!(inv.hotbar(4), None, "zero-count stacks are empty in 1.12");
+    assert_eq!(
+        WindowKind::from_v1_12_2("minecraft:shulker_box", 27),
+        Some(WindowKind::ShulkerBox)
+    );
+    assert_eq!(
+        WindowKind::from_v1_12_2("minecraft:chest", 27),
+        Some(WindowKind::Chest { rows: 3 })
+    );
+    assert!(inv.consume_offhand(1));
+    assert_eq!(inv.offhand().map(|s| s.count), Some(1));
+    assert_eq!(
+        inv.open_inventory(),
+        Ok(None),
+        "1.12 sends nothing when opening"
+    );
+}
+
+#[test]
+fn v1_12_packets() {
+    let mut inv = player_inv(Version::V1_12, &[(36, s(STONE, 5))]);
+    let p = click(
+        &mut inv,
+        Click::Pickup {
+            slot: 36,
+            right: false,
+        },
+    );
+    match Outgoing::Click(p).to_v1_12_2() {
+        Some(ghast_protocol::v1_12_2::play::serverbound::ServerboundPlayPacket::WindowClick(w)) => {
+            assert_eq!((w.slot, w.mouse_button, w.mode, w.action), (36, 0, 0, 1));
+            assert_eq!(w.item.0.map(|i| (i.id, i.count)), Some((1, 5)));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(Outgoing::OpenInventory.to_v1_12_2().is_none());
 }

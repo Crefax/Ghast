@@ -96,7 +96,10 @@ pub enum BlockEntity {
 
 /// Stores a `tile_entity_data` / chunk block entity NBT payload (both versions): ignored for
 /// unloaded columns, `y` outside `0..256` and the "no compound" value.
-#[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    allow(dead_code)
+)]
 pub(crate) fn put_nbt(
     columns: &mut ColumnMap,
     l: ghast_protocol::BlockPos,
@@ -189,7 +192,10 @@ impl Column {
             .map(|(_, b)| b)
     }
 
-    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+        allow(dead_code)
+    )]
     pub(crate) fn put_block_entity(&mut self, x: i32, y: i32, z: i32, be: BlockEntity) {
         if !(MIN_Y..MAX_Y).contains(&y) {
             return;
@@ -201,7 +207,10 @@ impl Column {
         }
     }
 
-    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+        allow(dead_code)
+    )]
     pub(crate) fn remove_block_entity(&mut self, x: i32, y: i32, z: i32) -> bool {
         if !(MIN_Y..MAX_Y).contains(&y) {
             return false;
@@ -222,7 +231,10 @@ impl Column {
     /// Sets a block like [`Column::set_raw`] and drops the block entity there when the block
     /// type changes (`same_block(old, new)` is the version's block-type comparison), as vanilla
     /// does.
-    #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+    #[cfg_attr(
+        not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+        allow(dead_code)
+    )]
     pub(crate) fn set_raw_with(
         &mut self,
         x: i32,

@@ -1,7 +1,7 @@
 # ghast-world
 
 Chunk storage for the ghast Minecraft Java Edition client library: decodes the chunk and
-block-change packets of 1.8.9 (protocol 47) and 1.16.5 (protocol 754) into compact sections with
+block-change packets of 1.8.9 (protocol 47), 1.12.2 (protocol 340) and 1.16.5 (protocol 754) into compact sections with
 O(1) block lookup, and keeps loaded and unloaded columns explicitly apart.
 
 | module | feature | chunk format |
@@ -124,6 +124,10 @@ work. The only cost is an empty `Vec` (24 bytes) per column.
 - **1.8:** `update_sign` (four raw chat JSON lines) and `tile_entity_data` (raw NBT + action).
   1.8 chunks carry no block entities. A ground-up chunk is a new vanilla chunk, so its block
   entities are dropped; a partial chunk keeps them, as vanilla does.
+- **1.12.2:** 1.9 – 1.15 paletted sections (linear palette up to 4 bits, hash palette 5 – 8, else
+  the 13-bit global palette whose length VarInt is still sent), values may span two longs,
+  block and sky light inline per section, 256 biome bytes on ground-up chunks, the `map_chunk`
+  block entity list, `unload_chunk`. Unregistered raw states read as air.
 - **1.16.5:** the `map_chunk` block entity list (each compound goes to the position in its
   `x` / `y` / `z` ints; entries without them are skipped) and `tile_entity_data`. A partial chunk
   drops the block entities of the sections it replaces, as vanilla does.

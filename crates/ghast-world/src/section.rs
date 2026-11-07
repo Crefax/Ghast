@@ -256,14 +256,20 @@ impl Indexed {
 /// Builds sections from decoded raw states (shared by every chunk format).
 ///
 /// The builder keeps a reusable scratch table so decoding allocates only the section itself.
-#[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    allow(dead_code)
+)]
 pub(crate) struct SectionBuilder {
     /// `state -> palette index + 1` (0 = not in the palette yet), sized for the largest state
     /// space handed to [`SectionBuilder::push_states`].
     lookup: Vec<u16>,
 }
 
-#[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    allow(dead_code)
+)]
 impl SectionBuilder {
     pub(crate) fn new(state_space: usize) -> Self {
         SectionBuilder {
@@ -345,6 +351,19 @@ impl SectionBuilder {
         bits: u32,
         data: &[u8],
     ) -> Option<Section> {
+        self.build_packed_layout(remap, bits, data, false)
+    }
+
+    /// [`SectionBuilder::build_packed`] with the word layout chosen: `spanning` = the 1.9 – 1.15
+    /// layout where values may span two words.
+    #[cfg_attr(not(any(feature = "v1_12", feature = "v1_16_5")), allow(dead_code))]
+    pub(crate) fn build_packed_layout(
+        &mut self,
+        remap: &[u16],
+        bits: u32,
+        data: &[u8],
+        spanning: bool,
+    ) -> Option<Section> {
         debug_assert!((4..=8).contains(&bits));
         let reachable = 1usize << bits;
         // Deduplicate the reachable palette entries (plus air for indices past the palette).
@@ -378,11 +397,16 @@ impl SectionBuilder {
             non_air: 0,
         });
         let mut hist = [0u16; 256];
-        crate::packed::unpack_be(bits, data, SECTION_VOLUME, |i, v| {
+        let mut put = |i: usize, v: u32| {
             let p = to_palette[(v & 255) as usize];
             ix.idx[i] = p;
             hist[usize::from(p)] += 1;
-        });
+        };
+        if spanning {
+            crate::packed::unpack_spanning_be(bits, data, SECTION_VOLUME, &mut put);
+        } else {
+            crate::packed::unpack_be(bits, data, SECTION_VOLUME, &mut put);
+        }
         // Keep only used palette entries.
         let mut remap2 = [0u8; 256];
         let mut n = 0usize;

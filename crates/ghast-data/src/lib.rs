@@ -5,6 +5,7 @@
 //! | module | feature | version | block model |
 //! |---|---|---|---|
 //! | [`v1_8`] | `v1_8` | 1.8.x (protocol 47) | `id << 4 \| meta` |
+//! | [`v1_12`] | `v1_12` | 1.12.x (protocol 335 – 340) | `id << 4 \| meta` |
 //! | [`v1_16_5`] | `v1_16_5` | 1.16.5 (protocol 754) | global palette with properties |
 //!
 //! All tables are generated (`codegen/data`) from PrismarineJS minecraft-data 3.119.0 plus a small
@@ -30,11 +31,13 @@
 pub mod common;
 mod generated;
 #[cfg_attr(
-    not(any(feature = "v1_8", feature = "v1_16_5")),
+    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
     allow(unused_macros, unused_imports)
 )]
 mod macros;
 
+#[cfg(feature = "v1_12")]
+pub mod v1_12;
 #[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]

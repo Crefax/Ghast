@@ -1,6 +1,6 @@
 [package]
 name = "ghast-world"
-description = "Chunk storage for the ghast Minecraft Java Edition client library: compact, O(1) block lookup, explicit loaded/unloaded columns, decoding of 1.8.9 and 1.16.5 chunk and block-change packets"
+description = "Chunk storage for the ghast Minecraft Java Edition client library: compact, O(1) block lookup, explicit loaded/unloaded columns, decoding of 1.8.9, 1.12.2 and 1.16.5 chunk and block-change packets"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,9 +14,10 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-world"
 
 [features]
-default = ["v1_8", "v1_16_5", "physics"]
+default = ["v1_8", "v1_12", "v1_16_5", "physics"]
 # Per-version worlds (chunk formats and packet handling).
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
+v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 # Implements `ghast_physics::BlockView` for the worlds.
 physics = ["dep:ghast-physics"]

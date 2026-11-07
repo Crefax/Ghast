@@ -1,8 +1,8 @@
 # ghast-client
 
 Headless Minecraft Java Edition client for the ghast library: connection, login, the fixed
-50 ms tick loop and a version-agnostic bot API. Supports **1.8.9** (protocol 47) and
-**1.16.5** (protocol 754).
+50 ms tick loop and a version-agnostic bot API. Supports **1.8.9** (protocol 47),
+**1.12.2** (protocol 340) and **1.16.5** (protocol 754).
 
 ```rust,no_run
 use ghast_client::connect::{Connector, ProxyPolicy};
@@ -28,7 +28,7 @@ let end = client.run(&mut Afk).await?; // Kicked / ServerClosed / Quit / Shutdow
 ```
 
 Examples (facade crate): `cargo run -p ghast --release --example afk -- --host … --port …
---username … --version 1.8.9|1.16.5 [--proxy socks5h://…] [--minutes N] [--reconnect]`, and
+--username … --version 1.8.9|1.12.2|1.16.5 [--proxy socks5h://…] [--minutes N] [--reconnect]`, and
 `--example chat` (stdin lines → chat).
 
 ## Layers
@@ -39,7 +39,7 @@ Examples (facade crate): `cargo run -p ghast --release --example afk -- --host �
 | `version` | `ClientVersion` (sealed) for `V1_8` / `V1_16_5`: login and play packet mapping, packet filter, teleport rules, chat limit |
 | `common` | version-agnostic `Inbound` / `Outbound` packets and the API types (`Pose`, `Controls`, `ChatMessage`, …) |
 | `engine` | the deterministic core (no I/O, no clock): state, `Behavior`, `TickContext`, the tick |
-| `sim` | per version: the `ghast-world` chunk store + the mover (`ghast-physics` on 1.8.9, stand-still on 1.16.5); `WorldView` for behaviours |
+| `sim` | per version: the `ghast-world` chunk store + the mover (`ghast-physics` per version); `WorldView` for behaviours |
 | `movement` | vanilla movement-packet choice (`MovementSender`) and a stand-still mover (no longer used by the client; kept for tools) |
 | `hands` | dig / place / use state machine, vanilla 1.8 `World.rayTrace` crosshair |
 | `record` | movement recorder in the oracle's replay format (`Client::record`) |
@@ -135,6 +135,10 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   explosion pushes are fed to it; the world border (moving borders advanced 50 ms per tick)
   reaches the collision code through the world. `Controls` are the vanilla keys (W/A/S/D, jump, sneak,
   sprint).
+- **1.12.2**: `ghast-physics::v1_12` (0 diffs against the 1.12.2 oracle) on the 1.12.2 chunk
+  store. A fresh player is added to its chunk on the first tick its column is loaded and moves
+  from the next one, as vanilla 1.9+ does; standing still sends no idle packets (only the
+  position refresh every 20 ticks). Recording is not available on 1.12.2 yet.
 - **1.16.5**: `ghast-physics::v1_16_5` (0 diffs against the 1.16.5 oracle) on the 1.16.5 chunk
   store, fed the same way (teleports with relative flags, abilities, food, velocity). Its packet
   rules are 1.16's: teleport confirm + `position_look`, no packet at all on idle ticks
@@ -304,6 +308,19 @@ cargo test -p ghast-client
   entity moves, 4 entity velocities; time and keep-alive): client thread CPU from
   `/proc/thread-self/stat`. WSL2 desktop, 2026-11-03: 50 ms CPU in 20 s = **0.25 % of one
   core** at ~900 inbound packets/s.
+
+## Live results: 1.12.2 (local WSL lab, Paper 1.12.2 build 1620 + Grim 2.3.73, 2026-11-07)
+
+Account `GhastBot13`, release examples, each run under `timeout -s TERM`, ~33 min in total:
+
+| run | duration | activity | Grim flags | setbacks |
+|---|---|---|---|---|
+| `afk` (measured with `lab/measure.sh`, 300 s) | 6.7 min | standing at the spawn; CPU 0.13 % of one core (max 10 s 0.30 %), RSS 5.5 MB, PSS 4.0 MB, 1 thread | 0 | 0 |
+| `movement_course --seed 7` | 8 min | 4 laps: ice, packed ice, soul sand, slime, water, slab step-up, block jump, sneak edge, wall / fence pushes, GCD turning | 0 | 0 |
+| `soak` | 12.7 min | 127 walks, 63 digs, 63 places, 84 clicks (all accepted) | 0 | 0 |
+| `inventory_probe` | 0.5 min | chest opened by right click, 30 clicks of every mode accepted, server contents equal the prediction (`PASS`) | 0 | 0 |
+| `dig_place` | 5 min | 238 broken, 238 placed | 0 | 0 |
+| `chat` | 0.3 min | chat sent and received | 0 | 0 |
 
 ## Live results: 30-min mixed soaks (local WSL labs, 2026-11-04)
 

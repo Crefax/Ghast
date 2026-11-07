@@ -8,13 +8,15 @@ use uuid::Uuid;
 pub enum EntityType {
     /// A player (`named_entity_spawn`).
     Player,
-    /// 1.8 mob id (`spawn_entity_living`), e.g. 54 = zombie. See `ghast_data::v1_8::entity(EntityKind::Mob, id)`.
+    /// 1.8 – 1.12 mob id (`spawn_entity_living`; the entity registry id), e.g. 54 = zombie. See
+    /// `ghast_data::v1_8::entity(EntityKind::Mob, id)` / `ghast_data::v1_12::entity(..)`.
     LegacyMob(u8),
-    /// 1.8 object id (`spawn_entity`), e.g. 2 = item, 1 = boat. See `ghast_data::v1_8::entity(EntityKind::Object, id)`.
+    /// 1.8 – 1.12 object type (`spawn_entity`), e.g. 2 = item, 1 = boat. See
+    /// `ghast_data::v1_8::entity(EntityKind::Object, id)` / `ghast_data::v1_12::entity(..)`.
     LegacyObject(u8),
-    /// 1.8 experience orb (`spawn_entity_experience_orb`; orb value in [`Entity::data`]).
+    /// 1.8 – 1.12 experience orb (`spawn_entity_experience_orb`; orb value in [`Entity::data`]).
     ExperienceOrb,
-    /// 1.8 painting (`spawn_entity_painting`).
+    /// 1.8 – 1.12 painting (`spawn_entity_painting`).
     Painting,
     /// 1.13+ entity registry id (1.16.5: every spawn packet except players), see
     /// `ghast_data::v1_16_5::entity`.
@@ -63,11 +65,13 @@ pub struct Effect {
     pub amplifier: i8,
     /// Duration in ticks at the time of the packet (not counted down here).
     pub duration: i32,
-    /// 1.8: bit 0 = hide particles. 1.16: bit 0 ambient, bit 1 show particles, bit 2 show icon.
+    /// 1.8: bit 0 = hide particles. 1.12: bit 0 ambient, bit 1 show particles. 1.16: bit 0 ambient,
+    /// bit 1 show particles, bit 2 show icon.
     pub flags: u8,
 }
 
-/// One entity metadata value (union of the 1.8 and 1.16.5 serializer types).
+/// One entity metadata value (union of the 1.8, 1.12.2 and 1.16.5 serializer types; variants
+/// marked 1.16 also occur in 1.12 where 1.12 has that serializer).
 #[derive(Clone, Debug, PartialEq)]
 pub enum MetaValue {
     /// Byte.
@@ -193,6 +197,18 @@ impl Metadata {
     }
 }
 
+/// The protocol family an entity was tracked with (selects metadata indices and size rules).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum Era {
+    /// 1.8.x.
+    #[default]
+    V1_8,
+    /// 1.9 – 1.12 (implemented: 1.12.2).
+    V1_12,
+    /// 1.16.5.
+    V1_16,
+}
+
 /// 1.16 registry ids used by [`Entity::class`].
 const ITEM_1_16: u16 = 37;
 const XP_ORB_1_16: u16 = 24;
@@ -209,10 +225,14 @@ pub struct Entity {
     pub(crate) uuid: Uuid,
     pub(crate) ty: EntityType,
     pub(crate) living: bool,
-    /// Vanilla size table entry (resolved at spawn) and whether it is a 1.16 entry.
-    pub(crate) sizer: Option<(&'static ghast_data::VanillaEntitySize, bool)>,
+    /// The tracker's protocol family.
+    pub(crate) era: Era,
+    /// Vanilla size table entry (resolved at spawn).
+    pub(crate) sizer: Option<&'static ghast_data::VanillaEntitySize>,
     pub(crate) pos: [f64; 3],
     pub(crate) fixed: [i32; 3],
+    /// 1.9 – 1.12: the tracked position in 1/4096 blocks (`lfloor(x * 4096)`, plus moves).
+    pub(crate) traced: [i64; 3],
     pub(crate) yaw: f32,
     pub(crate) pitch: f32,
     pub(crate) head_yaw: f32,
@@ -234,9 +254,11 @@ impl Entity {
             uuid: Uuid::nil(),
             ty,
             living: matches!(ty, EntityType::Player | EntityType::LegacyMob(_)),
+            era: Era::V1_8,
             sizer: None,
             pos: [0.0; 3],
             fixed: [0; 3],
+            traced: [0; 3],
             yaw: 0.0,
             pitch: 0.0,
             head_yaw: 0.0,
@@ -290,6 +312,7 @@ impl Entity {
     #[must_use]
     pub fn item(&self) -> Option<&Item> {
         let index = match self.ty {
+            EntityType::LegacyObject(2) if self.era == Era::V1_12 => 6,
             EntityType::LegacyObject(2) => 10,
             EntityType::Registry(ITEM_1_16) => 7,
             _ => return None,
@@ -306,11 +329,11 @@ impl Entity {
     /// the old-min-corner quirk after a resize is not modelled.
     #[must_use]
     pub fn dimensions(&self) -> Option<ghast_data::EntityDimensions> {
-        let (vs, modern) = self.sizer?;
-        if modern {
-            crate::v1_16_5::dimensions(self, vs)
-        } else {
-            crate::v1_8::dimensions(self, vs)
+        let vs = self.sizer?;
+        match self.era {
+            Era::V1_8 => crate::v1_8::dimensions(self, vs),
+            Era::V1_12 => crate::v1_12::dimensions(self, vs),
+            Era::V1_16 => crate::v1_16_5::dimensions(self, vs),
         }
     }
 
@@ -336,7 +359,8 @@ impl Entity {
     }
 
     /// The **server position**: exactly the coordinates the vanilla client tracks from the
-    /// packets (1.8: `serverPos / 32.0`; 1.16: the packet coordinates, rel moves applied in
+    /// packets (1.8: `serverPos / 32.0`; 1.12: spawn / teleport coordinates, after a relative
+    /// move the tracked 1/4096 position; 1.16: the packet coordinates, rel moves applied in
     /// 1/4096 fixed point). The rendered position interpolates towards this over 3 ticks in
     /// vanilla; a bot does not need that.
     #[must_use]
@@ -344,7 +368,7 @@ impl Entity {
         self.pos
     }
 
-    /// 1.8 only: the raw server position in 1/32 blocks (`[0; 3]` in 1.16).
+    /// 1.8 only: the raw server position in 1/32 blocks (`[0; 3]` in 1.12 and 1.16).
     #[must_use]
     pub fn fixed_position(&self) -> [i32; 3] {
         self.fixed

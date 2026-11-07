@@ -105,6 +105,9 @@ pub enum NeighbourShape {
     Door,
     /// Chests: the box extends to the block edge towards an adjacent chest of the same kind.
     Chest,
+    /// 1.12 chorus plants: a centre box plus an arm towards each connecting neighbour (chorus
+    /// plant / flower, end stone below).
+    ChorusPlant,
 }
 
 /// How vanilla turns one bound of a collision box into an absolute world coordinate.

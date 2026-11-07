@@ -2,7 +2,8 @@
 
 Inventory and container windows for the ghast client library: the player inventory, cursor and
 open window as the vanilla client holds them, **vanilla's client-side click prediction** and the
-window confirm protocol, for **1.8.9** (protocol 47) and **1.16.5** (protocol 754). Pure and
+window confirm protocol, for **1.8.9** (protocol 47), **1.12.2** (protocol 340; the click rules
+hold for 1.12 – 1.12.2) and **1.16.5** (protocol 754). Pure and
 sync: packets in, packets out; no I/O, no clock.
 
 ```rust
@@ -26,12 +27,13 @@ match inv.click(Click::QuickMove { slot: 36, right: false }) {
   feet→head, 40 offhand), the 2×2 crafting grid and result, the cursor, and the open window's own
   slots. Screen slot numbers are vanilla's (`window0_slot`, `slot`, `slot_of_player`).
 - Inbound handling follows `ClientPlayNetworkHandler`: `window_items` for window 0 or the open
-  window; `set_slot` -1 = cursor, 1.16.5 -2 = `PlayerInventory` index, window 0 slots 36–44
+  window; `set_slot` -1 = cursor, 1.12 / 1.16.5 -2 = `PlayerInventory` index, window 0 slots 36–44
   always reach window 0, other slots only the current screen (window 0 slot 10 while a chest is
   open is dropped, like vanilla); `close_window` ignores its id; window ids are compared after
   the packet's own (un)signed byte read; `login` / `respawn` reset everything (new player entity,
   action counters back to 0).
-- 1.8 keeps zero-count stacks (vanilla 1.8 does); 1.16.5 treats them and air as empty.
+- 1.8 keeps zero-count stacks (vanilla 1.8 does); 1.12 and 1.16.5 treat them and air as empty
+  (1.12 stacks keep their damage value; 1.16.5 has none on the wire).
 - Item stacks keep NBT raw (`RawNbt`); `window_items` never parses NBT. Equality compares bytes,
   then (only if they differ) the parsed trees like Java's `NbtCompound.equals`. NBT is parsed only
   for the few rules that read it (`Unbreakable`, 1.16 `Damage`, binding curse) and only when that
@@ -47,8 +49,8 @@ server compares it with its own result and rejects the click on a mismatch).
 | `Click` | mode | button | clicked item |
 |---|---|---|---|
 | `Pickup { slot, right }` (slot -999 = drop cursor / one) | 0 | 0 / 1 | slot before the click |
-| `QuickMove { slot, right }` (shift) | 1 | 0 / 1 | 1.8: first transfer's stack; 1.16.5: last transfer that left the same item in the slot (EMPTY when the slot emptied) |
-| `Swap { slot, hotbar }` (number keys; 1.16.5 `40` = offhand key) | 2 | 0–8, 40 | none |
+| `QuickMove { slot, right }` (shift) | 1 | 0 / 1 | 1.8: first transfer's stack; 1.12 / 1.16.5: last transfer that left the same item (1.12: and damage) in the slot (EMPTY when the slot emptied) |
+| `Swap { slot, hotbar }` (number keys; 1.16.5 `40` = offhand key, not on 1.12) | 2 | 0–8, 40 | none |
 | `Drop { slot, all }` (Q / ctrl+Q; slot -999 = GUI click outside with empty cursor) | 4 | 0 / 1 | none |
 | `PickupAll { slot }` (double click) | 6 | 0 | none |
 
@@ -59,7 +61,12 @@ retry loops, 1.8's number-key swap with a container slot (the hotbar item goes i
 inventory via `insertStack`), 1.16.5 swap limits, 1.16.5 `insertStack` preferring the selected
 slot and the offhand, armor validity (1.8 armor ids + pumpkin/skull for the helmet; 1.16.5
 preferred equipment slot incl. elytra, carved pumpkin, heads, shield → offhand), binding curse,
-shulker boxes, double-click's two passes.
+shulker boxes, double-click's two passes. **1.12.2** combines the two: 1.8-style damage
+variants and damage comparisons (42 item ids off the 1.12.2 registry), 1.16-style empty stacks,
+`insertItem` checking `canInsert` and slot limits, the quick-move loop, `insertStack` preferring
+the selected slot and the offhand, and number-key swaps with the hotbar only; window 0 has the
+offhand slot 45; the preferred equipment slot sends pumpkins and skulls to the helmet, elytra
+to the chest and the shield to the offhand; binding curse is the `ench` id 10.
 
 ### Crafting
 
@@ -70,6 +77,13 @@ shulker boxes, double-click's two passes.
   changes, and after `window_items` / grid `set_slot` (so the client's result wins over the
   server's). Built result NBT is written in Java `HashMap` key order (byte-identical packets).
   Banner recipes and map upscaling (which needs the map's state) make the result unknown.
+- **1.12.2**: the client never computes results (vanilla computes them on the server only): the
+  result slot holds what the server last sent, also after the grid changed (a stale result until
+  the server's `set_slot`). `result_current()` says whether the result belongs to the grid as it
+  is now. Taking a current result consumes the grid and hands back the remainders every 1.12
+  recipe uses (buckets, a glass bottle for dragon's breath, the written book of book cloning);
+  taking a stale result (its remainders depend on which recipe matches now) and grids with an
+  NBT banner are refused as unpredictable.
 - **1.16.5**: the server sends results; the client keeps the recipes from `declare_recipes`
   ([`RecipeBook`], `apply_v1_16_5` handles the packet) and uses them for the remainders of a taken
   result. After a grid change the result is unknown until the server's `set_slot`.
@@ -86,12 +100,15 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 
 ### Window types
 
+1.12.2 `open_window` uses the 1.8 type strings plus `minecraft:shulker_box`
+(`WindowKind::from_v1_12_2`); the brewing stand has 5 slots there.
+
 | ghast `WindowKind` | 1.8 `inventoryType` | 1.16.5 menu id | container slots | shift-click |
 |---|---|---|---|---|
 | `Chest { rows }` | `minecraft:chest`, `minecraft:container`, unknown types with slots (`slotCount / 9` rows) | 0–5 (`generic_9x1..6`) | rows × 9 | yes |
 | `Generic3x3` | `minecraft:dispenser`, `minecraft:dropper` | 6 | 9 | yes |
 | `Hopper` | `minecraft:hopper` | 15 | 5 | yes |
-| `ShulkerBox` | — | 19 | 27 | yes |
+| `ShulkerBox` | — (1.12: `minecraft:shulker_box`) | 19 | 27 | yes |
 | `Crafting` | `minecraft:crafting_table` (0 slots) | 11 | 10 (result + 3×3) | yes (1.16: into the grid first), not from the result |
 | `Furnace` | `minecraft:furnace` | 13, 9 (blast), 21 (smoker) | 3 | from furnace slots only |
 | `BrewingStand`, `Enchanting`, `Anvil`, `Beacon`, `Merchant`, `Horse`, `Grindstone`, `Lectern`, `Loom`, `Smithing`, `Cartography`, `Stonecutter` | as vanilla | as vanilla | as vanilla | no (player-part clicks of other modes work) |
@@ -120,7 +137,7 @@ cargo test -p ghast-inventory
 ```
 
 - `tests/clicks.rs`: every click mode on window 0, chest, 3×3, crafting table, furnace, shulker
-  box, both versions, against expectations traced by hand through the vanilla 1.8.9 and 1.16.5
+  box, all three versions, against expectations traced by hand through the vanilla 1.8.9 and 1.16.5
   `onSlotClick` / `transferSlot` / `insertItem` / `insertStack` code; the confirm protocol
   (pending, same-tick guard, reject → resync, foreign confirms, timeout), screen handling and
   `set_slot` routing.
@@ -147,9 +164,14 @@ cargo test -p ghast-inventory
   vanilla details the hand-derived tests missed: `SimpleInventory.setStack` caps a container slot at
   64 (the excess of an over-stacked stack is lost), 1.8 double click keeps a zero-count cursor, and
   1.16.5 `insertStack` into an empty slot uses AIR's stack limit (64) for the new zero-count stack.
+- 1.12.2 (2026-11-07, committed vectors, 3000 cases each): `clicks_seed1` 15 769 clicks, 15 599
+  predicted, all byte-identical, 0 differences, 170 refused (furnace shift-clicks and fuel);
+  `clicks_craft_seed1` 15 262 clicks, 14 797 predicted, all byte-identical, 0 differences, 465
+  refused (taking a stale result: the oracle emulates the server's result only once per case,
+  so most grid changes leave a stale result there).
 - `tests/robustness.rs`: proptest sequences of random packets (wild ids, counts -3..130,
-  oversized/short `window_items`, random window types) and clicks never panic; 1.16.5 never
-  stores empty stacks; clicks that only move items (all but drops) conserve every item.
+  oversized/short `window_items`, random window types) and clicks never panic; 1.12 and 1.16.5 never
+  store empty stacks; clicks that only move items (all but drops) conserve every item.
 - `examples/live_clicks.rs` (lab tool, not run by `cargo test`): a minimal standing-still client
   opens a chest with a real block interaction, sends 15 clicks of every mode in the chest and 15 in
   window 0 (armor, crafting grid, 16-stacks, number keys, Q, double click, outside), then reopens the
@@ -162,7 +184,8 @@ cargo test -p ghast-inventory
   # after the bot joined: gamemode survival, clear, tp 0.5 4 0.5 0 0, give stone 30, dirt 60, diamond_helmet 1, ender_pearl 10
   cargo run -p ghast-inventory --example live_clicks -- --version 1.8 --port 25618 --user GhastBot
   ```
-  (1.16.5: `minecraft:chest[facing=north]{Items:[... orange_wool, oak_planks ...]}`, `--version 1.16 --port 25616`.)
+  (1.16.5: `minecraft:chest[facing=north]{Items:[... orange_wool, oak_planks ...]}`, `--version 1.16 --port 25616`;
+  1.12.2: `--version 1.12` with the 1.8 block syntax.)
 - The same script through the full client (`crates/ghast/examples/inventory_probe.rs`: TickContext
   `click` / `open_inventory` / `close_window`, `place` on the chest after a GCD-stepped aim, the
   client's real movement stream), account GhastBot3, 2026-11-04: **1.8.9 30/30 accepted, 0

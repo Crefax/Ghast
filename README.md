@@ -2,8 +2,9 @@
 
 A headless Minecraft: Java Edition client / bot library in Rust.
 
-- **Old and popular versions first:** 1.8.9 (protocol 47) and 1.16.5 (protocol 754), in one
-  workspace with a version-agnostic bot API on top. A bot written once runs on both.
+- **Old and popular versions first:** 1.8.9 (protocol 47), 1.12.2 (protocol 340) and 1.16.5
+  (protocol 754), in one workspace with a version-agnostic bot API on top. A bot written once
+  runs on all three.
 - **Vanilla-exact physics, proven:** player movement is compared bit for bit with the real
   vanilla client code, run headless as an *oracle*. Not "close enough".
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
@@ -16,7 +17,7 @@ Status: early (0.2, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | | ghast | |
 |---|---|---|
 | AFK bot on a Raspberry Pi 5, 300 s, side by side with a mineflayer 4.39 / Node 22 AFK bot on the same 1.8 server | **0.33 %** of one core, **4.1 MB** RSS, 1 thread | mineflayer: 2.19 %, 120 MB RSS, 7 threads |
-| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9 and 1.16.5) | **0 diffs** over 5.16 million ticks | positions, velocities, flags and packets compared by their bits |
+| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 9.32 million ticks | positions, velocities, flags and packets compared by their bits |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of both versions round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
@@ -80,20 +81,22 @@ planned paths with the async helpers).
 
 ## Features per version
 
-| | 1.8.9 | 1.16.5 |
-|---|---|---|
-| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes |
-| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes |
-| chunks and block changes | yes | yes |
-| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified |
-| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (ray boxes approximated) |
-| inventory and container clicks, crafting results | oracle-verified | oracle-verified |
-| entities: tracking, crosshair, attack / interact | yes | yes |
-| mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes |
-| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | simulation-tested |
-| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet |
+| | 1.8.9 | 1.12.2 | 1.16.5 |
+|---|---|---|---|
+| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes |
+| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes |
+| chunks and block changes | yes | yes | yes |
+| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified |
+| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | yes (ray boxes approximated) |
+| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified |
+| entities: tracking, crosshair, attack / interact | yes | yes | yes |
+| mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes |
+| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | not yet | simulation-tested |
+| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet |
+| movement recording / trace replay (`Client::record`) | yes | not yet | yes |
 
-Planned: 1.12.2 and 1.21 / latest, one version at a time, each verified the same way. Not
+Planned: 1.21 / latest, one version at a time, each verified the same way; 1.9 – 1.12.1 as small
+deltas of the 1.12.2 family on demand. Not
 planned for now: a game client with its own window (`ghast-viewer` only draws the bot's view
 in a browser page, read-only).
 

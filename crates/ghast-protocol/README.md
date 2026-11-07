@@ -6,6 +6,7 @@ types per protocol version, framing, compression, encryption, NBT. No game logic
 | Module / feature | What it is |
 |---|---|
 | `v1_8` (feature `v1_8`) | Protocol 47 (1.8 – 1.8.9) |
+| `v1_12_2` (feature `v1_12_2`) | Protocol 340 (1.12.2) |
 | `v1_16_5` (feature `v1_16_5`) | Protocol 754 (1.16.4 – 1.16.5) |
 | `codec` | `Reader` (bounds-checked, zero-copy over `Bytes`), `McWrite`, VarInt/VarLong, `Decode`/`Encode` |
 | `types` | `BlockPos` (both bit layouts), slots (`slot::legacy` 1.8–1.12, `slot::modern` 1.13.2–1.20.4), angle/fixed-point helpers |

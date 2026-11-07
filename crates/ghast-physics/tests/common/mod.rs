@@ -11,6 +11,7 @@ use ghast_physics::v1_8::{self, Effects, MovementInput, PlayerState, SentState};
 use ghast_physics::{Abilities, Keys, Packet, Packets, TickInput};
 use serde_json::{Value, json};
 
+pub mod v112;
 pub mod v116;
 
 /// Repository root (`crates/ghast-physics/../..`).

@@ -1,5 +1,5 @@
 //! The client-side click simulation: vanilla's `ScreenHandler.onSlotClick` for
-//! 1.8.9 and 1.16.5, the containers' quick-move (`transferSlot`) rules
+//! 1.8.9, 1.12.2 and 1.16.5, the containers' quick-move (`transferSlot`) rules
 //! and the player inventory's insert logic, over a [`Model`] of the slots.
 //!
 //! Each function follows the vanilla control flow of its version (they differ in many small
@@ -26,7 +26,7 @@ type R<T> = Result<T, Unpredictable>;
 #[derive(Debug, Clone)]
 pub(crate) struct Model {
     /// `PlayerInventory` by vanilla index: 0..9 hotbar, 9..36 main, 36..40 armor (feet, legs,
-    /// chest, head), 40 offhand (1.16.5).
+    /// chest, head), 40 offhand (1.12 / 1.16.5).
     pub player: [Option<Stack>; 41],
     /// Window 0's 2×2 crafting grid.
     pub craft: [Option<Stack>; 4],
@@ -40,6 +40,12 @@ pub(crate) struct Model {
     pub container: Vec<Option<Stack>>,
     /// Whether the open window's crafting result (container slot 0) is known.
     pub container_result_known: bool,
+    /// 1.12: the window 0 crafting result came from the server for the grid as it is now (no
+    /// grid change since), so a recipe matches the grid. Taking a stale result is unpredictable
+    /// (vanilla's remainders then depend on the recipes).
+    pub craft_fresh: bool,
+    /// 1.12: the same for the open crafting table.
+    pub container_fresh: bool,
     /// Selected hotbar slot.
     pub selected: u8,
 }
@@ -54,6 +60,8 @@ impl Default for Model {
             cursor: None,
             container: Vec::new(),
             container_result_known: true,
+            craft_fresh: true,
+            container_fresh: true,
             selected: 0,
         }
     }
@@ -261,11 +269,11 @@ impl Sim<'_> {
         self.m.at_mut(l)
     }
 
-    /// Whether a stack with this count counts as gone (1.8: exactly 0; 1.16: `isEmpty`).
+    /// Whether a stack with this count counts as gone (1.8: exactly 0; 1.12 / 1.16: `isEmpty`).
     fn gone(&self, count: i32) -> bool {
         match self.v {
             Version::V1_8 => count == 0,
-            Version::V1_16_5 => count <= 0,
+            Version::V1_12 | Version::V1_16_5 => count <= 0,
         }
     }
 
@@ -310,6 +318,9 @@ impl Sim<'_> {
                 // binding curse keeps armor on (survival; ghast bots are never creative here)
                 Ok(!self.get(i).is_some_and(Stack::has_binding_curse))
             }
+            SlotKind::Armor(_) if self.v == Version::V1_12 => {
+                Ok(!self.get(i).is_some_and(Stack::has_binding_curse_1_12))
+            }
             _ => Ok(true),
         }
     }
@@ -342,7 +353,7 @@ impl Sim<'_> {
                     Some(out)
                 }
             }
-            Version::V1_16_5 => {
+            Version::V1_12 | Version::V1_16_5 => {
                 if whole {
                     return slot.take();
                 }
@@ -376,6 +387,12 @@ impl Sim<'_> {
                 };
                 let rems = match self.v {
                     Version::V1_8 => crafting::remainders_1_8(&grid),
+                    Version::V1_12 => {
+                        if !self.result_fresh(i) {
+                            return Err(Unpredictable);
+                        }
+                        crafting::remainders_1_12(&grid)
+                    }
                     Version::V1_16_5 => crafting::remainders_1_16(self.book, &grid),
                 }
                 .map_err(|()| Unpredictable)?;
@@ -399,6 +416,11 @@ impl Sim<'_> {
                                 (Version::V1_16_5, Some(c)) if c.id == r.id && c.nbt_eq(r) => {
                                     self.set(g, Some(r.with_count(r.count + c.count)));
                                 }
+                                (Version::V1_12, Some(c))
+                                    if c.id == r.id && c.damage == r.damage && c.nbt_eq(r) =>
+                                {
+                                    self.set(g, Some(r.with_count(r.count + c.count)));
+                                }
                                 (_, Some(_)) => self.insert_stack(r.clone()), // or dropped
                             }
                         }
@@ -407,6 +429,15 @@ impl Sim<'_> {
                 Ok(())
             }
             _ => Ok(()),
+        }
+    }
+
+    /// 1.12: whether the crafting result at slot `i` belongs to the grid as it is now.
+    fn result_fresh(&self, i: usize) -> bool {
+        match self.loc(i) {
+            Loc::CraftResult => self.m.craft_fresh,
+            Loc::Container(_) => self.m.container_fresh,
+            _ => true,
         }
     }
 
@@ -424,7 +455,7 @@ impl Sim<'_> {
         }
         match self.v {
             Version::V1_8 => self.click_1_8(slot, button, mode),
-            Version::V1_16_5 => self.click_1_16(slot, button, mode),
+            Version::V1_12 | Version::V1_16_5 => self.click_1_16(slot, button, mode),
         }
     }
 
@@ -500,7 +531,8 @@ impl Sim<'_> {
                     self.pickup_1_16(i, button)
                 }
             }
-            2 => {
+            // 1.12 swaps with the hotbar only (buttons 0..9), 1.16 also with the offhand (40)
+            2 if self.v == Version::V1_16_5 || button < 9 => {
                 if let Ok(i) = usize::try_from(slot) {
                     self.swap_1_16(i, usize::from(button))?;
                 }
@@ -639,7 +671,10 @@ impl Sim<'_> {
                     }
                     Some(mut c) => {
                         if self.can_insert(i, &c)? {
-                            if s.id == c.id && s.nbt_eq(&c) {
+                            if s.id == c.id
+                                && (v != Version::V1_12 || s.damage == c.damage)
+                                && s.nbt_eq(&c)
+                            {
                                 let mut q = if button == 0 { c.count } else { 1 };
                                 let lim = self.slot_limit(i)?;
                                 if q > lim - s.count {
@@ -658,7 +693,11 @@ impl Sim<'_> {
                                 self.set(i, Some(c));
                                 self.m.cursor = Some(s);
                             }
-                        } else if v.max_count(&c) > 1 && s.id == c.id && s.nbt_eq(&c) {
+                        } else if v.max_count(&c) > 1
+                            && s.id == c.id
+                            && (!v.has_subtypes(s.id) || s.damage == c.damage)
+                            && s.nbt_eq(&c)
+                        {
                             let r = s.count;
                             if r + c.count <= v.max_count(&c) {
                                 c.count += r;
@@ -707,7 +746,14 @@ impl Sim<'_> {
         let mut ret = None;
         for _ in 0..4096 {
             match self.transfer(i)? {
-                Some(t) if self.get(i).is_some_and(|s| s.id == t.id) => ret = Some(t),
+                // 1.12 `ItemStack.equalsIgnoreNbt`: same item and damage; 1.16: same item
+                Some(t)
+                    if self.get(i).is_some_and(|s| {
+                        s.id == t.id && (self.v != Version::V1_12 || s.damage == t.damage)
+                    }) =>
+                {
+                    ret = Some(t);
+                }
                 _ => return Ok(ret),
             }
         }
@@ -768,7 +814,7 @@ impl Sim<'_> {
                             self.insert(&mut st, 10, 46, true)?
                         } else if (10..46).contains(&i) {
                             match v {
-                                Version::V1_8 => {
+                                Version::V1_8 | Version::V1_12 => {
                                     if i < 37 {
                                         self.insert(&mut st, 37, 46, false)?
                                     } else {
@@ -837,7 +883,7 @@ impl Sim<'_> {
                 }
                 let Some(t) = self.get(i) else { continue };
                 let same = match v {
-                    Version::V1_8 => {
+                    Version::V1_8 | Version::V1_12 => {
                         t.id == st.id
                             && (!v.has_subtypes(st.id) || st.damage == t.damage)
                             && t.nbt_eq(st)
@@ -874,7 +920,7 @@ impl Sim<'_> {
                         self.set(i, Some(st.clone()));
                         st.count = 0;
                     }
-                    Version::V1_16_5 => {
+                    Version::V1_12 | Version::V1_16_5 => {
                         if !self.can_insert(i, st)? {
                             continue;
                         }
@@ -1006,7 +1052,7 @@ impl Sim<'_> {
                     return;
                 }
             }
-            Version::V1_16_5 => {
+            Version::V1_12 | Version::V1_16_5 => {
                 if st.count <= 0 {
                     return;
                 }
@@ -1038,7 +1084,9 @@ impl Sim<'_> {
                     && t.count < v.max_count(t)
                     && t.count < 64
                     && match v {
-                        Version::V1_8 => !v.has_subtypes(t.id) || t.damage == st.damage,
+                        Version::V1_8 | Version::V1_12 => {
+                            !v.has_subtypes(t.id) || t.damage == st.damage
+                        }
                         Version::V1_16_5 => true,
                     }
                     && t.nbt_eq(st)
@@ -1046,7 +1094,7 @@ impl Sim<'_> {
         };
         let found = match v {
             Version::V1_8 => (0..36).find(|&j| room(self.m, j)),
-            Version::V1_16_5 => {
+            Version::V1_12 | Version::V1_16_5 => {
                 let sel = usize::from(self.m.selected.min(8));
                 if room(self.m, sel) {
                     Some(sel)
@@ -1068,8 +1116,10 @@ impl Sim<'_> {
             damage: st.damage,
             nbt: st.nbt.clone(),
         });
-        // 1.16.5: the fresh zero-count stack is empty, and an empty stack's item is AIR (max 64)
-        let max = if created && v == Version::V1_16_5 {
+        // 1.12 / 1.16.5: the fresh zero-count stack is empty, and an empty stack's item is AIR
+        // (max 64)
+        let empty_stacks = v != Version::V1_8;
+        let max = if created && empty_stacks {
             64
         } else {
             v.max_count(t)
@@ -1082,14 +1132,14 @@ impl Sim<'_> {
             k = 64 - t.count;
         }
         if k == 0 {
-            if created && v == Version::V1_16_5 {
-                self.m.player[j] = None; // a zero-count stack is empty on 1.16
+            if created && empty_stacks {
+                self.m.player[j] = None; // a zero-count stack is empty on 1.12 / 1.16
             }
             return i;
         }
         i -= k;
         t.count += k;
-        if v == Version::V1_16_5 && t.count <= 0 {
+        if empty_stacks && t.count <= 0 {
             self.m.player[j] = None;
         }
         i
@@ -1139,7 +1189,7 @@ impl Sim<'_> {
                 let Some(t) = self.get(x) else { continue };
                 // canInsertItemIntoSlot(slot, cursor, true)
                 let same = match v {
-                    Version::V1_8 => c.id == t.id && c.damage == t.damage,
+                    Version::V1_8 | Version::V1_12 => c.id == t.id && c.damage == t.damage,
                     Version::V1_16_5 => c.id == t.id,
                 };
                 if !(same && t.nbt_eq(&c) && t.count <= max) {
@@ -1165,7 +1215,7 @@ impl Sim<'_> {
         // the cursor object is only grown in place (1.8 keeps it even at count 0)
         self.m.cursor = match v {
             Version::V1_8 => Some(c),
-            Version::V1_16_5 => self.norm(c),
+            Version::V1_12 | Version::V1_16_5 => self.norm(c),
         };
         Ok(())
     }

@@ -1,5 +1,5 @@
 //! Inventory and container windows for the ghast Minecraft Java Edition client library
-//! (1.8.9 and 1.16.5).
+//! (1.8.9, 1.12.2 and 1.16.5).
 //!
 //! [`Inventory`] holds what the vanilla client holds — the player inventory, the cursor stack
 //! and the open window — fed by the server's window packets, and turns click intents into

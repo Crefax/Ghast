@@ -1,6 +1,6 @@
 [package]
 name = "ghast-entity"
-description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9 and 1.16.5 entity packets, vanilla-exact server positions, O(1) lookup"
+description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9, 1.12.2 and 1.16.5 entity packets, vanilla-exact server positions, O(1) lookup"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,14 +14,14 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-entity"
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
-ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 bytes = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_16_5", "testgen"] }
-ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "testgen"] }
+ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 

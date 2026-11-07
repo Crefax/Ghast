@@ -8,7 +8,8 @@
 //!
 //! Committed vectors: `tests/golden/<ver>/clicks_seed1.jsonl.gz` (all windows) and
 //! `clicks_craft_seed1.jsonl.gz` (crafting). Bigger runs: `GHAST_CLICK_VECTORS_1_8`,
-//! `GHAST_CLICK_VECTORS_1_16`, `GHAST_CRAFT_VECTORS_1_8`, `GHAST_CRAFT_VECTORS_1_16` = path, then
+//! `GHAST_CLICK_VECTORS_1_12`, `GHAST_CLICK_VECTORS_1_16`, `GHAST_CRAFT_VECTORS_1_8`,
+//! `GHAST_CRAFT_VECTORS_1_12`, `GHAST_CRAFT_VECTORS_1_16` = path, then
 //! `cargo test -p ghast-inventory --release --test oracle_clicks -- --nocapture`.
 
 use std::io::{BufRead, BufReader};
@@ -22,6 +23,7 @@ use ghast_inventory::{
 use ghast_protocol::codec::{Encode, decode_exact};
 use ghast_protocol::types::slot::{legacy, modern};
 use ghast_protocol::v1_8::play::serverbound as sb8;
+use ghast_protocol::v1_12_2::play::serverbound as sb12;
 use ghast_protocol::v1_16_5::play::clientbound as cb16;
 use ghast_protocol::v1_16_5::play::serverbound as sb16;
 use serde_json::Value;
@@ -36,7 +38,9 @@ fn hex(s: &str) -> Bytes {
 fn stack(v: Version, h: &Value) -> Option<Stack> {
     let b = hex(h.as_str().unwrap());
     match v {
-        Version::V1_8 => from_legacy_slot(decode_exact::<legacy::Slot>(&b).unwrap()),
+        Version::V1_8 | Version::V1_12 => {
+            from_legacy_slot(decode_exact::<legacy::Slot>(&b).unwrap())
+        }
         Version::V1_16_5 => from_modern_slot(decode_exact::<modern::Slot>(&b).unwrap()),
     }
 }
@@ -213,6 +217,17 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
                             from_legacy_slot(w.item),
                         )
                     }
+                    Version::V1_12 => {
+                        p.to_v1_12_2().encode(&mut body).unwrap();
+                        let w: sb12::WindowClick = decode_exact(&want).unwrap();
+                        (
+                            w.slot,
+                            w.mouse_button,
+                            w.action,
+                            w.mode,
+                            from_legacy_slot(w.item),
+                        )
+                    }
                     Version::V1_16_5 => {
                         p.to_v1_16_5().encode(&mut body).unwrap();
                         let w: sb16::WindowClick = decode_exact(&want).unwrap();
@@ -341,6 +356,32 @@ fn vanilla_clicks_1_8_9() {
     check(
         Version::V1_8,
         vectors("GHAST_CLICK_VECTORS_1_8", "1.8.9", "clicks_seed1.jsonl.gz"),
+    );
+}
+
+#[test]
+fn vanilla_clicks_1_12_2() {
+    check(
+        Version::V1_12,
+        vectors(
+            "GHAST_CLICK_VECTORS_1_12",
+            "1.12.2",
+            "clicks_seed1.jsonl.gz",
+        ),
+    );
+}
+
+/// 1.12.2 crafting: the client never computes results; the emulated server's result is set
+/// once after the grid is filled and stays (stale) until a click takes it.
+#[test]
+fn vanilla_crafting_1_12_2() {
+    check(
+        Version::V1_12,
+        vectors(
+            "GHAST_CRAFT_VECTORS_1_12",
+            "1.12.2",
+            "clicks_craft_seed1.jsonl.gz",
+        ),
     );
 }
 

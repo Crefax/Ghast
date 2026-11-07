@@ -119,7 +119,7 @@ impl Driver {
         Driver {
             inv: Inventory::new(v),
             mover: Mover {
-                increment_first: v == Version::V1_16_5,
+                increment_first: v != Version::V1_8,
                 ..Mover::default()
             },
             spawned: false,
@@ -424,6 +424,7 @@ fn args() -> (Version, u16, String) {
     };
     let v = match get("--version").as_deref() {
         Some("1.16" | "1.16.5") => Version::V1_16_5,
+        Some("1.12" | "1.12.2") => Version::V1_12,
         _ => Version::V1_8,
     };
     let port = get("--port").and_then(|p| p.parse().ok()).unwrap_or(25618);
@@ -441,6 +442,7 @@ async fn main() -> Res<()> {
     let mut d = Driver::new(v, script());
     match v {
         Version::V1_8 => v18::run(&mut r, &mut w, &mut d, port, &user).await?,
+        Version::V1_12 => v12::run(&mut r, &mut w, &mut d, port, &user).await?,
         Version::V1_16_5 => v16::run(&mut r, &mut w, &mut d, port, &user).await?,
     }
     println!(
@@ -616,6 +618,57 @@ session!(v18, v1_8, 47, {
             cursor_z: 0,
         })?;
         w.queue(&sb::ArmAnimation {})?;
+        Ok(())
+    }
+});
+
+session!(v12, v1_12_2, 340, {
+    fn extra_id() -> i32 {
+        cb::id::CRAFT_PROGRESS_BAR
+    }
+    fn apply(inv: &mut Inventory, p: &P) -> Option<Outgoing> {
+        inv.apply_v1_12_2(p)
+    }
+    fn to_packet(o: &Outgoing) -> Option<S> {
+        o.to_v1_12_2()
+    }
+    fn teleport(t: &cb::Position, w: &mut Wr, d: &mut Driver) -> Res<()> {
+        let f = t.flags;
+        let m = &mut d.mover;
+        m.pos.0 = if f & 1 != 0 { m.pos.0 + t.x } else { t.x };
+        m.pos.1 = if f & 2 != 0 { m.pos.1 + t.y } else { t.y };
+        m.pos.2 = if f & 4 != 0 { m.pos.2 + t.z } else { t.z };
+        m.yaw = if f & 8 != 0 { m.yaw + t.yaw } else { t.yaw };
+        m.pitch = if f & 16 != 0 {
+            m.pitch + t.pitch
+        } else {
+            t.pitch
+        };
+        m.since_tp = 0;
+        w.queue(&sb::TeleportConfirm {
+            teleport_id: t.teleport_id,
+        })?;
+        w.queue(&sb::PositionLook {
+            x: m.pos.0,
+            y: m.pos.1,
+            z: m.pos.2,
+            yaw: m.yaw,
+            pitch: m.pitch,
+            on_ground: false,
+        })?;
+        d.spawned = true;
+        Ok(())
+    }
+    fn use_chest(w: &mut Wr, _d: &mut Driver) -> Res<()> {
+        w.queue(&sb::BlockPlace {
+            location: CHEST,
+            direction: 2,
+            hand: 0,
+            cursor_x: 0.5,
+            cursor_y: 0.5,
+            cursor_z: 0.0,
+        })?;
+        w.queue(&sb::ArmAnimation { hand: 0 })?;
         Ok(())
     }
 });

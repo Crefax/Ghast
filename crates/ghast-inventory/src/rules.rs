@@ -1,9 +1,9 @@
 //! Per-version item facts the click logic needs: stack limits, damageability, which items
-//! have subtypes (1.8), which go into armor / offhand slots, and which crafting ingredients
+//! have subtypes (1.8, 1.12), which go into armor / offhand slots, and which crafting ingredients
 //! leave something behind.
 //!
-//! Stack sizes and durability come from `ghast-data` (checked against the vanilla 1.8.9 and
-//! 1.16.5 item registries); the short lists below were read off the vanilla registries
+//! Stack sizes and durability come from `ghast-data` (checked against the vanilla 1.8.9, 1.12.2
+//! and 1.16.5 item registries; the two 1.12.2 differences are fixed below); the short lists below were read off the vanilla registries
 //! (the damage-variant flag, which Legacy Yarn names `Item.isUnbreakable`; `getRecipeRemainder`;
 //! `MobEntity.getPreferredEquipmentSlot`).
 
@@ -14,6 +14,8 @@ use crate::stack::Stack;
 pub enum Version {
     /// 1.8 – 1.8.9 (protocol 47).
     V1_8,
+    /// 1.12 – 1.12.2 (protocol 335 – 340).
+    V1_12,
     /// 1.16.4 – 1.16.5 (protocol 754).
     V1_16_5,
 }
@@ -25,7 +27,14 @@ const SUBTYPES_1_8: &[i32] = &[
     160, 161, 162, 168, 171, 175, 179, 182, 263, 322, 349, 350, 351, 358, 373, 383, 397, 425,
 ];
 
-/// Equipment slot index used by both versions: 0 head, 1 chest, 2 legs, 3 feet. Window 0 slot
+/// 1.12.2 items with damage variants (`Item.isUnbreakable()` in Legacy Yarn, read off the vanilla
+/// 1.12.2 item registry). Sorted.
+const SUBTYPES_1_12: &[i32] = &[
+    1, 3, 5, 6, 12, 17, 18, 19, 24, 31, 35, 37, 38, 44, 95, 97, 98, 126, 139, 145, 155, 159, 160,
+    161, 162, 168, 171, 175, 179, 182, 205, 251, 252, 263, 322, 349, 350, 351, 355, 358, 397, 425,
+];
+
+/// Equipment slot index used by every version: 0 head, 1 chest, 2 legs, 3 feet. Window 0 slot
 /// `5 + index` is that armor slot.
 pub(crate) type ArmorIndex = u8;
 
@@ -34,6 +43,7 @@ impl Version {
         let id = u16::try_from(id).ok()?;
         match self {
             Version::V1_8 => ghast_data::v1_8::Item::from_id(id).map(|i| i.info()),
+            Version::V1_12 => ghast_data::v1_12::Item::from_id(id).map(|i| i.info()),
             Version::V1_16_5 => ghast_data::v1_16_5::Item::from_id(id).map(|i| i.info()),
         }
     }
@@ -53,12 +63,20 @@ impl Version {
             // warped_fungus_on_a_stick: minecraft-data says 64, vanilla 1.16.5 says 1.
             return 1;
         }
+        if self == Version::V1_12 && matches!(s.id, 453 | 2256) {
+            // knowledge_book and record_13: minecraft-data says 64, vanilla 1.12.2 says 1.
+            return 1;
+        }
         self.info(s.id).map_or(64, |i| i32::from(i.stack_size))
     }
 
-    /// Whether the item has damage variants (1.8 only; 1.16 has no damage-selected variants).
+    /// Whether the item has damage variants (1.8 / 1.12; 1.16 has no damage-selected variants).
     pub(crate) fn has_subtypes(self, id: i32) -> bool {
-        self == Version::V1_8 && SUBTYPES_1_8.binary_search(&id).is_ok()
+        match self {
+            Version::V1_8 => SUBTYPES_1_8.binary_search(&id).is_ok(),
+            Version::V1_12 => SUBTYPES_1_12.binary_search(&id).is_ok(),
+            Version::V1_16_5 => false,
+        }
     }
 
     /// `ItemStack.isDamageable()`: the item has durability and the stack is not `Unbreakable`.
@@ -69,11 +87,11 @@ impl Version {
             && !s.nbt_bool("Unbreakable")
     }
 
-    /// `ItemStack.isDamaged()` (1.8: damage value; 1.16: `Damage` tag).
+    /// `ItemStack.isDamaged()` (1.8 / 1.12: damage value; 1.16: `Damage` tag).
     pub(crate) fn is_damaged(self, s: &Stack) -> bool {
         self.is_damageable(s)
             && match self {
-                Version::V1_8 => s.damage > 0,
+                Version::V1_8 | Version::V1_12 => s.damage > 0,
                 Version::V1_16_5 => s.nbt_int("Damage") > 0,
             }
     }
@@ -91,6 +109,7 @@ impl Version {
             Version::V1_8 => (298..=317)
                 .contains(&s.id)
                 .then(|| ((s.id - 298) % 4) as u8),
+            Version::V1_12 => equipment_1_12(s.id).filter(|&e| e < 4),
             Version::V1_16_5 => self.equipment_1_16(s.id).filter(|&e| e < 4),
         }
     }
@@ -106,13 +125,19 @@ impl Version {
                     (s.id == 86 || s.id == 397) && a == 0
                 }
             }
+            Version::V1_12 => equipment_1_12(s.id) == Some(a),
             Version::V1_16_5 => self.equipment_1_16(s.id) == Some(a),
         }
     }
 
-    /// 1.16.5 shift-click target "offhand" (`getPreferredEquipmentSlot == OFFHAND`: the shield).
+    /// 1.12 / 1.16.5 shift-click target "offhand" (`getPreferredEquipmentSlot == OFFHAND`: the
+    /// shield).
     pub(crate) fn prefers_offhand(self, s: &Stack) -> bool {
-        self == Version::V1_16_5 && self.equipment_1_16(s.id) == Some(4)
+        match self {
+            Version::V1_8 => false,
+            Version::V1_12 => equipment_1_12(s.id) == Some(4),
+            Version::V1_16_5 => self.equipment_1_16(s.id) == Some(4),
+        }
     }
 
     /// 1.16.5 `MobEntity.getPreferredEquipmentSlot`: 0..=3 armor (head, chest, legs, feet),
@@ -143,9 +168,22 @@ impl Version {
         }
     }
 
-    /// 1.16.5 shulker box slots refuse shulker boxes.
+    /// 1.12 / 1.16.5 shulker box slots refuse shulker boxes.
     pub(crate) fn is_shulker_box(self, s: &Stack) -> bool {
-        self == Version::V1_16_5 && self.name(s.id).ends_with("shulker_box")
+        self != Version::V1_8 && self.name(s.id).ends_with("shulker_box")
+    }
+}
+
+/// 1.12.2 `MobEntity.method_13083` (preferred equipment slot): pumpkin and skull on the head,
+/// armor pieces by type, elytra on the chest, the shield in the offhand. 0..=3 armor (head,
+/// chest, legs, feet), 4 offhand, `None` main hand.
+fn equipment_1_12(id: i32) -> Option<u8> {
+    match id {
+        86 | 397 => Some(0),
+        298..=317 => Some(((id - 298) % 4) as u8),
+        443 => Some(1),
+        442 => Some(4),
+        _ => None,
     }
 }
 
@@ -156,6 +194,7 @@ mod tests {
     #[test]
     fn tables_sorted_and_facts() {
         assert!(SUBTYPES_1_8.windows(2).all(|w| w[0] < w[1]));
+        assert!(SUBTYPES_1_12.windows(2).all(|w| w[0] < w[1]));
         let v = Version::V1_8;
         assert!(v.has_subtypes(351)); // dye
         assert!(!v.has_subtypes(276)); // diamond sword

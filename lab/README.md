@@ -7,28 +7,28 @@ worlds, logs, the built plugin and npm deps live in git-ignored dirs (`lab/serve
 
 ## Servers (localhost only)
 
-| | 1.8 | 1.16 |
-|---|---|---|
-| Address | `127.0.0.1:25618` (protocol 47) | `127.0.0.1:25616` (protocol 754) |
-| Server | Paper 1.8.8 build 445 | Paper 1.16.5 build 794 |
-| Java | Temurin 21 (`-DIReallyKnowWhatIAmDoingISwear`) | Temurin 17 (`-DPaper.IgnoreJavaVersion=true`) |
-| Anticheat | GrimAC 2.3.73 (sha256-pinned) | GrimAC 2.3.73 |
+| | 1.8 | 1.12 | 1.16 |
+|---|---|---|---|
+| Address | `127.0.0.1:25618` (protocol 47) | `127.0.0.1:25612` (protocol 340) | `127.0.0.1:25616` (protocol 754) |
+| Server | Paper 1.8.8 build 445 | Paper 1.12.2 build 1620 | Paper 1.16.5 build 794 |
+| Java | Temurin 21 (`-DIReallyKnowWhatIAmDoingISwear`) | Temurin 17 (`-DPaper.IgnoreJavaVersion=true`) | Temurin 17 (`-DPaper.IgnoreJavaVersion=true`) |
+| Anticheat | GrimAC 2.3.73 (sha256-pinned) | GrimAC 2.3.73 | GrimAC 2.3.73 |
 
-Both: offline mode, `-Xmx896M` (`LAB_HEAP`), compression threshold 256, view distance 6, superflat
+All: offline mode, `-Xmx896M` (`LAB_HEAP`), compression threshold 256, view distance 6, superflat
 (bedrock, 2 dirt, grass: grass is y=3, players stand at y=4), spawn `0 4 0`, peaceful, no mobs.
-Opped accounts (`LAB_OPS`): `GhastBot`..`GhastBot11`, `Baseline`, `Baseline2`. Op does **not**
+Opped accounts (`LAB_OPS`): `GhastBot`..`GhastBot11`, `GhastBot13`, `Baseline`, `Baseline2`. Op does **not**
 exempt from Grim. `GhastBot` and `GhastBot5` (`LAB_FLY`, read at server start) get allowFlight on join via the lab plugin (`/fly [player] [on|off]`,
 source in `plugins/labfly`, built at start against the 1.8.8 API, loads on both servers).
 Grim alerts and verbose flags are printed to the console (`config.yml` patched on first start).
 
-Why Java 17 for 1.16.5: Grim 2.3.73 is Java 17 bytecode and Paper 1.16.5 refuses Java 17+ unless told
-to ignore it; it runs fine. Why `use-native-transport=false` on 1.8: its netty 4.0 epoll transport can't
+Why Java 17 for 1.12.2 and 1.16.5: Grim 2.3.73 is Java 17 bytecode and those Paper builds refuse Java 17+
+unless told to ignore it; they run fine. Only one lab server at a time in WSL (memory). Why `use-native-transport=false` on 1.8: its netty 4.0 epoll transport can't
 read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to access address of buffer").
 1.8 survival join spawns are fuzzed by up to 5 blocks (hard-coded in 1.8); use `reset-field.sh 1.8 --tp`.
 
 ```
-./start.sh 1.8|1.16          # idempotent; first run downloads + creates the world (restarts once to move the spawn chunks)
-./stop.sh 1.8|1.16|all       # console "stop" (saves), SIGTERM/SIGKILL fallback
+./start.sh 1.8|1.12|1.16     # idempotent; first run downloads + creates the world (restarts once to move the spawn chunks)
+./stop.sh 1.8|1.12|1.16|all  # console "stop" (saves), SIGTERM/SIGKILL fallback
 ./console.sh 1.8 "list" "tp GhastBot 0.5 4 0.5"   # prints the log lines produced; no args = one command per stdin line
 ./alerts.sh 1.8              # follow Grim flags/setbacks/kicks; --all = all such lines in latest.log; --count = flags per player+check
 ./reset-field.sh 1.8 [--tp] [--fly]   # rules (time 6000, clear weather, no ticks) + rebuild the test pad

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.16> [--tp] [--fly]
+# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.12|1.16> [--tp] [--fly]
 #   --tp   teleport $LAB_BOT (default GhastBot) to the spawn pad 0.5 4 0.5
 #   --fly  /fly $LAB_BOT on
 # Superflat: bedrock y0, dirt y1-2, grass y3; players stand at y=4. Pad x -16..47, z -16..47 (spawn chunks).
@@ -14,6 +14,10 @@ for a in "$@"; do case "$a" in --tp) tp=1 ;; --fly) fly=1 ;; *) echo "unknown ar
 if [ "$VER" = 1.8 ]; then
   grass=minecraft:grass; slime=minecraft:slime; item=Item; slab="minecraft:stone_slab 0"; fence=minecraft:fence; water="minecraft:water 0"
   rules="weather clear 1000000"
+elif [ "$VER" = 1.12 ]; then
+  # 1.12: pre-flattening block names like 1.8, lower-case entity ids, 1.9+ game rules.
+  grass=minecraft:grass; slime=minecraft:slime; item=item; slab="minecraft:stone_slab 0"; fence=minecraft:fence; water="minecraft:water 0"
+  rules=$'gamerule spawnRadius 0\ngamerule doWeatherCycle false\ngamerule announceAdvancements false\nweather clear 1000000'
 else
   grass=minecraft:grass_block; slime=minecraft:slime_block; item=item; slab="minecraft:smooth_stone_slab[type=bottom]"; fence=minecraft:oak_fence; water=minecraft:water
   rules=$'gamerule spawnRadius 0\ngamerule doWeatherCycle false\ngamerule doInsomnia false\ngamerule doPatrolSpawning false\ngamerule doTraderSpawning false\ngamerule announceAdvancements false\nweather clear'

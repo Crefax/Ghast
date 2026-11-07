@@ -1,6 +1,6 @@
 # ghast
 
-A headless Minecraft Java Edition client / bot library in Rust (1.8.9 and 1.16.5), built for
+A headless Minecraft Java Edition client / bot library in Rust (1.8.9, 1.12.2 and 1.16.5), built for
 running many light bots: packets nobody needs are dropped before they are decoded, the tick
 loop mirrors vanilla's order exactly, and movement is checked against the real game.
 

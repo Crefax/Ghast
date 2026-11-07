@@ -8,6 +8,7 @@ vanilla's constant 65536-entry sine table, built once).
 | module | version | verification |
 |---|---|---|
 | `v1_8` | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle (see below) |
+| `v1_12` | 1.12.2 (protocol 340; the rules hold for every 1.12 release) | bit-exact against the vanilla oracle (see below) |
 | `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
 
 ## Use
@@ -127,6 +128,44 @@ budgets) is client policy and stays out of this crate.
 - Movement packet: position when moved² > 9e-4 or every 20 ticks, rotation when the float
   difference is non-zero; sprint/sneak entity actions before it; flight toggles send abilities.
 
+## 1.12.2 (`v1_12`): what changed since 1.8.9
+
+`v1_12` has the structure of `v1_8` (same calling convention, `PlayerState` is `Copy`) and is the
+first member of the 1.9 – 1.12 family. Everything below is verified against the vanilla 1.12.2
+oracle (`tests/golden/1.12.2/`, `oracle/README.md` "1.12.2"):
+
+- **Ticking**: the client only ticks a player its world has added to a chunk: a player spawned
+  above a column that is not loaded neither moves nor sends anything until the column arrives
+  (`PlayerState::added_to_chunk`); once added it keeps ticking over unloaded columns, falling
+  at −0.1 there (the column test floors x / z; 1.8 truncated).
+- **Constants**: velocity cut-off 0.003 (1.8: 0.005); input acceleration converts the yaw with
+  one `float` multiply (`yaw * 0.017453292F`) and has a (zero) vertical component, which turns a
+  `-0.0` vertical velocity into `+0.0`.
+- **Sneaking**: the edge guard probes one step height (0.6) down instead of one block, so a
+  sneaking player walks down half-block drops; after the move the box becomes 0.6 × 1.65 while
+  sneaking (1.8 when not) if the new box is free, rebuilt from its minimum corner; the step
+  effects (slime walking) are skipped when the player is sneaking on the ground *after* the move.
+- **Flying**: sneaking no longer slows horizontal flight (the input is divided by 0.3 again);
+  flight resets the fall distance.
+- **Effects / blocks**: levitation replaces gravity (`vy += (0.05 · (amp + 1) − vy) · 0.2`); beds
+  bounce (`vy = −vy · 0.66F` unless sneaking); an open trapdoor above a ladder with the same facing
+  is climbable.
+- **Collision query**: one block wider on x / z (corner columns and the top layer of edge columns
+  skipped); no validity filter on columns, so the size check counts columns beyond ±30,000,000 as
+  colliding. Axes with a zero offset are not clipped or moved.
+- **Fluids**: every material query iterates `floor(min) .. ceil(max)`; falling water pulls down
+  next to a solid *face* (by the 1.12 face shape, stairs and the attach exclusion list excepted).
+- **Shapes** (`blocks.rs`): no history-dependent shapes; fences are a post plus one box per arm
+  and connect by the neighbour's face shape (same material or a gate for fence posts), panes a
+  post plus arms, walls one box; doors read the other half's *decoded* properties when it is the
+  same door (a half whose metadata does not carry a property has the palette's hidden default:
+  the last value — facing east, closed, right hinge); chests reach towards a chest of the same
+  kind; chorus plants grow arms towards chorus blocks (and end stone below).
+- **Packets**: a bare on-ground packet only when `on_ground` changed (no idle packets), the
+  position refresh on the 20th tick; teleports clamp x / z to ±3e7 and the pitch to ±90 and are
+  answered with `teleport_confirm` (sent by the client crate) then `position_look`.
+- Auto-jump is not modelled (bots never auto-jump; the oracle runs with it off).
+
 ## Verification
 
 ```sh
@@ -188,8 +227,15 @@ events; seeds 4-6 add item use and origins at ±2^24).
 "$PWD/oracle/cache/1.16.5/fuzz/physics_sS.jsonl.gz"`; seeds 11-15 = 1,000,000 ticks, 0 diffs (plus the
 committed `tests/golden/1.16.5/` scenarios and `fuzz_seed1`, replayed by `tests/golden_1_16_5.rs`).
 
-**Total randomized oracle fuzz: 5,160,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
-1,000,000 extras, 1,000,000 edges) and 1.16.5 1,000,000.
+1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
+`fuzz_seed1` and `fuzz_edges_seed1`; `src/v1_12/tests.rs` checks every line of the 1.12.2 collision
+dumps (6,083 box lines incl. neighbour configurations, 12,192 far lines) and the stairs face shapes.
+Large fuzz: the same commands with `MC=1.12.2` and `oracle/cache/1.12.2/` (seeds 11-15, 21 with
+`--use-item true`, extra 1-6 replayed from `fuzz-in/`, edges 31-35, extras 41-45) = 4,160,000 ticks,
+0 diffs.
+
+**Total randomized oracle fuzz: 9,320,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
+1,000,000 extras, 1,000,000 edges), 1.12.2 4,160,000 and 1.16.5 1,000,000.
 
 ## Performance
 
