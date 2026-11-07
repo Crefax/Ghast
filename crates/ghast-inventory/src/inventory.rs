@@ -83,6 +83,7 @@ impl Click {
 
 /// Why a click (or open / close) was refused. Nothing was sent and nothing changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ClickError {
     /// The previous click's confirm has not arrived yet (one click in flight).
     Pending,
@@ -143,6 +144,7 @@ pub struct ClickPacket {
 /// A packet the inventory wants sent. Write it right away, in call order (before the tick's
 /// movement packet when it comes from a behaviour action).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Outgoing {
     /// `window_click`.
     Click(ClickPacket),

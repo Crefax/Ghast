@@ -72,6 +72,7 @@ impl Aabb {
 /// "default" situation described on each variant and the caller (world / physics crate) must
 /// compute the real shape. The tables never pretend such shapes are static.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ShapeDependency {
     /// The shape is fully determined by the block state.
     None,
@@ -92,6 +93,7 @@ pub enum ShapeDependency {
 /// Family of a neighbour-dependent shape. The world/physics crate implements the vanilla
 /// connection rules per family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NeighbourShape {
     /// Fences: centre post plus arms towards connecting neighbours, 1.5 high.
     Fence,
@@ -156,6 +158,7 @@ fn ordered(a: f64, b: f64) -> (f64, f64) {
 
 /// The collision of one block state.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Collision {
     /// Boxes in block-local coordinates; empty means no collision.
     pub boxes: &'static [Aabb],
@@ -224,6 +227,7 @@ pub enum BoundingBox {
 /// minecraft-data's harvest "material" group: selects the tool speed multipliers
 /// (see the per-version `tool_multiplier`). This is NOT vanilla's `Material` class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DigMaterial {
     /// Pickaxe group.
     Rock,
@@ -314,6 +318,7 @@ impl PhysicsFlags {
 /// Physics properties of a block (vanilla facts that minecraft-data does not carry; maintained in
 /// `codegen/data/src/facts.rs`).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct BlockPhysics {
     /// Ground friction ("slipperiness"), vanilla `float`: default 0.6, ice 0.98, slime 0.8.
     pub slipperiness: f32,
@@ -355,6 +360,7 @@ impl BlockPhysics {
 
 /// Static description of a block (cold data: names, digging, light, drops).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct BlockInfo {
     /// Registry id (1.8: 0..=255, 1.16: 0..763).
     pub id: u16,
@@ -457,6 +463,7 @@ impl Fluid {
 
 /// An item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ItemInfo {
     /// Item id.
     pub id: u16,
@@ -485,6 +492,7 @@ pub enum EntityKind {
 
 /// An entity type.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct EntityInfo {
     /// Network type id (in 1.8 mob and object ids are separate spaces, see [`EntityKind`]).
     pub id: u16,
@@ -532,6 +540,7 @@ impl EntityDimensions {
 
 /// When the vanilla client applies a size variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum VariantApplied {
     /// The size right after the spawn packet (the `"default"` variant).
     Spawn,
@@ -620,6 +629,7 @@ impl VanillaEntitySize {
 
 /// A biome.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct BiomeInfo {
     /// Biome id.
     pub id: u16,
@@ -650,6 +660,7 @@ pub struct EnchantCost {
 
 /// An enchantment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EnchantmentInfo {
     /// Enchantment id (1.8: the NBT `id` short; 1.16: registry id).
     pub id: u16,
@@ -677,6 +688,7 @@ pub struct EnchantmentInfo {
 
 /// A food item.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct FoodInfo {
     /// Item id (resolved by name against this version's item table).
     pub item: u16,
@@ -690,6 +702,7 @@ pub struct FoodInfo {
 
 /// A status effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct EffectInfo {
     /// Effect id.
     pub id: u8,

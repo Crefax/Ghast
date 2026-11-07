@@ -14,8 +14,8 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-inventory"
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5"] }
-ghast-data = { path = "../ghast-data", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 bytes = { workspace = true }
 bytestring = { workspace = true }
 
@@ -25,7 +25,7 @@ proptest = { workspace = true }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
 # examples/live_clicks.rs (lab test tool)
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.3", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "tokio"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "tokio"] }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
 
 [package.metadata.docs.rs]

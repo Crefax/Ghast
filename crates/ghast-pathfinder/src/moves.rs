@@ -20,6 +20,7 @@ pub(crate) const JUMP_MARGIN: f64 = 0.15;
 
 /// How the player is held up in a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum NodeKind {
     /// Standing on a floor (possibly in shallow water or on a ladder's foot).
     Ground,
@@ -31,6 +32,7 @@ pub enum NodeKind {
 
 /// How a step is reached from the previous one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MoveKind {
     /// The first step (where the player starts).
     Start,

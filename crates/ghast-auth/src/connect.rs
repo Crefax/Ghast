@@ -51,6 +51,7 @@ pub enum TargetAddr {
 
 /// Why a target address could not be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum AddrError {
     /// The host part is empty.
     #[error("host is empty")]
@@ -368,6 +369,7 @@ impl fmt::Display for TimeoutStage {
 
 /// Errors from [`Connector::connect`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConnectError {
     /// The policy requires a proxy for this target but none is configured. Nothing was sent.
     #[error("the proxy policy requires a proxy to connect to {0}, but none is configured")]

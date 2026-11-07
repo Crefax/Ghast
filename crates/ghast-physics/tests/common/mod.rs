@@ -298,6 +298,7 @@ pub fn packet_json(p: &Packet) -> Value {
             "name": "position_look", "pos": [jf64(x), jf64(y), jf64(z)],
             "yaw": jf32(yaw), "pitch": jf32(pitch), "on_ground": on_ground,
         }),
+        other => unimplemented!("{other:?}"),
     }
 }
 

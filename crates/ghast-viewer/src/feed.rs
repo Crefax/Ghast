@@ -121,6 +121,7 @@ pub const RAW_ALWAYS_1_8: &[i32] = &[cb::id::GAME_STATE_CHANGE, cb::id::EXPERIEN
 
 /// What a page stream must do besides sending the tick frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Notice {
     /// The bot changed or left the game: drop everything, a snapshot follows.
     Reset,

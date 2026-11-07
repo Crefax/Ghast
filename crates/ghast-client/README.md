@@ -36,7 +36,7 @@ Examples (facade crate): `cargo run -p ghast --release --example afk -- --host �
 | module | what |
 |---|---|
 | `client` | `Client` (config + `run` / `run_until`), connect → handshake → login → play loop |
-| `version` | `ClientVersion` (sealed) for `V1_8` / `V1_16_5`: login and play packet mapping, packet filter, teleport rules, chat limit |
+| `version` | `ClientVersion` (sealed) for `V1_8` / `V1_12_2` / `V1_16_5`: login and play packet mapping, packet filter, teleport rules, chat limit |
 | `common` | version-agnostic `Inbound` / `Outbound` packets and the API types (`Pose`, `Controls`, `ChatMessage`, …) |
 | `engine` | the deterministic core (no I/O, no clock): state, `Behavior`, `TickContext`, the tick |
 | `sim` | per version: the `ghast-world` chunk store + the mover (`ghast-physics` per version); `WorldView` for behaviours |
@@ -248,13 +248,14 @@ with their `flags` byte, the reply the client sent in `ghast_reply` — our velo
 ghast's own `state` and packets. Compare with `oracle/cache/replay_compare.py`. Block changes
 after a column was first seen and explosion pushes are not representable (`ghast_note`).
 
-## API stability (0.2)
+## API stability (0.3)
 
 Types the library fills in and may extend are `#[non_exhaustive]`: the events (`TickEvents`,
 `RawInbound`, `TeleportEvent`), the pose and status types (`Pose`, `Health`, `Abilities`,
 `ChatMessage`, `Teleport`, `JoinGame`), the crosshair results (`BlockHit`, `EntityHit`,
 `RayResult`), and the enums `Inbound`, `Outbound`, `SessionEnd`, `ClientError`, `ClickRefused`,
-`GameVersion`, `Account`, `ForceStepPosition`, ... (match them with a `_` arm). Option structs
+`GameVersion`, `Account`, `ForceStepPosition`, ... (match them with a `_` arm). New Minecraft
+versions arrive as new `GameVersion` variants in patch releases; `GameVersion::ALL` is a slice. Option structs
 are built with methods: `ClientSettings::default().with_view_distance(4)`,
 `WorldConfig::default().with_light(true)`. Plain inputs (`Controls`, `Buttons`, `Vec3`, the
 hands' `BlockQuery` / `HeldItem` / `DigFactors`) stay open structs.

@@ -222,6 +222,7 @@ impl MicrosoftConfig {
 
 /// Which request of the chain failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Stage {
     /// Requesting a device code.
     DeviceCode,
@@ -310,6 +311,7 @@ pub enum JoinRejection {
 
 /// Errors from the Microsoft login chain and the session server.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum MicrosoftError {
     /// Network or TLS error.
     #[error("HTTP error: {0}")]

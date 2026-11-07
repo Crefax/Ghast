@@ -180,6 +180,7 @@ fn classify(f: &Facts<'_>) -> Class {
     } else {
         bottom = 1.0;
     }
+    let mut irregular_solid = false;
     match f.dependency {
         ShapeDependency::None | ShapeDependency::Neighbours(NeighbourShape::Chest) => {}
         ShapeDependency::Neighbours(NeighbourShape::Fence | NeighbourShape::Wall) => {
@@ -196,12 +197,15 @@ fn classify(f: &Facts<'_>) -> Class {
         ShapeDependency::Neighbours(NeighbourShape::Door | NeighbourShape::ChorusPlant)
         | ShapeDependency::EntityContext
         | ShapeDependency::BlockEntity
-        | ShapeDependency::PositionOffset => {
-            flags |= SOLID | IRREGULAR;
-            flags &= !(SUPPORT | THIN);
-            bottom = 0.0;
-            top_any = top_any.max(1.0);
-        }
+        | ShapeDependency::PositionOffset => irregular_solid = true,
+        // A shape kind added for a newer version: an irregular solid until classified here.
+        _ => irregular_solid = true,
+    }
+    if irregular_solid {
+        flags |= SOLID | IRREGULAR;
+        flags &= !(SUPPORT | THIN);
+        bottom = 0.0;
+        top_any = top_any.max(1.0);
     }
     if flags & IRREGULAR != 0 {
         bottom = 0.0;

@@ -32,6 +32,7 @@ impl CachedAccount {
 
 /// Errors from [`TokenCache`].
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CacheError {
     /// Reading or writing the file failed.
     #[error("I/O error on {path}: {source}")]

@@ -26,13 +26,13 @@ pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
 viewer = ["dep:ghast-viewer"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.2.3" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.2.3" }
-ghast-auth = { path = "../ghast-auth", version = "0.2.3" }
-ghast-data = { path = "../ghast-data", version = "0.2.3" }
-ghast-ext = { path = "../ghast-ext", version = "0.2.3", optional = true, default-features = false }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.2.3", optional = true }
-ghast-viewer = { path = "../ghast-viewer", version = "0.2.3", optional = true }
+ghast-client = { path = "../ghast-client", version = "0.3.0" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0" }
+ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
+ghast-data = { path = "../ghast-data", version = "0.3.0" }
+ghast-ext = { path = "../ghast-ext", version = "0.3.0", optional = true, default-features = false }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true }
+ghast-viewer = { path = "../ghast-viewer", version = "0.3.0", optional = true }
 
 [dev-dependencies]
 log = { workspace = true }

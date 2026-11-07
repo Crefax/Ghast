@@ -13,6 +13,7 @@ const CLICK_WAIT: u64 = 100;
 /// What an item helper looks for: a registry name, an item id of the session's version,
 /// or a predicate on the stack.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum ItemMatch {
     /// A registry name (`"diamond_pickaxe"`, `"minecraft:bread"`), resolved per version.
     Name(String),

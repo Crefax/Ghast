@@ -29,7 +29,7 @@ use crate::store::{Config, Entities, Event};
 use crate::v1_8::{remove_effect, set_effect};
 
 /// Spawn, movement, destroy, riding, pickup, status packets, plus `login` / `respawn`.
-pub const CORE_IDS: [i32; 20] = [
+pub const CORE_IDS: &[i32] = &[
     id::LOGIN,
     id::RESPAWN,
     id::NAMED_ENTITY_SPAWN,
@@ -54,13 +54,13 @@ pub const CORE_IDS: [i32; 20] = [
 /// `entity_metadata`. It is also in [`CORE_IDS`]: item entities need their stack for pickup
 /// counts, so with [`Config::metadata`] off it is still read for item entities (and skipped
 /// after the entity id for everything else).
-pub const METADATA_IDS: [i32; 1] = [id::ENTITY_METADATA];
+pub const METADATA_IDS: &[i32] = &[id::ENTITY_METADATA];
 /// `entity_equipment`.
-pub const EQUIPMENT_IDS: [i32; 1] = [id::ENTITY_EQUIPMENT];
+pub const EQUIPMENT_IDS: &[i32] = &[id::ENTITY_EQUIPMENT];
 /// `entity_effect`, `remove_entity_effect`.
-pub const EFFECT_IDS: [i32; 2] = [id::ENTITY_EFFECT, id::REMOVE_ENTITY_EFFECT];
+pub const EFFECT_IDS: &[i32] = &[id::ENTITY_EFFECT, id::REMOVE_ENTITY_EFFECT];
 /// `player_info`.
-pub const PLAYER_LIST_IDS: [i32; 1] = [id::PLAYER_INFO];
+pub const PLAYER_LIST_IDS: &[i32] = &[id::PLAYER_INFO];
 
 /// Registry ids used by the tracker's rules.
 mod ty {
@@ -113,15 +113,15 @@ impl Tracker {
     #[must_use]
     pub fn new(config: Config) -> Self {
         let mut wanted = IdMask::default();
-        wanted.add(&CORE_IDS);
+        wanted.add(CORE_IDS);
         if config.equipment {
-            wanted.add(&EQUIPMENT_IDS);
+            wanted.add(EQUIPMENT_IDS);
         }
         if config.effects {
-            wanted.add(&EFFECT_IDS);
+            wanted.add(EFFECT_IDS);
         }
         if config.player_list {
-            wanted.add(&PLAYER_LIST_IDS);
+            wanted.add(PLAYER_LIST_IDS);
         }
         Tracker {
             store: Entities {

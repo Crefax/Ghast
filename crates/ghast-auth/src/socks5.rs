@@ -154,6 +154,7 @@ impl fmt::Display for Socks5Proxy {
 
 /// Why a proxy URL could not be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ProxyUrlError {
     /// The scheme is not `socks5://` or `socks5h://`.
     #[error("unsupported proxy scheme {0:?} (expected socks5:// or socks5h://)")]
@@ -321,6 +322,7 @@ pub enum BoundAddr {
 
 /// Errors from the SOCKS5 negotiation.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Socks5Error {
     /// The proxy closed the connection in the middle of a reply.
     #[error("proxy closed the connection during the handshake")]

@@ -34,8 +34,9 @@ pub enum GameVersion {
 }
 
 impl GameVersion {
-    /// Every supported version.
-    pub const ALL: [GameVersion; 3] = [
+    /// Every supported version, oldest first. A slice, so that adding a version is not a
+    /// breaking change.
+    pub const ALL: &'static [GameVersion] = &[
         GameVersion::V1_8_9,
         GameVersion::V1_12_2,
         GameVersion::V1_16_5,

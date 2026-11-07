@@ -310,6 +310,7 @@ impl SeekCompactor {
 
 /// Page → replay commands.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum ReplayCmd {
     /// Clock ping (answered with PONG).
     Ping(f64),

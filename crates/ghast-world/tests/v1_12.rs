@@ -192,3 +192,33 @@ fn malformed_sections_unload_the_column() {
     assert!(w.apply_map_chunk(&chunk(1, 0, true, 1, short)).is_err());
     assert!(!w.is_column_loaded(1, 0));
 }
+
+#[test]
+fn biomes_only_full_chunk_is_an_empty_column() {
+    // Ground-up, a non-empty mask, but only the 256 biome bytes (as some servers and protocol
+    // translators send an empty column): an empty loaded column with those biomes, no error.
+    let mut w = World::new(WorldConfig::default());
+    let mut d = BytesMut::new();
+    section(&mut d, 4, Some(&[STONE]), &[0; 4096], 4);
+    d.put_bytes(0, 256);
+    w.apply_map_chunk(&chunk(0, 0, true, 1, d.freeze()))
+        .unwrap();
+    assert_eq!(w.block_state(3, 3, 3).map(BlockState::raw), Some(STONE));
+    let biomes: Vec<u8> = (0..=255u8).collect();
+    assert_eq!(
+        w.apply_map_chunk(&chunk(0, 0, true, 1, Bytes::from(biomes.clone()))),
+        Ok(Applied::Changed)
+    );
+    assert!(w.is_column_loaded(0, 0));
+    assert_eq!(w.block_state(3, 3, 3), Some(BlockState::AIR));
+    assert!(matches!(
+        w.column(0, 0).unwrap().biomes(),
+        ghast_world::Biomes::Legacy(b) if b[..] == biomes[..]
+    ));
+    // A partial chunk of the same bytes is still malformed (the column is unloaded).
+    assert!(
+        w.apply_map_chunk(&chunk(0, 0, false, 1, Bytes::from(biomes)))
+            .is_err()
+    );
+    assert!(!w.is_column_loaded(0, 0));
+}

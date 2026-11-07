@@ -213,29 +213,59 @@ fn load_unload_partial() {
 }
 
 #[test]
-fn truncated_ground_up_keeps_an_empty_column() {
-    // Seen on a real server (End auth lobby): ground-up, mask 1, only the 256 biome bytes.
+fn biomes_only_ground_up_loads_an_empty_column() {
+    // Seen on a real server (End auth lobby): ground-up, mask 1, only the 256 biome bytes. No
+    // section fits in 256 bytes, so this is an empty column: loaded (as in vanilla, which
+    // creates it before `fillChunk` fails), no blocks, the biomes kept, and no error.
     let mut w = World::new(WorldConfig::default());
     w.apply_login(&login(1));
     let biomes: Vec<u8> = (0..=255u8).map(|i| i.wrapping_mul(7)).collect();
-    let r = w.apply_map_chunk(&map_chunk(0, 0, true, 1, biomes.clone()));
-    assert!(matches!(r, Err(WorldError::Truncated { .. })), "{r:?}");
-    assert!(
-        w.is_column_loaded(0, 0),
-        "vanilla has already created the column"
+    // A column with blocks first: the biomes-only chunk replaces it.
+    let mut secs: [Option<LegacySection>; 16] = Default::default();
+    secs[0] = Some(section(&mut Rng(5), 0));
+    let (m, d) = encode_1_8(&secs, false, Some(&[0; 256]));
+    w.apply_map_chunk(&map_chunk(0, 0, true, m, d)).unwrap();
+    assert_eq!(
+        w.apply_map_chunk(&map_chunk(0, 0, true, 1, biomes.clone())),
+        Ok(Applied::Changed)
     );
-    // The first 128 blocks of section 0 come from the bytes (as vanilla reads them), the rest is air.
+    assert!(w.is_column_loaded(0, 0));
     for i in 0..4096usize {
         let (x, y, z) = ((i & 15) as i32, (i >> 8) as i32, ((i >> 4) & 15) as i32);
-        let expect = if i < 128 {
-            BlockState::from_raw_vanilla(u16::from_le_bytes([biomes[2 * i], biomes[2 * i + 1]]))
-        } else {
-            BlockState::AIR
-        };
-        assert_eq!(w.block_state(x, y, z), Some(expect), "index {i}");
+        assert_eq!(w.block_state(x, y, z), Some(BlockState::AIR), "index {i}");
     }
     assert_eq!(w.block_state(0, 100, 0), Some(BlockState::AIR));
-    assert!(matches!(w.column(0, 0).unwrap().biomes(), Biomes::None));
+    assert!(matches!(w.column(0, 0).unwrap().biomes(), Biomes::Legacy(b) if b[..] == biomes[..]));
+    // Any mask, any dimension; a column not loaded before.
+    for (dim, mask) in [(0, 0xFFFF), (-1, 0x8001)] {
+        w.apply_login(&login(dim));
+        assert_eq!(
+            w.apply_map_chunk(&map_chunk(3, -2, true, mask, biomes.clone())),
+            Ok(Applied::Changed)
+        );
+        assert_eq!(w.block_state(48, 0, -32), Some(BlockState::AIR));
+    }
+    // One byte more is a real truncation again: an error, and the column kept the way vanilla
+    // keeps it (the first 128 states copied from the bytes).
+    let mut longer = biomes.clone();
+    longer.push(0);
+    assert!(matches!(
+        w.apply_map_chunk(&map_chunk(0, 0, true, 1, longer.clone())),
+        Err(WorldError::Truncated { .. })
+    ));
+    assert!(w.is_column_loaded(0, 0));
+    assert_eq!(
+        w.block_state(1, 0, 0),
+        Some(BlockState::from_raw_vanilla(u16::from_le_bytes([
+            longer[2], longer[3]
+        ])))
+    );
+    assert_eq!(w.block_state(0, 0, 8), Some(BlockState::AIR));
+    // A partial chunk of 256 bytes is still a truncated update of a loaded column.
+    assert!(
+        w.apply_map_chunk(&map_chunk(0, 0, false, 1, biomes))
+            .is_err()
+    );
 }
 
 /// Dense model of vanilla 1.8 `Chunk.fillChunk` block copying on short data.
@@ -286,7 +316,11 @@ fn truncated_chunks_match_vanilla_model() {
             continue;
         }
         let ground_up = round % 2 == 0;
-        let cut = rng.below(mask.count_ones() as u64 * 8192) as usize;
+        let mut cut = rng.below(mask.count_ones() as u64 * 8192) as usize;
+        if ground_up && cut == 256 {
+            // Exactly the biome bytes: an empty column, see the test above.
+            cut += 1;
+        }
         let short = &data[..cut];
         let r = w.apply_map_chunk(&map_chunk(0, 0, ground_up, mask, short.to_vec()));
         assert!(r.is_err());

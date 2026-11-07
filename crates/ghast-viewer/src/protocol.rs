@@ -534,6 +534,7 @@ pub struct SignText {
 
 /// Other tile entities the page draws (chunk-local position).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TileKind {
     /// Skull type (0 skeleton, 1 wither, 2 zombie, 3 player, 4 creeper), floor rotation 0..15 and
     /// a player skull's served skin path ('' = Steve).

@@ -94,6 +94,7 @@ impl Default for Config {
 
 /// A change notification (only queued with [`Config::events`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Event {
     /// A new entity (or a replacement for an existing id).
     Spawned(i32),

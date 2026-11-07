@@ -107,7 +107,7 @@ impl ClientVersion for V1_8 {
             .with(cb::id::REMOVE_ENTITY_EFFECT)
             .with(cb::id::EXPLOSION);
         // The world: chunks, block changes, border (physics and the loaded-column check).
-        for id in ghast_world::v1_8::PACKET_IDS {
+        for &id in ghast_world::v1_8::PACKET_IDS {
             f.insert(id);
         }
         if interests.contains(Interests::CHAT) {

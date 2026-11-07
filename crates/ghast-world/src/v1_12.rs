@@ -43,7 +43,7 @@ const LIGHT_BYTES: usize = 2048;
 const BIOME_BYTES: usize = 256;
 
 /// Clientbound play packet ids this world consumes (for a `PacketFilter`).
-pub const PACKET_IDS: [i32; 8] = [
+pub const PACKET_IDS: &[i32] = &[
     cb::id::LOGIN,
     cb::id::RESPAWN,
     cb::id::MAP_CHUNK,
@@ -56,7 +56,7 @@ pub const PACKET_IDS: [i32; 8] = [
 
 /// Extra packet ids with [`WorldConfig::block_entities`] (chunk block entities come with
 /// `map_chunk`).
-pub const BLOCK_ENTITY_IDS: [i32; 1] = [cb::id::TILE_ENTITY_DATA];
+pub const BLOCK_ENTITY_IDS: &[i32] = &[cb::id::TILE_ENTITY_DATA];
 
 /// Same block id (any meta): the condition under which vanilla keeps a block entity.
 fn same_block(a: u16, b: u16) -> bool {
@@ -195,11 +195,11 @@ impl World {
     /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
     pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
         let extra: &'static [i32] = if self.config.block_entities {
-            &BLOCK_ENTITY_IDS
+            BLOCK_ENTITY_IDS
         } else {
             &[]
         };
-        PACKET_IDS.into_iter().chain(extra.iter().copied())
+        PACKET_IDS.iter().chain(extra).copied()
     }
 
     /// Join game: vanilla creates a new client world, so everything is unloaded.
@@ -230,7 +230,8 @@ impl World {
     /// `map_chunk`. A ground-up chunk replaces the column (sections outside the mask become
     /// air); a partial chunk replaces only the masked sections of a loaded column and is ignored
     /// for an unloaded one (vanilla writes it into the shared empty chunk, which always reads as
-    /// air).
+    /// air). A ground-up chunk whose data is only the 256 biome bytes loads an empty column
+    /// whatever its mask says.
     ///
     /// # Errors
     /// Malformed section data (the column is unloaded).
@@ -299,6 +300,14 @@ impl World {
         if !full && !self.columns.contains(x, z) {
             return Ok(Applied::Ignored);
         }
+        // A ground-up chunk that is only the 256 biome bytes (no section can be that short) is
+        // an empty column whatever its mask says, as on 1.8 (some servers and protocol
+        // translators send empty columns that way).
+        let mask = if full && data.len() == BIOME_BYTES {
+            0
+        } else {
+            mask
+        };
         let has_sky = self.dimension == 0;
         let d = match decode(
             &mut self.builder,

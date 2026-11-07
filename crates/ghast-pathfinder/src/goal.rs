@@ -2,6 +2,7 @@
 
 /// A path goal. Positions are feet blocks (the block the player's feet are in).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Goal {
     /// Stand with the feet in this block.
     Block([i32; 3]),

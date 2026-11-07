@@ -77,6 +77,7 @@ impl fmt::Debug for SharedSecret {
 
 /// Errors from the login crypto.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CryptoError {
     /// The server's public key is not a valid DER `SubjectPublicKeyInfo` RSA key.
     #[error("invalid server public key: {0}")]

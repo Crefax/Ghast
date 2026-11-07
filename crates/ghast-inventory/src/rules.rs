@@ -11,6 +11,7 @@ use crate::stack::Stack;
 
 /// Protocol version of the connection; selects the vanilla rules being reproduced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Version {
     /// 1.8 – 1.8.9 (protocol 47).
     V1_8,

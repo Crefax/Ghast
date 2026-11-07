@@ -482,6 +482,8 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
             }
             _ => false,
         },
+        // A class added for a newer version: not targetable until it is classified here.
+        _ => false,
     }
 }
 
@@ -2419,7 +2421,7 @@ mod tests {
     #[test]
     fn block_updates_per_version() {
         use ghast_protocol::BlockPos;
-        for v in GameVersion::ALL {
+        for &v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             e.sim.collect_block_updates(true);
@@ -2522,7 +2524,7 @@ mod tests {
     /// `set_flying` sends the abilities packet before the move, only when allowed and changed.
     #[test]
     fn set_flying_needs_may_fly() {
-        for v in GameVersion::ALL {
+        for &v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();
@@ -2831,7 +2833,7 @@ mod tests {
     /// resolved pose.
     #[test]
     fn teleport_event_has_the_sent_pose_before() {
-        for v in GameVersion::ALL {
+        for &v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();
@@ -2871,7 +2873,7 @@ mod tests {
     /// buttons are up.
     #[test]
     fn closed_window_frees_the_buttons() {
-        for v in GameVersion::ALL {
+        for &v in GameVersion::ALL {
             let mut e = engine(v);
             join(&mut e);
             let t0 = Instant::now();

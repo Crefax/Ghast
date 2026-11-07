@@ -34,7 +34,7 @@ const STATE_SPACE: usize = 4096;
 const _: () = assert!(BLOCK_COUNT * 16 <= STATE_SPACE);
 
 /// Clientbound play packet ids this world consumes (for a `PacketFilter`).
-pub const PACKET_IDS: [i32; 8] = [
+pub const PACKET_IDS: &[i32] = &[
     cb::id::LOGIN,
     cb::id::RESPAWN,
     cb::id::MAP_CHUNK,
@@ -46,7 +46,7 @@ pub const PACKET_IDS: [i32; 8] = [
 ];
 
 /// Extra packet ids with [`WorldConfig::block_entities`].
-pub const BLOCK_ENTITY_IDS: [i32; 2] = [cb::id::UPDATE_SIGN, cb::id::TILE_ENTITY_DATA];
+pub const BLOCK_ENTITY_IDS: &[i32] = &[cb::id::UPDATE_SIGN, cb::id::TILE_ENTITY_DATA];
 
 /// Same block type (1.8: same block id, any meta), the condition under which vanilla keeps a
 /// block entity across a block change.
@@ -198,11 +198,11 @@ impl World {
     /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
     pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
         let extra: &'static [i32] = if self.config.block_entities {
-            &BLOCK_ENTITY_IDS
+            BLOCK_ENTITY_IDS
         } else {
             &[]
         };
-        PACKET_IDS.into_iter().chain(extra.iter().copied())
+        PACKET_IDS.iter().chain(extra).copied()
     }
 
     /// The block entity at a position (`None` when absent or the column is not loaded).
@@ -256,7 +256,8 @@ impl World {
 
     /// `map_chunk`: ground-up with an empty mask unloads the column; ground-up otherwise replaces
     /// it; a partial chunk replaces the masked sections of a loaded column and is ignored for an
-    /// unloaded one.
+    /// unloaded one. A ground-up chunk whose data is only the 256 biome bytes loads an empty
+    /// column whatever its mask says (a server-side encoding of an empty column).
     ///
     /// # Errors
     /// Data too short for the mask. The error is returned after the column has been left the
@@ -291,6 +292,17 @@ impl World {
         if !ground_up && !self.columns.contains(x, z) {
             return Ok(Applied::Ignored);
         }
+        // Some servers send an empty column as ground-up with section 0 in the mask but only
+        // the 256 biome bytes (no section can be that short). Vanilla creates the column and
+        // then fails inside `fillChunk` after 128 block states read from the biome bytes; the
+        // column the server means (and judges movement against) is empty. Load it empty: a
+        // deliberate difference from vanilla, whose 128 states are client-side garbage from an
+        // exception path that the server never has.
+        let mask = if ground_up && data.len() == BIOME_BYTES {
+            0
+        } else {
+            mask
+        };
         let has_sky = self.dimension == 0;
         match decode(
             &mut self.builder,

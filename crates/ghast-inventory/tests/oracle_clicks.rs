@@ -42,6 +42,7 @@ fn stack(v: Version, h: &Value) -> Option<Stack> {
             from_legacy_slot(decode_exact::<legacy::Slot>(&b).unwrap())
         }
         Version::V1_16_5 => from_modern_slot(decode_exact::<modern::Slot>(&b).unwrap()),
+        other => unimplemented!("{other:?}"),
     }
 }
 
@@ -239,6 +240,7 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
                             from_modern_slot(w.item),
                         )
                     }
+                    other => unimplemented!("{other:?}"),
                 };
                 let fields_ok = (vslot, vbutton, vaction, vmode)
                     == (p.slot, p.button as i8, p.action, p.mode as i8)

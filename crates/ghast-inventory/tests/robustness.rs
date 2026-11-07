@@ -105,6 +105,7 @@ fn max_count(v: Version, id: i32) -> i32 {
         Version::V1_16_5 => id
             .and_then(ghast_data::v1_16_5::Item::from_id)
             .map(|i| i.info().stack_size),
+        other => unimplemented!("{other:?}"),
     };
     i32::from(n.unwrap_or(64))
 }

@@ -119,7 +119,7 @@ impl ClientVersion for V1_16_5 {
             .with(cb::id::ENTITY_VELOCITY);
         // The world: chunks, view window, block changes, border (the 1.16 client player does
         // not tick outside a loaded column).
-        for id in ghast_world::v1_16_5::PACKET_IDS {
+        for &id in ghast_world::v1_16_5::PACKET_IDS {
             f.insert(id);
         }
         if interests.contains(Interests::CHAT) {

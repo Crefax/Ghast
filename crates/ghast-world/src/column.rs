@@ -41,6 +41,7 @@ impl ChunkPos {
 
 /// Biome data of a column as the server sent it.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub enum Biomes {
     /// Not received (partial chunk only so far) or not kept ([`crate::WorldConfig::biomes`]).
     #[default]
@@ -80,6 +81,7 @@ pub struct Column {
 
 /// A block entity's data as the server sent it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BlockEntity {
     /// Raw NBT compound (a private copy, never a view into a packet buffer). `action` is the
     /// `tile_entity_data` action (1.8: 1 spawner, 2 command block, 3 beacon, 4 skull, 5 flower

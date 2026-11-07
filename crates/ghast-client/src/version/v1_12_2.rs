@@ -108,7 +108,7 @@ impl ClientVersion for V1_12_2 {
             .with(cb::id::ENTITY_VELOCITY);
         // The world: chunks, block changes, border (a 1.9+ client player is not ticked until
         // its column has arrived).
-        for id in ghast_world::v1_12::PACKET_IDS {
+        for &id in ghast_world::v1_12::PACKET_IDS {
             f.insert(id);
         }
         if interests.contains(Interests::CHAT) {

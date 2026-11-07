@@ -6,7 +6,59 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## Unreleased
+## 0.3.0 — 2026-11-07
+
+Minecraft 1.12.2 is the third supported version (the same bot runs on 1.8.9, 1.12.2 and
+1.16.5), the path finder jumps gaps and solves mazes, and the public enums and tables that grow
+with every Minecraft version are now open-ended, so that future versions (1.9 – 1.12.1, 1.13+,
+1.21.x, ...) can be added in patch releases without breaking anyone.
+
+### Breaking changes / migration
+
+- **`#[non_exhaustive]` enums.** A `match` on one of these outside its crate needs a `_ =>`
+  arm (building values is unchanged):
+  - versions and protocol: `ghast_inventory::Version`, `ghast_protocol::State` (1.20.2 adds a
+    configuration state); `GameVersion` and `ghast_pathfinder::Version` already were;
+  - block shapes and data: `ghast_data::{ShapeDependency, NeighbourShape, DigMaterial,
+    VariantApplied}`;
+  - world: `ghast_world::{Biomes, BlockEntity, WorldError}`;
+  - physics: `ghast_physics::Packet` (newer versions send movement input differently);
+  - entities: `ghast_entity::{EntityType, EntityClass, MetaValue, Event}`;
+  - inventory: `ghast_inventory::{SlotKind, ClickError, Outgoing}`;
+  - path finding: `ghast_pathfinder::{Goal, MoveKind, NodeKind}`;
+  - ext: `ghast_ext::{BlockMatch, ItemMatch}`;
+  - viewer: `ghast_viewer::{tiles::Entry, protocol::TileKind, feed::Notice, replay::ReplayCmd}`;
+  - auth errors: `ghast_auth::{AddrError, ConnectError, CryptoError, ProxyUrlError,
+    Socks5Error}`, `ghast_auth::microsoft::{Stage, MicrosoftError, CacheError}`.
+- **`#[non_exhaustive]` data records** (read their fields as before; they cannot be built with a
+  struct literal or destructured without `..` outside `ghast-data`): `ghast_data::{BlockInfo,
+  BlockPhysics, Collision, ItemInfo, EntityInfo, BiomeInfo, EnchantmentInfo, FoodInfo,
+  EffectInfo}`.
+- **New variants**: `GameVersion::V1_12_2`, `ghast_inventory::Version::V1_12`,
+  `ghast_pathfinder::Version::V1_12`, `ghast_data::NeighbourShape::ChorusPlant`. The version
+  enums are ordered oldest first, so `V1_16_5 as isize` changed; do not rely on such casts.
+- **`GameVersion::ALL` is a slice** (`&'static [GameVersion]`, was `[GameVersion; 2]`):
+  `for v in GameVersion::ALL` becomes `for &v in GameVersion::ALL`; `.iter()`, `.len()` and
+  `.contains(..)` work as before. Its length changes with every added version.
+- **Packet id lists are slices** (`&'static [i32]`, were fixed-size arrays):
+  `ghast_world::v1_*::{PACKET_IDS, BLOCK_ENTITY_IDS}`, `ghast_entity::v1_*::{CORE_IDS,
+  METADATA_IDS, EQUIPMENT_IDS, EFFECT_IDS, PLAYER_LIST_IDS}`. `filter.add(&CORE_IDS)` becomes
+  `filter.add(CORE_IDS)`, `for id in PACKET_IDS` becomes `for &id in PACKET_IDS`.
+- Behaviour: `GameVersion::V1_12_2` now plans with the 1.12 rules in `ghast-pathfinder` (it used
+  1.16.5 blocks and physics); a search out of nodes now returns a partial path instead of
+  `PlanError::NoPath` (see `Search::exhausted`).
+
+### ghast-world
+- 1.8: a ground-up `map_chunk` whose data is only the 256 biome bytes (sent by some servers
+  for an empty column, with section 0 still in the mask) loads an empty column with those
+  biomes, without an error. It used to replay vanilla's failing `fillChunk` (128 block states
+  read from the biome bytes, `WorldError::Truncated`, a warning in the client log); dropping
+  those client-side garbage states is a deliberate difference from vanilla, the server never
+  has them. Real truncations stay errors with vanilla's column-kept semantics. 1.12.2 (256
+  biome bytes) and 1.16.5 (no section data) handle the equivalent packet the same way. A
+  ground-up chunk with an empty mask still unloads the column on 1.8.
+- The client's "bad world packet" warning no longer claims the column was unloaded (1.8 keeps
+  what vanilla keeps).
 
 ### Minecraft 1.12.2 (protocol 340)
 A third supported version, end to end: the same bot runs unchanged on 1.8.9, 1.12.2 and 1.16.5
@@ -37,9 +89,6 @@ A third supported version, end to end: the same bot runs unchanged on 1.8.9, 1.1
 - **oracle**: `MC=1.12.2 oracle/run.sh …` (vanilla 1.12.2 + Legacy Yarn 1.12.2+build.604,
   fetched at run time), golden vectors in `tests/golden/1.12.2/`.
 - **lab**: `lab/start.sh 1.12` (Paper 1.12.2 build 1620 + GrimAC 2.3.73, Java 17, port 25612).
-
-Breaking for code that matches exhaustively: `ghast_inventory::Version` and
-`ghast_data::NeighbourShape` gained variants, and `GameVersion::ALL` is now `[GameVersion; 3]`.
 
 ### ghast-pathfinder
 - 1.12.2: `Version::V1_12` (`GameVersion::V1_12_2` maps to it; it used to plan with 1.16.5

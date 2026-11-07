@@ -143,6 +143,7 @@ impl Block {
 }
 
 /// What [`Bot::find_blocks`] looks for: a name, several names, or a predicate.
+#[non_exhaustive]
 pub enum BlockMatch {
     /// One registry name (`"diamond_ore"`, `"minecraft:chest"`).
     Name(String),

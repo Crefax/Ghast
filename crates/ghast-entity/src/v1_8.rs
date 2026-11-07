@@ -27,7 +27,7 @@ use crate::store::{Config, Entities, Event};
 
 /// Spawn, movement, destroy, riding, pickup, status packets (always needed for tracking),
 /// plus `login` / `respawn` (world changes).
-pub const CORE_IDS: [i32; 19] = [
+pub const CORE_IDS: &[i32] = &[
     id::LOGIN,
     id::RESPAWN,
     id::NAMED_ENTITY_SPAWN,
@@ -49,13 +49,13 @@ pub const CORE_IDS: [i32; 19] = [
     id::SPAWN_ENTITY_WEATHER,
 ];
 /// `entity_metadata`.
-pub const METADATA_IDS: [i32; 1] = [id::ENTITY_METADATA];
+pub const METADATA_IDS: &[i32] = &[id::ENTITY_METADATA];
 /// `entity_equipment`.
-pub const EQUIPMENT_IDS: [i32; 1] = [id::ENTITY_EQUIPMENT];
+pub const EQUIPMENT_IDS: &[i32] = &[id::ENTITY_EQUIPMENT];
 /// `entity_effect`, `remove_entity_effect`.
-pub const EFFECT_IDS: [i32; 2] = [id::ENTITY_EFFECT, id::REMOVE_ENTITY_EFFECT];
+pub const EFFECT_IDS: &[i32] = &[id::ENTITY_EFFECT, id::REMOVE_ENTITY_EFFECT];
 /// `player_info`.
-pub const PLAYER_LIST_IDS: [i32; 1] = [id::PLAYER_INFO];
+pub const PLAYER_LIST_IDS: &[i32] = &[id::PLAYER_INFO];
 
 /// 1.8 metadata indices.
 pub mod meta {
@@ -94,18 +94,18 @@ impl Tracker {
     #[must_use]
     pub fn new(config: Config) -> Self {
         let mut wanted = IdMask::default();
-        wanted.add(&CORE_IDS);
+        wanted.add(CORE_IDS);
         if config.metadata {
-            wanted.add(&METADATA_IDS);
+            wanted.add(METADATA_IDS);
         }
         if config.equipment {
-            wanted.add(&EQUIPMENT_IDS);
+            wanted.add(EQUIPMENT_IDS);
         }
         if config.effects {
-            wanted.add(&EFFECT_IDS);
+            wanted.add(EFFECT_IDS);
         }
         if config.player_list {
-            wanted.add(&PLAYER_LIST_IDS);
+            wanted.add(PLAYER_LIST_IDS);
         }
         Tracker {
             store: Entities::new(config),

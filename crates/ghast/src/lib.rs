@@ -18,6 +18,18 @@
 //! ```text
 //! cargo run -p ghast --example afk -- --host localhost --port 25565 --username Bot --version 1.8.9
 //! ```
+//!
+//! ## Features
+//!
+//! Every supported Minecraft version is always compiled in; the version is picked at run time
+//! with [`GameVersion`] (`#[non_exhaustive]`: new versions arrive in patch releases). The
+//! default build has no optional features:
+//!
+//! - `microsoft`: online-mode servers (Microsoft account login, session-server join; pulls in an
+//!   HTTPS client).
+//! - `ext`: `ghast::ext`, sequential async helpers.
+//! - `pathfinder`: `ghast::pathfinder`; with `ext` also `Bot::goto` / `Bot::follow_path`.
+//! - `viewer`: `ghast::viewer`, the bot screen in the browser.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, unnameable_types)]

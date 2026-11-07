@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 /// What kind of entity this is, in the id space of the packet that spawned it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum EntityType {
     /// A player (`named_entity_spawn`).
     Player,
@@ -25,6 +26,7 @@ pub enum EntityType {
 
 /// Version-independent classification of an entity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum EntityClass {
     /// A player.
     Player,
@@ -73,6 +75,7 @@ pub struct Effect {
 /// One entity metadata value (union of the 1.8, 1.12.2 and 1.16.5 serializer types; variants
 /// marked 1.16 also occur in 1.12 where 1.12 has that serializer).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum MetaValue {
     /// Byte.
     Byte(i8),

@@ -10,7 +10,7 @@ A headless Minecraft: Java Edition client / bot library in Rust.
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
   thread and a few MB of memory.
 
-Status: early (0.2, on crates.io). APIs will still change; see CONTRIBUTING.md for the versioning policy.
+Status: early (0.3, on crates.io). APIs will still change; see CONTRIBUTING.md for the versioning policy.
 
 ## Numbers
 
@@ -19,7 +19,7 @@ Status: early (0.2, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | AFK bot on a Raspberry Pi 5, 300 s, side by side with a mineflayer 4.39 / Node 22 AFK bot on the same 1.8 server | **0.33 %** of one core, **4.1 MB** RSS, 1 thread | mineflayer: 2.19 %, 120 MB RSS, 7 threads |
 | Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 9.32 million ticks | positions, velocities, flags and packets compared by their bits |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |
-| Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of both versions round-trips |
+| Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
 
 All measurements are dated and described with their method in the crate READMEs and
@@ -91,7 +91,7 @@ planned paths with the async helpers).
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified |
 | entities: tracking, crosshair, attack / interact | yes | yes | yes |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes |
-| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | not yet | simulation-tested |
+| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested |
 | bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet |
 | movement recording / trace replay (`Client::record`) | yes | not yet | yes |
 

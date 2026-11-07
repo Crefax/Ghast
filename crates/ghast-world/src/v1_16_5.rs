@@ -34,7 +34,7 @@ use crate::{Applied, ChunkPos, WorldConfig, WorldError};
 pub const GLOBAL_BITS: u32 = usize::BITS - (STATE_COUNT - 1).leading_zeros();
 
 /// Clientbound play packet ids this world consumes (for a `PacketFilter`).
-pub const PACKET_IDS: [i32; 10] = [
+pub const PACKET_IDS: &[i32] = &[
     cb::id::LOGIN,
     cb::id::RESPAWN,
     cb::id::MAP_CHUNK,
@@ -49,7 +49,7 @@ pub const PACKET_IDS: [i32; 10] = [
 
 /// Extra packet ids with [`WorldConfig::block_entities`] (chunk block entities come with
 /// `map_chunk`).
-pub const BLOCK_ENTITY_IDS: [i32; 1] = [cb::id::TILE_ENTITY_DATA];
+pub const BLOCK_ENTITY_IDS: &[i32] = &[cb::id::TILE_ENTITY_DATA];
 
 /// Same block type (the condition under which vanilla keeps a block entity).
 fn same_block(a: u16, b: u16) -> bool {
@@ -297,7 +297,8 @@ impl World {
 
     /// `map_chunk`. Ignored outside the view window (once the window is known) and, for a
     /// partial chunk, when the column is not loaded. A full chunk replaces the column (sections
-    /// outside the mask become air); a partial chunk replaces only the masked sections.
+    /// outside the mask become air); a partial chunk replaces only the masked sections. A full
+    /// chunk without section data loads an empty column whatever its mask says.
     ///
     /// # Errors
     /// Malformed section data (the column is unloaded).
@@ -365,11 +366,11 @@ impl World {
     /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
     pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
         let extra: &'static [i32] = if self.config.block_entities {
-            &BLOCK_ENTITY_IDS
+            BLOCK_ENTITY_IDS
         } else {
             &[]
         };
-        PACKET_IDS.into_iter().chain(extra.iter().copied())
+        PACKET_IDS.iter().chain(extra).copied()
     }
 
     /// [`World::apply_map_chunk`] without the packet struct.
@@ -391,6 +392,9 @@ impl World {
         if !full && !self.columns.contains(x, z) {
             return Ok(Applied::Ignored);
         }
+        // A ground-up chunk without any section data is an empty column whatever its mask says
+        // (no section is 0 bytes long), as on 1.8 and 1.12.
+        let mask = if full && data.is_empty() { 0 } else { mask };
         let mut sections: [Option<crate::Section>; SECTIONS] = Default::default();
         if let Err(e) = decode_sections(&mut self.builder, x, z, mask, data, &mut sections) {
             self.columns.remove(x, z);

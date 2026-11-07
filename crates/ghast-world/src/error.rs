@@ -2,8 +2,10 @@ use thiserror::Error;
 
 use crate::ChunkPos;
 
-/// Malformed world data from the server. The affected column has been unloaded.
+/// Malformed world data from the server. 1.8 leaves the column the way vanilla does (see
+/// `v1_8::World::apply_chunk_data`); 1.12 and 1.16 unload it.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum WorldError {
     /// Chunk data is shorter than its section mask requires.
     #[error("chunk {pos:?}: data too short ({len} bytes, need {need})")]

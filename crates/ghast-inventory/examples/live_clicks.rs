@@ -444,6 +444,7 @@ async fn main() -> Res<()> {
         Version::V1_8 => v18::run(&mut r, &mut w, &mut d, port, &user).await?,
         Version::V1_12 => v12::run(&mut r, &mut w, &mut d, port, &user).await?,
         Version::V1_16_5 => v16::run(&mut r, &mut w, &mut d, port, &user).await?,
+        other => return Err(format!("no live driver for {other:?}").into()),
     }
     println!(
         "clicks sent {}, accepted {}, failures {}",

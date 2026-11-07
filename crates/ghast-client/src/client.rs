@@ -545,7 +545,7 @@ where
         let n = self.world_errors;
         if n <= 3 || n.is_power_of_two() {
             log::warn!(
-                "[{}] bad world packet 0x{:02x} ({} bytes), column unloaded: {e} ({n} so far)",
+                "[{}] bad world packet 0x{:02x} ({} bytes): {e} ({n} so far)",
                 self.engine.name(),
                 raw.id,
                 raw.body.len()

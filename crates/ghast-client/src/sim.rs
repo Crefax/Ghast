@@ -863,7 +863,7 @@ fn push_packets(packets: &ghast_physics::Packets, entity_id: i32, out: &mut Vec<
     for p in packets {
         use ghast_physics::Packet as P;
         let action = |action| Outbound::EntityAction { entity_id, action };
-        out.push(match *p {
+        let wire = match *p {
             P::StartSneaking => action(EntityAction::StartSneaking),
             P::StopSneaking => action(EntityAction::StopSneaking),
             P::StartSprinting => action(EntityAction::StartSprinting),
@@ -900,7 +900,13 @@ fn push_packets(packets: &ghast_physics::Packets, entity_id: i32, out: &mut Vec<
                 pitch,
                 on_ground,
             }),
-        });
+            // The physics of the versions this client speaks emits only the packets above.
+            _ => {
+                debug_assert!(false, "physics packet without a wire form: {p:?}");
+                continue;
+            }
+        };
+        out.push(wire);
     }
 }
 

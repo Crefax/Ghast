@@ -9,6 +9,7 @@ use ghast_world::{BlockEntity, Column};
 
 /// One block entity as the page needs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Entry {
     Sign([String; 4]),
     /// Skull type, floor rotation and a player skull's skin URL.

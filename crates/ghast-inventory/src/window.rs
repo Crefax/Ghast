@@ -54,6 +54,7 @@ pub enum WindowKind {
 
 /// What a slot of a screen handler is, as far as click prediction is concerned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SlotKind {
     /// Plain slot: takes any item, up to 64.
     Normal,

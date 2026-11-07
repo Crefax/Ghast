@@ -566,3 +566,20 @@ fn block_entities_from_chunks_and_updates() {
     off.handle(&chunk(true, vec![nbt(17, 70, 2)])).unwrap();
     assert_eq!(off.column(1, 0).unwrap().block_entities().count(), 0);
 }
+
+#[test]
+fn full_chunk_without_section_data_is_an_empty_column() {
+    // A full chunk with a non-empty mask but no section data: an empty loaded column, no error.
+    let mut w = stone_world(&[(0, 0)]);
+    assert_eq!(w.block_state(1, 70, 1), st(STONE));
+    let biomes: Vec<i32> = vec![3; 1024];
+    assert_eq!(
+        w.apply_chunk_data(0, 0, true, 1 << 4, Some(&biomes), &[]),
+        Ok(Applied::Changed)
+    );
+    assert!(w.is_column_loaded(0, 0));
+    assert_eq!(w.block_state(1, 70, 1), st(0));
+    assert!(matches!(w.column(0, 0).unwrap().biomes(), Biomes::Cells(b) if b[0] == 3));
+    // A partial chunk without data for its mask is still malformed.
+    assert!(w.apply_chunk_data(0, 0, false, 1 << 4, None, &[]).is_err());
+}

@@ -7,6 +7,7 @@ use crate::error::DecodeError;
 
 /// Connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum State {
     /// The first packet of every connection.
     Handshaking,

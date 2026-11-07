@@ -139,6 +139,8 @@ pub fn kind_of(e: &Entity) -> u8 {
         EntityClass::Mob => kind::MOB,
         EntityClass::Object => kind::OBJECT,
         EntityClass::Painting => kind::OTHER,
+        // Classes added for newer versions: drawn as a plain box.
+        _ => kind::OTHER,
     }
 }
 

@@ -81,6 +81,7 @@ impl Default for Abilities {
 
 /// A movement-related packet the client sends, in the order the tick produced it.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Packet {
     /// Entity action "start sneaking".
     StartSneaking,
