@@ -596,6 +596,9 @@ pub const V1_16_5_ORACLE_SHAPES: &str = "tests/golden/1.16.5/collision_shapes.js
 /// 1.16.5 oracle voxel dump (VoxelShape grids, per-state material / solidity facts, tags).
 pub const V1_16_5_ORACLE_VOXELS: &str = "tests/golden/1.16.5/voxel_shapes.jsonl.gz";
 
+/// Oracle crosshair shape dump for 1.16.5 (outline / raycast shapes per state).
+pub const V1_16_5_ORACLE_SELECTION: &str = "tests/golden/1.16.5/selection_shapes.jsonl.gz";
+
 /// 1.8.9 oracle selection dump (ray-test bounds, canCollide flags).
 pub const V1_8_ORACLE_SELECTION: &str = "tests/golden/1.8.9/selection_boxes.jsonl.gz";
 

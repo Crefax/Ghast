@@ -161,7 +161,15 @@ pub fn blocks(v: &Value) -> R<Vec<Block>> {
             let values: Vec<String> = match s(st, "type")?.as_str() {
                 // Vanilla BooleanProperty order is [true, false].
                 "bool" => vec!["true".into(), "false".into()],
-                "int" => (0..n).map(|i| i.to_string()).collect(),
+                // minecraft-data lists int values where they do not start at 0 (leaves'
+                // distance 1..=7, turtle eggs 1..=4); older files may omit them.
+                "int" => match st.get("values").and_then(Value::as_array) {
+                    Some(v) => v
+                        .iter()
+                        .map(|x| x.as_str().map(str::to_owned).ok_or("int value".to_string()))
+                        .collect::<R<_>>()?,
+                    None => (0..n).map(|i| i.to_string()).collect(),
+                },
                 "enum" => arr(&st["values"], "values")?
                     .iter()
                     .map(|x| {

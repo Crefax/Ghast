@@ -42,6 +42,7 @@ mod input;
 pub mod math;
 #[cfg(feature = "v26_1")]
 pub mod modern;
+pub mod pick;
 pub mod rotation;
 pub mod v1_12;
 pub mod v1_16_5;

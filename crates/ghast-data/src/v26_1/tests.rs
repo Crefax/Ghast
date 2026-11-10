@@ -9,6 +9,28 @@ fn state_strings_round_trip() {
     }
 }
 
+/// Every state's text is the jar's (`BlockState.toString`), including int properties that do
+/// not start at 0 (leaves' distance, snow layers).
+#[test]
+fn state_strings_match_the_jar() {
+    use std::io::{BufRead, BufReader};
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/golden/26.1/voxel_shapes.jsonl.gz"
+    );
+    let f = std::fs::File::open(path).unwrap();
+    let mut n = 0;
+    for l in BufReader::new(flate2::read::GzDecoder::new(f)).lines() {
+        let v: serde_json::Value = serde_json::from_str(&l.unwrap()).unwrap();
+        if v["type"] == "state" {
+            let s = BlockState::from_id(v["id"].as_u64().unwrap() as u16).unwrap();
+            assert_eq!(s.to_string(), v["state"].as_str().unwrap());
+            n += 1;
+        }
+    }
+    assert_eq!(n, STATE_COUNT);
+}
+
 #[test]
 fn packed_records_are_consistent() {
     let air = BlockState::AIR.phys();

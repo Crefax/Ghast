@@ -66,6 +66,47 @@ impl Aabb {
     }
 }
 
+/// A block's outline (selection) or interaction `VoxelShape`, block-local, as the crosshair ray
+/// tests it (1.14+ versions; oracle `selection_shapes.jsonl.gz`).
+///
+/// The ray uses two views of a shape: the filled-cell grid (is the ray's first test point inside
+/// the shape?) and the box list (`toAabbs()` / `getBoundingBoxes()` in vanilla's order, which
+/// decides ties between equally near faces).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionShape {
+    /// Vanilla's cube shape class (`CubeVoxelShape` / `SimpleVoxelShape`): a coordinate's cell is
+    /// `floor(c * n)` clamped to `-1..=n`; otherwise (array shapes) it is found by binary search
+    /// over the points.
+    pub cube: bool,
+    /// Cell counts `[nx, ny, nz]` (`0, 0, 0` for the empty shape).
+    pub sizes: [u8; 3],
+    /// Cell boundaries along X (`nx + 1` values; the empty shape has `[0.0]`).
+    pub xs: &'static [f64],
+    /// Cell boundaries along Y.
+    pub ys: &'static [f64],
+    /// Cell boundaries along Z.
+    pub zs: &'static [f64],
+    /// Filled-cell bitset, bit index `(x * ny + y) * nz + z`, 64 bits per word.
+    pub cells: &'static [u64],
+    /// `VoxelShape.isEmpty()`.
+    pub empty: bool,
+    /// The shape's boxes in vanilla's order.
+    pub boxes: &'static [Aabb],
+}
+
+impl SelectionShape {
+    /// `true` when cell (`x`, `y`, `z`) is filled; `false` outside the grid.
+    #[must_use]
+    pub fn filled(&self, x: i32, y: i32, z: i32) -> bool {
+        let [nx, ny, nz] = self.sizes.map(i32::from);
+        if x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz {
+            return false;
+        }
+        let i = ((x * ny + y) * nz + z) as usize;
+        self.cells[i / 64] & (1 << (i % 64)) != 0
+    }
+}
+
 /// What a block's collision shape depends on besides its own block state.
 ///
 /// When this is not [`ShapeDependency::None`], [`Collision::boxes`] is only the shape for the

@@ -14,6 +14,7 @@ mod facts;
 mod fetch;
 mod generate;
 mod model;
+mod selection;
 mod v1_12;
 mod v26_1;
 

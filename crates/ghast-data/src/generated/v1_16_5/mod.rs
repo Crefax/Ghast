@@ -18,3 +18,5 @@ pub(crate) mod foods;
 pub(crate) mod items;
 #[rustfmt::skip]
 pub(crate) mod materials;
+#[rustfmt::skip]
+pub(crate) mod selection;

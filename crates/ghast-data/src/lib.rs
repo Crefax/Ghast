@@ -49,6 +49,6 @@ pub mod v26_1;
 pub use common::{
     Aabb, BiomeInfo, BlockInfo, BlockPhysics, BoundingBox, Collision, DigMaterial, Drop,
     EffectInfo, EnchantCost, EnchantmentInfo, EntityDimensions, EntityInfo, EntityKind, Fluid,
-    FluidKind, FoodInfo, ItemInfo, NeighbourShape, PhysicsFlags, ShapeDependency,
+    FluidKind, FoodInfo, ItemInfo, NeighbourShape, PhysicsFlags, SelectionShape, ShapeDependency,
     VanillaEntitySize, WorldCoord, WorldCoords,
 };

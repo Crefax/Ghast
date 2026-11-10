@@ -10,7 +10,7 @@
 //! The hot path is one table read per state: [`BlockState::phys`] returns a packed
 //! [`StatePhys`] (shape index, flags, fluid, per-kind extra bits, [`BlockKind`]).
 
-use crate::common::{Aabb, lookup_name};
+use crate::common::{Aabb, SelectionShape, lookup_name};
 use crate::generated::v26_1 as g;
 use core::fmt;
 
@@ -407,6 +407,39 @@ impl BlockState {
     #[must_use]
     pub fn voxel_shape(self) -> &'static VoxelShapeRef {
         &g::blocks::VOXEL_SHAPES[self.phys().shape() as usize]
+    }
+
+    /// The crosshair outline shape (`getShape` / `getOutlineShape` with the player's context,
+    /// empty hand). For states with [`BlockState::outline_offset`] this is the unshifted shape: the
+    /// block moves it by its per-position model offset.
+    #[must_use]
+    pub fn outline_shape(self) -> &'static SelectionShape {
+        &g::selection::SELECTION_SHAPES[g::selection::STATE_OUTLINE[self.0 as usize] as usize]
+    }
+
+    /// The outline while the player holds this block's own item (scaffolding and, where it
+    /// exists, the light block show a full cube then); otherwise [`BlockState::outline_shape`].
+    #[must_use]
+    pub fn outline_shape_holding_own_item(self) -> &'static SelectionShape {
+        let t = &g::selection::OUTLINE_HOLDING_OWN_ITEM;
+        match t.binary_search_by_key(&self.0, |e| e.0) {
+            Ok(i) => &g::selection::SELECTION_SHAPES[t[i].1 as usize],
+            Err(_) => self.outline_shape(),
+        }
+    }
+
+    /// `true` when the outline is moved by the block's model offset (flowers, bamboo, ...).
+    #[must_use]
+    pub fn outline_offset(self) -> bool {
+        g::selection::STATE_OUTLINE_OFFSET[self.0 as usize / 64] & (1 << (self.0 % 64)) != 0
+    }
+
+    /// The interaction shape (`getInteractionShape`): when the ray hits it nearer than the outline,
+    /// the hit keeps the outline's position but takes this shape's face (cauldrons, composters,
+    /// hoppers, scaffolding).
+    #[must_use]
+    pub fn interaction_shape(self) -> &'static SelectionShape {
+        &g::selection::SELECTION_SHAPES[g::selection::STATE_INTERACTION[self.0 as usize] as usize]
     }
 
     /// Index of `prop`'s value in [`PropertyDef::values`], if the block has that property.

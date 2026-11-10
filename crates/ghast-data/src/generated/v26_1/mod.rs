@@ -4,3 +4,5 @@
 
 #[rustfmt::skip]
 pub(crate) mod blocks;
+#[rustfmt::skip]
+pub(crate) mod selection;

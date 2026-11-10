@@ -55,6 +55,13 @@ public final class Main {
             case "boxes-far" -> Io.write(a.path("--out", golden.resolve("collision_shapes_far.jsonl.gz")), sink -> CollisionDump.farLines(sink));
             case "voxels" -> Io.write(a.path("--out", golden.resolve("voxel_shapes.jsonl.gz")), Main::voxels);
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
+            case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
+            case "rays" -> {
+                long seed = a.lng("--seed", 1);
+                int worlds = (int) a.lng("--worlds", SelectionDump.RAY_WORLDS);
+                int rays = (int) a.lng("--rays", SelectionDump.RAY_RAYS);
+                Io.write(a.path("--out", golden.resolve("raytrace.jsonl.gz")), sink -> SelectionDump.rays(seed, worlds, rays, sink));
+            }
             case "list" -> {
                 for (Scenario sc : Scenarios.all()) {
                     System.out.println(sc.name + "\t" + sc.ticks.size() + "\t" + sc.description);
@@ -77,6 +84,8 @@ public final class Main {
                   boxes-far [--out FILE]               the same at far positions, absolute
                   voxels [--out FILE]                  voxel grids of every collision shape + per-state facts
                   entity-sizes [--out FILE]            dimensions / eye heights of every entity type, poses, variants
+                  selection [--out FILE]               outline / interaction shapes of every block state
+                  rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
     }
@@ -104,12 +113,22 @@ public final class Main {
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
+        Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
+        Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
     }
 
     static void voxels(Consumer<String> sink) {
         try {
             VoxelDump.lines(sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static void selection(Consumer<String> sink) {
+        try {
+            SelectionDump.selection(sink);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

@@ -970,8 +970,20 @@ pub fn v1_16_5(
         notes,
     )?);
     files.push((
+        "selection.rs".to_string(),
+        crate::selection::generate(
+            "Minecraft 1.16.5 crosshair (outline / raycast) shape tables.",
+            &oracle_voxels.with_file_name("selection_shapes.jsonl.gz"),
+            facts::V1_16_5_ORACLE_SELECTION,
+            state_count,
+        )?,
+    ));
+    let mut mods = MODS.to_vec();
+    mods.push("selection");
+    mods.sort_unstable();
+    files.push((
         "mod.rs".to_string(),
-        mod_rs("Generated 1.16.5 tables.", MODS),
+        mod_rs("Generated 1.16.5 tables.", &mods),
     ));
     Ok(files
         .into_iter()

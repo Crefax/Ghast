@@ -23,10 +23,10 @@
 //! `suffocating_large_shapes_stay_in_their_cube`).
 
 mod attr;
-mod collide;
+pub(crate) mod collide;
 mod fluid;
 mod inside;
-mod math;
+pub(crate) mod math;
 mod player;
 mod rules;
 
