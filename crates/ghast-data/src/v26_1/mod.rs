@@ -16,6 +16,11 @@ use core::fmt;
 
 pub use g::blocks::Property;
 
+pub mod dig;
+pub mod items;
+
+pub use items::{BlockSet, Food, Item, ItemData, Tool, ToolRule, food};
+
 /// Number of blocks (ids `0..BLOCK_COUNT`).
 pub const BLOCK_COUNT: usize = g::blocks::BLOCKS.len();
 /// Number of block states (ids `0..STATE_COUNT`).

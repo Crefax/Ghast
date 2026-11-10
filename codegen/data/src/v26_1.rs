@@ -809,7 +809,13 @@ pub fn generate(
         out,
         "\n/// The full cube (`Shapes.block()`).\npub(crate) const FULL_CUBE_VOXEL: u16 = {full_cube};\n/// Scaffolding's bottom shape (the \"collision shape\" below the stable top).\npub(crate) const SCAFFOLDING_BOTTOM_VOXEL: u16 = {scaffolding_bottom};\n/// Powder snow's shape for entities falling faster than 2.5 blocks.\npub(crate) const POWDER_SNOW_FALLING_VOXEL: u16 = {powder_falling};"
     );
-    let mods = crate::generate::mod_rs("Generated 26.1 tables.", &["blocks", "selection"]);
+    let mods = crate::generate::mod_rs("Generated 26.1 tables.", &["blocks", "items", "selection"]);
+    let items = crate::v26_1_items::generate(
+        p,
+        &oracle_voxels.with_file_name("items.jsonl.gz"),
+        blocks.len(),
+        notes,
+    )?;
     let selection = crate::selection::generate(
         "Minecraft 26.1 crosshair (outline / interaction) shape tables.",
         &oracle_voxels.with_file_name("selection_shapes.jsonl.gz"),
@@ -819,6 +825,7 @@ pub fn generate(
     Ok(vec![
         ("v26_1/blocks.rs".into(), out),
         ("v26_1/selection.rs".into(), selection),
+        ("v26_1/items.rs".into(), items),
         ("v26_1/mod.rs".into(), mods),
     ])
 }

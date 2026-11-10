@@ -960,6 +960,21 @@ selection and raytrace dumps as 26.1. The 26.1 eye position interpolates even at
 `from + (to - from) * 0.001` facing against the ray. In 26.1 a hit beyond the block range (or an
 entity beyond the entity range) becomes a miss at that point.
 
+## `items.jsonl.gz` (26.1): item and dig facts
+
+`ItemDump` (`items`, part of `golden`), from the live registries with the harness's real tag load.
+`item` lines: `id`, `name`, `max_stack_size`, `max_damage`, `food` (`nutrition`, `saturation`,
+`can_always_eat`), `block` (a `BlockItem`'s block), `tool` (the default `minecraft:tool`: `rules`
+with `tag` or `blocks`, optional `speed` / `correct_for_drops`, `default_mining_speed`,
+`damage_per_block`, `can_destroy_blocks_in_creative`), and the rule logic's result through the real
+stack on every block's default state (`speed_blocks`: speed ≠ 1 per block id, `correct_blocks`).
+`tag` lines: each block tag a tool rule names, resolved (`blocks` = ids). `block` lines: `id`,
+`name`, `destroy_time`, `requires_correct_tool`, `differing_states` (states whose destroy time or
+correct-tool flag differ from the default state: none in 26.1), `item` (`Block.asItem`).
+Generated into `crates/ghast-data/src/generated/v26_1/items.rs`; cross-checked with
+minecraft-data (ids, names, stack sizes, durabilities, hardness: all equal) and, in tests, with the
+Mojang item-component report when `.cache/mojang/26.1.2` is present.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or

@@ -56,6 +56,7 @@ public final class Main {
             case "voxels" -> Io.write(a.path("--out", golden.resolve("voxel_shapes.jsonl.gz")), Main::voxels);
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
+            case "items" -> Io.write(a.path("--out", golden.resolve("items.jsonl.gz")), ItemDump::lines);
             case "rays" -> {
                 long seed = a.lng("--seed", 1);
                 int worlds = (int) a.lng("--worlds", SelectionDump.RAY_WORLDS);
@@ -85,6 +86,7 @@ public final class Main {
                   voxels [--out FILE]                  voxel grids of every collision shape + per-state facts
                   entity-sizes [--out FILE]            dimensions / eye heights of every entity type, poses, variants
                   selection [--out FILE]               outline / interaction shapes of every block state
+                  items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
@@ -114,6 +116,7 @@ public final class Main {
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
+        Io.write(dir.resolve("items.jsonl.gz"), ItemDump::lines);
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
     }
