@@ -265,8 +265,20 @@ final class Fuzz {
             // Move the whole case next to the default world border (radius 29,999,984).
             int bx = x.chance(0.5) ? 29_999_984 : -29_999_984, bz = x.chance(0.5) ? 29_999_984 : -29_999_984;
             boolean both = x.chance(0.3), alongX = x.chance(0.5);
-            int dx = both || alongX ? bx + x.range(-4, 4) - (int) Math.floor(sc.x) : 0;
-            int dz = both || !alongX ? bz + x.range(-4, 4) - (int) Math.floor(sc.z) : 0;
+            // Mostly just inside the border (a few blocks), sometimes outside it.
+            int inX = x.chance(0.7) ? -x.range(1, 4) : x.range(0, 3), inZ = x.chance(0.7) ? -x.range(1, 4) : x.range(0, 3);
+            int dx = both || alongX ? bx + (bx > 0 ? inX : -inX - 1) - (int) Math.floor(sc.x) : 0;
+            int dz = both || !alongX ? bz + (bz > 0 ? inZ : -inZ - 1) - (int) Math.floor(sc.z) : 0;
+            if (x.chance(0.6)) {
+                // Turn the whole input so the case starts facing the border (yaw -90 = +x, 0 = +z).
+                float face = alongX && !both ? (bx > 0 ? -90 : 90) : (bz > 0 ? 0 : 180);
+                float turn = face + (float) ((x.nextDouble() - 0.5) * 40) - sc.yaw;
+                sc.yaw += turn;
+                for (int i = 0; i < sc.ticks.size(); i++) {
+                    Scenario.Tick tk = sc.ticks.get(i);
+                    sc.ticks.set(i, new Scenario.Tick(tk.keys(), tk.yaw() + turn, tk.pitch(), tk.events()));
+                }
+            }
             List<Scenario.Fill> moved = new ArrayList<>();
             for (Scenario.Fill f : sc.fills) {
                 moved.add(new Scenario.Fill(f.x0() + dx, f.y0(), f.z0() + dz, f.x1() + dx, f.y1(), f.z1() + dz, f.id(), f.meta()));
