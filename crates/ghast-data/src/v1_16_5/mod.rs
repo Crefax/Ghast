@@ -13,6 +13,8 @@ use crate::common::{
     lookup_id, lookup_name,
 };
 use crate::generated::v1_16_5 as g;
+
+pub mod dig;
 use core::fmt;
 
 pub use g::blocks::{Material, Property};

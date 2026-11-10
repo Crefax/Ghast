@@ -980,6 +980,16 @@ pub fn v1_16_5(
         notes,
     )?);
     files.push((
+        "dig.rs".to_string(),
+        crate::dig_tables::generate(
+            "Minecraft 1.16.5 dig tables (oracle).",
+            &oracle_voxels.with_file_name("dig_facts.jsonl.gz"),
+            "tests/golden/1.16.5/dig_facts.jsonl.gz",
+            "hardness",
+            "requires_tool",
+        )?,
+    ));
+    files.push((
         "selection.rs".to_string(),
         crate::selection::generate(
             "Minecraft 1.16.5 crosshair (outline / raycast) shape tables.",
@@ -990,6 +1000,7 @@ pub fn v1_16_5(
     ));
     let mut mods = MODS.to_vec();
     mods.push("selection");
+    mods.push("dig");
     mods.sort_unstable();
     files.push((
         "mod.rs".to_string(),

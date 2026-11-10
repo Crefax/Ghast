@@ -133,3 +133,93 @@ fn dig_1_8_9() {
     }
     assert!(cases >= 3000 && digs > 2500, "{cases} / {digs}");
 }
+
+#[cfg(feature = "v1_16_5")]
+#[test]
+fn dig_1_16_5() {
+    use ghast_data::v1_16_5::dig::{self, DigConditions};
+    use ghast_data::v1_16_5::{Block, BlockState, Item};
+    for v in golden("1.16.5", "dig_facts.jsonl.gz") {
+        let id = v["id"].as_u64().unwrap() as u16;
+        let name = v["name"].as_str().unwrap().trim_start_matches("minecraft:");
+        match v["type"].as_str().unwrap() {
+            "block" => {
+                assert_eq!(Block::from_id(id).unwrap().name(), name);
+                assert_eq!(
+                    dig::strength(id).to_bits(),
+                    f32_hex(&v["hardness"]).to_bits(),
+                    "{name}"
+                );
+                assert_eq!(
+                    dig::requires_tool(id),
+                    v["requires_tool"].as_bool().unwrap(),
+                    "{name}"
+                );
+            }
+            _ => {
+                // minecraft-data has no air item; every other id names the same item.
+                if name != "air" {
+                    assert_eq!(Item::from_id(id).unwrap().info().name, name, "item id {id}");
+                }
+                let mut want = std::collections::BTreeMap::new();
+                for s in v["speed_blocks"].as_array().unwrap() {
+                    for b in s["blocks"].as_array().unwrap() {
+                        want.insert(b.as_u64().unwrap() as u16, f32_hex(&s["speed"]));
+                    }
+                }
+                let eff: Vec<u16> = v["effective_blocks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|b| b.as_u64().unwrap() as u16)
+                    .collect();
+                for b in 0..ghast_data::v1_16_5::BLOCK_COUNT as u16 {
+                    assert_eq!(
+                        dig::speed_multiplier(id, b),
+                        *want.get(&b).unwrap_or(&1.0),
+                        "{name} block {b}"
+                    );
+                    assert_eq!(
+                        dig::is_effective(id, b),
+                        eff.contains(&b),
+                        "{name} block {b}"
+                    );
+                }
+            }
+        }
+    }
+    let (mut cases, mut digs) = (0, 0);
+    for v in golden("1.16.5", "dig.jsonl.gz") {
+        let state = BlockState::from_id(v["state"].as_u64().unwrap() as u16).unwrap();
+        assert_eq!(state.to_string(), v["name"].as_str().unwrap());
+        let block = state.block().id();
+        let held = Some(v["held_id"].as_i64().unwrap())
+            .filter(|i| *i >= 0)
+            .map(|i| i as u16);
+        let c = DigConditions {
+            efficiency: v["efficiency"].as_u64().unwrap() as u8,
+            haste: amp(&v["haste"]),
+            conduit_power: amp(&v["conduit_power"]),
+            mining_fatigue: amp(&v["mining_fatigue"]),
+            eye_in_water: v["eye_in_water"].as_bool().unwrap(),
+            aqua_affinity: v["aqua_affinity"].as_bool().unwrap(),
+            on_ground: v["on_ground"].as_bool().unwrap(),
+        };
+        let k = v["k"].as_u64().unwrap();
+        assert_eq!(
+            dig::mining_speed(held, block, &c).to_bits(),
+            f32_hex(&v["mining_speed"]).to_bits(),
+            "case {k}"
+        );
+        assert_eq!(
+            dig::effective_tool(held, block),
+            v["effective_tool"].as_bool().unwrap(),
+            "case {k}"
+        );
+        let p = dig::destroy_progress(held, block, &c);
+        assert_eq!(p.to_bits(), f32_hex(&v["progress"]).to_bits(), "case {k}");
+        digs += check_timing(&v, p);
+        cases += 1;
+    }
+    assert!(cases >= 3000 && digs > 2500, "{cases} / {digs}");
+}

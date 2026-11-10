@@ -65,6 +65,12 @@ public final class Main {
             }
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
+            case "dig-facts" -> Io.write(a.path("--out", golden.resolve("dig_facts.jsonl.gz")), DigDump::facts);
+            case "dig" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", DigDump.CASES);
+                Io.write(a.path("--out", golden.resolve("dig.jsonl.gz")), sink -> dig(seed, count, sink));
+            }
             case "rays" -> {
                 long seed = a.lng("--seed", 1);
                 int worlds = (int) a.lng("--worlds", SelectionDump.RAY_WORLDS);
@@ -121,10 +127,20 @@ public final class Main {
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
+        Io.write(dir.resolve("dig_facts.jsonl.gz"), DigDump::facts);
+        Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         Io.write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
         Io.bestCompression = false;
+    }
+
+    static void dig(long seed, int count, Consumer<String> sink) {
+        try {
+            DigDump.cases(seed, count, sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     static void selection(Consumer<String> sink) {
