@@ -412,3 +412,19 @@ fn v1_16_5_voxels_match_oracle() {
     assert_eq!(states, 17112);
     assert!(bad.is_empty(), "{} voxel-dump mismatches", bad.len());
 }
+
+/// Every state's text (properties and value labels included) is the 1.16.5 jar's
+/// (`BlockState.toString` in the oracle voxel dump).
+#[test]
+fn state_strings_match_the_jar() {
+    let Some(lines) = lines("voxel_shapes.jsonl.gz") else {
+        return;
+    };
+    let mut n = 0;
+    for v in lines.iter().filter(|v| v["type"] == "state") {
+        let s = BlockState::from_id(v["id"].as_u64().unwrap() as u16).unwrap();
+        assert_eq!(s.to_string(), v["state"].as_str().unwrap());
+        n += 1;
+    }
+    assert_eq!(n, ghast_data::v1_16_5::STATE_COUNT);
+}
