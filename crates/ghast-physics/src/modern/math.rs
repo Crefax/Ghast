@@ -209,13 +209,37 @@ impl V3 {
 #[inline]
 pub fn bx(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> Aabb {
     Aabb::new(
-        java_min(x0, x1),
-        java_min(y0, y1),
-        java_min(z0, z1),
-        java_max(x0, x1),
-        java_max(y0, y1),
-        java_max(z0, z1),
+        jmin(x0, x1),
+        jmin(y0, y1),
+        jmin(z0, z1),
+        jmax(x0, x1),
+        jmax(y0, y1),
+        jmax(z0, z1),
     )
+}
+
+/// Java `Math.min` with the ordered case first (equal values, zeros and NaN take the full rule).
+#[inline]
+fn jmin(a: f64, b: f64) -> f64 {
+    if a < b {
+        a
+    } else if b < a {
+        b
+    } else {
+        java_min(a, b)
+    }
+}
+
+/// Java `Math.max` with the ordered case first.
+#[inline]
+fn jmax(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else if b > a {
+        b
+    } else {
+        java_max(a, b)
+    }
 }
 
 /// `AABB.move`.

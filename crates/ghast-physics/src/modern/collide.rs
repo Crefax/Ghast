@@ -478,6 +478,12 @@ impl Colliders {
     }
 
     #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+        self.spill.clear();
+    }
+
+    #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Placed> {
         self.buf[..self.len].iter().chain(self.spill.iter())
     }
@@ -714,8 +720,8 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
 
     /// `collectColliders(entity, [], box)`: the border shape when the entity is inside and close
     /// to it, then every block shape.
-    pub(crate) fn colliders(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx) -> Colliders {
-        let mut c = Colliders::new();
+    pub(crate) fn colliders(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx, c: &mut Colliders) {
+        c.clear();
         if self.border.inside_close(src[0], src[2], query) {
             c.push(Placed::Border);
         }
@@ -723,7 +729,6 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
             c.push(s);
             true
         });
-        c
     }
 
     /// `findSupportingBlock(entity, box)`: the colliding block whose centre is closest to the
@@ -832,11 +837,12 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
     step: f32,
     ctx: &ShapeCtx,
 ) -> V3 {
+    let mut colliders = Colliders::new();
     let step_v = if movement.length_sqr() == 0.0 {
         movement
     } else {
-        let c = world.colliders(src, &expand_towards(bb, movement), ctx);
-        collide_with_shapes(movement, bb, &c, world.border)
+        world.colliders(src, &expand_towards(bb, movement), ctx, &mut colliders);
+        collide_with_shapes(movement, bb, &colliders, world.border)
     };
     let cx = movement.x != step_v.x;
     let cy = movement.y != step_v.y;
@@ -852,7 +858,7 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
         if !landing {
             up = expand_towards(&up, V3::new(0.0, f64::from(-1.0e-5f32), 0.0));
         }
-        let colliders = world.colliders(src, &up, ctx);
+        world.colliders(src, &up, ctx, &mut colliders);
         let skip = step_v.y as f32;
         // FloatArraySet: bitwise-distinct values; inline for the usual few, spilling when a tall
         // step height meets finely divided shapes (e.g. stacked daylight detectors: one value per

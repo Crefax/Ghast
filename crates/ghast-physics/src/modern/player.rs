@@ -877,10 +877,13 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         if !p.no_physics {
             let r = f64::from(p.dims.width) * 0.35;
             let (x, z) = (p.pos[0], p.pos[2]);
-            self.move_towards_closest_space(x - r, z + r);
-            self.move_towards_closest_space(x - r, z - r);
-            self.move_towards_closest_space(x + r, z - r);
-            self.move_towards_closest_space(x + r, z + r);
+            // The four probes mostly test the same few columns and the box does not move in
+            // between: each column's answer is remembered.
+            let mut memo = ColumnMemo::default();
+            self.move_towards_closest_space(x - r, z + r, &mut memo);
+            self.move_towards_closest_space(x - r, z - r, &mut memo);
+            self.move_towards_closest_space(x + r, z - r, &mut memo);
+            self.move_towards_closest_space(x + r, z + r, &mut memo);
         }
         let slow_using = self.using_item && !self.p.use_effects.can_sprint;
         let p = &mut *self.p;
@@ -991,9 +994,9 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     }
 
     /// `LocalPlayer.moveTowardsClosestSpace(x, z)`.
-    fn move_towards_closest_space(&mut self, x: f64, z: f64) {
+    fn move_towards_closest_space(&mut self, x: f64, z: f64, memo: &mut ColumnMemo) {
         let (bx_, bz) = (floor(x), floor(z));
-        if !self.suffocates_at(bx_, bz) {
+        if !self.suffocates_memo(bx_, bz, memo) {
             return;
         }
         let xd = x - f64::from(bx_);
@@ -1002,7 +1005,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         let mut closest = f64::MAX;
         // WEST, EAST, NORTH, SOUTH
         for (dx, dz, d) in [(-1, 0, xd), (1, 0, 1.0 - xd), (0, -1, zd), (0, 1, 1.0 - zd)] {
-            if d < closest && !self.suffocates_at(bx_ + dx, bz + dz) {
+            if d < closest && !self.suffocates_memo(bx_ + dx, bz + dz, memo) {
                 closest = d;
                 best = Some((dx, dz));
             }
@@ -1012,6 +1015,18 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             Some((0, dz)) => self.p.vel[2] = 0.1 * f64::from(dz),
             _ => {}
         }
+    }
+
+    fn suffocates_memo(&self, x: i32, z: i32, memo: &mut ColumnMemo) -> bool {
+        if let Some(&(_, r)) = memo.entries[..memo.len].iter().find(|e| e.0 == (x, z)) {
+            return r;
+        }
+        let r = self.suffocates_at(x, z);
+        if memo.len < memo.entries.len() {
+            memo.entries[memo.len] = ((x, z), r);
+            memo.len += 1;
+        }
+        r
     }
 
     fn suffocates_at(&self, x: i32, z: i32) -> bool {
@@ -2226,6 +2241,13 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         p.sent.horizontal_collision = hc;
         p.auto_jump_enabled = p.options.auto_jump;
     }
+}
+
+/// Answers of the push-out column test within one tick.
+#[derive(Default)]
+struct ColumnMemo {
+    entries: [((i32, i32), bool); 12],
+    len: usize,
 }
 
 fn sign_f(v: f64) -> f64 {
