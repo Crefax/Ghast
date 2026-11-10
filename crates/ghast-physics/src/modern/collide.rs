@@ -854,8 +854,12 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
         }
         let colliders = world.colliders(src, &up, ctx);
         let skip = step_v.y as f32;
-        let mut cands = [0.0f32; 16];
+        // FloatArraySet: bitwise-distinct values; inline for the usual few, spilling when a tall
+        // step height meets finely divided shapes (e.g. stacked daylight detectors: one value per
+        // 1/8 block).
+        let mut inline = [0.0f32; 64];
         let mut n = 0usize;
+        let mut spill: Vec<f32> = Vec::new();
         for c in colliders.iter() {
             c.for_y_coords(world.border, |coord| {
                 let rel = (coord - grounded.min_y) as f32;
@@ -865,15 +869,25 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
                 if rel > step {
                     return false;
                 }
-                // FloatArraySet: bitwise-distinct values.
-                if !cands[..n].iter().any(|c| c.to_bits() == rel.to_bits()) && n < cands.len() {
-                    cands[n] = rel;
-                    n += 1;
+                let seen = |v: &f32| v.to_bits() == rel.to_bits();
+                if !inline[..n].iter().any(seen) && !spill.iter().any(seen) {
+                    if n < inline.len() {
+                        inline[n] = rel;
+                        n += 1;
+                    } else {
+                        spill.push(rel);
+                    }
                 }
                 true
             });
         }
-        let cands = &mut cands[..n];
+        let mut all = spill;
+        let cands: &mut [f32] = if all.is_empty() {
+            &mut inline[..n]
+        } else {
+            all.extend_from_slice(&inline[..n]);
+            &mut all
+        };
         cands.sort_by(f32::total_cmp);
         for &h in cands.iter() {
             let s = collide_with_shapes(

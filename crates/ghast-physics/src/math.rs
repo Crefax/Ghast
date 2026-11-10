@@ -29,6 +29,7 @@ static SIN_TABLE: LazyLock<Box<[f32; SIN_TABLE_LEN]>> = LazyLock::new(|| {
 /// The shared sine table (also the 26.x table: a JDK builds identical entries from
 /// `i / 10430.378350470453`).
 #[inline]
+#[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
 pub(crate) fn sin_table() -> &'static [f32; SIN_TABLE_LEN] {
     &SIN_TABLE
 }
