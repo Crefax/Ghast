@@ -228,9 +228,14 @@ pub(crate) fn equip(s: &Stack) -> Result<Equip, ()> {
     }
 }
 
-/// Whether clicks with this stack run item-specific rules (bundles).
+/// Whether the stack has the `bundle_contents` component (a bundle: some clicks with it run
+/// the bundle's own rules, `BundleItem.overrideStackedOnOther` / `overrideOtherStackedOnMe`).
 pub(crate) fn overrides_clicks(s: &Stack) -> bool {
-    defaults(s.id).is_some_and(|d| d.bundle) || has_component(s, component::BUNDLE_CONTENTS, false)
+    has_component(
+        s,
+        component::BUNDLE_CONTENTS,
+        defaults(s.id).is_some_and(|d| d.bundle),
+    )
 }
 
 /// `(enchantment registry id, level)` of the `enchantments` (`stored = false`) or

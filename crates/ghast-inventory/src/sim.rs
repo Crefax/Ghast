@@ -521,12 +521,17 @@ impl Sim<'_> {
             use crate::v26_1::{equip, overrides_clicks};
             let at = usize::try_from(slot).ok().and_then(|i| self.get(i));
             let cursor = self.m.cursor.as_ref();
-            if mode == 0
-                && button <= 1
-                && slot >= 0
-                && (at.is_some_and(overrides_clicks) || cursor.is_some_and(overrides_clicks))
-            {
-                return Err(Unpredictable);
+            if mode == 0 && button <= 1 && slot >= 0 {
+                // the bundle rules: a carried bundle onto a full slot (left) or an empty one
+                // (right); a bundle in the slot under a carried stack (left) or an empty
+                // cursor (right)
+                let left = button == 0;
+                if cursor.is_some_and(overrides_clicks) && left == at.is_some() {
+                    return Err(Unpredictable);
+                }
+                if at.is_some_and(overrides_clicks) && left == cursor.is_some() {
+                    return Err(Unpredictable);
+                }
             }
             let hot = (mode == 2)
                 .then(|| self.m.player.get(usize::from(button)))

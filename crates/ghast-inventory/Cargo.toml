@@ -44,5 +44,9 @@ required-features = ["v1_8", "v1_12", "v1_16_5"]
 [[example]]
 name = "gen_items_26_1"
 
+[[example]]
+name = "live_clicks_26_1"
+required-features = ["v26_1"]
+
 [package.metadata.docs.rs]
 all-features = true
