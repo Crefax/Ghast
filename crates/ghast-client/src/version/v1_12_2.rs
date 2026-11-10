@@ -33,7 +33,13 @@ impl ClientVersion for V1_12_2 {
         })
     }
 
-    fn write_login_start(enc: &mut FrameEncoder, username: &str) -> Result<(), EncodeError> {
+    type Wire = ();
+
+    fn write_login_start(
+        enc: &mut FrameEncoder,
+        username: &str,
+        _uuid: uuid::Uuid,
+    ) -> Result<(), EncodeError> {
         enc.write_packet(&login::serverbound::LoginStart {
             username: ByteString::from(username),
         })
@@ -117,7 +123,7 @@ impl ClientVersion for V1_12_2 {
         f
     }
 
-    fn decode_play(raw: &RawPacket) -> Result<Option<Inbound>, DecodeError> {
+    fn decode_play(raw: &RawPacket, (): &mut ()) -> Result<Option<Inbound>, DecodeError> {
         Ok(Some(match raw.id {
             cb::id::KEEP_ALIVE => {
                 Inbound::KeepAlive(raw.decode_as::<cb::KeepAlive>()?.keep_alive_id)
@@ -136,6 +142,7 @@ impl ClientVersion for V1_12_2 {
             cb::id::CHAT => {
                 let p: cb::Chat = raw.decode_as()?;
                 Inbound::Chat(ChatMessage {
+                    rendered: None,
                     json: p.message,
                     position: ChatPosition::from_wire(p.position),
                     sender: None,
@@ -154,6 +161,8 @@ impl ClientVersion for V1_12_2 {
                 Inbound::Respawn {
                     dimension: p.dimension.to_string(),
                     game_mode: GameMode::from_wire(p.gamemode),
+
+                    keep: 0,
                 }
             }
             cb::id::POSITION => {
@@ -166,6 +175,8 @@ impl ClientVersion for V1_12_2 {
                     pitch: p.pitch,
                     flags: p.flags,
                     teleport_id: Some(p.teleport_id),
+                    relative: u32::from(p.flags as u8),
+                    delta: Vec3::default(),
                 })
             }
             cb::id::HELD_ITEM_SLOT => Inbound::HeldSlot(raw.decode_as::<cb::HeldItemSlot>()?.slot),
@@ -294,15 +305,15 @@ impl ClientVersion for V1_12_2 {
         }
     }
 
-    fn write_play(enc: &mut FrameEncoder, out: &Outbound) -> Result<(), EncodeError> {
+    fn write_play(enc: &mut FrameEncoder, out: &Outbound, (): &mut ()) -> Result<(), EncodeError> {
         match out {
             Outbound::KeepAlive(id) => enc.write_packet(&sb::KeepAlive { keep_alive_id: *id }),
             Outbound::TeleportConfirm(teleport_id) => enc.write_packet(&sb::TeleportConfirm {
                 teleport_id: *teleport_id,
             }),
             Outbound::Move(m) => match *m {
-                MovePacket::Flying { on_ground } => enc.write_packet(&sb::Flying { on_ground }),
-                MovePacket::Position { pos, on_ground } => enc.write_packet(&sb::Position {
+                MovePacket::Flying { on_ground, .. } => enc.write_packet(&sb::Flying { on_ground }),
+                MovePacket::Position { pos, on_ground, .. } => enc.write_packet(&sb::Position {
                     x: pos.x,
                     y: pos.y,
                     z: pos.z,
@@ -312,6 +323,7 @@ impl ClientVersion for V1_12_2 {
                     yaw,
                     pitch,
                     on_ground,
+                    ..
                 } => enc.write_packet(&sb::Look {
                     yaw,
                     pitch,
@@ -322,6 +334,7 @@ impl ClientVersion for V1_12_2 {
                     yaw,
                     pitch,
                     on_ground,
+                    ..
                 } => enc.write_packet(&sb::PositionLook {
                     x: pos.x,
                     y: pos.y,
@@ -438,6 +451,15 @@ impl ClientVersion for V1_12_2 {
                     data: data.freeze(),
                 })
             }
+            // Packets of newer versions: never produced for this one.
+            Outbound::PlayerInput(_)
+            | Outbound::TickEnd
+            | Outbound::PlayerLoaded
+            | Outbound::ChunkBatchReceived(_)
+            | Outbound::Pong(_)
+            | Outbound::ResourcePackStatus { .. }
+            | Outbound::CookieResponse { .. }
+            | Outbound::LookAnswer { .. } => Ok(()),
         }
     }
 

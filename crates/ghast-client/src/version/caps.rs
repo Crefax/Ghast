@@ -153,3 +153,21 @@ pub(crate) const V1_16_5: Capabilities = Capabilities {
     immediate_respawn_rule: true,
     ..V1_12_2
 };
+
+/// 26.1 – 26.1.2 (protocol 775).
+pub(crate) const V26_1: Capabilities = Capabilities {
+    version: GameVersion::V26_1,
+    protocol: 775,
+    physics: PhysicsRules::Modern26_1,
+    data: DataSet::V26_1,
+    item_model: ItemModel::Components,
+    window_confirm: false,
+    configuration_state: true,
+    sneak_via_player_input: true,
+    sends_tick_end: true,
+    player_loaded_gate: true,
+    chunk_batch_ack: true,
+    block_sequence: true,
+    chat_acknowledgements: true,
+    ..V1_16_5
+};

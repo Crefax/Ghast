@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.12|1.16> [--tp] [--fly]
+# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.12|1.16|26.1> [--tp] [--fly]
 #   --tp   teleport $LAB_BOT (default GhastBot) to the spawn pad 0.5 4 0.5
 #   --fly  /fly $LAB_BOT on
 # Superflat: bedrock y0, dirt y1-2, grass y3; players stand at y=4. Pad x -16..47, z -16..47 (spawn chunks).
@@ -11,7 +11,13 @@ here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 lab_select "${1:-}"; shift || true
 tp=0; fly=0
 for a in "$@"; do case "$a" in --tp) tp=1 ;; --fly) fly=1 ;; *) echo "unknown arg $a" >&2; exit 2 ;; esac; done
-if [ "$VER" = 1.8 ]; then
+base=$'gamerule doDaylightCycle false\ngamerule doMobSpawning false\ngamerule doFireTick false\ngamerule mobGriefing false\ngamerule keepInventory true\ngamerule logAdminCommands false\ngamerule randomTickSpeed 0'
+if [ "$VER" = 26.1 ]; then
+  # 26.x: registry game rules with snake_case names; no always-loaded spawn chunks (force-load the pad).
+  grass=minecraft:grass_block; slime=minecraft:slime_block; item=item; slab="minecraft:smooth_stone_slab[type=bottom]"; fence=minecraft:oak_fence; water=minecraft:water
+  base=$'forceload add -16 -16 47 47\ngamerule advance_time false\ngamerule spawn_mobs false\ngamerule fire_spread_radius_around_player 0\ngamerule mob_griefing false\ngamerule keep_inventory true\ngamerule log_admin_commands false\ngamerule random_tick_speed 0'
+  rules=$'gamerule respawn_radius 0\ngamerule advance_weather false\ngamerule spawn_phantoms false\ngamerule spawn_patrols false\ngamerule spawn_wandering_traders false\ngamerule show_advancement_messages false\nweather clear'
+elif [ "$VER" = 1.8 ]; then
   grass=minecraft:grass; slime=minecraft:slime; item=Item; slab="minecraft:stone_slab 0"; fence=minecraft:fence; water="minecraft:water 0"
   rules="weather clear 1000000"
 elif [ "$VER" = 1.12 ]; then
@@ -24,13 +30,7 @@ else
 fi
 {
   cat <<CMDS
-gamerule doDaylightCycle false
-gamerule doMobSpawning false
-gamerule doFireTick false
-gamerule mobGriefing false
-gamerule keepInventory true
-gamerule logAdminCommands false
-gamerule randomTickSpeed 0
+$base
 $rules
 time set 6000
 setworldspawn 0 4 0
@@ -53,7 +53,7 @@ CMDS
   [ "$tp" = 1 ] && echo "tp $LAB_BOT 0.5 4 0.5"
   [ "$fly" = 1 ] && echo "fly $LAB_BOT on"
   true
-} | sed '/^$/d' | "$here/console.sh" "$VER" | tee "$DIR/reset.out" | grep -vE 'Game ?rule .*(updated|set to)|blocks? (filled|placed)|filled [0-9]+ blocks|No blocks were filled|No entity was found' || true
+} | sed '/^$/d' | "$here/console.sh" "$VER" | tee "$DIR/reset.out" | grep -vE 'Game ?rule .*(updated|set to)|[Mm]arked .* to be force loaded|already marked|blocks? (filled|placed)|filled [0-9]+ blocks|No blocks were filled|No entity was found' || true
 if grep -q 'outside of the world' "$DIR/reset.out"; then
   echo "pad not loaded: the spawn chunks are elsewhere. ./stop.sh $VER && ./start.sh $VER, then retry" >&2; exit 1
 fi

@@ -1574,7 +1574,7 @@ impl Feed {
         let mut armour = Vec::new();
         for slot in 1..=4u8 {
             if let Some(st) = v.armor(4 - usize::from(slot)).filter(|s| s.id > 0) {
-                let color = st.nbt.as_ref().map_or(NO_COLOR, leather_color_nbt);
+                let color = st.nbt().map_or(NO_COLOR, leather_color_nbt);
                 armour.push((slot, st.id as u16, st.damage as u16, color));
             }
         }

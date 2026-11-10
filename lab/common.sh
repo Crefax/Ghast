@@ -14,7 +14,7 @@ GRIM_JAR=grimac-bukkit-2.3.73.jar
 GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/1FIGlM6Q/grimac-bukkit-2.3.73.jar
 GRIM_SHA=a095331a8ba47286b27bdb9b51f0d35ae4a227632a2c50b25cedba85439f1810
 
-# lab_select <1.8|1.12|1.16>: sets VER, DIR, PORT, PAPER_JAR, PAPER_URL, PAPER_SHA, JAVA
+# lab_select <1.8|1.12|1.16|26.1>: sets VER, DIR, PORT, PAPER_JAR, PAPER_URL, PAPER_SHA, JAVA, GRIM_*
 lab_select() {
   case "${1:-}" in
     1.8|1.8.8|1.8.9|18)
@@ -31,7 +31,16 @@ lab_select() {
       VER=1.16; PORT=25616; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
       PAPER_JAR=paper-1.16.5-794.jar
       PAPER_SHA=e67da4851d08cde378ab2b89be58849238c303351ed2482181a99c2c2b489276 ;;
-    *) echo "usage: $(basename "$0") <1.8|1.12|1.16> ..." >&2; exit 2 ;;
+    26.1|26.1.1|26.1.2|261)
+      # Protocol 775 (26.1 - 26.1.2): Paper 26.1.2 (final build 74) needs Java 25; Grim 2.3.74 is the
+      # first release with native 26.x support (no ViaVersion).
+      VER=26.1; PORT=25626; JAVA_MAJOR=25; JAVA_FLAGS=""
+      PAPER_JAR=paper-26.1.2-74.jar
+      PAPER_SHA=1d70b1dab9cf4a6de615209a536f3a45a2186240253c428213ce2188ab95e5f7
+      GRIM_JAR=grimac-bukkit-2.3.74.jar
+      GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/baDrVvfo/grimac-bukkit-2.3.74.jar
+      GRIM_SHA=3ac71c0b6ef8ab586c1dd3ab4c0b3254394ef39d048e4985efb2898b9fef628c ;;
+    *) echo "usage: $(basename "$0") <1.8|1.12|1.16|26.1> ..." >&2; exit 2 ;;
   esac
   PAPER_URL="https://fill-data.papermc.io/v1/objects/$PAPER_SHA/$PAPER_JAR"
   DIR="$SERVERS/$VER"

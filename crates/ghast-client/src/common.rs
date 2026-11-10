@@ -130,13 +130,40 @@ pub struct ChatMessage {
     pub position: ChatPosition,
     /// Sender UUID (1.16+; `None` on 1.8 and for system messages with the nil UUID).
     pub sender: Option<Uuid>,
+    /// 1.20.3+: the text already rendered from the NBT component (`json` is empty then).
+    pub(crate) rendered: Option<String>,
 }
 
 impl ChatMessage {
+    /// A message from its JSON chat component.
+    #[must_use]
+    pub fn from_json(json: ByteString, position: ChatPosition, sender: Option<Uuid>) -> Self {
+        ChatMessage {
+            json,
+            position,
+            sender,
+            rendered: None,
+        }
+    }
+
+    /// A message already rendered to plain text (1.20.3+ NBT components).
+    #[must_use]
+    pub fn from_text(text: String, position: ChatPosition, sender: Option<Uuid>) -> Self {
+        ChatMessage {
+            json: ByteString::from_static(""),
+            position,
+            sender,
+            rendered: Some(text),
+        }
+    }
+
     /// The message as plain text, with legacy `§` formatting codes kept.
     #[must_use]
     pub fn text(&self) -> String {
-        ghast_protocol::chat::to_plain_text(&self.json)
+        match &self.rendered {
+            Some(t) => t.clone(),
+            None => ghast_protocol::chat::to_plain_text(&self.json),
+        }
     }
 
     /// The message as plain text without `§` formatting codes.
@@ -255,7 +282,7 @@ pub mod teleport_flags {
 }
 
 /// A server teleport (position packet), before it is applied to the pose.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[non_exhaustive]
 pub struct Teleport {
     /// X (absolute or relative, see `flags`).
@@ -272,6 +299,11 @@ pub struct Teleport {
     pub flags: i8,
     /// Teleport id to confirm (1.9+).
     pub teleport_id: Option<i32>,
+    /// Every relative bit as on the wire: `flags` (bits 0 – 4) plus, from 1.21.2 on, 5 – 7
+    /// delta X / Y / Z relative and 8 "rotate the delta".
+    pub relative: u32,
+    /// The motion the teleport sets (1.21.2+; zero before).
+    pub delta: Vec3,
 }
 
 /// Login-state packets from the server, common to every version.
@@ -305,6 +337,83 @@ pub enum LoginInbound {
         /// Channel name.
         channel: ByteString,
     },
+    /// The server asks for a cookie (1.20.5+): answered with none.
+    CookieRequest(ByteString),
+}
+
+/// A data pack the server offers as known (configuration `select_known_packs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct KnownPack {
+    /// Namespace (`minecraft`).
+    pub namespace: ByteString,
+    /// Pack id (`core`).
+    pub id: ByteString,
+    /// Pack version (the game version, e.g. `26.1.2`).
+    pub version: ByteString,
+}
+
+/// Configuration-state packets from the server the client reacts to (1.20.2+).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum ConfigInbound {
+    /// Keep-alive to echo.
+    KeepAlive(i64),
+    /// Ping to answer with a pong.
+    Ping(i32),
+    /// Configuration is done: answer and enter play.
+    Finish,
+    /// The server ends the connection (plain text).
+    Disconnect(String),
+    /// The packs the server can skip sending data for.
+    SelectKnownPacks(Vec<KnownPack>),
+    /// A registry (`registry_data`), kept raw for the world and the wire layer.
+    RegistryData(ghast_protocol::RawPacket),
+    /// A server resource pack.
+    ResourcePackPush {
+        /// Pack id.
+        id: Uuid,
+        /// The server requires it.
+        required: bool,
+    },
+    /// The server asks for a cookie.
+    CookieRequest(ByteString),
+    /// The server's code of conduct (26.x): the player accepts it to continue.
+    CodeOfConduct(String),
+    /// The server sends the client to another server (not supported: logged).
+    Transfer(String),
+}
+
+/// Configuration-state packets the client writes (1.20.2+).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum ConfigOutbound {
+    /// Keep-alive answer.
+    KeepAlive(i64),
+    /// Pong.
+    Pong(i32),
+    /// Acknowledge the end of configuration.
+    Finish,
+    /// The packs the client knows too.
+    SelectKnownPacks(Vec<KnownPack>),
+    /// Resource pack status (see [`Outbound::ResourcePackStatus`]).
+    ResourcePackStatus {
+        /// Pack id.
+        id: Uuid,
+        /// Status.
+        result: i32,
+    },
+    /// Cookie answer.
+    CookieResponse {
+        /// Key.
+        key: ByteString,
+    },
+    /// Accept the code of conduct.
+    AcceptCodeOfConduct,
+    /// The client brand.
+    Brand(String),
+    /// Client settings.
+    Settings(ClientSettings),
 }
 
 /// Static information from the join game packet.
@@ -340,6 +449,9 @@ pub enum Inbound {
         dimension: String,
         /// Game mode after the respawn.
         game_mode: GameMode,
+        /// 1.20.2+ data kept from the old player: bit 1 attributes, bit 2 entity data (the
+        /// last sent input and sprinting); 0 before.
+        keep: u8,
     },
     /// Server teleport / position correction.
     Teleport(Teleport),
@@ -421,6 +533,61 @@ pub enum Inbound {
         /// The dead player's entity id.
         entity_id: i32,
     },
+    /// Movement attributes of an entity (1.20.5+ registry attributes; only the ones movement
+    /// reads are kept).
+    Attributes {
+        /// The entity.
+        entity_id: i32,
+        /// The attributes in packet order.
+        attributes: Vec<AttributeUpdate>,
+    },
+    /// The server's ping (1.17+): answered with a pong.
+    Ping(i32),
+    /// A chunk batch starts (1.20.2+).
+    ChunkBatchStart,
+    /// A chunk batch ended with this many chunks (1.20.2+): answered with the chunks per tick.
+    ChunkBatchFinished(i32),
+    /// The server moves the connection back to the configuration state (1.20.2+).
+    StartConfiguration,
+    /// A server resource pack (1.20.3+ ids).
+    ResourcePackPush {
+        /// Pack id.
+        id: Uuid,
+        /// The server requires it.
+        required: bool,
+    },
+    /// The server asks for a cookie (1.20.5+).
+    CookieRequest(ByteString),
+    /// The server stores a cookie (1.20.5+).
+    StoreCookie {
+        /// Key.
+        key: ByteString,
+        /// Value.
+        value: Bytes,
+    },
+    /// A rotation-only server turn (1.21.2+ `player_rotation`).
+    Rotate {
+        /// Yaw (added when `relative_yaw`).
+        yaw: f32,
+        /// Pitch (added when `relative_pitch`).
+        pitch: f32,
+        /// Yaw is relative.
+        relative_yaw: bool,
+        /// Pitch is relative.
+        relative_pitch: bool,
+    },
+}
+
+/// One entry of a 1.20.5+ attributes packet.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct AttributeUpdate {
+    /// Registry name without namespace (`movement_speed`, `step_height`, …).
+    pub name: &'static str,
+    /// Base value.
+    pub base: f64,
+    /// Modifiers `(id, amount, operation)` in packet order.
+    pub modifiers: Vec<(ByteString, f64, i8)>,
 }
 
 /// Sneak / sprint `entity_action` values.
@@ -438,12 +605,17 @@ pub enum EntityAction {
 }
 
 /// The one movement packet of a tick.
+///
+/// `horizontal_collision` is sent from 1.21.2 on (always `false` for older versions).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum MovePacket {
     /// `flying` (C03): only on-ground.
     Flying {
         /// On ground.
         on_ground: bool,
+        /// Horizontal collision (1.21.2+).
+        horizontal_collision: bool,
     },
     /// `position` (C04).
     Position {
@@ -451,6 +623,8 @@ pub enum MovePacket {
         pos: Vec3,
         /// On ground.
         on_ground: bool,
+        /// Horizontal collision (1.21.2+).
+        horizontal_collision: bool,
     },
     /// `look` (C05).
     Look {
@@ -460,6 +634,8 @@ pub enum MovePacket {
         pitch: f32,
         /// On ground.
         on_ground: bool,
+        /// Horizontal collision (1.21.2+).
+        horizontal_collision: bool,
     },
     /// `position_look` (C06).
     PositionLook {
@@ -471,6 +647,8 @@ pub enum MovePacket {
         pitch: f32,
         /// On ground.
         on_ground: bool,
+        /// Horizontal collision (1.21.2+).
+        horizontal_collision: bool,
     },
 }
 
@@ -753,4 +931,35 @@ pub enum Outbound {
     Inventory(ghast_inventory::Outgoing),
     /// The client brand plugin message (`MC|Brand` on 1.8, `minecraft:brand` on 1.13+).
     Brand(String),
+    /// Held movement keys (1.21.2+ `player_input`; sneaking is sent this way).
+    PlayerInput(Controls),
+    /// End of the client tick (1.21.2+ `tick_end`, every tick).
+    TickEnd,
+    /// The client finished loading the level (1.21.4+ `player_loaded`).
+    PlayerLoaded,
+    /// Chunk batch acknowledgement with the desired chunks per tick (1.20.2+).
+    ChunkBatchReceived(f32),
+    /// Pong for a server ping (1.17+).
+    Pong(i32),
+    /// Resource pack status (1.20.3+): 0 loaded, 1 declined, 3 accepted, 4 downloaded, …
+    ResourcePackStatus {
+        /// Pack id.
+        id: Uuid,
+        /// Status.
+        result: i32,
+    },
+    /// Cookie answer (1.20.5+): the stored value, if any.
+    CookieResponse {
+        /// Key.
+        key: ByteString,
+        /// Value.
+        value: Option<Bytes>,
+    },
+    /// Rotation-only movement packet, as the answer to a server turn (1.21.2+).
+    LookAnswer {
+        /// Yaw.
+        yaw: f32,
+        /// Pitch.
+        pitch: f32,
+    },
 }

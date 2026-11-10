@@ -51,6 +51,7 @@ fn opts(caps_version: GameVersion) -> CoreOptions {
         sensitivity: 0.5,
         silent_hold: Duration::from_secs(3600),
         hold_turn_on_action: true,
+        accept_required_packs: true,
         inventory: match caps_version {
             GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
             GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
@@ -90,9 +91,11 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         pitch: 0.0,
         flags: 0,
         teleport_id: Some(1),
+        ..Default::default()
     };
     e.handle(Inbound::Teleport(home));
     let chat = ChatMessage {
+        rendered: None,
         json: ghast_protocol::types::ByteString::from_static(r#"{"text":"hello"}"#),
         position: ChatPosition::Chat,
         sender: None,
@@ -148,4 +151,18 @@ fn engine_bench() {
         total += run(GameVersion::V1_16_5, crate::sim::Sim16::new(), ticks);
     }
     println!("engine_bench: {ticks} ticks, {total} packets");
+}
+
+#[test]
+#[ignore = "prints type sizes"]
+fn type_sizes() {
+    println!(
+        "Outbound {} Inbound {} MovePacket {} Teleport {} ChatMessage {} Pose {}",
+        std::mem::size_of::<crate::common::Outbound>(),
+        std::mem::size_of::<Inbound>(),
+        std::mem::size_of::<crate::common::MovePacket>(),
+        std::mem::size_of::<Teleport>(),
+        std::mem::size_of::<ChatMessage>(),
+        std::mem::size_of::<crate::common::Pose>(),
+    );
 }

@@ -10,7 +10,9 @@ use std::str::FromStr;
 
 use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, PacketFilter, RawPacket, Version};
 
-use crate::common::{Inbound, LoginInbound, Outbound, Pose, Teleport};
+use crate::common::{
+    ConfigInbound, ConfigOutbound, Inbound, LoginInbound, Outbound, Pose, Teleport,
+};
 use crate::interest::Interests;
 
 mod caps;
@@ -20,6 +22,8 @@ mod v1_12_2;
 mod v1_16_5;
 #[cfg(feature = "v1_8")]
 mod v1_8;
+#[cfg(feature = "v26_1")]
+mod v26_1;
 
 pub use caps::{Capabilities, DataSet, ItemModel, PhysicsRules};
 #[cfg(feature = "v1_8")]
@@ -28,6 +32,10 @@ pub use ghast_protocol::v1_8::V1_8;
 pub use ghast_protocol::v1_12_2::V1_12_2;
 #[cfg(feature = "v1_16_5")]
 pub use ghast_protocol::v1_16_5::V1_16_5;
+#[cfg(feature = "v26_1")]
+pub use ghast_protocol::v26_1::V26_1;
+#[cfg(feature = "v26_1")]
+pub use v26_1::Wire26_1;
 
 /// A protocol version the client supports, chosen at run time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,6 +47,8 @@ pub enum GameVersion {
     V1_12_2,
     /// 1.16.4 – 1.16.5 (protocol 754).
     V1_16_5,
+    /// 26.1 – 26.1.2 (protocol 775).
+    V26_1,
 }
 
 impl GameVersion {
@@ -48,6 +58,7 @@ impl GameVersion {
         GameVersion::V1_8_9,
         GameVersion::V1_12_2,
         GameVersion::V1_16_5,
+        GameVersion::V26_1,
     ];
 
     /// What this version can do (the row the client core reads instead of comparing
@@ -58,6 +69,7 @@ impl GameVersion {
             Self::V1_8_9 => &caps::V1_8_9,
             Self::V1_12_2 => &caps::V1_12_2,
             Self::V1_16_5 => &caps::V1_16_5,
+            Self::V26_1 => &caps::V26_1,
         }
     }
 
@@ -68,6 +80,7 @@ impl GameVersion {
             Self::V1_8_9 => cfg!(feature = "v1_8"),
             Self::V1_12_2 => cfg!(feature = "v1_12_2"),
             Self::V1_16_5 => cfg!(feature = "v1_16_5"),
+            Self::V26_1 => cfg!(feature = "v26_1"),
         }
     }
 
@@ -93,6 +106,7 @@ impl GameVersion {
             Self::V1_8_9 => "1.8.9",
             Self::V1_12_2 => "1.12.2",
             Self::V1_16_5 => "1.16.5",
+            Self::V26_1 => "26.1",
         }
     }
 
@@ -125,19 +139,21 @@ impl fmt::Display for GameVersion {
 
 /// Error parsing a [`GameVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5)")]
+#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5, 26.1)")]
 pub struct UnknownVersion(pub String);
 
 impl FromStr for GameVersion {
     type Err = UnknownVersion;
 
-    /// Accepts `1.8`, `1.8.x`, `47`, `1.12.2`, `340`, `1.16.4`, `1.16.5` and `754`.
+    /// Accepts `1.8`, `1.8.x`, `47`, `1.12.2`, `340`, `1.16.4`, `1.16.5`, `754`, `26.1`,
+    /// `26.1.1`, `26.1.2` and `775`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "1.8" | "1.8.0" | "1.8.1" | "1.8.2" | "1.8.3" | "1.8.4" | "1.8.5" | "1.8.6"
             | "1.8.7" | "1.8.8" | "1.8.9" | "47" => Ok(Self::V1_8_9),
             "1.12.2" | "340" => Ok(Self::V1_12_2),
             "1.16.4" | "1.16.5" | "754" => Ok(Self::V1_16_5),
+            "26.1" | "26.1.0" | "26.1.1" | "26.1.2" | "775" => Ok(Self::V26_1),
             other => Err(UnknownVersion(other.to_owned())),
         }
     }
@@ -154,8 +170,16 @@ pub trait ClientVersion: Version + sealed::Sealed {
 
     /// Queues the handshake packet (next state = login).
     fn write_handshake(enc: &mut FrameEncoder, host: &str, port: u16) -> Result<(), EncodeError>;
-    /// Queues the login start packet.
-    fn write_login_start(enc: &mut FrameEncoder, username: &str) -> Result<(), EncodeError>;
+    /// Per-connection state of the wire layer (block action sequence numbers, chat
+    /// acknowledgements, cookies); `()` for versions without any.
+    type Wire: Default + fmt::Debug + Send;
+
+    /// Queues the login start packet (1.19+ also send the profile id).
+    fn write_login_start(
+        enc: &mut FrameEncoder,
+        username: &str,
+        uuid: uuid::Uuid,
+    ) -> Result<(), EncodeError>;
     /// Queues the encryption response.
     fn write_encryption_response(
         enc: &mut FrameEncoder,
@@ -166,12 +190,57 @@ pub trait ClientVersion: Version + sealed::Sealed {
     fn write_plugin_response(enc: &mut FrameEncoder, message_id: i32) -> Result<(), EncodeError>;
     /// Decodes a login-state packet; `Ok(None)` for packets the client ignores.
     fn decode_login(raw: &RawPacket) -> Result<Option<LoginInbound>, DecodeError>;
+    /// Queues a login-state cookie answer (1.20.5+; never called for older versions).
+    fn write_login_cookie_response(enc: &mut FrameEncoder, key: &str) -> Result<(), EncodeError> {
+        let _ = (enc, key);
+        Ok(())
+    }
+    /// Queues `login_acknowledged` (1.20.2+; never called for older versions).
+    fn write_login_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {
+        let _ = enc;
+        Ok(())
+    }
+    /// Decodes a configuration-state packet (1.20.2+); `Ok(None)` for packets the client
+    /// ignores. Registry data is returned raw ([`ConfigInbound::RegistryData`]).
+    fn decode_configuration(
+        raw: &RawPacket,
+        wire: &mut Self::Wire,
+    ) -> Result<Option<ConfigInbound>, DecodeError> {
+        let _ = (raw, wire);
+        Ok(None)
+    }
+    /// Queues a configuration-state packet (1.20.2+).
+    fn write_configuration(
+        enc: &mut FrameEncoder,
+        out: &ConfigOutbound,
+        wire: &mut Self::Wire,
+    ) -> Result<(), EncodeError> {
+        let _ = (enc, out, wire);
+        Ok(())
+    }
+    /// A `registry_data` packet of the configuration state, for the wire layer (chat types).
+    fn note_registry(raw: &RawPacket, wire: &mut Self::Wire) {
+        let _ = (raw, wire);
+    }
+    /// Queues `configuration_acknowledged` (play → configuration, 1.20.2+).
+    fn write_configuration_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {
+        let _ = enc;
+        Ok(())
+    }
+    /// Packets the wire layer itself owes the server after decoding (chat acknowledgements).
+    fn write_wire_replies(
+        enc: &mut FrameEncoder,
+        wire: &mut Self::Wire,
+    ) -> Result<(), EncodeError> {
+        let _ = (enc, wire);
+        Ok(())
+    }
 
     /// The play-state packet filter for the given interests: everything the core needs plus
     /// what the interests ask for. Everything else is dropped before it is decoded.
     fn play_filter(interests: Interests) -> PacketFilter;
     /// Decodes a play-state packet; `Ok(None)` for packets the core does not use.
-    fn decode_play(raw: &RawPacket) -> Result<Option<Inbound>, DecodeError>;
+    fn decode_play(raw: &RawPacket, wire: &mut Self::Wire) -> Result<Option<Inbound>, DecodeError>;
     /// Applies an inventory packet (windows, slots, confirms, held slot, login / respawn
     /// reset) to the inventory; returns the confirm answer to send now, if any. Other packets
     /// are ignored.
@@ -182,7 +251,11 @@ pub trait ClientVersion: Version + sealed::Sealed {
     /// The inventory version.
     const INVENTORY: ghast_inventory::Version;
     /// Queues a play-state packet.
-    fn write_play(enc: &mut FrameEncoder, out: &Outbound) -> Result<(), EncodeError>;
+    fn write_play(
+        enc: &mut FrameEncoder,
+        out: &Outbound,
+        wire: &mut Self::Wire,
+    ) -> Result<(), EncodeError>;
     /// Applies a server teleport to the pose the way this version's client does
     /// (`onPlayerPositionLook` + `Entity.updatePositionAndAngles`).
     fn apply_teleport(pose: &mut Pose, t: &Teleport);
@@ -206,6 +279,8 @@ mod sealed {
     impl Sealed for super::V1_12_2 {}
     #[cfg(feature = "v1_16_5")]
     impl Sealed for super::V1_16_5 {}
+    #[cfg(feature = "v26_1")]
+    impl Sealed for super::V26_1 {}
 }
 
 /// Truncates `s` to at most `max` UTF-16 units (Java's `String.length()`), at a character

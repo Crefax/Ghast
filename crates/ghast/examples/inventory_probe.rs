@@ -197,7 +197,7 @@ fn screen(ctx: &TickContext<'_>) -> Vec<Option<Stack>> {
 
 fn key(s: &Option<Stack>) -> Option<(i32, i32, i16, bool)> {
     s.as_ref()
-        .map(|s| (s.id, s.count, s.damage, s.nbt.is_some()))
+        .map(|s| (s.id, s.count, s.damage, s.nbt().is_some()))
 }
 
 impl Probe {

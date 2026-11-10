@@ -6,63 +6,6 @@ use super::*;
 use crate::common::{Abilities, Controls, Outbound, Pose, Teleport, Vec3};
 use crate::hands::{BlockQuery, HeldItem};
 
-/// 1.16 blocks whose `onUse` succeeds for a plain right click (GUIs, doors,
-/// switches, …). Name-based approximation of vanilla's per-block `use` overrides.
-fn activates_1_16(name: &str) -> bool {
-    const EXACT: &[&str] = &[
-        "chest",
-        "trapped_chest",
-        "ender_chest",
-        "crafting_table",
-        "furnace",
-        "blast_furnace",
-        "smoker",
-        "barrel",
-        "anvil",
-        "chipped_anvil",
-        "damaged_anvil",
-        "enchanting_table",
-        "brewing_stand",
-        "hopper",
-        "dispenser",
-        "dropper",
-        "repeater",
-        "comparator",
-        "note_block",
-        "jukebox",
-        "cake",
-        "loom",
-        "stonecutter",
-        "grindstone",
-        "cartography_table",
-        "smithing_table",
-        "lectern",
-        "bell",
-        "beacon",
-        "daylight_detector",
-        "respawn_anchor",
-        "composter",
-        "lever",
-        "command_block",
-        "chain_command_block",
-        "repeating_command_block",
-        "structure_block",
-        "jigsaw",
-        "dragon_egg",
-        "flower_pot",
-        "sweet_berry_bush",
-    ];
-    EXACT.contains(&name)
-        || name.ends_with("_shulker_box")
-        || name == "shulker_box"
-        || name.ends_with("_bed")
-        || name.ends_with("_button")
-        || name.ends_with("_fence_gate")
-        || (name.ends_with("_door") && name != "iron_door")
-        || (name.ends_with("_trapdoor") && name != "iron_trapdoor")
-        || name.starts_with("potted_")
-}
-
 // ---- 1.16.5: world + stand-still mover --------------------------------------------------
 
 /// 1.16.5: the chunk store and the stand-still mover (no 1.16 physics yet).

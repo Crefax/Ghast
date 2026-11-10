@@ -304,6 +304,7 @@ fn teleport_of(l: &Line) -> Teleport {
         pitch: l.f32("pitch"),
         flags: l.i64("rel") as i8,
         teleport_id: None,
+        ..Default::default()
     }
 }
 
@@ -427,10 +428,10 @@ fn movement_lines(tick: &TraceTick) -> Vec<&Line> {
 /// An engine packet in trace notation (`C08 pos=… f=… h16=… i=…`) for comparison.
 fn engine_text(o: &Outbound) -> Option<String> {
     Some(match o {
-        Outbound::Move(MovePacket::Flying { on_ground }) => {
+        Outbound::Move(MovePacket::Flying { on_ground, .. }) => {
             format!("C03 g={}", u8::from(*on_ground))
         }
-        Outbound::Move(MovePacket::Position { pos, on_ground }) => format!(
+        Outbound::Move(MovePacket::Position { pos, on_ground, .. }) => format!(
             "C04 {:?} {:?} {:?} g={}",
             pos.x,
             pos.y,
@@ -441,12 +442,14 @@ fn engine_text(o: &Outbound) -> Option<String> {
             yaw,
             pitch,
             on_ground,
+            ..
         }) => format!("C05 {yaw:?} {pitch:?} g={}", u8::from(*on_ground)),
         Outbound::Move(MovePacket::PositionLook {
             pos,
             yaw,
             pitch,
             on_ground,
+            ..
         }) => format!(
             "C06 {:?} {:?} {:?} {yaw:?} {pitch:?} g={}",
             pos.x,
@@ -1116,6 +1119,7 @@ fn opts(sensitivity: f32) -> CoreOptions {
         silent_hold: Duration::from_secs(3600),
         inventory: ghast_inventory::Version::V1_8,
         hold_turn_on_action: true,
+        accept_required_packs: true,
     }
 }
 
@@ -1211,6 +1215,7 @@ fn engine_pass(
         pitch: initial.pitch,
         flags: 0,
         teleport_id: None,
+        ..Default::default()
     }));
     let a = initial.abilities;
     e.handle(Inbound::Abilities(Abilities {

@@ -297,6 +297,8 @@ pub(crate) struct CoreOptions {
     /// Keep the look still on a tick that dug / placed when the turn would take the
     /// crosshair off the clicked block (Grim RotationPlace re-checks with the next look).
     pub hold_turn_on_action: bool,
+    /// Accept server resource packs the server requires (optional ones are declined).
+    pub accept_required_packs: bool,
 }
 
 /// Client state shared by the connection and the behaviour context.
@@ -347,6 +349,14 @@ pub(crate) struct Core {
     held_turns: u64,
     /// Arm swings (main and off hand) written in finished ticks.
     swings: u64,
+    /// 1.21.4+ level loading: the server said the level's chunks are coming (game event 13).
+    level_load_started: bool,
+    /// 1.21.4+: `player_loaded` was sent for the current level.
+    client_loaded: bool,
+    /// Ticks spent waiting for the level (vanilla lets the player in after 30 s).
+    load_wait: u32,
+    /// Time origin for nanosecond timestamps (chunk batch timing).
+    origin: Instant,
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
@@ -411,6 +421,10 @@ impl Core {
             want_flying: None,
             held_turns: 0,
             swings: 0,
+            level_load_started: false,
+            client_loaded: false,
+            load_wait: 0,
+            origin: Instant::now(),
             #[cfg(test)]
             forced_look: None,
         }
@@ -430,11 +444,22 @@ impl Core {
         self.hands.reset();
         self.buttons = Buttons::default();
         self.effects.clear();
+        // A new level waits for its chunks again (1.21.4+ LevelLoadTracker).
+        self.level_load_started = false;
+        self.client_loaded = false;
+        self.load_wait = 0;
         log::debug!(
             "[{}] t{} {why}: waiting for the server position",
             self.opts.name,
             self.tick
         );
+    }
+
+    /// The last inbound time in nanoseconds from the core's origin.
+    fn now_nanos(&self) -> i64 {
+        self.last_inbound.map_or(0, |t| {
+            t.saturating_duration_since(self.origin).as_nanos() as i64
+        })
     }
 
     fn column_loaded(&self, world: &dyn WorldView) -> bool {
@@ -531,7 +556,7 @@ fn efficiency(s: &ghast_inventory::Stack) -> u8 {
 /// `Enchantments` list with names. Parsed only when the stack has NBT.
 fn enchant_level(s: &ghast_inventory::Stack, id_1_8: i32, name: &str) -> u8 {
     use ghast_protocol::nbt::Tag;
-    let Some(root) = s.nbt.as_ref().and_then(|n| n.parse().ok().flatten()) else {
+    let Some(root) = s.nbt().and_then(|n| n.parse().ok().flatten()) else {
         return 0;
     };
     let Some(c) = root.tag.as_compound() else {
@@ -646,10 +671,13 @@ impl<S: Sim> Engine<S> {
                 c.reset_player("join game");
                 sim.reset_player();
                 sim.spectator(c.game_mode == GameMode::Spectator);
-                // ClientPlayNetworkHandler.onGameJoin: settings, then the brand.
-                c.out.push(Outbound::Settings(c.opts.settings.clone()));
-                if let Some(brand) = &c.opts.brand {
-                    c.out.push(Outbound::Brand(brand.clone()));
+                // ClientPlayNetworkHandler.onGameJoin: settings, then the brand (1.20.2+ sends
+                // both in the configuration state instead).
+                if !c.opts.caps.configuration_state {
+                    c.out.push(Outbound::Settings(c.opts.settings.clone()));
+                    if let Some(brand) = &c.opts.brand {
+                        c.out.push(Outbound::Brand(brand.clone()));
+                    }
                 }
                 log::info!(
                     "[{}] joined: entity {} {:?} dimension {}",
@@ -662,6 +690,7 @@ impl<S: Sim> Engine<S> {
             Inbound::Respawn {
                 dimension,
                 game_mode,
+                keep,
             } => {
                 if dimension != c.dimension {
                     c.dimension = dimension;
@@ -669,7 +698,7 @@ impl<S: Sim> Engine<S> {
                 c.game_mode = game_mode;
                 c.pending.respawned = true;
                 c.reset_player("respawn");
-                sim.reset_player();
+                sim.respawn_player(keep);
                 sim.spectator(c.game_mode == GameMode::Spectator);
             }
             Inbound::Teleport(t) => {
@@ -707,6 +736,7 @@ impl<S: Sim> Engine<S> {
                     c.out.push(Outbound::TeleportConfirm(id));
                 }
                 c.out.push(Outbound::Move(MovePacket::PositionLook {
+                    horizontal_collision: false,
                     pos: c.pose.pos,
                     yaw: c.pose.yaw,
                     pitch: c.pose.pitch,
@@ -777,6 +807,8 @@ impl<S: Sim> Engine<S> {
                 }
                 // 1.15+: "immediate respawn" gamerule (1 = no respawn screen).
                 11 if c.opts.caps.immediate_respawn_rule => c.respawn_screen = value == 0.0,
+                // 1.21.4+ LEVEL_CHUNKS_LOAD_START: the level's chunks are on their way.
+                13 if c.opts.caps.player_loaded_gate => c.level_load_started = true,
                 _ => {}
             },
             // Window confirms are answered by the inventory (exactly once).
@@ -829,6 +861,66 @@ impl<S: Sim> Engine<S> {
                     c.hands.stop_using();
                 }
             }
+            Inbound::Attributes {
+                entity_id,
+                attributes,
+            } => {
+                if entity_id == c.entity_id {
+                    sim.attributes(&attributes);
+                }
+            }
+            Inbound::Ping(id) => c.out.push(Outbound::Pong(id)),
+            Inbound::ChunkBatchStart => sim.chunk_batch_start(c.now_nanos()),
+            Inbound::ChunkBatchFinished(size) => {
+                let per_tick = sim.chunk_batch_finished(size, c.now_nanos());
+                c.out.push(Outbound::ChunkBatchReceived(per_tick));
+            }
+            Inbound::StartConfiguration => {
+                // Vanilla drops the level and the player until the next join.
+                c.joined = false;
+                c.reset_player("reconfiguration");
+                sim.reset_player();
+            }
+            Inbound::ResourcePackPush { id, required } => {
+                // A client that never shows the prompt: optional packs are declined; required
+                // ones are accepted (and reported loaded) when allowed, as the server would
+                // otherwise disconnect.
+                if required && c.opts.accept_required_packs {
+                    for result in [3, 4, 0] {
+                        c.out.push(Outbound::ResourcePackStatus { id, result });
+                    }
+                } else {
+                    c.out.push(Outbound::ResourcePackStatus { id, result: 1 });
+                }
+            }
+            Inbound::CookieRequest(key) => {
+                // The wire layer fills in a stored value.
+                c.out.push(Outbound::CookieResponse { key, value: None });
+            }
+            Inbound::StoreCookie { .. } => {}
+            Inbound::Rotate {
+                yaw,
+                pitch,
+                relative_yaw,
+                relative_pitch,
+            } => {
+                // ClientPacketListener.handleRotatePlayer: set (or add), answer with a look.
+                let yaw = if relative_yaw { c.pose.yaw + yaw } else { yaw };
+                let pitch = if relative_pitch {
+                    c.pose.pitch + pitch
+                } else {
+                    pitch
+                };
+                c.pose.yaw = yaw;
+                c.pose.pitch = pitch.clamp(-90.0, 90.0);
+                c.rotation.reset(c.pose.yaw, c.pose.pitch);
+                c.out.push(Outbound::LookAnswer {
+                    yaw: c.pose.yaw,
+                    pitch: c.pose.pitch,
+                });
+                c.sent.yaw = c.pose.yaw;
+                c.sent.pitch = c.pose.pitch;
+            }
             Inbound::Disconnect(_) | Inbound::SetCompression(_) => {}
         }
     }
@@ -879,9 +971,26 @@ impl<S: Sim> Engine<S> {
                 );
             }
         }
-        if !c.ready {
+        if c.opts.caps.player_loaded_gate && c.joined && !c.client_loaded {
+            // 1.21.4+ LevelLoadTracker: after the server's "chunks load start" the level is
+            // ready once the player's chunk is there (spectators and dead players at once);
+            // after 30 s it lets the player in anyway. `player_loaded` goes out from the
+            // connection tick, before the key handling and the player tick.
+            c.load_wait += 1;
+            let ready =
+                c.level_load_started && (c.ready || c.game_mode == GameMode::Spectator || c.dead);
+            if ready || c.load_wait >= 600 {
+                c.client_loaded = true;
+                c.out.push(Outbound::PlayerLoaded);
+                log::debug!("[{}] t{} player loaded", c.opts.name, c.tick);
+            }
+        }
+        if !c.ready || (c.opts.caps.player_loaded_gate && !c.client_loaded) {
             // The client player does not tick outside a loaded column (1.16 vanilla; on 1.8
-            // the bot waits for its column as well).
+            // the bot waits for its column as well) nor before its level loaded (1.21.4+).
+            if c.opts.caps.sends_tick_end && c.joined {
+                c.out.push(Outbound::TickEnd);
+            }
             return;
         }
 
@@ -978,7 +1087,7 @@ impl<S: Sim> Engine<S> {
             let sim = &self.sim;
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
-            let target = hands::pick(&blocks, eyes, look, hands::REACH);
+            let target = sim.crosshair(eyes, (c.pose.yaw, c.pose.pitch), look, hands::REACH);
             let entity = entity_pick(sim, c.opts.caps, eyes, look, target.map(|t| t.distance));
             let in_water = blocks(
                 eyes.x.floor() as i32,
@@ -1089,6 +1198,10 @@ impl<S: Sim> Engine<S> {
         c.sent.sprinting = c.pose.sprinting;
         c.sent.flying = c.pose.flying;
         c.swings += count_swings(&c.out);
+        // Minecraft.tick ends with `tick_end` (1.21.2+), after the player's packets.
+        if c.opts.caps.sends_tick_end {
+            c.out.push(Outbound::TickEnd);
+        }
 
         if self.state.started && !self.state.failed {
             let name = c.opts.name.clone();
@@ -1623,11 +1736,9 @@ impl TickContext<'_> {
         } else {
             v.eye_height
         };
-        let world = self.world;
-        let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
-        hands::pick(
-            &blocks,
+        self.world.crosshair(
             Vec3::new(s.pos.x, s.pos.y + eye, s.pos.z),
+            (s.yaw, s.pitch),
             hands::look_vector(s.yaw, s.pitch),
             hands::REACH,
         )
@@ -1935,7 +2046,13 @@ impl TickContext<'_> {
     }
 }
 
-#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 mod tests {
     use super::*;
     use crate::common::Teleport;
@@ -1951,6 +2068,7 @@ mod tests {
             sensitivity: 0.5,
             silent_hold: Duration::from_millis(1500),
             hold_turn_on_action: true,
+            accept_required_packs: true,
             inventory: match version {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
                 GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
@@ -1964,6 +2082,7 @@ mod tests {
         let sim: Box<dyn Sim> = match version {
             GameVersion::V1_8_9 => Box::new(crate::sim::Sim18::new()),
             GameVersion::V1_12_2 => Box::new(crate::sim::Sim12::new()),
+            GameVersion::V26_1 => Box::new(crate::sim::Sim26::test_overworld()),
             _ => Box::new(crate::sim::Sim16::new()),
         };
         Engine::new(opts(version), sim)
@@ -1974,6 +2093,7 @@ mod tests {
         let raw = match e.core.opts.caps.version {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
+            GameVersion::V26_1 => crate::sim::test_chunks::v26_1(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),
         };
         e.sim.world_packet(&raw).unwrap();
@@ -1997,7 +2117,13 @@ mod tests {
             pitch: 0.0,
             flags: 0,
             teleport_id: None,
+            ..Default::default()
         }));
+        // 1.21.4+: the server says the level's chunks are coming (game event 13).
+        e.handle(Inbound::GameState {
+            reason: 13,
+            value: 0.0,
+        });
         e.outbound().clear();
     }
 
@@ -2023,6 +2149,14 @@ mod tests {
                 Outbound::SwingOffHand => "swing_off",
                 Outbound::UseEntity { .. } => "use_entity",
                 Outbound::Inventory(_) => "inventory",
+                Outbound::PlayerInput(_) => "player_input",
+                Outbound::TickEnd => "tick_end",
+                Outbound::PlayerLoaded => "player_loaded",
+                Outbound::ChunkBatchReceived(_) => "chunk_batch_received",
+                Outbound::Pong(_) => "pong",
+                Outbound::ResourcePackStatus { .. } => "resource_pack",
+                Outbound::CookieResponse { .. } => "cookie_response",
+                Outbound::LookAnswer { .. } => "C05",
             })
             .collect();
         out.clear();
@@ -2074,6 +2208,7 @@ mod tests {
             pitch: 100.0,
             flags: 0,
             teleport_id: Some(5),
+            ..Default::default()
         }));
         let out = std::mem::take(e.outbound());
         assert_eq!(out[0], Outbound::TeleportConfirm(5));
@@ -2097,6 +2232,7 @@ mod tests {
             pitch: 100.0,
             flags: 0,
             teleport_id: None,
+            ..Default::default()
         }));
         let out = std::mem::take(e.outbound());
         assert_eq!(out.len(), 1);
@@ -2236,6 +2372,7 @@ mod tests {
         let mut e = engine(GameVersion::V1_16_5);
         join(&mut e);
         e.handle(Inbound::Chat(ChatMessage {
+            rendered: None,
             json: r#"{"text":"hi"}"#.into(),
             position: ChatPosition::System,
             sender: None,
@@ -2466,6 +2603,27 @@ mod tests {
                         .unwrap(),
                     ]
                 }
+                GameVersion::V26_1 => {
+                    use ghast_protocol::v26_1::play::clientbound as cb;
+                    // Section y = -1 (20-bit two's complement), local x 5 z 6 y 14.
+                    let local = (5 << 8 | 6 << 4 | 14) as i64;
+                    vec![
+                        RawPacket::from_packet(&cb::BlockChange {
+                            location: BlockPos::new(3, 63, 4),
+                            r#type: 1,
+                        })
+                        .unwrap(),
+                        RawPacket::from_packet(&cb::MultiBlockChange {
+                            chunk_coordinates: cb::MultiBlockChangeChunkCoordinates {
+                                x: 0,
+                                z: 0,
+                                y: -1,
+                            },
+                            records: vec![9 << 12 | local],
+                        })
+                        .unwrap(),
+                    ]
+                }
                 _ => {
                     use ghast_protocol::v1_16_5::play::clientbound as cb;
                     // Section y = -1 (20-bit two's complement), local x 5 z 6 y 14.
@@ -2536,6 +2694,7 @@ mod tests {
                 pitch: 0.0,
                 flags: 0,
                 teleport_id: Some(2),
+                ..Default::default()
             }));
             e.outbound().clear();
             let mut b = Script(|ctx: &mut TickContext<'_>| ctx.set_flying(true));
@@ -2851,6 +3010,8 @@ mod tests {
                 pitch: 0.0,
                 flags: crate::common::teleport_flags::YAW,
                 teleport_id: Some(9),
+                relative: crate::common::teleport_flags::YAW as u32,
+                ..Default::default()
             };
             e.handle(Inbound::Teleport(tp));
             e.tick(&mut b, t0);

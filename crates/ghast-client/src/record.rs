@@ -22,6 +22,7 @@
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
+#[cfg(feature = "v1_8")]
 use ghast_physics::v1_8::PlayerState;
 
 /// Hex-tagged value pairs as the oracle writes them.
@@ -109,6 +110,7 @@ impl Recorder {
     }
 
     /// Takes the 1.8.9 setup at the first movement step.
+    #[cfg(feature = "v1_8")]
     pub(crate) fn start_1_8(&mut self, p: &PlayerState) {
         let a = &p.abilities;
         self.setup = format!(
@@ -133,6 +135,7 @@ impl Recorder {
     }
 
     /// Takes the 1.16.5 setup at the first movement step.
+    #[cfg(feature = "v1_16_5")]
     pub(crate) fn start_1_16(&mut self, p: &ghast_physics::v1_16_5::PlayerState) {
         let a = &p.abilities;
         self.setup = format!(
@@ -364,6 +367,7 @@ impl Recorder {
             Ver::V1_16 => {
                 ids.sort_unstable();
                 ids.dedup();
+                #[cfg(feature = "v1_16_5")]
                 let names: Vec<String> = ids
                     .iter()
                     .filter_map(|&id| {
@@ -371,6 +375,8 @@ impl Recorder {
                         Some(format!("\"{id}\":\"{s}\""))
                     })
                     .collect();
+                #[cfg(not(feature = "v1_16_5"))]
+                let names: Vec<String> = Vec::new();
                 ("1.16.5", format!(r#""states":{{{}}},"#, names.join(",")))
             }
         };
@@ -432,6 +438,7 @@ fn runs(cx: i32, cz: i32, block: &impl Fn(i32, i32, i32) -> Option<u32>) -> Vec<
 }
 
 /// The 1.8 state fields the oracle writes (subset).
+#[cfg(feature = "v1_8")]
 pub(crate) fn state_1_8(p: &PlayerState) -> String {
     format!(
         r#"{{"pos":{},"bb":{},"vel":{},"yaw":{},"pitch":{},"on_ground":{},"horizontal_collision":{},"fall_distance":{},"sprinting":{}}}"#,
@@ -448,6 +455,7 @@ pub(crate) fn state_1_8(p: &PlayerState) -> String {
 }
 
 /// The 1.16.5 state fields the oracle writes (subset).
+#[cfg(feature = "v1_16_5")]
 pub(crate) fn state_1_16(p: &ghast_physics::v1_16_5::PlayerState) -> String {
     format!(
         r#"{{"pos":{},"bb":{},"vel":{},"yaw":{},"pitch":{},"on_ground":{},"horizontal_collision":{},"vertical_collision":{},"fall_distance":{},"sprinting":{},"swimming":{},"touching_water":{}}}"#,

@@ -90,21 +90,27 @@ impl MovementSender {
         let on_ground = pose.on_ground;
         let packet = match (moved, turned) {
             (true, true) => MovePacket::PositionLook {
+                horizontal_collision: false,
                 pos: pose.pos,
                 yaw: pose.yaw,
                 pitch: pose.pitch,
                 on_ground,
             },
             (true, false) => MovePacket::Position {
+                horizontal_collision: false,
                 pos: pose.pos,
                 on_ground,
             },
             (false, true) => MovePacket::Look {
+                horizontal_collision: false,
                 yaw: pose.yaw,
                 pitch: pose.pitch,
                 on_ground,
             },
-            (false, false) => MovePacket::Flying { on_ground },
+            (false, false) => MovePacket::Flying {
+                horizontal_collision: false,
+                on_ground,
+            },
         };
         if !self.increment_first {
             self.ticks_since_pos += 1;
@@ -181,7 +187,10 @@ mod tests {
         for _ in 0..20 {
             assert!(matches!(
                 s.update(&p).packet,
-                MovePacket::Flying { on_ground: true }
+                MovePacket::Flying {
+                    on_ground: true,
+                    ..
+                }
             ));
         }
         assert!(matches!(s.update(&p).packet, MovePacket::Position { .. }));

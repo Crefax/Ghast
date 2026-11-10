@@ -11,7 +11,9 @@ use ghast_protocol::{FrameDecoder, FrameEncoder, PacketFilter, RawPacket, State}
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::common::{ClientSettings, Inbound, LoginInbound, chat_to_plain};
+use crate::common::{
+    ClientSettings, ConfigInbound, ConfigOutbound, Inbound, KnownPack, LoginInbound, chat_to_plain,
+};
 use crate::engine::{Behavior, CoreOptions, Engine};
 use crate::error::{ClientError, SessionEnd};
 use crate::interest::Interests;
@@ -22,6 +24,8 @@ use crate::version::V1_8;
 use crate::version::V1_12_2;
 #[cfg(feature = "v1_16_5")]
 use crate::version::V1_16_5;
+#[cfg(feature = "v26_1")]
+use crate::version::V26_1;
 use crate::version::{ClientVersion, GameVersion, HasSim};
 
 /// Length of one client tick.
@@ -60,6 +64,16 @@ impl Account {
             Account::Microsoft { session, .. } => &session.profile.name,
         }
     }
+
+    /// The profile id (offline: derived from the name like vanilla's offline mode).
+    #[must_use]
+    pub fn uuid(&self) -> uuid::Uuid {
+        match self {
+            Account::Offline(p) => p.uuid(),
+            #[cfg(feature = "microsoft")]
+            Account::Microsoft { session, .. } => session.profile.id,
+        }
+    }
 }
 
 impl std::fmt::Debug for Account {
@@ -96,6 +110,7 @@ pub struct Client {
     force_step_position: crate::sim::ForceStepPosition,
     hold_turn_on_action: bool,
     world_config: Option<ghast_world::WorldConfig>,
+    accept_required_packs: bool,
 }
 
 impl Client {
@@ -118,6 +133,7 @@ impl Client {
             force_step_position: crate::sim::ForceStepPosition::Off,
             hold_turn_on_action: true,
             world_config: None,
+            accept_required_packs: true,
         }
     }
 
@@ -223,6 +239,16 @@ impl Client {
         self
     }
 
+    /// Server resource packs (1.20.3+): optional packs are always declined (the client never
+    /// shows the prompt); a pack the server requires is reported accepted and loaded when this
+    /// is on (default), declined otherwise (the server then usually disconnects). Nothing is
+    /// downloaded.
+    #[must_use]
+    pub fn accept_required_resource_packs(mut self, on: bool) -> Self {
+        self.accept_required_packs = on;
+        self
+    }
+
     /// The server address.
     #[must_use]
     pub fn address(&self) -> &TargetAddr {
@@ -267,6 +293,8 @@ impl Client {
             GameVersion::V1_12_2 => session::<V1_12_2, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v1_16_5")]
             GameVersion::V1_16_5 => session::<V1_16_5, B, S>(self, behavior, shutdown).await,
+            #[cfg(feature = "v26_1")]
+            GameVersion::V26_1 => session::<V26_1, B, S>(self, behavior, shutdown).await,
             #[allow(unreachable_patterns)]
             v => {
                 let _ = (behavior, shutdown);
@@ -312,11 +340,23 @@ where
     let name: Arc<str> = client.account.name().into();
     let mut dec = FrameDecoder::new();
     let mut enc = FrameEncoder::new();
+    let mut wire = V::Wire::default();
+    // Configuration-state registries, applied to the world once it exists.
+    let mut registries = Vec::new();
 
     let login = async {
         let stream = client.connector.connect(&client.address).await?;
         let (mut rd, mut wr) = stream.into_split();
-        login::<V, _, _>(client, &mut rd, &mut wr, &mut dec, &mut enc).await?;
+        login::<V, _, _>(
+            client,
+            &mut rd,
+            &mut wr,
+            &mut dec,
+            &mut enc,
+            &mut wire,
+            &mut registries,
+        )
+        .await?;
         Ok::<_, ClientError>((rd, wr))
     };
     let (rd, wr) = tokio::select! {
@@ -337,6 +377,7 @@ where
         silent_hold: client.silent_hold,
         inventory: V::INVENTORY,
         hold_turn_on_action: client.hold_turn_on_action,
+        accept_required_packs: client.accept_required_packs,
     };
     let mut play = Play::<V, _, _> {
         rd,
@@ -357,8 +398,14 @@ where
         raw_ids: Vec::new(),
         raw_mask: [0; 4],
         world_errors: 0,
-        _v: std::marker::PhantomData,
+        wire,
+        client,
+        reconfigure: false,
     };
+    for raw in &registries {
+        play.engine.sim.registry_data(raw);
+    }
+    drop(registries);
     let result = play.run(behavior, shutdown).await;
     let reason = match &result {
         Ok(SessionEnd::Kicked { reason, .. }) => format!("kicked: {reason}"),
@@ -381,13 +428,16 @@ where
     result
 }
 
-/// Handshake and login. Returns once the server sent login success.
+/// Handshake and login (and on 1.20.2+ the configuration state). Returns once the
+/// connection is in the play state.
 async fn login<V, R, W>(
     client: &Client,
     rd: &mut R,
     wr: &mut W,
     dec: &mut FrameDecoder,
     enc: &mut FrameEncoder,
+    wire: &mut V::Wire,
+    registries: &mut Vec<RawPacket>,
 ) -> Result<(), ClientError>
 where
     V: ClientVersion,
@@ -395,7 +445,7 @@ where
     W: AsyncWrite + Unpin,
 {
     V::write_handshake(enc, &client.address.host(), client.address.port())?;
-    V::write_login_start(enc, client.account.name())?;
+    V::write_login_start(enc, client.account.name(), client.account.uuid())?;
     flush(wr, enc).await?;
     loop {
         while let Some(raw) = dec.next_packet()? {
@@ -433,11 +483,120 @@ where
                     enc.enable_encryption(&secret);
                     dec.enable_encryption(&secret);
                 }
+                Some(LoginInbound::CookieRequest(key)) => {
+                    V::write_login_cookie_response(enc, &key)?;
+                    flush(wr, enc).await?;
+                }
                 Some(LoginInbound::Success { uuid, username }) => {
                     log::debug!("login success: {username} {uuid:?}");
+                    if V::GAME.caps().configuration_state {
+                        // ClientHandshakePacketListenerImpl.handleLoginFinished: acknowledge,
+                        // then the brand and the client information.
+                        V::write_login_acknowledged(enc)?;
+                        if let Some(brand) = &client.brand {
+                            let b = ConfigOutbound::Brand(brand.clone());
+                            V::write_configuration(enc, &b, wire)?;
+                        }
+                        let settings = ConfigOutbound::Settings(client.settings.clone());
+                        V::write_configuration(enc, &settings, wire)?;
+                        flush(wr, enc).await?;
+                        configure::<V, _, _>(client, rd, wr, dec, enc, wire, registries).await?;
+                    }
                     return Ok(());
                 }
             }
+        }
+        if read_more(rd, dec).await? == 0 {
+            return Err(ClientError::LoginClosed);
+        }
+    }
+}
+
+/// The built-in data packs of the vanilla client (`KnownPacksManager`): core and the feature
+/// packs, all in the `minecraft` namespace.
+const VANILLA_PACKS: &[&str] = &[
+    "core",
+    "minecart_improvements",
+    "redstone_experiments",
+    "trade_rebalance",
+];
+
+/// The configuration state (1.20.2+), until the server finishes it. Registry data is collected
+/// into `registries` (raw) for the world.
+async fn configure<V, R, W>(
+    client: &Client,
+    rd: &mut R,
+    wr: &mut W,
+    dec: &mut FrameDecoder,
+    enc: &mut FrameEncoder,
+    wire: &mut V::Wire,
+    registries: &mut Vec<RawPacket>,
+) -> Result<(), ClientError>
+where
+    V: ClientVersion,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let family = V::GAME.protocol_info().game_versions;
+    loop {
+        while let Some(raw) = dec.next_packet()? {
+            let p = V::decode_configuration(&raw, wire).map_err(|source| ClientError::Decode {
+                state: State::Configuration,
+                id: raw.id,
+                source,
+            })?;
+            let Some(p) = p else { continue };
+            let reply = match p {
+                ConfigInbound::KeepAlive(id) => vec![ConfigOutbound::KeepAlive(id)],
+                ConfigInbound::Ping(id) => vec![ConfigOutbound::Pong(id)],
+                ConfigInbound::Finish => {
+                    V::write_configuration(enc, &ConfigOutbound::Finish, wire)?;
+                    flush(wr, enc).await?;
+                    log::debug!("configuration done ({} registries)", registries.len());
+                    return Ok(());
+                }
+                ConfigInbound::Disconnect(reason) => return Err(ClientError::LoginRefused(reason)),
+                ConfigInbound::SelectKnownPacks(packs) => {
+                    // The vanilla packs of this version family (the server's own patch).
+                    let known: Vec<KnownPack> = packs
+                        .into_iter()
+                        .filter(|k| {
+                            &*k.namespace == "minecraft"
+                                && VANILLA_PACKS.contains(&&*k.id)
+                                && family.contains(&&*k.version)
+                        })
+                        .collect();
+                    vec![ConfigOutbound::SelectKnownPacks(known)]
+                }
+                ConfigInbound::RegistryData(raw) => {
+                    V::note_registry(&raw, wire);
+                    registries.push(raw);
+                    continue;
+                }
+                ConfigInbound::ResourcePackPush { id, required } => {
+                    if required && client.accept_required_packs {
+                        [3, 4, 0]
+                            .into_iter()
+                            .map(|result| ConfigOutbound::ResourcePackStatus { id, result })
+                            .collect()
+                    } else {
+                        vec![ConfigOutbound::ResourcePackStatus { id, result: 1 }]
+                    }
+                }
+                ConfigInbound::CookieRequest(key) => vec![ConfigOutbound::CookieResponse { key }],
+                ConfigInbound::CodeOfConduct(text) => {
+                    log::info!("server code of conduct (accepted): {text}");
+                    vec![ConfigOutbound::AcceptCodeOfConduct]
+                }
+                ConfigInbound::Transfer(to) => {
+                    log::warn!("server transfer to {to} is not supported; staying");
+                    continue;
+                }
+            };
+            for o in &reply {
+                V::write_configuration(enc, o, wire)?;
+            }
+            flush(wr, enc).await?;
         }
         if read_more(rd, dec).await? == 0 {
             return Err(ClientError::LoginClosed);
@@ -483,7 +642,7 @@ async fn encryption<V: ClientVersion>(
 }
 
 /// The play state of one session.
-struct Play<V: HasSim, R, W> {
+struct Play<'c, V: ClientVersion + HasSim, R, W> {
     rd: R,
     wr: W,
     dec: FrameDecoder,
@@ -496,7 +655,11 @@ struct Play<V: HasSim, R, W> {
     raw_mask: [u64; 4],
     /// World packets the world rejected (malformed chunk data).
     world_errors: u64,
-    _v: std::marker::PhantomData<V>,
+    /// The version's wire state (sequence numbers, chat acknowledgements).
+    wire: V::Wire,
+    client: &'c Client,
+    /// The server moved the connection to the configuration state (1.20.2+).
+    reconfigure: bool,
 }
 
 /// The entity tracking the interests ask for: positions and metadata (item stacks, sneak /
@@ -520,7 +683,7 @@ enum Wake {
     Shutdown,
 }
 
-impl<V, R, W> Play<V, R, W>
+impl<V, R, W> Play<'_, V, R, W>
 where
     V: ClientVersion + HasSim,
     R: AsyncRead + Unpin,
@@ -588,7 +751,7 @@ where
         let out = self.engine.outbound();
         let mut res = Ok(());
         for p in out.drain(..) {
-            if let Err(e) = V::write_play(&mut self.enc, &p) {
+            if let Err(e) = V::write_play(&mut self.enc, &p, &mut self.wire) {
                 res = Err(e);
                 break;
             }
@@ -641,11 +804,12 @@ where
                     .outbound()
                     .push(crate::common::Outbound::Inventory(o));
             }
-            let p = V::decode_play(&raw).map_err(|source| ClientError::Decode {
+            let p = V::decode_play(&raw, &mut self.wire).map_err(|source| ClientError::Decode {
                 state: State::Play,
                 id: raw.id,
                 source,
             })?;
+            V::write_wire_replies(&mut self.enc, &mut self.wire)?;
             match p {
                 None => {}
                 Some(Inbound::Disconnect(json)) => {
@@ -655,6 +819,12 @@ where
                         reason,
                         json: json.to_string(),
                     }));
+                }
+                Some(Inbound::StartConfiguration) => {
+                    // Everything after this packet is configuration state: stop here.
+                    self.engine.handle(Inbound::StartConfiguration);
+                    self.reconfigure = true;
+                    return Ok(None);
                 }
                 Some(Inbound::SetCompression(t)) => {
                     // 1.8 play-state Set Compression: applies to the next frame both ways.
@@ -666,6 +836,39 @@ where
             }
         }
         Ok(None)
+    }
+
+    /// Play → configuration → play (1.20.2+ `start_configuration`): acknowledges, runs the
+    /// configuration state (no ticks meanwhile, like vanilla without a level) and resumes play;
+    /// the server then sends a new join game.
+    async fn reconfigure_if_asked(&mut self) -> Result<(), ClientError> {
+        if !self.reconfigure {
+            return Ok(());
+        }
+        self.reconfigure = false;
+        log::info!("[{}] server asked for reconfiguration", self.engine.name());
+        self.encode_outbound()?;
+        V::write_configuration_acknowledged(&mut self.enc)?;
+        flush(&mut self.wr, &mut self.enc).await?;
+        let play_filter = *self.dec.filter();
+        self.dec.set_filter(PacketFilter::all());
+        let mut registries = Vec::new();
+        configure::<V, _, _>(
+            self.client,
+            &mut self.rd,
+            &mut self.wr,
+            &mut self.dec,
+            &mut self.enc,
+            &mut self.wire,
+            &mut registries,
+        )
+        .await?;
+        for raw in &registries {
+            self.engine.sim.registry_data(raw);
+        }
+        self.dec.set_filter(play_filter);
+        self.engine.note_inbound(Instant::now().into_std());
+        Ok(())
     }
 
     /// Reads if data is available right now; `None` if the read would wait.
@@ -693,6 +896,7 @@ where
         if let Some(end) = self.drain_inbound()? {
             return Ok(end);
         }
+        self.reconfigure_if_asked().await?;
         self.encode_outbound()?;
         flush(&mut self.wr, &mut self.enc).await?;
 
@@ -724,6 +928,7 @@ where
                     if let Some(end) = self.drain_inbound()? {
                         return Ok(end);
                     }
+                    self.reconfigure_if_asked().await?;
                     // Replies (keep-alive, teleport, confirms) go out right away, like
                     // vanilla's per-frame packet handling.
                     self.encode_outbound()?;
@@ -743,6 +948,7 @@ where
                                 if let Some(end) = self.drain_inbound()? {
                                     return Ok(end);
                                 }
+                                self.reconfigure_if_asked().await?;
                             }
                         }
                     }

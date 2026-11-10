@@ -1,0 +1,1036 @@
+//! Protocol 775 (26.1 – 26.1.2): login with the profile id, the configuration state, and the
+//! play packets of the modern client (`player_input`, `tick_end`, `player_loaded`, sequenced
+//! block actions, unsigned chat with message acknowledgements).
+
+use std::collections::HashMap;
+
+use bytes::{Bytes, BytesMut};
+use ghast_protocol::chat::nbt_to_plain_text;
+use ghast_protocol::nbt::AnonNbt;
+use ghast_protocol::types::{ByteString, LpVec3};
+use ghast_protocol::v26_1::{configuration, handshaking, login, play};
+use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, McWrite, PacketFilter, RawPacket};
+
+use super::{ClientVersion, GameVersion, V26_1, teleport_target, truncate_utf16};
+use crate::common::{
+    Abilities, AttributeUpdate, ChatMessage, ChatPosition, ConfigInbound, ConfigOutbound,
+    EntityAction, GameMode, Health, Inbound, JoinGame, KnownPack, LoginInbound, MovePacket,
+    Outbound, Pose, Teleport, Vec3,
+};
+use crate::interest::Interests;
+
+use play::clientbound as cb;
+use play::serverbound as sb;
+
+/// Messages kept for acknowledgement (`LastSeenMessagesTracker(20)`).
+const LAST_SEEN: usize = 20;
+/// The client acknowledges once this many messages are pending (`markMessageAsProcessed`).
+const ACK_AFTER: i32 = 64;
+
+/// Per-connection wire state of protocol 775 (opaque).
+#[derive(Debug, Default)]
+pub struct Wire26_1 {
+    /// `BlockStatePredictionHandler.currentSequenceNr` of the current level.
+    sequence: i32,
+    /// The look of the last movement packet (`use_item` carries the player's rotation).
+    last_look: (f32, f32),
+    /// The current dimension (a respawn into another one starts a new level).
+    dimension: String,
+    /// Received signed messages not yet acknowledged.
+    seen: LastSeen,
+    /// Next expected `player_chat` global index.
+    next_chat_index: i32,
+    /// `minecraft:chat_type` registry keys in order.
+    chat_types: Vec<String>,
+    /// Cookies the server stored.
+    cookies: HashMap<ByteString, Bytes>,
+    /// Salt generator state.
+    salt: u64,
+}
+
+/// `LastSeenMessagesTracker`: a ring of the last 20 signed messages seen.
+#[derive(Debug, Default)]
+struct LastSeen {
+    entries: [Option<Bytes>; LAST_SEEN],
+    tail: usize,
+    offset: i32,
+    last: Option<Bytes>,
+    /// An acknowledgement is due (`offset > 64` after a new message).
+    ack_due: bool,
+}
+
+impl LastSeen {
+    /// `addPending` (every shown signed message).
+    fn add(&mut self, sig: Bytes) {
+        if self.last.as_ref() == Some(&sig) {
+            return;
+        }
+        self.last = Some(sig.clone());
+        self.entries[self.tail] = Some(sig);
+        self.tail = (self.tail + 1) % LAST_SEEN;
+        self.offset += 1;
+        if self.offset > ACK_AFTER {
+            self.ack_due = true;
+        }
+    }
+
+    /// `generateAndApplyUpdate`: offset, the acknowledged bit set (20 bits, 3 bytes) and the
+    /// checksum of the acknowledged signatures.
+    fn update(&mut self) -> (i32, [u8; 3], u8) {
+        let offset = std::mem::take(&mut self.offset);
+        self.ack_due = false;
+        let mut bits = [0u8; 3];
+        let mut checksum: i32 = 1;
+        for i in 0..LAST_SEEN {
+            if let Some(sig) = &self.entries[(self.tail + i) % LAST_SEEN] {
+                bits[i / 8] |= 1 << (i % 8);
+                checksum = checksum.wrapping_mul(31).wrapping_add(java_array_hash(sig));
+            }
+        }
+        let b = checksum as u8;
+        (offset, bits, if b == 0 { 1 } else { b })
+    }
+}
+
+/// `Arrays.hashCode(byte[])`.
+fn java_array_hash(b: &[u8]) -> i32 {
+    b.iter().fold(1i32, |h, &x| {
+        h.wrapping_mul(31).wrapping_add(i32::from(x as i8))
+    })
+}
+
+impl Wire26_1 {
+    /// The next prediction sequence number (`startPredicting`).
+    fn next_sequence(&mut self) -> i32 {
+        self.sequence = self.sequence.wrapping_add(1);
+        self.sequence
+    }
+
+    fn next_salt(&mut self) -> i64 {
+        if self.salt == 0 {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64);
+            self.salt = t ^ (std::ptr::from_ref(self) as u64).rotate_left(32) | 1;
+        }
+        // xorshift64*
+        let mut x = self.salt;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.salt = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D) as i64
+    }
+
+    fn new_level(&mut self, dimension: &str) {
+        self.sequence = 0;
+        dimension.clone_into(&mut self.dimension);
+    }
+}
+
+/// Plain text of a network chat component.
+fn plain(nbt: &AnonNbt) -> String {
+    nbt_to_plain_text(nbt)
+}
+
+/// A disconnect reason as the JSON text component the session end reports.
+fn reason_json(nbt: &AnonNbt) -> ByteString {
+    let text = plain(nbt);
+    let mut s = String::with_capacity(text.len() + 12);
+    s.push_str("{\"text\":\"");
+    for c in text.chars() {
+        match c {
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            '\n' => s.push_str("\\n"),
+            c if (c as u32) < 0x20 => s.push_str(&format!("\\u{:04x}", c as u32)),
+            c => s.push(c),
+        }
+    }
+    s.push_str("\"}");
+    ByteString::from(s)
+}
+
+/// The vanilla en_us pattern of a chat type, with `%1` the sender and `%2` the content (and
+/// `%3` the target where the type has one).
+fn chat_pattern(chat_type: &str) -> &'static str {
+    match chat_type.strip_prefix("minecraft:").unwrap_or(chat_type) {
+        "say_command" => "[%1] %2",
+        "emote_command" => "* %1 %2",
+        "msg_command_incoming" => "%1 whispers to you: %2",
+        "msg_command_outgoing" => "You whisper to %3: %2",
+        "team_msg_command_incoming" => "%3 <%1> %2",
+        "team_msg_command_outgoing" => "%3 -> <%1> %2",
+        _ => "<%1> %2",
+    }
+}
+
+fn render_chat(pattern: &str, sender: &str, content: &str, target: &str) -> String {
+    let mut out = String::with_capacity(pattern.len() + sender.len() + content.len());
+    let mut it = pattern.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '%' {
+            match it.peek() {
+                Some('1') => out.push_str(sender),
+                Some('2') => out.push_str(content),
+                Some('3') => out.push_str(target),
+                _ => {
+                    out.push(c);
+                    continue;
+                }
+            }
+            it.next();
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The attributes movement reads (by registry id of `minecraft:attribute`, checked against
+/// the 26.1.2 registries report).
+fn attribute_name(id: i32) -> Option<&'static str> {
+    Some(match id {
+        14 => "gravity",
+        15 => "jump_strength",
+        21 => "movement_efficiency",
+        22 => "movement_speed",
+        24 => "safe_fall_distance",
+        25 => "scale",
+        26 => "sneaking_speed",
+        28 => "step_height",
+        32 => "water_movement_efficiency",
+        _ => return None,
+    })
+}
+
+impl ClientVersion for V26_1 {
+    const GAME: GameVersion = GameVersion::V26_1;
+    const CHAT_LIMIT: usize = 256;
+    type Wire = Wire26_1;
+
+    fn write_handshake(enc: &mut FrameEncoder, host: &str, port: u16) -> Result<(), EncodeError> {
+        enc.write_packet(&handshaking::serverbound::SetProtocol {
+            protocol_version: 775,
+            server_host: ByteString::from(host),
+            server_port: port,
+            next_state: 2,
+        })
+    }
+
+    fn write_login_start(
+        enc: &mut FrameEncoder,
+        username: &str,
+        uuid: uuid::Uuid,
+    ) -> Result<(), EncodeError> {
+        enc.write_packet(&login::serverbound::LoginStart {
+            username: ByteString::from(username),
+            player_uuid: uuid,
+        })
+    }
+
+    fn write_encryption_response(
+        enc: &mut FrameEncoder,
+        shared_secret: &[u8],
+        verify_token: &[u8],
+    ) -> Result<(), EncodeError> {
+        enc.write_packet(&login::serverbound::EncryptionBegin {
+            shared_secret: Bytes::copy_from_slice(shared_secret),
+            verify_token: Bytes::copy_from_slice(verify_token),
+        })
+    }
+
+    fn write_plugin_response(enc: &mut FrameEncoder, message_id: i32) -> Result<(), EncodeError> {
+        enc.write_packet(&login::serverbound::LoginPluginResponse {
+            message_id,
+            data: None,
+        })
+    }
+
+    fn decode_login(raw: &RawPacket) -> Result<Option<LoginInbound>, DecodeError> {
+        use login::clientbound as lc;
+        Ok(Some(match raw.id {
+            lc::id::DISCONNECT => {
+                // The login disconnect is still a JSON string.
+                LoginInbound::Disconnect(raw.decode_as::<lc::Disconnect>()?.reason)
+            }
+            lc::id::ENCRYPTION_BEGIN => {
+                let p: lc::EncryptionBegin = raw.decode_as()?;
+                LoginInbound::EncryptionRequest {
+                    server_id: p.server_id,
+                    public_key: p.public_key,
+                    verify_token: p.verify_token,
+                }
+            }
+            lc::id::SUCCESS => {
+                let p: lc::Success = raw.decode_as()?;
+                LoginInbound::Success {
+                    uuid: Some(p.uuid),
+                    username: p.username,
+                }
+            }
+            lc::id::COMPRESS => LoginInbound::Compress(raw.decode_as::<lc::Compress>()?.threshold),
+            lc::id::LOGIN_PLUGIN_REQUEST => {
+                let p: lc::LoginPluginRequest = raw.decode_as()?;
+                LoginInbound::PluginRequest {
+                    message_id: p.message_id,
+                    channel: p.channel,
+                }
+            }
+            lc::id::COOKIE_REQUEST => {
+                LoginInbound::CookieRequest(raw.decode_as::<lc::CookieRequest>()?.cookie)
+            }
+            _ => return Ok(None),
+        }))
+    }
+
+    fn write_login_cookie_response(enc: &mut FrameEncoder, key: &str) -> Result<(), EncodeError> {
+        // A fresh connection has no cookies (they come with a transfer).
+        enc.write_packet(&login::serverbound::CookieResponse {
+            key: ByteString::from(key),
+            value: None,
+        })
+    }
+
+    fn write_login_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {
+        enc.write_packet(&login::serverbound::LoginAcknowledged {})
+    }
+
+    fn decode_configuration(
+        raw: &RawPacket,
+        wire: &mut Wire26_1,
+    ) -> Result<Option<ConfigInbound>, DecodeError> {
+        use configuration::clientbound as cc;
+        Ok(Some(match raw.id {
+            cc::id::KEEP_ALIVE => {
+                ConfigInbound::KeepAlive(raw.decode_as::<cc::KeepAlive>()?.keep_alive_id)
+            }
+            cc::id::PING => ConfigInbound::Ping(raw.decode_as::<cc::Ping>()?.id),
+            cc::id::FINISH_CONFIGURATION => ConfigInbound::Finish,
+            cc::id::DISCONNECT => {
+                ConfigInbound::Disconnect(plain(&raw.decode_as::<cc::Disconnect>()?.reason))
+            }
+            cc::id::SELECT_KNOWN_PACKS => {
+                let p: cc::SelectKnownPacks = raw.decode_as()?;
+                ConfigInbound::SelectKnownPacks(
+                    p.packs
+                        .into_iter()
+                        .map(|k| KnownPack {
+                            namespace: k.namespace,
+                            id: k.id,
+                            version: k.version,
+                        })
+                        .collect(),
+                )
+            }
+            cc::id::REGISTRY_DATA => ConfigInbound::RegistryData(raw.clone()),
+            cc::id::ADD_RESOURCE_PACK => {
+                let p: cc::AddResourcePack = raw.decode_as()?;
+                ConfigInbound::ResourcePackPush {
+                    id: p.uuid,
+                    required: p.forced,
+                }
+            }
+            cc::id::COOKIE_REQUEST => {
+                ConfigInbound::CookieRequest(raw.decode_as::<cc::CookieRequest>()?.cookie)
+            }
+            cc::id::STORE_COOKIE => {
+                let p: cc::StoreCookie = raw.decode_as()?;
+                wire.cookies.insert(p.key, p.value);
+                return Ok(None);
+            }
+            cc::id::CODE_OF_CONDUCT => ConfigInbound::CodeOfConduct(
+                raw.decode_as::<cc::CodeOfConduct>()?.contents.to_string(),
+            ),
+            cc::id::TRANSFER => {
+                let p: cc::Transfer = raw.decode_as()?;
+                ConfigInbound::Transfer(format!("{}:{}", p.host, p.port))
+            }
+            _ => return Ok(None),
+        }))
+    }
+
+    fn write_configuration(
+        enc: &mut FrameEncoder,
+        out: &ConfigOutbound,
+        wire: &mut Wire26_1,
+    ) -> Result<(), EncodeError> {
+        use configuration::serverbound as cs;
+        match out {
+            ConfigOutbound::KeepAlive(id) => {
+                enc.write_packet(&cs::KeepAlive { keep_alive_id: *id })
+            }
+            ConfigOutbound::Pong(id) => enc.write_packet(&cs::Pong { id: *id }),
+            ConfigOutbound::Finish => enc.write_packet(&cs::FinishConfiguration {}),
+            ConfigOutbound::SelectKnownPacks(packs) => enc.write_packet(&cs::SelectKnownPacks {
+                packs: packs
+                    .iter()
+                    .map(|k| cs::SelectKnownPacksPacks {
+                        namespace: k.namespace.clone(),
+                        id: k.id.clone(),
+                        version: k.version.clone(),
+                    })
+                    .collect(),
+            }),
+            ConfigOutbound::ResourcePackStatus { id, result } => {
+                enc.write_packet(&cs::ResourcePackReceive {
+                    uuid: *id,
+                    result: *result,
+                })
+            }
+            ConfigOutbound::CookieResponse { key } => enc.write_packet(&cs::CookieResponse {
+                key: key.clone(),
+                value: wire.cookies.get(key).cloned(),
+            }),
+            ConfigOutbound::AcceptCodeOfConduct => enc.write_packet(&cs::AcceptCodeOfConduct {}),
+            ConfigOutbound::Brand(brand) => {
+                let mut data = BytesMut::with_capacity(brand.len() + 1);
+                data.put_string(brand)?;
+                enc.write_packet(&cs::CustomPayload {
+                    channel: ByteString::from_static("minecraft:brand"),
+                    data: data.freeze(),
+                })
+            }
+            ConfigOutbound::Settings(s) => enc.write_packet(&cs::Settings {
+                locale: ByteString::from(s.locale.to_ascii_lowercase()),
+                view_distance: s.view_distance,
+                chat_flags: i32::from(s.chat_mode),
+                chat_colors: s.chat_colors,
+                skin_parts: s.skin_parts,
+                main_hand: s.main_hand,
+                enable_text_filtering: false,
+                enable_server_listing: true,
+                particle_status: cs::SettingsParticleStatus::ALL,
+            }),
+        }
+    }
+
+    fn note_registry(raw: &RawPacket, wire: &mut Wire26_1) {
+        let Ok(p) = raw.decode_as::<configuration::clientbound::RegistryData>() else {
+            return;
+        };
+        if &*p.id == "minecraft:chat_type" {
+            wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
+        }
+    }
+
+    fn write_configuration_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {
+        enc.write_packet(&sb::ConfigurationAcknowledged {})
+    }
+
+    fn write_wire_replies(enc: &mut FrameEncoder, wire: &mut Wire26_1) -> Result<(), EncodeError> {
+        if wire.seen.ack_due {
+            wire.seen.ack_due = false;
+            let count = std::mem::take(&mut wire.seen.offset);
+            if count > 0 {
+                enc.write_packet(&sb::MessageAcknowledgement { count })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn play_filter(interests: Interests) -> PacketFilter {
+        let mut f = PacketFilter::none()
+            .with(cb::id::KEEP_ALIVE)
+            .with(cb::id::PING)
+            .with(cb::id::LOGIN)
+            .with(cb::id::UPDATE_HEALTH)
+            .with(cb::id::RESPAWN)
+            .with(cb::id::POSITION)
+            .with(cb::id::PLAYER_ROTATION)
+            .with(cb::id::HELD_ITEM_SLOT)
+            .with(cb::id::GAME_STATE_CHANGE)
+            .with(cb::id::OPEN_WINDOW)
+            .with(cb::id::OPEN_HORSE_WINDOW)
+            .with(cb::id::CLOSE_WINDOW)
+            .with(cb::id::WINDOW_ITEMS)
+            .with(cb::id::SET_SLOT)
+            .with(cb::id::SET_CURSOR_ITEM)
+            .with(cb::id::SET_PLAYER_INVENTORY)
+            .with(cb::id::CRAFT_PROGRESS_BAR)
+            .with(cb::id::ABILITIES)
+            .with(cb::id::KICK_DISCONNECT)
+            .with(cb::id::DEATH_COMBAT_EVENT)
+            .with(cb::id::ENTITY_STATUS)
+            .with(cb::id::ENTITY_UPDATE_ATTRIBUTES)
+            .with(cb::id::ENTITY_EFFECT)
+            .with(cb::id::REMOVE_ENTITY_EFFECT)
+            .with(cb::id::ENTITY_VELOCITY)
+            .with(cb::id::EXPLOSION)
+            .with(cb::id::START_CONFIGURATION)
+            .with(cb::id::ADD_RESOURCE_PACK)
+            .with(cb::id::COOKIE_REQUEST)
+            .with(cb::id::STORE_COOKIE)
+            // Signed player messages must be acknowledged even when nobody reads chat.
+            .with(cb::id::PLAYER_CHAT);
+        for &id in ghast_world::v26_1::PACKET_IDS {
+            f.insert(id);
+        }
+        if interests.contains(Interests::CHAT) {
+            f.insert(cb::id::SYSTEM_CHAT);
+            f.insert(cb::id::PROFILELESS_CHAT);
+        }
+        f
+    }
+
+    fn decode_play(raw: &RawPacket, wire: &mut Wire26_1) -> Result<Option<Inbound>, DecodeError> {
+        Ok(Some(match raw.id {
+            cb::id::KEEP_ALIVE => {
+                Inbound::KeepAlive(raw.decode_as::<cb::KeepAlive>()?.keep_alive_id)
+            }
+            cb::id::PING => Inbound::Ping(raw.decode_as::<cb::Ping>()?.id),
+            cb::id::LOGIN => {
+                let p: cb::Login = raw.decode_as()?;
+                let w = &p.world_state;
+                wire.new_level(&w.name);
+                wire.next_chat_index = 0;
+                wire.seen = LastSeen::default();
+                Inbound::JoinGame(JoinGame {
+                    entity_id: p.entity_id,
+                    game_mode: GameMode::from_wire(w.gamemode.0 as u8),
+                    dimension: w.name.to_string(),
+                    hardcore: p.is_hardcore,
+                    dimension_nbt: None,
+                    respawn_screen: p.enable_respawn_screen,
+                })
+            }
+            cb::id::RESPAWN => {
+                let p: cb::Respawn = raw.decode_as()?;
+                let w = &p.world_state;
+                if *w.name != *wire.dimension {
+                    wire.new_level(&w.name);
+                }
+                Inbound::Respawn {
+                    dimension: w.name.to_string(),
+                    game_mode: GameMode::from_wire(w.gamemode.0 as u8),
+                    keep: p.copy_metadata,
+                }
+            }
+            cb::id::SYSTEM_CHAT => {
+                let p: cb::SystemChat = raw.decode_as()?;
+                Inbound::Chat(ChatMessage::from_text(
+                    plain(&p.content),
+                    if p.is_action_bar {
+                        ChatPosition::ActionBar
+                    } else {
+                        ChatPosition::System
+                    },
+                    None,
+                ))
+            }
+            cb::id::PLAYER_CHAT => {
+                let p: cb::PlayerChat = raw.decode_as()?;
+                if p.global_index != wire.next_chat_index {
+                    log::warn!(
+                        "player chat index {} (expected {}): vanilla disconnects here",
+                        p.global_index,
+                        wire.next_chat_index
+                    );
+                }
+                wire.next_chat_index = p.global_index.wrapping_add(1);
+                if let Some(sig) = p.signature.clone() {
+                    wire.seen.add(sig);
+                }
+                let content = p
+                    .unsigned_chat_content
+                    .as_ref()
+                    .map_or_else(|| p.plain_message.to_string(), plain);
+                let kind = match &p.r#type {
+                    ghast_protocol::types::Holder::Id(i) => usize::try_from(*i)
+                        .ok()
+                        .and_then(|i| wire.chat_types.get(i))
+                        .map_or("minecraft:chat", String::as_str),
+                    ghast_protocol::types::Holder::Inline(_) => "minecraft:chat",
+                };
+                let target = p
+                    .network_target_name
+                    .as_ref()
+                    .map(plain)
+                    .unwrap_or_default();
+                let text = render_chat(
+                    chat_pattern(kind),
+                    &plain(&p.network_name),
+                    &content,
+                    &target,
+                );
+                Inbound::Chat(ChatMessage::from_text(
+                    text,
+                    ChatPosition::Chat,
+                    Some(p.sender_uuid),
+                ))
+            }
+            cb::id::PROFILELESS_CHAT => {
+                let p: cb::ProfilelessChat = raw.decode_as()?;
+                let kind = p
+                    .r#type
+                    .id()
+                    .and_then(|i| usize::try_from(i).ok())
+                    .and_then(|i| wire.chat_types.get(i))
+                    .map_or("minecraft:chat", String::as_str);
+                let target = p.target.as_ref().map(plain).unwrap_or_default();
+                Inbound::Chat(ChatMessage::from_text(
+                    render_chat(
+                        chat_pattern(kind),
+                        &plain(&p.name),
+                        &plain(&p.message),
+                        &target,
+                    ),
+                    ChatPosition::Chat,
+                    None,
+                ))
+            }
+            cb::id::UPDATE_HEALTH => {
+                let p: cb::UpdateHealth = raw.decode_as()?;
+                Inbound::Health(Health {
+                    health: p.health,
+                    food: p.food,
+                    saturation: p.food_saturation,
+                })
+            }
+            cb::id::POSITION => {
+                let p: cb::Position = raw.decode_as()?;
+                Inbound::Teleport(Teleport {
+                    x: p.x,
+                    y: p.y,
+                    z: p.z,
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    flags: (p.flags.0 & 0x1f) as i8,
+                    teleport_id: Some(p.teleport_id),
+                    relative: p.flags.0,
+                    delta: Vec3::new(p.dx, p.dy, p.dz),
+                })
+            }
+            cb::id::PLAYER_ROTATION => {
+                let p: cb::PlayerRotation = raw.decode_as()?;
+                Inbound::Rotate {
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    relative_yaw: p.relative_yaw,
+                    relative_pitch: p.relative_pitch,
+                }
+            }
+            cb::id::HELD_ITEM_SLOT => {
+                Inbound::HeldSlot(raw.decode_as::<cb::HeldItemSlot>()?.slot as i8)
+            }
+            cb::id::GAME_STATE_CHANGE => {
+                let p: cb::GameStateChange = raw.decode_as()?;
+                Inbound::GameState {
+                    reason: p.reason.0,
+                    value: p.game_mode,
+                }
+            }
+            cb::id::OPEN_WINDOW => {
+                Inbound::OpenWindow(raw.decode_as::<cb::OpenWindow>()?.window_id)
+            }
+            cb::id::CLOSE_WINDOW => {
+                Inbound::CloseWindow(raw.decode_as::<cb::CloseWindow>()?.window_id)
+            }
+            cb::id::ABILITIES => {
+                let p: cb::Abilities = raw.decode_as()?;
+                Inbound::Abilities(Abilities {
+                    flags: p.flags,
+                    flying_speed: p.flying_speed,
+                    walking_speed: p.walking_speed,
+                })
+            }
+            cb::id::KICK_DISCONNECT => {
+                Inbound::Disconnect(reason_json(&raw.decode_as::<cb::KickDisconnect>()?.reason))
+            }
+            cb::id::ENTITY_VELOCITY => {
+                let p: cb::EntityVelocity = raw.decode_as()?;
+                let [x, y, z] = p.velocity.to_vec3();
+                Inbound::Velocity {
+                    entity_id: p.entity_id,
+                    motion: Vec3::new(x, y, z),
+                }
+            }
+            cb::id::EXPLOSION => {
+                let p: cb::Explosion = raw.decode_as()?;
+                let Some(k) = p.player_knockback else {
+                    return Ok(None);
+                };
+                Inbound::ExplosionPush(Vec3::new(k.x, k.y, k.z))
+            }
+            cb::id::ENTITY_UPDATE_ATTRIBUTES => {
+                let p: cb::EntityUpdateAttributes = raw.decode_as()?;
+                let attributes: Vec<AttributeUpdate> = p
+                    .properties
+                    .iter()
+                    .filter_map(|a| {
+                        Some(AttributeUpdate {
+                            name: attribute_name(a.key.0)?,
+                            base: a.value,
+                            modifiers: a
+                                .modifiers
+                                .iter()
+                                .map(|m| (m.uuid.clone(), m.amount, m.operation))
+                                .collect(),
+                        })
+                    })
+                    .collect();
+                if attributes.is_empty() {
+                    return Ok(None);
+                }
+                Inbound::Attributes {
+                    entity_id: p.entity_id,
+                    attributes,
+                }
+            }
+            cb::id::ENTITY_EFFECT => {
+                let p: cb::EntityEffect = raw.decode_as()?;
+                // Registry ids are 0-based; the core uses the classic 1-based effect numbers.
+                Inbound::Effect {
+                    entity_id: p.entity_id,
+                    id: i8::try_from(p.effect_id + 1).unwrap_or(i8::MAX),
+                    amplifier: p.amplifier.clamp(0, 127) as i8,
+                }
+            }
+            cb::id::REMOVE_ENTITY_EFFECT => {
+                let p: cb::RemoveEntityEffect = raw.decode_as()?;
+                Inbound::EffectRemoved {
+                    entity_id: p.entity_id,
+                    id: i8::try_from(p.effect_id + 1).unwrap_or(i8::MAX),
+                }
+            }
+            cb::id::ENTITY_STATUS => {
+                let p: cb::EntityStatus = raw.decode_as()?;
+                Inbound::EntityStatus {
+                    entity_id: p.entity_id,
+                    status: p.entity_status,
+                }
+            }
+            cb::id::DEATH_COMBAT_EVENT => Inbound::Died {
+                entity_id: raw.decode_as::<cb::DeathCombatEvent>()?.player_id,
+            },
+            cb::id::CHUNK_BATCH_START => Inbound::ChunkBatchStart,
+            cb::id::CHUNK_BATCH_FINISHED => {
+                Inbound::ChunkBatchFinished(raw.decode_as::<cb::ChunkBatchFinished>()?.batch_size)
+            }
+            cb::id::START_CONFIGURATION => Inbound::StartConfiguration,
+            cb::id::ADD_RESOURCE_PACK => {
+                let p: cb::AddResourcePack = raw.decode_as()?;
+                Inbound::ResourcePackPush {
+                    id: p.uuid,
+                    required: p.forced,
+                }
+            }
+            cb::id::COOKIE_REQUEST => {
+                Inbound::CookieRequest(raw.decode_as::<cb::CookieRequest>()?.cookie)
+            }
+            cb::id::STORE_COOKIE => {
+                let p: cb::StoreCookie = raw.decode_as()?;
+                wire.cookies.insert(p.key, p.value);
+                return Ok(None);
+            }
+            _ => return Ok(None),
+        }))
+    }
+
+    const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V1_16_5;
+
+    fn inventory_packet(
+        inv: &mut ghast_inventory::Inventory,
+        raw: &RawPacket,
+    ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError> {
+        // 26.1 windows arrive with ghast-inventory's 26.1 support.
+        let _ = (inv, raw);
+        Ok(None)
+    }
+
+    fn write_play(
+        enc: &mut FrameEncoder,
+        out: &Outbound,
+        wire: &mut Wire26_1,
+    ) -> Result<(), EncodeError> {
+        let flags = |on_ground: bool, horizontal_collision: bool| {
+            let mut f = sb::MovementFlags(0);
+            if on_ground {
+                f = f.with(sb::MovementFlags::ON_GROUND);
+            }
+            if horizontal_collision {
+                f = f.with(sb::MovementFlags::HAS_HORIZONTAL_COLLISION);
+            }
+            f
+        };
+        match out {
+            Outbound::KeepAlive(id) => enc.write_packet(&sb::KeepAlive { keep_alive_id: *id }),
+            Outbound::TeleportConfirm(teleport_id) => enc.write_packet(&sb::TeleportConfirm {
+                teleport_id: *teleport_id,
+            }),
+            Outbound::Move(m) => match *m {
+                MovePacket::Flying {
+                    on_ground,
+                    horizontal_collision,
+                } => enc.write_packet(&sb::Flying {
+                    flags: flags(on_ground, horizontal_collision),
+                }),
+                MovePacket::Position {
+                    pos,
+                    on_ground,
+                    horizontal_collision,
+                } => enc.write_packet(&sb::Position {
+                    x: pos.x,
+                    y: pos.y,
+                    z: pos.z,
+                    flags: flags(on_ground, horizontal_collision),
+                }),
+                MovePacket::Look {
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                } => {
+                    wire.last_look = (yaw, pitch);
+                    enc.write_packet(&sb::Look {
+                        yaw,
+                        pitch,
+                        flags: flags(on_ground, horizontal_collision),
+                    })
+                }
+                MovePacket::PositionLook {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                } => {
+                    wire.last_look = (yaw, pitch);
+                    enc.write_packet(&sb::PositionLook {
+                        x: pos.x,
+                        y: pos.y,
+                        z: pos.z,
+                        yaw,
+                        pitch,
+                        flags: flags(on_ground, horizontal_collision),
+                    })
+                }
+            },
+            Outbound::LookAnswer { yaw, pitch } => {
+                wire.last_look = (*yaw, *pitch);
+                enc.write_packet(&sb::Look {
+                    yaw: *yaw,
+                    pitch: *pitch,
+                    flags: flags(false, false),
+                })
+            }
+            Outbound::EntityAction { entity_id, action } => {
+                let action_id = match action {
+                    EntityAction::StartSprinting => sb::EntityActionActionId::START_SPRINTING,
+                    EntityAction::StopSprinting => sb::EntityActionActionId::STOP_SPRINTING,
+                    // Sneaking is part of `player_input` since 1.21.2.
+                    _ => return Ok(()),
+                };
+                enc.write_packet(&sb::EntityAction {
+                    entity_id: *entity_id,
+                    action_id,
+                    jump_boost: 0,
+                })
+            }
+            Outbound::PlayerInput(c) => {
+                let mut i = sb::PlayerInputInputs(0);
+                for (on, bit) in [
+                    (c.forward, sb::PlayerInputInputs::FORWARD),
+                    (c.back, sb::PlayerInputInputs::BACKWARD),
+                    (c.left, sb::PlayerInputInputs::LEFT),
+                    (c.right, sb::PlayerInputInputs::RIGHT),
+                    (c.jump, sb::PlayerInputInputs::JUMP),
+                    (c.sneak, sb::PlayerInputInputs::SHIFT),
+                    (c.sprint, sb::PlayerInputInputs::SPRINT),
+                ] {
+                    if on {
+                        i = sb::PlayerInputInputs(i.0 | bit.0);
+                    }
+                }
+                enc.write_packet(&sb::PlayerInput { inputs: i })
+            }
+            Outbound::TickEnd => enc.write_packet(&sb::TickEnd {}),
+            Outbound::PlayerLoaded => enc.write_packet(&sb::PlayerLoaded {}),
+            Outbound::ChunkBatchReceived(chunks_per_tick) => {
+                enc.write_packet(&sb::ChunkBatchReceived {
+                    chunks_per_tick: *chunks_per_tick,
+                })
+            }
+            Outbound::Pong(id) => enc.write_packet(&sb::Pong { id: *id }),
+            Outbound::Chat(text) => {
+                if let Some(command) = text.strip_prefix('/') {
+                    // Unsigned command (no chat session; offline mode).
+                    enc.write_packet(&sb::ChatCommand {
+                        command: ByteString::from(command),
+                    })
+                } else {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_millis() as i64);
+                    let salt = wire.next_salt();
+                    let (offset, bits, checksum) = wire.seen.update();
+                    enc.write_packet(&sb::ChatMessage {
+                        message: ByteString::from(truncate_utf16(text, Self::CHAT_LIMIT)),
+                        timestamp,
+                        salt,
+                        signature: None,
+                        offset,
+                        acknowledged: Bytes::copy_from_slice(&bits),
+                        checksum,
+                    })
+                }
+            }
+            Outbound::Respawn => enc.write_packet(&sb::ClientCommand {
+                action_id: sb::ClientCommandActionId::PERFORM_RESPAWN,
+            }),
+            Outbound::Abilities { flags, .. } => enc.write_packet(&sb::Abilities { flags: *flags }),
+            Outbound::HeldSlot(slot) => enc.write_packet(&sb::HeldItemSlot { slot_id: *slot }),
+            Outbound::Swing => enc.write_packet(&sb::ArmAnimation {
+                hand: sb::ArmAnimationHand::MAIN_HAND,
+            }),
+            Outbound::SwingOffHand => enc.write_packet(&sb::ArmAnimation {
+                hand: sb::ArmAnimationHand::OFF_HAND,
+            }),
+            Outbound::Dig { status, pos, face } => {
+                use crate::common::DigStatus;
+                // Start and finish are predictions (a new sequence); abort and release are not.
+                let sequence = match status {
+                    DigStatus::Start | DigStatus::Finish => wire.next_sequence(),
+                    _ => 0,
+                };
+                enc.write_packet(&sb::BlockDig {
+                    status: status.id(),
+                    location: *pos,
+                    face: face.id(),
+                    sequence,
+                })
+            }
+            Outbound::Place {
+                pos,
+                face,
+                cursor,
+                off_hand,
+                ..
+            } => {
+                let sequence = wire.next_sequence();
+                enc.write_packet(&sb::BlockPlace {
+                    hand: sb::BlockPlaceHand(i32::from(*off_hand)),
+                    location: *pos,
+                    direction: i32::from(face.id()),
+                    cursor_x: cursor.x as f32,
+                    cursor_y: cursor.y as f32,
+                    cursor_z: cursor.z as f32,
+                    inside_block: false,
+                    world_border_hit: false,
+                    sequence,
+                })
+            }
+            Outbound::UseItem { off_hand, .. } => {
+                let sequence = wire.next_sequence();
+                let (yaw, pitch) = wire.last_look;
+                enc.write_packet(&sb::UseItem {
+                    hand: sb::UseItemHand(i32::from(*off_hand)),
+                    sequence,
+                    rotation: ghast_protocol::v26_1::types::Vec2f { x: yaw, y: pitch },
+                })
+            }
+            Outbound::UseEntity {
+                target,
+                action,
+                off_hand,
+                sneaking,
+            } => match action {
+                crate::common::EntityUse::Attack => {
+                    enc.write_packet(&sb::Attack { entity_id: *target })
+                }
+                crate::common::EntityUse::InteractAt(v) => enc.write_packet(&sb::UseEntity {
+                    target: *target,
+                    hand: sb::UseEntityHand(i32::from(*off_hand)),
+                    location: LpVec3::from_vec3([v.x, v.y, v.z]),
+                    sneaking: *sneaking,
+                }),
+                // 26.1 has one interaction packet, sent with its hit location (`InteractAt`).
+                _ => Ok(()),
+            },
+            Outbound::Settings(s) => enc.write_packet(&sb::Settings {
+                locale: ByteString::from(s.locale.to_ascii_lowercase()),
+                view_distance: s.view_distance,
+                chat_flags: i32::from(s.chat_mode),
+                chat_colors: s.chat_colors,
+                skin_parts: s.skin_parts,
+                main_hand: s.main_hand,
+                enable_text_filtering: false,
+                enable_server_listing: true,
+                particle_status: sb::SettingsParticleStatus::ALL,
+            }),
+            Outbound::Brand(brand) => {
+                let mut data = BytesMut::with_capacity(brand.len() + 1);
+                data.put_string(brand)?;
+                enc.write_packet(&sb::CustomPayload {
+                    channel: ByteString::from_static("minecraft:brand"),
+                    data: data.freeze(),
+                })
+            }
+            Outbound::ResourcePackStatus { id, result } => {
+                enc.write_packet(&sb::ResourcePackReceive {
+                    uuid: *id,
+                    result: *result,
+                })
+            }
+            Outbound::CookieResponse { key, value } => enc.write_packet(&sb::CookieResponse {
+                key: key.clone(),
+                value: value.clone().or_else(|| wire.cookies.get(key).cloned()),
+            }),
+            // Window clicks wait for ghast-inventory's 26.1 support; no transactions since 1.17.
+            Outbound::Inventory(_) | Outbound::Transaction { .. } => Ok(()),
+        }
+    }
+
+    fn apply_teleport(pose: &mut Pose, t: &Teleport) {
+        // The physics applies 26.1 teleports (relative deltas included); this keeps the
+        // position / rotation rules for callers without a world.
+        let (yaw, pitch) = teleport_target(pose, t);
+        pose.yaw = yaw;
+        pose.pitch = pitch.clamp(-90.0, 90.0);
+    }
+}
+
+impl super::HasSim for V26_1 {
+    type Sim = crate::sim::Sim26;
+    fn new_sim(opts: &crate::sim::SimOptions) -> Self::Sim {
+        crate::sim::Sim26::with(opts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn last_seen_checksum_and_bits() {
+        let mut t = LastSeen::default();
+        // Nothing seen: checksum 1, no bits.
+        assert_eq!(t.update(), (0, [0; 3], 1));
+        t.add(Bytes::from_static(&[1, 2, 3]));
+        t.add(Bytes::from_static(&[1, 2, 3])); // the same message again is ignored
+        t.add(Bytes::from_static(&[200]));
+        let (offset, bits, checksum) = t.update();
+        assert_eq!(offset, 2);
+        // The ring starts at the tail: the two entries are the last two slots.
+        assert_eq!(bits, [0, 0, 0b1100]);
+        let h1 = java_array_hash(&[1, 2, 3]);
+        let h2 = java_array_hash(&[200]);
+        // checksum = 1; then 31 * checksum + hash per entry, oldest first.
+        let c = 31i32.wrapping_add(h1).wrapping_mul(31).wrapping_add(h2);
+        assert_eq!(checksum, if c as u8 == 0 { 1 } else { c as u8 });
+        // Arrays.hashCode([1,2,3]) = 30817.
+        assert_eq!(h1, 30817);
+    }
+
+    #[test]
+    fn chat_rendering() {
+        assert_eq!(
+            render_chat(chat_pattern("minecraft:chat"), "Steve", "hi", ""),
+            "<Steve> hi"
+        );
+        assert_eq!(
+            render_chat(chat_pattern("minecraft:say_command"), "Server", "%2 x", ""),
+            "[Server] %2 x"
+        );
+    }
+}

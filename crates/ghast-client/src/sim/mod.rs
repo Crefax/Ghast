@@ -19,6 +19,8 @@ mod v1_12;
 mod v1_16_5;
 #[cfg(feature = "v1_8")]
 mod v1_8;
+#[cfg(feature = "v26_1")]
+mod v26_1;
 
 #[cfg(feature = "v1_8")]
 pub(crate) use v1_8::Sim18;
@@ -26,6 +28,8 @@ pub(crate) use v1_8::Sim18;
 pub(crate) use v1_12::Sim12;
 #[cfg(feature = "v1_16_5")]
 pub(crate) use v1_16_5::Sim16;
+#[cfg(feature = "v26_1")]
+pub(crate) use v26_1::Sim26;
 
 /// Why a world packet could not be applied.
 #[derive(Debug)]
@@ -75,15 +79,32 @@ pub trait WorldView {
         let _ = (chunk_x, chunk_z);
         None
     }
+
+    /// The block the crosshair is on from `eyes` with the look `(yaw, pitch)` (`look` is its
+    /// unit vector, [`crate::hands::look_vector`]) within `reach`, by the version's ray rules.
+    /// `None` when nothing is hit.
+    fn crosshair(
+        &self,
+        eyes: Vec3,
+        rotation: (f32, f32),
+        look: Vec3,
+        reach: f64,
+    ) -> Option<crate::BlockHit> {
+        let _ = rotation;
+        let blocks = |x: i32, y: i32, z: i32| self.block_query(x, y, z);
+        crate::hands::pick(&blocks, eyes, look, reach)
+    }
 }
 
 /// The join / respawn packets of the session (cheap `Bytes` copies).
+#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 #[derive(Debug, Default)]
 pub(super) struct SessionPackets {
     login: Option<RawPacket>,
     respawn: Option<RawPacket>,
 }
 
+#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 impl SessionPackets {
     fn note(&mut self, raw: &RawPacket, login: i32, respawn: i32) {
         if raw.id == login {
@@ -132,6 +153,12 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError>;
     /// A new client player (join, respawn).
     fn reset_player(&mut self);
+    /// A new client player after a respawn; `keep` is the respawn packet's kept-data bits
+    /// (1.20.2+).
+    fn respawn_player(&mut self, keep: u8) {
+        let _ = keep;
+        self.reset_player();
+    }
     /// A server teleport: updates the pose like vanilla (the engine sends the reply).
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport);
     /// Server abilities.
@@ -166,6 +193,10 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// Packet ids the world consumes with its configuration.
     fn world_packet_ids(&self) -> Vec<i32>;
     /// The entity tracking configuration (`None`: not tracking).
+    #[cfg_attr(
+        not(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5")),
+        allow(dead_code)
+    )]
     fn entity_config(&self) -> Option<ghast_entity::Config>;
     /// Starts (empty, our entity id and dimension from the session's join / respawn), stops
     /// (frees the store) or reconfigures entity tracking mid-session.
@@ -182,6 +213,24 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn predict_air(&mut self, x: i32, y: i32, z: i32);
     /// A held item's version facts (tool speeds, block item, usable) from its id.
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem;
+    /// 1.20.5+ movement attributes of our entity, in packet order.
+    fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
+        let _ = attributes;
+    }
+    /// `chunk_batch_start` arrived (1.20.2+), at `now_nanos` from any fixed origin.
+    fn chunk_batch_start(&mut self, now_nanos: i64) {
+        let _ = now_nanos;
+    }
+    /// `chunk_batch_finished` arrived: the chunks per tick to answer with (1.20.2+).
+    fn chunk_batch_finished(&mut self, batch_size: i32, now_nanos: i64) -> f32 {
+        let _ = (batch_size, now_nanos);
+        // ChunkBatchSizeCalculator's initial value: 7 ms / 2 ms.
+        3.5
+    }
+    /// A configuration-state `registry_data` packet (1.20.2+).
+    fn registry_data(&mut self, raw: &RawPacket) {
+        let _ = raw;
+    }
 }
 
 /// Options of the per-version sim.
@@ -216,6 +265,7 @@ pub enum ForceStepPosition {
 /// Grim compatibility: when the tick's movement packet carries no position but the feet height
 /// changed since the last sent position (a step-up or landing under the 0.03 threshold),
 /// upgrade it to `position` / `position_look` and update the sent bookkeeping.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 pub(super) fn force_position(
     packets: &mut ghast_physics::Packets,
     cur: [f64; 3],
@@ -275,8 +325,66 @@ pub(super) fn force_position(
     *ticks_since_pos = 0;
 }
 
+/// 1.16 blocks whose `onUse` succeeds for a plain right click (GUIs, doors,
+/// switches, …). Name-based approximation of vanilla's per-block `use` overrides.
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+pub(super) fn activates_1_16(name: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "chest",
+        "trapped_chest",
+        "ender_chest",
+        "crafting_table",
+        "furnace",
+        "blast_furnace",
+        "smoker",
+        "barrel",
+        "anvil",
+        "chipped_anvil",
+        "damaged_anvil",
+        "enchanting_table",
+        "brewing_stand",
+        "hopper",
+        "dispenser",
+        "dropper",
+        "repeater",
+        "comparator",
+        "note_block",
+        "jukebox",
+        "cake",
+        "loom",
+        "stonecutter",
+        "grindstone",
+        "cartography_table",
+        "smithing_table",
+        "lectern",
+        "bell",
+        "beacon",
+        "daylight_detector",
+        "respawn_anchor",
+        "composter",
+        "lever",
+        "command_block",
+        "chain_command_block",
+        "repeating_command_block",
+        "structure_block",
+        "jigsaw",
+        "dragon_egg",
+        "flower_pot",
+        "sweet_berry_bush",
+    ];
+    EXACT.contains(&name)
+        || name.ends_with("_shulker_box")
+        || name == "shulker_box"
+        || name.ends_with("_bed")
+        || name.ends_with("_button")
+        || name.ends_with("_fence_gate")
+        || (name.ends_with("_door") && name != "iron_door")
+        || (name.ends_with("_trapdoor") && name != "iron_trapdoor")
+        || name.starts_with("potted_")
+}
+
 /// Union of the collision boxes as a ray box (`None` when there is none).
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 pub(super) fn union(boxes: &[ghast_data::Aabb]) -> Option<[f64; 6]> {
     let mut u = [1.0_f64, 1.0, 1.0, 0.0, 0.0, 0.0];
     for b in boxes {
@@ -424,8 +532,12 @@ pub(super) fn push_packets(
                 flying_speed: a.fly_speed,
                 walking_speed: a.walk_speed,
             },
-            P::Flying { on_ground } => Outbound::Move(MovePacket::Flying { on_ground }),
+            P::Flying { on_ground } => Outbound::Move(MovePacket::Flying {
+                horizontal_collision: false,
+                on_ground,
+            }),
             P::Position { x, y, z, on_ground } => Outbound::Move(MovePacket::Position {
+                horizontal_collision: false,
                 pos: Vec3::new(x, y, z),
                 on_ground,
             }),
@@ -434,6 +546,7 @@ pub(super) fn push_packets(
                 pitch,
                 on_ground,
             } => Outbound::Move(MovePacket::Look {
+                horizontal_collision: false,
                 yaw,
                 pitch,
                 on_ground,
@@ -446,12 +559,52 @@ pub(super) fn push_packets(
                 pitch,
                 on_ground,
             } => Outbound::Move(MovePacket::PositionLook {
+                horizontal_collision: false,
                 pos: Vec3::new(x, y, z),
                 yaw,
                 pitch,
                 on_ground,
             }),
-            // The physics of the versions this client speaks emits only the packets above.
+            // The modern physics (1.21.2+): one move packet with optional parts, held keys.
+            P::Move {
+                pos,
+                look,
+                on_ground,
+                horizontal_collision,
+            } => Outbound::Move(match (pos, look) {
+                (Some([x, y, z]), Some((yaw, pitch))) => MovePacket::PositionLook {
+                    pos: Vec3::new(x, y, z),
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                },
+                (Some([x, y, z]), None) => MovePacket::Position {
+                    pos: Vec3::new(x, y, z),
+                    on_ground,
+                    horizontal_collision,
+                },
+                (None, Some((yaw, pitch))) => MovePacket::Look {
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                },
+                (None, None) => MovePacket::Flying {
+                    on_ground,
+                    horizontal_collision,
+                },
+            }),
+            P::PlayerInput(k) => Outbound::PlayerInput(Controls {
+                forward: k.forward,
+                back: k.back,
+                left: k.left,
+                right: k.right,
+                jump: k.jump,
+                sneak: k.sneak,
+                sprint: k.sprint,
+            }),
+            // A physics packet added later without a wire form here.
             _ => {
                 debug_assert!(false, "physics packet without a wire form: {p:?}");
                 continue;
@@ -552,6 +705,50 @@ pub(crate) mod test_chunks {
         .unwrap()
     }
 
+    #[cfg(feature = "v26_1")]
+    /// A 26.1 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
+    pub(crate) fn v26_1(x: i32, z: i32) -> RawPacket {
+        use ghast_protocol::McWrite;
+        let stone = ghast_data::v26_1::BlockState::parse("stone").unwrap().id();
+        let mut d = BytesMut::new();
+        for section in 0..24 {
+            if section == 7 {
+                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
+                d.put_i16(256);
+                d.put_i16(0);
+                d.put_u8(4);
+                d.put_varint(2);
+                d.put_varint(0);
+                d.put_varint(i32::from(stone));
+                for w in 0..256 {
+                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+                }
+            } else {
+                d.put_i16(0);
+                d.put_i16(0);
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            // Biomes: one value (registry id 0).
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        RawPacket::from_packet(&ghast_protocol::v26_1::play::clientbound::MapChunk {
+            x,
+            z,
+            heightmaps: Vec::new(),
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+            sky_light_mask: Vec::new(),
+            block_light_mask: Vec::new(),
+            empty_sky_light_mask: Vec::new(),
+            empty_block_light_mask: Vec::new(),
+            sky_light: Vec::new(),
+            block_light: Vec::new(),
+        })
+        .unwrap()
+    }
+
     #[cfg(feature = "v1_16_5")]
     /// A 1.16.5 full chunk without sections (all air).
     pub(crate) fn v1_16_5(x: i32, z: i32) -> RawPacket {
@@ -591,6 +788,16 @@ impl WorldView for Box<dyn Sim> {
     fn block_query(&self, x: i32, y: i32, z: i32) -> Option<BlockQuery> {
         (**self).block_query(x, y, z)
     }
+
+    fn crosshair(
+        &self,
+        eyes: Vec3,
+        rotation: (f32, f32),
+        look: Vec3,
+        reach: f64,
+    ) -> Option<crate::BlockHit> {
+        (**self).crosshair(eyes, rotation, look, reach)
+    }
 }
 
 #[cfg(test)]
@@ -600,6 +807,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn reset_player(&mut self) {
         (**self).reset_player();
+    }
+    fn respawn_player(&mut self, keep: u8) {
+        (**self).respawn_player(keep);
     }
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
         (**self).teleport(pose, t);
@@ -662,6 +872,18 @@ impl Sim for Box<dyn Sim> {
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         (**self).held_item(id, count, efficiency)
     }
+    fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
+        (**self).attributes(attributes);
+    }
+    fn chunk_batch_start(&mut self, now_nanos: i64) {
+        (**self).chunk_batch_start(now_nanos);
+    }
+    fn chunk_batch_finished(&mut self, batch_size: i32, now_nanos: i64) -> f32 {
+        (**self).chunk_batch_finished(batch_size, now_nanos)
+    }
+    fn registry_data(&mut self, raw: &RawPacket) {
+        (**self).registry_data(raw);
+    }
 }
 
 #[cfg(all(test, feature = "v1_8"))]
@@ -686,6 +908,7 @@ mod tests {
                 pitch,
                 flags,
                 teleport_id: None,
+                ..Default::default()
             };
             let start = Pose {
                 pos: Vec3::new(10.0, 65.0, 10.0),
@@ -796,6 +1019,7 @@ mod tests {
                 pitch: 0.0,
                 flags: 0,
                 teleport_id: None,
+                ..Default::default()
             },
         );
         let mut out = Vec::new();
