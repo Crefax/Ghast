@@ -150,6 +150,40 @@ block entity); the tables hold the closed box. The client push-out probe also re
 suffocating large shape staying inside its cube — pinned by the `ghast-data` test
 `suffocating_large_shapes_stay_in_their_cube`, which fails if the data ever changes that.
 
+## Crosshair pick (`pick`, 1.16.5 and 26.1)
+
+Which block, face and exact point the look ray hits, or which entity — the target the server
+judges a dig, place or attack against. One shared implementation of vanilla's block traversal,
+`VoxelShape.clip` (inside test on the grid, then the boxes in vanilla's order), the interaction-shape
+face override and the entity loop (`ProjectileUtil`); 1.16.5 and 26.1 run identical code there. The
+version modules add the eye, look vector, ranges and per-state shapes (`ghast-data`
+`BlockState::outline_shape` / `outline_shape_holding_own_item` / `outline_offset` /
+`interaction_shape` (26.1) / `raycast_shape` (1.16.5)):
+
+```rust
+use ghast_physics::pick::{Target, v26_1};
+
+let eye = v26_1::eye_position(feet, old_feet, eye_height);
+let view = v26_1::view_vector(yaw, pitch);
+match v26_1::pick_target(&world, &player_bb, eye, view, block_range, entity_range, held_block, &entities) {
+    Target::Block(hit) if hit.is_block() => { /* hit.pos, hit.face, hit.location */ }
+    Target::Entity(e) => { /* entities[e.index] */ }
+    Target::Block(_miss) => {}
+}
+```
+
+`entities` are the pickable ones (no spectators, no items / orbs / arrows), in the world's iteration
+order; that order only decides between overlapping boxes around the eye. 1.16.5:
+`v1_16_5::pick_target(world, bb, eye, look, creative, held_block, entities)` (reach 4.5 / 5.0, entity
+reach 3 / 6). `pick` / `clip` are the block-only parts.
+
+Verified against both oracles: 3200 + 3200 committed viewpoints (`tests/pick.rs`) and 200k cached
+ones per version (feature `oracle-cache`), random worlds of all states (partial shapes, offset
+plants, scaffolding / light held-item outlines, cauldron / hopper / composter interaction shapes)
+with entities: 0 diffs in location bits, block, face, inside flag and entity. Not covered: fluid
+picks, 26.1 attack-range items (spears), multipart entities, riding (`same_root_vehicle` is
+implemented but has no oracle vector), block-entity outlines (shulker boxes, moving pistons).
+
 ## Design decisions
 
 - **Version rules are modules, selected at compile time.** `v1_8` has its own `PlayerState`,

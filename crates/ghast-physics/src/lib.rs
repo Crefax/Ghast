@@ -17,6 +17,8 @@
 //! Code that is generic over versions uses the [`Ruleset`] trait (static dispatch, no runtime
 //! cost).
 //!
+//! [`pick`] is the crosshair target (block, face, hit point, or entity) for 1.16.5 and 26.1.
+//!
 //! ```
 //! use ghast_physics::{Keys, Packets, TickInput, v1_8};
 //!

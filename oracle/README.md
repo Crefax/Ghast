@@ -31,7 +31,7 @@ set. Other commands (`oracle/run.sh help` lists them):
 | `replay --in F [--out F]` | read cases in the golden format (header + tick `input`s) and run them in vanilla |
 | `boxes [--out F]` | the collision box dump |
 | `boxes-far [--out F]` | the far-position collision box dump |
-| `selection [--out F]` / `rays [--seed --worlds --rays --out]` | 1.8.9 crosshair bounds / raytrace vectors |
+| `selection [--out F]` / `rays [--seed --worlds --rays --out]` | crosshair data: 1.8.9 / 1.12.2 ray bounds and raytrace vectors; 1.16.5 / 26.1 outline + interaction shapes per state and pick vectors with entities (see "Crosshair pick (1.16.5 and 26.1)") |
 | `voxels [--out F]` | 1.16.5 voxel grids of all collision shapes (`MC=1.16.5`) |
 | `clicks [--seed S --count N --out F]` | window click vectors (`ClickDump`, both versions): N random cases of a screen handler + contents + 1–10 clicks through the real `ClientPlayerInteractionManager.clickSlot`; default `cache/<mc>/clicks/…`. The golden set has 3000 cases (`tests/golden/<mc>/clicks_seed1.jsonl.gz`), replayed by `crates/ghast-inventory/tests/oracle_clicks.rs`. |
 | `recipes [--out F]` | 1.8.9: the client's crafting recipes in match order (`RecipeDump`) → `tests/golden/1.8.9/recipes.jsonl.gz` |
@@ -907,6 +907,58 @@ against their jars: renderer / level extractor, entity size and authlib API chan
   modifiers.
 - A scale change rebuilds the box at the end of the tick that applied the attributes packet
   (`refreshDirtyAttributes` in `LivingEntity.tick`), from the position.
+
+## Crosshair pick (1.16.5 and 26.1)
+
+`SelectionDump` in both harnesses (`selection`, `rays`; both part of `golden`). Replayed by
+`crates/ghast-physics/tests/pick.rs`; generated tables in `crates/ghast-data/src/generated/<v>/selection.rs`.
+
+### `selection_shapes.jsonl.gz`
+
+`voxel_shape` lines (own sid space, same fields as `voxel_shapes.jsonl.gz` plus `boxes` =
+`toAabbs()` / `getBoundingBoxes()` in vanilla's order), then one `state` line per state:
+
+| field | meaning |
+|---|---|
+| `outline` | sid of `getShape` / `getOutlineShape(level, pos, CollisionContext.of(player))`, empty hand, at (0, 64, 0) |
+| `outline_empty_context` | only when the context-free outline differs (never so far; the pick always has the player's context) |
+| `outline_holding_own_item` | only when it differs: the outline while the main hand holds the block's own item (scaffolding; 26.1 also light) |
+| `interaction` | sid of `getInteractionShape` (26.1) / `getRaycastShape` (1.16.5) |
+| `outline_base`, `offset_at_dump` | for outlines moved by the model offset (flowers, bamboo, 26.1 pointed dripstone, eyeblossoms, mangrove propagules): the unshifted shape (rebuilt from the `OffsetDoubleList` delegates) and the offset at the dump position |
+| `position_independent` | the same shapes (or base) at a second position (3, 66, 5) |
+
+Grass, ferns and tall plants have an offset model but an unshifted outline in both versions.
+
+### `raytrace.jsonl.gz`
+
+16 worlds × 200 viewpoints (seed 1). A `ray_world` line: `region` (inclusive box filled at random
+density with random states: a uniform pick of all states except shulker boxes and moving pistons,
+mixed with a list of partial / special shapes), `blocks` (`[x, y, z, state id]`, air omitted),
+`states` (id → name, so readers can check ids), `entities` (4–21 client-side entities of varied
+types: `id`, `type`, `bb`, `pick_radius`, `pickable` = the pick's predicate; listed in the level's
+iteration order, which the pick follows). A `ray` line: `feet`, `yaw`, `pitch`, `pose`,
+`eye_height`, `held` (main-hand item or null), `bb` (player box), `eyes`, `view`, and:
+
+- 26.1: `old` (xo/yo/zo; the eye is `lerp(1, old, pos)`), `block_range` / `entity_range` (attribute
+  values, randomised incl. 0 and the clamp at 64), `clip` = `Entity.pick(max(ranges), 1, false)`, and
+  `pick` = `LocalPlayer.raycastHitResult(1.0F, player)` (what `Minecraft.pick` stores);
+- 1.16.5: `reach` (random, incl. 4.5 / 5.0) with `pick` = `Entity.raycast(reach, 1.0F, false)`, and
+  `creative` with `target` = the crosshair after the real `GameRenderer.updateTargetedEntity(1.0F)`
+  (reach 4.5 / 5.0, entity reach 3 / 6).
+
+Hit objects: `type` (`block` / `miss` / `entity`), `location`, and `block`, `face`, `inside` for
+block results or `entity` (id) for entity results. About 45 % of the viewpoints aim at an entity
+(15 % of those stand inside it); 25 % of entities overlap the previous one.
+
+Cached sets: `rays --seed 2..6 --worlds 100 --rays 400 --out cache/<v>/rays/…` (200k rays per
+version, ~75 MB each), replayed with `cargo test -p ghast-physics --features oracle-cache --test pick`.
+
+Findings (both versions, bit-identical in the replay): the block traversal, `VoxelShape.clip`,
+`AABB.clip` and the entity loop are the same code in 1.16.5 and 26.1; 26.1.2 gives the same
+selection and raytrace dumps as 26.1. The 26.1 eye position interpolates even at partial tick 1
+(`xo + 1 * (x - xo)`, not always `x`); 1.16.5 does not. A hit inside a shape's first test point is
+`from + (to - from) * 0.001` facing against the ray. In 26.1 a hit beyond the block range (or an
+entity beyond the entity range) becomes a miss at that point.
 
 ## Notes for implementers
 

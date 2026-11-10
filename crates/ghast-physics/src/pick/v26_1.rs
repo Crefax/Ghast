@@ -8,7 +8,11 @@
 
 use ghast_data::v26_1::{Block, BlockState};
 
-use super::{BlockHit, Direction, PlacedShape};
+use ghast_data::Aabb;
+
+use super::{
+    BlockHit, Direction, PickEntity, PlacedShape, Target, entity_hit, length_sqr, search_box,
+};
 use crate::modern::collide::model_offset;
 use crate::modern::math::{DEG_TO_RAD, cos, sin};
 use crate::world::BlockView;
@@ -123,4 +127,52 @@ pub fn filter(hit: BlockHit, from: [f64; 3], range: f64) -> BlockHit {
     }
     let face = Direction::approximate_nearest(l[0] - from[0], l[1] - from[1], l[2] - from[2]);
     BlockHit::miss(l, face)
+}
+
+/// The crosshair target (vanilla `LocalPlayer.pick`): the block pick as [`pick`], unless an
+/// entity of `entities` is hit nearer than the block (or the miss point) along the ray; that
+/// entity then counts if it is closer than `entity_range` (else a miss at its hit point).
+/// `player_bb` is the player's bounding box (it bounds the entity search).
+#[allow(clippy::too_many_arguments)]
+pub fn pick_target<W: BlockView<State = BlockState>>(
+    world: &W,
+    player_bb: &Aabb,
+    eye: [f64; 3],
+    view: [f64; 3],
+    block_range: f64,
+    entity_range: f64,
+    held_block: Option<Block>,
+    entities: &[PickEntity],
+) -> Target {
+    let mut max = if block_range >= entity_range {
+        block_range
+    } else {
+        entity_range
+    };
+    let mut max_sq = max * max;
+    let to = [
+        eye[0] + view[0] * max,
+        eye[1] + view[1] * max,
+        eye[2] + view[2] * max,
+    ];
+    let block = clip(world, eye, to, held_block);
+    let block_sq = length_sqr(block.location, eye);
+    if block.is_block() {
+        max_sq = block_sq;
+        max = block_sq.sqrt();
+    }
+    let delta = [view[0] * max, view[1] * max, view[2] * max];
+    let to = [eye[0] + delta[0], eye[1] + delta[1], eye[2] + delta[2]];
+    let search = search_box(player_bb, delta);
+    if let Some(e) = entity_hit(eye, to, &search, entities, max_sq)
+        && length_sqr(e.location, eye) < block_sq
+    {
+        if length_sqr(e.location, eye) < entity_range * entity_range {
+            return Target::Entity(e);
+        }
+        let l = e.location;
+        let face = Direction::approximate_nearest(l[0] - eye[0], l[1] - eye[1], l[2] - eye[2]);
+        return Target::Block(BlockHit::miss(l, face));
+    }
+    Target::Block(filter(block, eye, block_range))
 }

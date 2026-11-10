@@ -16,11 +16,17 @@
 //! the look vector, the range rules and the per-state shapes. 1.16.5 and 26.1 share every step
 //! here bit for bit (checked against both oracles: `tests/golden/{1.16.5,26.1}/raytrace.jsonl.gz`).
 //!
-//! Not covered: entity picks (the world model has no entities), fluid picks (the crosshair never
-//! uses them), items with an attack range component (26.1 spears), and block-entity-dependent
-//! outlines (shulker boxes are a full cube here; moving pistons have no outline here).
+//! Entities: [`entity_hit`] is the shared entity part (vanilla `ProjectileUtil.getEntityHitResult`
+//! / 1.16.5 `ProjectileUtil.raycast`); the version modules combine it with the block pick as the
+//! client does (`pick_target`). The caller lists the pickable entities in the world's iteration
+//! order (entity sections in order, then insertion order): it only decides between overlapping
+//! boxes that both contain the eye, or an entity after one that contains the eye.
+//!
+//! Not covered: fluid picks (the crosshair never uses them), items with an attack range component
+//! (26.1 spears), multipart entities (ender dragon), and block-entity-dependent outlines (shulker
+//! boxes are a full cube here; moving pistons have no outline here).
 
-use ghast_data::SelectionShape;
+use ghast_data::{Aabb, SelectionShape};
 
 pub mod v1_16_5;
 #[cfg(feature = "v26_1")]
@@ -111,6 +117,35 @@ impl Direction {
         }
         result
     }
+}
+
+/// An entity the crosshair can pick (spectators and entities that are not pickable left out).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PickEntity {
+    /// The entity's bounding box (world coordinates).
+    pub bb: Aabb,
+    /// Its pick radius (`getPickRadius` / 1.16.5 `getTargetingMargin`; 0 for almost every entity).
+    pub pick_radius: f32,
+    /// It has the same root vehicle as the player (the player's own vehicle and its passengers).
+    pub same_root_vehicle: bool,
+}
+
+/// An entity pick: the index into the caller's entity list and the point on its (inflated) box.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntityHit {
+    /// Index of the entity in the slice passed to the pick.
+    pub index: usize,
+    /// The hit point (the eye itself when the eye is inside the box).
+    pub location: [f64; 3],
+}
+
+/// The crosshair target: a block (or a miss), or an entity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Target {
+    /// A block hit or a miss.
+    Block(BlockHit),
+    /// An entity.
+    Entity(EntityHit),
 }
 
 /// Whether a pick hit a block.
@@ -404,6 +439,117 @@ fn box_direction(
     dir
 }
 
+/// `AABB.clip(from, to)` for one box.
+#[must_use]
+pub fn clip_box(b: &Aabb, from: [f64; 3], to: [f64; 3]) -> Option<[f64; 3]> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let mut scale = 1.0;
+    let c = [b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z];
+    box_direction(c, from, &mut scale, None, d)?;
+    Some([
+        from[0] + scale * d[0],
+        from[1] + scale * d[1],
+        from[2] + scale * d[2],
+    ])
+}
+
+/// `AABB.intersects(AABB)`.
+#[inline]
+fn intersects(a: &Aabb, b: &Aabb) -> bool {
+    a.min_x < b.max_x
+        && a.max_x > b.min_x
+        && a.min_y < b.max_y
+        && a.max_y > b.min_y
+        && a.min_z < b.max_z
+        && a.max_z > b.min_z
+}
+
+/// `AABB.contains(Vec3)`.
+#[inline]
+fn contains(b: &Aabb, p: [f64; 3]) -> bool {
+    p[0] >= b.min_x
+        && p[0] < b.max_x
+        && p[1] >= b.min_y
+        && p[1] < b.max_y
+        && p[2] >= b.min_z
+        && p[2] < b.max_z
+}
+
+/// The entity search box: the player's box stretched along `delta`, grown by 1 (vanilla
+/// `getBoundingBox().expandTowards(delta).inflate(1.0)`).
+#[must_use]
+pub fn search_box(player_bb: &Aabb, delta: [f64; 3]) -> Aabb {
+    let mut lo = [player_bb.min_x, player_bb.min_y, player_bb.min_z];
+    let mut hi = [player_bb.max_x, player_bb.max_y, player_bb.max_z];
+    for i in 0..3 {
+        if delta[i] < 0.0 {
+            lo[i] += delta[i];
+        } else if delta[i] > 0.0 {
+            hi[i] += delta[i];
+        }
+    }
+    Aabb::new(
+        lo[0] - 1.0,
+        lo[1] - 1.0,
+        lo[2] - 1.0,
+        hi[0] + 1.0,
+        hi[1] + 1.0,
+        hi[2] + 1.0,
+    )
+}
+
+/// The entity the segment `from -> to` picks among the entities whose box intersects `search`
+/// (vanilla `ProjectileUtil.getEntityHitResult`): the nearest box hit within `max_dist_sq`; a box
+/// containing `from` counts as distance 0.
+#[must_use]
+pub fn entity_hit(
+    from: [f64; 3],
+    to: [f64; 3],
+    search: &Aabb,
+    entities: &[PickEntity],
+    max_dist_sq: f64,
+) -> Option<EntityHit> {
+    let mut nearest = max_dist_sq;
+    let mut hovered = None;
+    for (index, e) in entities.iter().enumerate() {
+        if !intersects(&e.bb, search) {
+            continue;
+        }
+        let r = f64::from(e.pick_radius);
+        let bb = Aabb::new(
+            e.bb.min_x - r,
+            e.bb.min_y - r,
+            e.bb.min_z - r,
+            e.bb.max_x + r,
+            e.bb.max_y + r,
+            e.bb.max_z + r,
+        );
+        let clip = clip_box(&bb, from, to);
+        if contains(&bb, from) {
+            if nearest >= 0.0 {
+                hovered = Some(EntityHit {
+                    index,
+                    location: clip.unwrap_or(from),
+                });
+                nearest = 0.0;
+            }
+        } else if let Some(location) = clip {
+            let dd = length_sqr(location, from);
+            if dd < nearest || nearest == 0.0 {
+                if e.same_root_vehicle {
+                    if nearest == 0.0 {
+                        hovered = Some(EntityHit { index, location });
+                    }
+                } else {
+                    hovered = Some(EntityHit { index, location });
+                    nearest = dd;
+                }
+            }
+        }
+    }
+    hovered
+}
+
 /// One shape against the segment `from -> to` at block `pos` (vanilla `VoxelShape.clip`).
 #[must_use]
 pub fn clip_shape(
@@ -469,7 +615,7 @@ pub fn clip_shape(
 }
 
 #[inline]
-fn length_sqr(a: [f64; 3], from: [f64; 3]) -> f64 {
+pub(crate) fn length_sqr(a: [f64; 3], from: [f64; 3]) -> f64 {
     let (x, y, z) = (a[0] - from[0], a[1] - from[1], a[2] - from[2]);
     x * x + y * y + z * z
 }

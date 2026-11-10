@@ -7,6 +7,8 @@ import it.unimi.dsi.fastutil.doubles.DoubleList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.Item;
@@ -302,6 +304,16 @@ final class SelectionDump {
             world.key("states").beginObject();
             used.forEach((k, v) -> world.field(Integer.toString(k), v));
             world.endObject();
+            List<Entity> spawned = spawnEntities(run, rng);
+            world.key("entities").beginArray();
+            for (Entity e : run.level.getEntities(run.player, new AABB(-1.0E4, -1.0E4, -1.0E4, 1.0E4, 1.0E4, 1.0E4), e -> true)) {
+                AABB b = e.getBoundingBox();
+                world.beginObject().field("id", e.getId()).field("type", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
+                world.key("bb").beginArray().f64(b.minX).f64(b.minY).f64(b.minZ).f64(b.maxX).f64(b.maxY).f64(b.maxZ).endArray();
+                world.fieldF32("pick_radius", e.getPickRadius()).field("pickable", net.minecraft.world.entity.EntitySelector.CAN_BE_PICKED.test(e));
+                world.endObject();
+            }
+            world.endArray();
             sink.accept(world.endObject().toString());
 
             for (int k = 0; k < raysPerWorld; k++) {
@@ -360,6 +372,30 @@ final class SelectionDump {
                 run.player.getAttribute(Attributes.BLOCK_INTERACTION_RANGE).setBaseValue(blockRange);
                 run.player.getAttribute(Attributes.ENTITY_INTERACTION_RANGE).setBaseValue(entityRange);
                 hold(run, held);
+                if (!spawned.isEmpty() && rng.chance(0.45)) {
+                    // Aim at (or stand in) an entity so entity picks are common.
+                    Entity t = spawned.get(rng.nextInt(spawned.size()));
+                    if (rng.chance(0.15)) {
+                        x = t.getX();
+                        y = t.getY() + (rng.nextDouble() - 0.5) * 0.6;
+                        z = t.getZ();
+                        xo = x;
+                        yo = y;
+                        zo = z;
+                        run.player.setPos(x, y, z);
+                        run.player.xo = xo;
+                        run.player.yo = yo;
+                        run.player.zo = zo;
+                    }
+                    AABB tb = t.getBoundingBox().inflate(0.2);
+                    double tx = tb.minX + rng.nextDouble() * (tb.maxX - tb.minX);
+                    double ty = tb.minY + rng.nextDouble() * (tb.maxY - tb.minY);
+                    double tz = tb.minZ + rng.nextDouble() * (tb.maxZ - tb.minZ);
+                    Vec3 e0 = run.player.getEyePosition(1.0F);
+                    double dx = tx - e0.x, dy = ty - e0.y, dz = tz - e0.z;
+                    run.player.setYRot((float) Math.toDegrees(Math.atan2(-dx, dz)));
+                    run.player.setXRot((float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))));
+                }
 
                 HitResult hit = run.player.raycastHitResult(1.0F, run.player);
                 double br = run.player.blockInteractionRange(), er = run.player.entityInteractionRange();
@@ -375,6 +411,8 @@ final class SelectionDump {
                 j.fieldF32("eye_height", run.player.getEyeHeight());
                 j.fieldF64("block_range", br).fieldF64("entity_range", er);
                 j.field("held", held == null ? null : BuiltInRegistries.ITEM.getKey(held).toString());
+                AABB pb = run.player.getBoundingBox();
+                j.key("bb").beginArray().f64(pb.minX).f64(pb.minY).f64(pb.minZ).f64(pb.maxX).f64(pb.maxY).f64(pb.maxZ).endArray();
                 j.key("eyes").beginArray().f64(eyes.x).f64(eyes.y).f64(eyes.z).endArray();
                 j.key("view").beginArray().f64(view.x).f64(view.y).f64(view.z).endArray();
                 j.key("clip");
@@ -382,6 +420,9 @@ final class SelectionDump {
                 j.key("pick");
                 hit(j, hit);
                 sink.accept(j.endObject().toString());
+            }
+            for (Entity e : spawned) {
+                run.level.removeEntity(e.getId(), Entity.RemovalReason.DISCARDED);
             }
             for (int x = X0; x <= X1; x++) {
                 for (int y = Y0; y <= Y1; y++) {
@@ -392,6 +433,47 @@ final class SelectionDump {
             }
         }
         hold(run, null);
+    }
+
+    /** Entity types the worlds get (pickable ones with varied boxes, plus some that are not pickable). */
+    private static EntityType<?>[] entityTypes() {
+        return new EntityType<?>[] {EntityType.ARMOR_STAND, EntityType.PIG, EntityType.CHICKEN, EntityType.ZOMBIE,
+                EntityType.VILLAGER, EntityType.OAK_BOAT, EntityType.MINECART, EntityType.END_CRYSTAL, EntityType.ITEM_FRAME,
+                EntityType.SLIME, EntityType.SHULKER, EntityType.ITEM, EntityType.EXPERIENCE_ORB, EntityType.ARROW};
+    }
+
+    private static List<Entity> spawnEntities(Harness.Run run, Rng rng) {
+        List<Entity> out = new ArrayList<>();
+        int n = rng.range(4, 22);
+        for (int i = 0; i < n; i++) {
+            EntityType<?>[] types = entityTypes();
+            EntityType<?> type = types[rng.nextInt(types.length)];
+            Entity e = type.create(run.level, net.minecraft.world.entity.EntitySpawnReason.LOAD);
+            if (e == null) {
+                continue;
+            }
+            e.setId(1000 + i);
+            double x = X0 - 1 + rng.nextDouble() * (X1 - X0 + 3);
+            double y = Y0 - 1 + rng.nextDouble() * (Y1 - Y0 + 1);
+            double z = Z0 - 1 + rng.nextDouble() * (Z1 - Z0 + 3);
+            if (rng.chance(0.2)) {
+                x = Math.floor(x) + 0.5;
+                y = Math.floor(y);
+                z = Math.floor(z) + 0.5;
+            }
+            if (!out.isEmpty() && rng.chance(0.25)) {
+                // Overlapping entities: iteration order decides some picks.
+                Entity prev = out.get(out.size() - 1);
+                x = prev.getX() + (rng.chance(0.5) ? 0.0 : (rng.nextDouble() - 0.5) * 0.4);
+                y = prev.getY();
+                z = prev.getZ();
+            }
+            e.setYRot((float) (rng.nextDouble() * 360));
+            e.setPos(x, y, z);
+            run.level.addEntity(e);
+            out.add(e);
+        }
+        return out;
     }
 
     private static double pickRange(Rng rng, double dflt) {
@@ -412,6 +494,9 @@ final class SelectionDump {
         j.field("type", h.getType().name().toLowerCase());
         Vec3 l = h.getLocation();
         j.key("location").beginArray().f64(l.x).f64(l.y).f64(l.z).endArray();
+        if (h instanceof net.minecraft.world.phys.EntityHitResult eh) {
+            j.field("entity", eh.getEntity().getId());
+        }
         if (h instanceof BlockHitResult b) {
             BlockPos p = b.getBlockPos();
             j.key("block").beginArray().value(p.getX()).value(p.getY()).value(p.getZ()).endArray();

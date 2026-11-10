@@ -6,7 +6,8 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 
-use ghast_physics::pick::{BlockHit, HitKind};
+use ghast_data::Aabb;
+use ghast_physics::pick::{BlockHit, HitKind, PickEntity, Target};
 use serde_json::Value;
 
 fn golden(version: &str, name: &str) -> impl Iterator<Item = Value> {
@@ -71,6 +72,51 @@ fn same_hit(got: &BlockHit, want: &Value) -> Result<(), String> {
         return Err(format!("inside {}, oracle {}", got.inside, want["inside"]));
     }
     Ok(())
+}
+
+fn aabb(v: &Value) -> Aabb {
+    let c = [0, 1, 2, 3, 4, 5].map(|i| f64v(&v[i]));
+    Aabb::new(c[0], c[1], c[2], c[3], c[4], c[5])
+}
+
+/// The pickable entities of a ray world, in the world's order, with their ids.
+fn world_entities(l: &Value) -> (Vec<PickEntity>, Vec<u64>) {
+    let mut out = (Vec::new(), Vec::new());
+    for e in l["entities"].as_array().into_iter().flatten() {
+        if e["pickable"].as_bool().unwrap() {
+            out.0.push(PickEntity {
+                bb: aabb(&e["bb"]),
+                pick_radius: f32v(&e["pick_radius"]),
+                same_root_vehicle: false,
+            });
+            out.1.push(e["id"].as_u64().unwrap());
+        }
+    }
+    out
+}
+
+/// Compares a crosshair target with an oracle hit object.
+fn same_target(got: &Target, want: &Value, ids: &[u64]) -> Result<(), String> {
+    match (got, want["type"].as_str().unwrap()) {
+        (Target::Entity(e), "entity") => {
+            if ids[e.index] != want["entity"].as_u64().unwrap() {
+                return Err(format!(
+                    "entity {}, oracle {}",
+                    ids[e.index], want["entity"]
+                ));
+            }
+            if bits(e.location) != bits(v3(&want["location"])) {
+                return Err(format!(
+                    "entity location {:?}, oracle {:?}",
+                    e.location,
+                    v3(&want["location"])
+                ));
+            }
+            Ok(())
+        }
+        (Target::Block(b), t) if t != "entity" => same_hit(b, want),
+        (got, _) => Err(format!("target {got:?}, oracle {want}")),
+    }
 }
 
 /// Shape content as a comparable value (points, cells, boxes as bits).
@@ -260,8 +306,10 @@ fn replay_1_16_5(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
     let mut world = ghast_physics::v1_16_5::memory_world();
     let (mut ok, mut fails) = (0, Vec::new());
     let mut w = 0;
+    let mut entities = (Vec::new(), Vec::new());
     for l in input {
         if l["type"] == "ray_world" {
+            entities = world_entities(&l);
             world = ghast_physics::v1_16_5::memory_world();
             world.load_chunks(-2, -2, 2, 2);
             for (p, id) in world_blocks(&l, |id| BlockState::from_id(id).unwrap().to_string()) {
@@ -283,7 +331,22 @@ fn replay_1_16_5(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
             Err(format!("look {look:?}, oracle {:?}", v3(&l["view"])))
         } else {
             let hit = pick::pick(&world, eye, look, f64v(&l["reach"]), held);
-            same_hit(&hit, &l["pick"])
+            same_hit(&hit, &l["pick"]).and_then(|()| match l.get("target") {
+                None => Ok(()),
+                Some(want) => {
+                    let creative = l["creative"].as_bool().unwrap();
+                    let t = pick::pick_target(
+                        &world,
+                        &aabb(&l["bb"]),
+                        eye,
+                        look,
+                        creative,
+                        held,
+                        &entities.0,
+                    );
+                    same_target(&t, want, &entities.1).map_err(|e| format!("target: {e}"))
+                }
+            })
         };
         match r {
             Ok(()) => ok += 1,
@@ -307,8 +370,10 @@ fn replay_26_1(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
     let mut world = ghast_physics::modern::memory_world_26_1();
     let (mut ok, mut fails) = (0, Vec::new());
     let mut w = 0;
+    let mut entities = (Vec::new(), Vec::new());
     for l in input {
         if l["type"] == "ray_world" {
+            entities = world_entities(&l);
             world = ghast_physics::modern::memory_world_26_1();
             world.load_chunks(-2, -2, 2, 2);
             for (p, id) in world_blocks(&l, |id| BlockState::from_id(id).unwrap().to_string()) {
@@ -338,7 +403,22 @@ fn replay_26_1(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
             let clip = pick::clip(&world, eye, to, held);
             same_hit(&clip, &l["clip"])
                 .map_err(|e| format!("clip: {e}"))
-                .and_then(|()| same_hit(&pick::pick(&world, eye, view, br, er, held), &l["pick"]))
+                .and_then(|()| {
+                    let t = match l.get("bb") {
+                        Some(bb) => pick::pick_target(
+                            &world,
+                            &aabb(bb),
+                            eye,
+                            view,
+                            br,
+                            er,
+                            held,
+                            &entities.0,
+                        ),
+                        None => Target::Block(pick::pick(&world, eye, view, br, er, held)),
+                    };
+                    same_target(&t, &l["pick"], &entities.1)
+                })
         };
         match r {
             Ok(()) => ok += 1,

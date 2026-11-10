@@ -7,7 +7,10 @@ import it.unimi.dsi.fastutil.doubles.DoubleList;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityPose;
+import net.minecraft.entity.EntityType;
+import net.minecraft.world.GameMode;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -273,6 +276,13 @@ final class SelectionDump {
         Scenario sc = new Scenario("ray_dump").spawn(0.5, RY + 1, 0.5, 0, 0);
         Harness.Run run = new Harness.Run(sc);
         palettes();
+        // A GameRenderer of our own for the crosshair update (the harness one is a bare stub).
+        net.minecraft.client.render.GameRenderer renderer = Reflect.allocate(net.minecraft.client.render.GameRenderer.class);
+        Reflect.set(net.minecraft.client.render.GameRenderer.class, renderer, "client", Harness.client);
+        if (Harness.client.getProfiler() == null) {
+            Reflect.set(net.minecraft.client.MinecraftClient.class, Harness.client, "profiler",
+                    net.minecraft.util.profiler.DummyProfiler.INSTANCE);
+        }
         EntityPose[] poses = {EntityPose.STANDING, EntityPose.CROUCHING, EntityPose.SWIMMING, EntityPose.FALL_FLYING,
                 EntityPose.SPIN_ATTACK};
         for (int w = 0; w < worlds; w++) {
@@ -303,6 +313,16 @@ final class SelectionDump {
             world.key("states").beginObject();
             used.forEach((k, v) -> world.field(Integer.toString(k), v));
             world.endObject();
+            List<Entity> spawned = spawnEntities(run, rng);
+            world.key("entities").beginArray();
+            for (Entity e : run.world.getOtherEntities(run.player, new Box(-1.0E4, -1.0E4, -1.0E4, 1.0E4, 1.0E4, 1.0E4), e -> true)) {
+                Box b = e.getBoundingBox();
+                world.beginObject().field("id", e.getEntityId()).field("type", Registry.ENTITY_TYPE.getId(e.getType()).toString());
+                world.key("bb").beginArray().f64(b.minX).f64(b.minY).f64(b.minZ).f64(b.maxX).f64(b.maxY).f64(b.maxZ).endArray();
+                world.fieldF32("pick_radius", e.getTargetingMargin()).field("pickable", !e.isSpectator() && e.collides());
+                world.endObject();
+            }
+            world.endArray();
             sink.accept(world.endObject().toString());
 
             for (int k = 0; k < raysPerWorld; k++) {
@@ -341,14 +361,34 @@ final class SelectionDump {
                     held = Items.STONE;
                 }
 
+                boolean creative = rng.chance(0.3);
+
                 run.player.setPose(pose);
-                run.player.setPos(x, y, z);
+                run.player.setPosition(x, y, z);
                 run.player.prevX = x;
                 run.player.prevY = y;
                 run.player.prevZ = z;
                 run.player.yaw = yaw;
                 run.player.pitch = pitch;
                 hold(run, held);
+                if (!spawned.isEmpty() && rng.chance(0.45)) {
+                    // Aim at (or stand in) an entity so entity picks are common.
+                    Entity t = spawned.get(rng.nextInt(spawned.size()));
+                    if (rng.chance(0.15)) {
+                        run.player.setPosition(t.getX(), t.getY() + (rng.nextDouble() - 0.5) * 0.6, t.getZ());
+                    }
+                    Box tb = t.getBoundingBox().expand(0.2);
+                    double tx = tb.minX + rng.nextDouble() * (tb.maxX - tb.minX);
+                    double ty = tb.minY + rng.nextDouble() * (tb.maxY - tb.minY);
+                    double tz = tb.minZ + rng.nextDouble() * (tb.maxZ - tb.minZ);
+                    Vec3d e0 = run.player.getCameraPosVec(1.0F);
+                    double dx = tx - e0.x, dy = ty - e0.y, dz = tz - e0.z;
+                    run.player.yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+                    run.player.pitch = (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+                }
+                Harness.client.interactionManager.setGameMode(creative ? GameMode.CREATIVE : GameMode.SURVIVAL);
+                renderer.updateTargetedEntity(1.0F);
+                HitResult target = Harness.client.crosshairTarget;
 
                 HitResult hit = run.player.raycast(reach, 1.0F, false);
                 Vec3d eyes = run.player.getCameraPosVec(1.0F);
@@ -361,11 +401,19 @@ final class SelectionDump {
                 j.fieldF32("eye_height", run.player.getStandingEyeHeight());
                 j.fieldF64("reach", reach);
                 j.field("held", held == null ? null : Registry.ITEM.getId(held).toString());
+                j.field("creative", creative);
+                Box pb = run.player.getBoundingBox();
+                j.key("bb").beginArray().f64(pb.minX).f64(pb.minY).f64(pb.minZ).f64(pb.maxX).f64(pb.maxY).f64(pb.maxZ).endArray();
                 j.key("eyes").beginArray().f64(eyes.x).f64(eyes.y).f64(eyes.z).endArray();
                 j.key("view").beginArray().f64(view.x).f64(view.y).f64(view.z).endArray();
                 j.key("pick");
                 hit(j, hit);
+                j.key("target");
+                hit(j, target);
                 sink.accept(j.endObject().toString());
+            }
+            for (Entity e : spawned) {
+                run.world.removeEntity(e.getEntityId());
             }
             for (int x = X0; x <= X1; x++) {
                 for (int y = Y0; y <= Y1; y++) {
@@ -376,6 +424,46 @@ final class SelectionDump {
             }
         }
         hold(run, null);
+        Harness.client.interactionManager.setGameMode(GameMode.SURVIVAL);
+    }
+
+    private static EntityType<?>[] entityTypes() {
+        return new EntityType<?>[] {EntityType.ARMOR_STAND, EntityType.PIG, EntityType.CHICKEN, EntityType.ZOMBIE,
+                EntityType.VILLAGER, EntityType.BOAT, EntityType.MINECART, EntityType.END_CRYSTAL, EntityType.ITEM_FRAME,
+                EntityType.SLIME, EntityType.SHULKER, EntityType.ITEM, EntityType.EXPERIENCE_ORB, EntityType.ARROW};
+    }
+
+    private static List<Entity> spawnEntities(Harness.Run run, Rng rng) {
+        List<Entity> out = new ArrayList<>();
+        int n = rng.range(4, 22);
+        for (int i = 0; i < n; i++) {
+            EntityType<?>[] types = entityTypes();
+            EntityType<?> type = types[rng.nextInt(types.length)];
+            Entity e = type.create(run.world);
+            if (e == null) {
+                continue;
+            }
+            e.setEntityId(1000 + i);
+            double x = X0 - 1 + rng.nextDouble() * (X1 - X0 + 3);
+            double y = Y0 - 1 + rng.nextDouble() * (Y1 - Y0 + 1);
+            double z = Z0 - 1 + rng.nextDouble() * (Z1 - Z0 + 3);
+            if (rng.chance(0.2)) {
+                x = Math.floor(x) + 0.5;
+                y = Math.floor(y);
+                z = Math.floor(z) + 0.5;
+            }
+            if (!out.isEmpty() && rng.chance(0.25)) {
+                Entity prev = out.get(out.size() - 1);
+                x = prev.getX() + (rng.chance(0.5) ? 0.0 : (rng.nextDouble() - 0.5) * 0.4);
+                y = prev.getY();
+                z = prev.getZ();
+            }
+            e.yaw = (float) (rng.nextDouble() * 360);
+            e.setPosition(x, y, z);
+            run.world.addEntity(1000 + i, e);
+            out.add(e);
+        }
+        return out;
     }
 
     private static void hit(Json j, HitResult h) {
@@ -383,6 +471,9 @@ final class SelectionDump {
         j.field("type", h.getType().name().toLowerCase());
         Vec3d l = h.getPos();
         j.key("location").beginArray().f64(l.x).f64(l.y).f64(l.z).endArray();
+        if (h instanceof net.minecraft.util.hit.EntityHitResult) {
+            j.field("entity", ((net.minecraft.util.hit.EntityHitResult) h).getEntity().getEntityId());
+        }
         if (h instanceof BlockHitResult) {
             BlockHitResult b = (BlockHitResult) h;
             BlockPos p = b.getBlockPos();

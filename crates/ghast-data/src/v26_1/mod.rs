@@ -221,7 +221,7 @@ pub mod state_flags {
     /// The collision shape depends on the colliding entity (scaffolding, powder snow).
     pub const CONTEXT: u16 = 1 << 10;
     /// The collision shape is shifted by the block's model offset (bamboo, pointed dripstone);
-    /// [`StatePhys::shape`] is the unshifted shape.
+    /// [`super::StatePhys::shape`] is the unshifted shape.
     pub const OFFSET: u16 = 1 << 11;
     /// `moving_piston`.
     pub const MOVING_PISTON: u16 = 1 << 12;

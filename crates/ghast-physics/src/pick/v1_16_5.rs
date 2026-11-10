@@ -5,7 +5,11 @@
 
 use ghast_data::v1_16_5::{Block, BlockState, OffsetType};
 
-use super::{BlockHit, PlacedShape};
+use ghast_data::Aabb;
+
+use super::{
+    BlockHit, Direction, PickEntity, PlacedShape, Target, entity_hit, length_sqr, search_box,
+};
 use crate::math::{cos, sin};
 use crate::world::BlockView;
 
@@ -116,4 +120,40 @@ pub fn pick<W: BlockView<State = BlockState>>(
         eye[2] + look[2] * reach,
     ];
     clip(world, eye, to, held_block)
+}
+
+/// The crosshair target (vanilla `GameRenderer.updateTargetedEntity(1.0F)`): the block pick at
+/// the game mode's reach (5.0 creative, else 4.5), unless an entity of `entities` is hit nearer
+/// along the ray to 6.0 (creative) or the reach; outside creative an entity farther than 3 blocks
+/// gives a miss at its hit point instead. `player_bb` is the player's bounding box.
+pub fn pick_target<W: BlockView<State = BlockState>>(
+    world: &W,
+    player_bb: &Aabb,
+    eye: [f64; 3],
+    look: [f64; 3],
+    creative: bool,
+    held_block: Option<Block>,
+    entities: &[PickEntity],
+) -> Target {
+    let reach = if creative { CREATIVE_REACH } else { REACH };
+    let block = pick(world, eye, look, reach, held_block);
+    let (d, limited) = if creative {
+        (6.0, false)
+    } else {
+        (reach, reach > 3.0)
+    };
+    let block_sq = length_sqr(block.location, eye);
+    let delta = [look[0] * d, look[1] * d, look[2] * d];
+    let to = [eye[0] + delta[0], eye[1] + delta[1], eye[2] + delta[2]];
+    if let Some(e) = entity_hit(eye, to, &search_box(player_bb, delta), entities, block_sq) {
+        let g = length_sqr(e.location, eye);
+        if limited && g > 9.0 {
+            let face = Direction::approximate_nearest(look[0], look[1], look[2]);
+            return Target::Block(BlockHit::miss(e.location, face));
+        }
+        if g < block_sq {
+            return Target::Entity(e);
+        }
+    }
+    Target::Block(block)
 }

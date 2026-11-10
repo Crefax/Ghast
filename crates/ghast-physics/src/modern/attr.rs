@@ -50,7 +50,7 @@ pub fn identifier_key(id: &str) -> u64 {
 pub struct ModifierId {
     /// `Identifier.hashCode()`.
     pub hash: i32,
-    /// Equality key ([`identifier_key`]).
+    /// Equality key (`identifier_key`).
     pub key: u64,
 }
 
