@@ -120,6 +120,15 @@ and answer `is_chunk_loaded` truthfully: collision skips unloaded chunks, and th
 no fluid when any chunk around the player's box is unloaded (vanilla 26.1 client). Gravity is
 normal over unloaded columns (the 26.1 client always reports chunks as present).
 
+Verification: `tests/golden_26_1.rs` replays the committed 26.1 goldens (scenarios, `fuzz_seed1`,
+`fuzz_edges_seed1`, `fuzz_extras_seed1`); the large-fuzz test replays `oracle/cache/26.1/` (4.0 M
+ticks: plain, item use, edges, extras; commands in `oracle/README.md`, "26.1 fuzz"), 0 diffs.
+26.1.1 and 26.1.2 give identical oracle records, so `V26_1` covers 26.1 – 26.1.2.
+
+Cost per tick (`modern_tick`, 2026-11-11, machine shared with other builds): walk 3.3 µs hash-map
+world / 2.4 µs dense world, busy collision 3.9 / 2.7 µs, swim 2.4 / 1.8 µs (1.16.5 on the same
+scenarios: 5.4 / 3.2, 6.2 / 4.1, 3.3 / 2.2 µs).
+
 Not modelled: elytra, riptide, vehicles, entity collision and push, pistons, block entities
 (shulker box lids collide as closed boxes), a moving world border, the nether's `fast_lava` is
 supported only as a flag (no oracle vector yet).
