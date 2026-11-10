@@ -1002,10 +1002,12 @@ version = "0.3.0"
 dependencies = [
  "bytes",
  "criterion",
+ "flate2",
  "ghast-data",
  "ghast-physics",
  "ghast-protocol",
  "proptest",
+ "serde_json",
  "thiserror",
 ]
 

@@ -35,4 +35,7 @@ pub enum WorldError {
         /// What is wrong.
         reason: &'static str,
     },
+    /// A world packet could not be decoded (26.1 raw packet handling).
+    #[error("world packet: {0}")]
+    Decode(ghast_protocol::DecodeError),
 }

@@ -36,6 +36,8 @@ mod border;
 mod column;
 mod error;
 pub mod packed;
+#[cfg(feature = "v26_1")]
+pub mod paletted;
 mod section;
 
 #[cfg(feature = "v1_12")]
@@ -44,6 +46,8 @@ pub mod v1_12;
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
+#[cfg(feature = "v26_1")]
+pub mod v26_1;
 
 pub use border::Border;
 pub use column::{

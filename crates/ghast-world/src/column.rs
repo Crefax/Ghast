@@ -358,23 +358,32 @@ fn key(x: i32, z: i32) -> u64 {
     u64::from(x as u32) | (u64::from(z as u32) << 32)
 }
 
-/// The loaded columns. Version-independent; the version worlds wrap it.
-#[derive(Clone, Debug, Default)]
-pub struct ColumnMap {
-    map: HashMap<u64, (ChunkPos, Column), BuildHasherDefault<ChunkHasher>>,
+/// The loaded columns. Version-independent; the version worlds wrap it. `C` is the column
+/// type (the legacy [`Column`] by default; the modern worlds use their own).
+#[derive(Clone, Debug)]
+pub struct ColumnMap<C = Column> {
+    map: HashMap<u64, (ChunkPos, C), BuildHasherDefault<ChunkHasher>>,
 }
 
-impl ColumnMap {
+impl<C> Default for ColumnMap<C> {
+    fn default() -> Self {
+        ColumnMap {
+            map: HashMap::default(),
+        }
+    }
+}
+
+impl<C> ColumnMap<C> {
     /// The column at `(cx, cz)` if loaded.
     #[inline]
     #[must_use]
-    pub fn get(&self, cx: i32, cz: i32) -> Option<&Column> {
+    pub fn get(&self, cx: i32, cz: i32) -> Option<&C> {
         self.map.get(&key(cx, cz)).map(|(_, c)| c)
     }
 
     /// Mutable access to a loaded column.
     #[inline]
-    pub fn get_mut(&mut self, cx: i32, cz: i32) -> Option<&mut Column> {
+    pub fn get_mut(&mut self, cx: i32, cz: i32) -> Option<&mut C> {
         self.map.get_mut(&key(cx, cz)).map(|(_, c)| c)
     }
 
@@ -385,15 +394,8 @@ impl ColumnMap {
         self.map.contains_key(&key(cx, cz))
     }
 
-    /// Raw state at a block position; `None` when the column is not loaded.
-    #[inline]
-    #[must_use]
-    pub fn raw(&self, x: i32, y: i32, z: i32) -> Option<u16> {
-        self.get(x >> 4, z >> 4).map(|c| c.raw(x, y, z))
-    }
-
     /// Inserts (replaces) a column.
-    pub fn insert(&mut self, cx: i32, cz: i32, column: Column) {
+    pub fn insert(&mut self, cx: i32, cz: i32, column: C) {
         self.map
             .insert(key(cx, cz), (ChunkPos::new(cx, cz), column));
     }
@@ -426,15 +428,29 @@ impl ColumnMap {
     }
 
     /// Iterates the loaded columns (arbitrary order).
-    pub fn iter(&self) -> impl Iterator<Item = (ChunkPos, &Column)> {
+    pub fn iter(&self) -> impl Iterator<Item = (ChunkPos, &C)> {
         self.map.values().map(|(p, c)| (*p, c))
+    }
+
+    /// Heap bytes of the hash table itself (entries included, column contents excluded).
+    #[must_use]
+    pub fn table_bytes(&self) -> usize {
+        self.map.capacity() * (size_of::<(u64, (ChunkPos, C))>() + 1)
+    }
+}
+
+impl ColumnMap<Column> {
+    /// Raw state at a block position; `None` when the column is not loaded.
+    #[inline]
+    #[must_use]
+    pub fn raw(&self, x: i32, y: i32, z: i32) -> Option<u16> {
+        self.get(x >> 4, z >> 4).map(|c| c.raw(x, y, z))
     }
 
     /// Approximate heap bytes: columns plus the hash table.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        let table = self.map.capacity() * (size_of::<(u64, (ChunkPos, Column))>() + 1);
-        table
+        self.table_bytes()
             + self
                 .map
                 .values()

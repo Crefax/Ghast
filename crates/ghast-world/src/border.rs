@@ -57,6 +57,23 @@ pub(crate) struct BorderPacket {
     pub warning_blocks: Option<i32>,
 }
 
+impl BorderPacket {
+    /// A packet with every optional field absent.
+    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+    pub(crate) const EMPTY: BorderPacket = BorderPacket {
+        action: 0,
+        diameter: None,
+        x: None,
+        z: None,
+        old_diameter: None,
+        new_diameter: None,
+        speed_ms: None,
+        portal_boundary: None,
+        warning_time: None,
+        warning_blocks: None,
+    };
+}
+
 impl Border {
     pub(crate) fn new(math: LerpMath) -> Self {
         Border {

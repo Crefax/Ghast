@@ -14,29 +14,40 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-world"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "physics"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "physics"]
 # Per-version worlds (chunk formats and packet handling).
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-physics?/v26_1"]
 # Implements `ghast_physics::BlockView` for the worlds.
 physics = ["dep:ghast-physics"]
 
 [dependencies]
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false }
 ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
-ghast-physics = { path = "../ghast-physics", version = "0.3.0", optional = true }
+ghast-physics = { path = "../ghast-physics", version = "0.3.0", optional = true, default-features = false }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 criterion = { workspace = true }
+flate2 = { workspace = true }
+serde_json = { workspace = true }
 
 [[bench]]
 name = "world"
 harness = false
 required-features = ["v1_8", "v1_16_5"]
+
+[[example]]
+name = "chunk_stats_26_1"
+required-features = ["v26_1"]
+
+[[example]]
+name = "probe_26_1"
+required-features = ["v26_1"]
 
 [package.metadata.docs.rs]
 all-features = true
