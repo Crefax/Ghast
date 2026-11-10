@@ -33,7 +33,7 @@ use crate::hands::{self, BlockHit, Buttons, DigFactors, Hands, HandsIo};
 use crate::interest::Interests;
 use crate::rotation::Rotation;
 use crate::sim::{Sim, WorldView};
-use crate::version::GameVersion;
+use crate::version::{Capabilities, GameVersion};
 
 /// Pending chat messages kept for the behaviour; more are dropped (and counted) while the
 /// behaviour is not ticking.
@@ -287,7 +287,8 @@ impl TickEvents {
 #[derive(Debug, Clone)]
 pub(crate) struct CoreOptions {
     pub name: Arc<str>,
-    pub version: GameVersion,
+    /// The version's capability row (the core asks it instead of comparing versions).
+    pub caps: &'static Capabilities,
     pub settings: ClientSettings,
     pub brand: Option<String>,
     pub sensitivity: f32,
@@ -491,7 +492,7 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
 /// entities are tracked.
 fn entity_pick<W: WorldView + ?Sized>(
     w: &W,
-    version: GameVersion,
+    caps: &Capabilities,
     eyes: Vec3,
     look: Vec3,
     block_distance: Option<f64>,
@@ -499,7 +500,7 @@ fn entity_pick<W: WorldView + ?Sized>(
     let ents = w.entities()?;
     let riding = ents.me().and_then(ghast_entity::Entity::vehicle);
     // 1.8 grows entity boxes by the 0.1 collision border; 1.9+ does not.
-    let border = if !version.combat_1_9() { 0.1 } else { 0.0 };
+    let border = caps.entity_pick_border;
     let cands = ents
         .within([eyes.x, eyes.y, eyes.z], 8.0)
         .filter(|e| collidable(e))
@@ -597,7 +598,7 @@ impl<S: Sim> Engine<S> {
         if self.state.failed || self.state.done {
             std::borrow::Cow::Borrowed(&[])
         } else {
-            b.raw_packets(self.core.opts.version)
+            b.raw_packets(self.core.opts.caps.version)
         }
     }
 
@@ -775,7 +776,7 @@ impl<S: Sim> Engine<S> {
                     c.pending.game_mode_changed = true;
                 }
                 // 1.15+: "immediate respawn" gamerule (1 = no respawn screen).
-                11 if c.opts.version == GameVersion::V1_16_5 => c.respawn_screen = value == 0.0,
+                11 if c.opts.caps.immediate_respawn_rule => c.respawn_screen = value == 0.0,
                 _ => {}
             },
             // Window confirms are answered by the inventory (exactly once).
@@ -969,16 +970,16 @@ impl<S: Sim> Engine<S> {
             // screen for opens none; a window the client closed is gone at once).
             let gui = c.inv.gui_open();
             let eye = if c.pose.sneaking {
-                c.opts.version.sneak_eye_height()
+                c.opts.caps.sneak_eye_height
             } else {
-                c.opts.version.eye_height()
+                c.opts.caps.eye_height
             };
             let eyes = Vec3::new(c.pose.pos.x, c.pose.pos.y + eye, c.pose.pos.z);
             let sim = &self.sim;
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
             let target = hands::pick(&blocks, eyes, look, hands::REACH);
-            let entity = entity_pick(sim, c.opts.version, eyes, look, target.map(|t| t.distance));
+            let entity = entity_pick(sim, c.opts.caps, eyes, look, target.map(|t| t.distance));
             let in_water = blocks(
                 eyes.x.floor() as i32,
                 eyes.y.floor() as i32,
@@ -994,7 +995,7 @@ impl<S: Sim> Engine<S> {
                 held,
                 held_stack: c.inv.held().cloned(),
                 food: c.health.food,
-                modern: c.opts.version.combat_1_9(),
+                modern: c.opts.caps.combat_1_9,
                 off_held: off_held_item(&c.inv, sim),
                 off_stack: c.inv.offhand().cloned(),
                 entity,
@@ -1138,7 +1139,7 @@ impl TickView<'_> {
     /// The protocol version.
     #[must_use]
     pub fn version(&self) -> GameVersion {
-        self.core.opts.version
+        self.core.opts.caps.version
     }
 
     /// The client pose after this tick's movement step.
@@ -1273,7 +1274,7 @@ impl TickContext<'_> {
 /// from `first` on. Other placements wait for the server's set_slot: predicting them needs
 /// vanilla's full placement rules, and a wrong prediction would never be corrected.
 fn predict_planting(c: &mut Core, world: &dyn WorldView, first: usize) {
-    if c.opts.version != GameVersion::V1_8_9 || c.game_mode == GameMode::Creative {
+    if !c.opts.caps.seed_planting_prediction || c.game_mode == GameMode::Creative {
         return;
     }
     let mut uses = 0u8;
@@ -1313,10 +1314,7 @@ fn post_look_ok(c: &Core, yaw: f32, pitch: f32) -> bool {
         hands::look_vector(c.pose.yaw, pitch),
         hands::look_vector(yaw, pitch),
     ];
-    let heights = [
-        c.opts.version.eye_height(),
-        c.opts.version.sneak_eye_height(),
-    ];
+    let heights = [c.opts.caps.eye_height, c.opts.caps.sneak_eye_height];
     c.out
         .iter()
         .filter_map(|o| match o {
@@ -1372,7 +1370,7 @@ impl TickContext<'_> {
     /// The protocol version of this connection.
     #[must_use]
     pub fn version(&self) -> GameVersion {
-        self.core.opts.version
+        self.core.opts.caps.version
     }
 
     /// The client pose now (start of the tick, before this tick's rotation and movement).
@@ -1390,11 +1388,11 @@ impl TickContext<'_> {
     /// Eye position of `pose` (standing or sneaking eye height of this version).
     #[must_use]
     pub fn eyes(&self, pose: &Pose) -> Vec3 {
-        let v = self.core.opts.version;
+        let v = self.core.opts.caps;
         pose.eyes(if pose.sneaking {
-            v.sneak_eye_height()
+            v.sneak_eye_height
         } else {
-            v.eye_height()
+            v.eye_height
         })
     }
 
@@ -1619,11 +1617,11 @@ impl TickContext<'_> {
     #[must_use]
     pub fn target(&self) -> Option<BlockHit> {
         let s = &self.core.sent;
-        let v = self.core.opts.version;
+        let v = self.core.opts.caps;
         let eye = if s.sneaking {
-            v.sneak_eye_height()
+            v.sneak_eye_height
         } else {
-            v.eye_height()
+            v.eye_height
         };
         let world = self.world;
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
@@ -1646,11 +1644,11 @@ impl TickContext<'_> {
     #[must_use]
     pub fn target_entity(&self) -> Option<hands::EntityHit> {
         let s = &self.core.sent;
-        let v = self.core.opts.version;
+        let v = self.core.opts.caps;
         let eye = if s.sneaking {
-            v.sneak_eye_height()
+            v.sneak_eye_height
         } else {
-            v.eye_height()
+            v.eye_height
         };
         let eyes = Vec3::new(s.pos.x, s.pos.y + eye, s.pos.z);
         let look = hands::look_vector(s.yaw, s.pitch);
@@ -1668,7 +1666,7 @@ impl TickContext<'_> {
         let world = self.world;
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
         let c = &mut *self.core;
-        let modern = c.opts.version.combat_1_9();
+        let modern = c.opts.caps.combat_1_9;
         let mut placed = false;
         let mut io = HandsIo {
             blocks: &blocks,
@@ -1700,7 +1698,7 @@ impl TickContext<'_> {
     /// axes 0.8–1.0); 1.0 on 1.8 (no cooldown).
     #[must_use]
     pub fn attack_strength(&self, attack_speed: f64) -> f32 {
-        if self.core.opts.version.combat_1_9() {
+        if self.core.opts.caps.combat_1_9 {
             self.core.hands.attack_strength(attack_speed)
         } else {
             1.0
@@ -1740,7 +1738,7 @@ impl TickContext<'_> {
         let id = u16::try_from(stack.id).ok()?;
         let count = u8::try_from(stack.count.clamp(0, 255)).unwrap_or(0);
         Some(crate::sim::held_item_facts(
-            self.core.opts.version,
+            self.core.opts.caps.data,
             id,
             count,
             efficiency(stack),
@@ -1814,7 +1812,7 @@ impl TickContext<'_> {
             held: self.held,
             held_stack: c.inv.held().cloned(),
             food: c.health.food,
-            modern: c.opts.version.combat_1_9(),
+            modern: c.opts.caps.combat_1_9,
             off_held: None,
             off_stack: None,
             entity: None,
@@ -1861,7 +1859,7 @@ impl TickContext<'_> {
             held: self.held,
             held_stack: c.inv.held().cloned(),
             food: c.health.food,
-            modern: c.opts.version.combat_1_9(),
+            modern: c.opts.caps.combat_1_9,
             off_held: None,
             off_stack: None,
             entity: None,
@@ -1937,7 +1935,7 @@ impl TickContext<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 mod tests {
     use super::*;
     use crate::common::Teleport;
@@ -1947,7 +1945,7 @@ mod tests {
     fn opts(version: GameVersion) -> CoreOptions {
         CoreOptions {
             name: "test".into(),
-            version,
+            caps: version.caps(),
             settings: ClientSettings::default(),
             brand: Some("vanilla".into()),
             sensitivity: 0.5,
@@ -1973,7 +1971,7 @@ mod tests {
 
     /// Loads the column of chunk (x, z) the way the connection does.
     fn load(e: &mut Engine<Box<dyn Sim>>, x: i32, z: i32) {
-        let raw = match e.core.opts.version {
+        let raw = match e.core.opts.caps.version {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),

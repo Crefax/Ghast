@@ -55,6 +55,18 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  features:
+    name: One version per build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: features
+      - name: feature matrix
+        run: scripts/feature-matrix.sh
+
   oracle:
     name: Oracle verify (${{ matrix.mc }})
     if: github.event_name == 'workflow_dispatch' && inputs.oracle

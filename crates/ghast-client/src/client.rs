@@ -16,7 +16,13 @@ use crate::engine::{Behavior, CoreOptions, Engine};
 use crate::error::{ClientError, SessionEnd};
 use crate::interest::Interests;
 use crate::sim::{Sim, SimError};
-use crate::version::{ClientVersion, GameVersion, HasSim, V1_8, V1_12_2, V1_16_5};
+#[cfg(feature = "v1_8")]
+use crate::version::V1_8;
+#[cfg(feature = "v1_12_2")]
+use crate::version::V1_12_2;
+#[cfg(feature = "v1_16_5")]
+use crate::version::V1_16_5;
+use crate::version::{ClientVersion, GameVersion, HasSim};
 
 /// Length of one client tick.
 pub const TICK: Duration = Duration::from_millis(50);
@@ -253,10 +259,19 @@ impl Client {
         S: Future<Output = ()>,
     {
         let shutdown = std::pin::pin!(shutdown);
+        // The version is chosen once: everything below is monomorphised per version.
         match self.version {
+            #[cfg(feature = "v1_8")]
             GameVersion::V1_8_9 => session::<V1_8, B, S>(self, behavior, shutdown).await,
+            #[cfg(feature = "v1_12_2")]
             GameVersion::V1_12_2 => session::<V1_12_2, B, S>(self, behavior, shutdown).await,
+            #[cfg(feature = "v1_16_5")]
             GameVersion::V1_16_5 => session::<V1_16_5, B, S>(self, behavior, shutdown).await,
+            #[allow(unreachable_patterns)]
+            v => {
+                let _ = (behavior, shutdown);
+                Err(ClientError::VersionNotEnabled(v))
+            }
         }
     }
 }
@@ -315,7 +330,7 @@ where
 
     let opts = CoreOptions {
         name,
-        version: V::GAME,
+        caps: V::GAME.caps(),
         settings: client.settings.clone(),
         brand: client.brand.clone(),
         sensitivity: client.sensitivity,

@@ -16,6 +16,9 @@
 //! representable (`ghast_note` lines). Teleports are written with the
 //! raw values and their `flags` byte (the oracle applies them like the client handler).
 
+// One build may include only one of the two recorded versions.
+#![cfg_attr(not(all(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+
 use std::collections::BTreeMap;
 use std::io::Write as _;
 

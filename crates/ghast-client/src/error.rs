@@ -76,6 +76,9 @@ pub enum ClientError {
     /// No data from the server for too long.
     #[error("timed out: {0}")]
     Timeout(&'static str),
+    /// The version's cargo feature is off in this build of the library.
+    #[error("Minecraft {0} is not compiled in (enable the ghast feature for it)")]
+    VersionNotEnabled(crate::GameVersion),
 }
 
 impl From<FrameError> for ClientError {

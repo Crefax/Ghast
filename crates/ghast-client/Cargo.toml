@@ -1,6 +1,6 @@
 [package]
 name = "ghast-client"
-description = "Headless Minecraft Java Edition client for the ghast library: connection, login, fixed 50 ms tick loop and a version-agnostic bot API (1.8.9, 1.12.2 and 1.16.5)"
+description = "Headless Minecraft Java Edition client for the ghast library: connection, login, fixed 50 ms tick loop and a version-agnostic bot API (1.8.9, 1.12.2, 1.16.5 and 26.1)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,18 +14,27 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-client"
 
 [features]
-default = []
+default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate"]
+# Game versions (each one alone builds; drop the ones you do not connect with to cut compile
+# time and binary size). A `GameVersion` whose feature is off still exists, but running it
+# returns `ClientError::VersionNotEnabled`.
+v1_8 = ["ghast-protocol/v1_8", "ghast-world/v1_8", "ghast-data/v1_8"]
+v1_12_2 = ["ghast-protocol/v1_12_2", "ghast-world/v1_12", "ghast-data/v1_12"]
+v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-world/v1_16_5", "ghast-data/v1_16_5"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1"]
+# Inflate / deflate packets with libdeflate (C, faster); off = pure Rust (flate2 + zlib-rs).
+libdeflate = ["ghast-protocol/libdeflate"]
 # Online-mode servers: Microsoft account sessions and the session-server join call.
 microsoft = ["ghast-auth/microsoft"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "tokio", "libdeflate", "chat-json"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["tokio", "chat-json"] }
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
-ghast-world = { path = "../ghast-world", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "physics"] }
-ghast-physics = { path = "../ghast-physics", version = "0.3.0" }
+ghast-world = { path = "../ghast-world", version = "0.3.0", default-features = false, features = ["physics"] }
+ghast-physics = { path = "../ghast-physics", version = "0.3.0", default-features = false }
 ghast-inventory = { path = "../ghast-inventory", version = "0.3.0" }
 ghast-entity = { path = "../ghast-entity", version = "0.3.0" }
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

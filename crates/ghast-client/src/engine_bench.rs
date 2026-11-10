@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::Controls;
 use crate::common::{
     ChatMessage, ChatPosition, ClientSettings, GameMode, Health, Inbound, JoinGame, Teleport, Vec3,
 };
@@ -15,7 +16,6 @@ use crate::engine::{Behavior, CoreOptions, Engine, TickContext};
 use crate::hands::Buttons;
 use crate::sim::Sim;
 use crate::version::GameVersion;
-use crate::Controls;
 
 /// Walks a square, turns, sneaks now and then, holds the left button some of the time.
 struct Walker;
@@ -29,7 +29,7 @@ impl Behavior for Walker {
             forward: true,
             sprint: t % 80 < 40,
             sneak: t % 100 > 90,
-            jump: t % 33 == 0,
+            jump: t.is_multiple_of(33),
             ..Controls::NONE
         });
         ctx.set_buttons(Buttons {
@@ -45,7 +45,7 @@ impl Behavior for Walker {
 fn opts(caps_version: GameVersion) -> CoreOptions {
     CoreOptions {
         name: "bench".into(),
-        version: caps_version,
+        caps: caps_version.caps(),
         settings: ClientSettings::default(),
         brand: Some("vanilla".into()),
         sensitivity: 0.5,
@@ -108,10 +108,10 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
             entity_id: 99,
             motion: Vec3::new(0.1, 0.0, 0.1),
         });
-        if i % 5 == 0 {
+        if i.is_multiple_of(5) {
             e.handle(Inbound::Chat(chat.clone()));
         }
-        if i % 20 == 0 {
+        if i.is_multiple_of(20) {
             e.handle(Inbound::Health(Health {
                 health: 20.0,
                 food: 20,

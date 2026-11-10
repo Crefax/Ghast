@@ -1,6 +1,6 @@
 [package]
 name = "ghast"
-description = "Headless Minecraft Java Edition client / bot library (1.8.9, 1.12.2 and 1.16.5) with vanilla-exact behaviour: facade crate re-exporting the ghast-* crates"
+description = "Headless Minecraft Java Edition client / bot library (1.8.9, 1.12.2, 1.16.5 and 26.1) with vanilla-exact behaviour: facade crate re-exporting the ghast-* crates"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,15 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast"
 
 [features]
-default = []
+default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate"]
+# Game versions. Each one builds alone; drop the ones you never connect with to cut compile
+# time and binary size (`cargo add ghast --no-default-features --features v1_8,libdeflate`).
+v1_8 = ["ghast-client/v1_8", "ghast-protocol/v1_8", "ghast-data/v1_8"]
+v1_12_2 = ["ghast-client/v1_12_2", "ghast-protocol/v1_12_2", "ghast-data/v1_12"]
+v1_16_5 = ["ghast-client/v1_16_5", "ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
+v26_1 = ["ghast-client/v26_1", "ghast-protocol/v26_1", "ghast-data/v26_1"]
+# Packet compression with libdeflate (C, faster); without it pure Rust (flate2 + zlib-rs).
+libdeflate = ["ghast-client/libdeflate"]
 # Online-mode servers (Microsoft accounts).
 microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
 # `ghast::ext`: sequential async helpers (look, dig, place, equip, containers, chat, events).
@@ -26,10 +34,10 @@ pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
 viewer = ["dep:ghast-viewer"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.3.0" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0" }
+ghast-client = { path = "../ghast-client", version = "0.3.0", default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["tokio"] }
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
-ghast-data = { path = "../ghast-data", version = "0.3.0" }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
 ghast-ext = { path = "../ghast-ext", version = "0.3.0", optional = true, default-features = false }
 ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true }
 ghast-viewer = { path = "../ghast-viewer", version = "0.3.0", optional = true }

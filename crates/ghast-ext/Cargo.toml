@@ -19,13 +19,15 @@ default = ["pathfinder"]
 pathfinder = ["dep:ghast-pathfinder"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.3.0" }
+# Versions come from the application (the `ghast` features); tests use all of them.
+ghast-client = { path = "../ghast-client", version = "0.3.0", default-features = false }
 ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+ghast-client = { path = "../ghast-client", version = "0.3.0" }
 bytes = { workspace = true }
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0" }

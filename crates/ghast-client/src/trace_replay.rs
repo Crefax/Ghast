@@ -1109,7 +1109,7 @@ impl Behavior for Script<'_> {
 fn opts(sensitivity: f32) -> CoreOptions {
     CoreOptions {
         name: "replay".into(),
-        version: GameVersion::V1_8_9,
+        caps: GameVersion::V1_8_9.caps(),
         settings: crate::common::ClientSettings::default(),
         brand: Some("vanilla".into()),
         sensitivity,

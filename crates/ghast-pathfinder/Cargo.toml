@@ -21,10 +21,11 @@ client = ["dep:ghast-client", "dep:log"]
 [dependencies]
 ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
 ghast-physics = { path = "../ghast-physics", version = "0.3.0" }
-ghast-client = { path = "../ghast-client", version = "0.3.0", optional = true }
+ghast-client = { path = "../ghast-client", version = "0.3.0", optional = true, default-features = false }
 log = { workspace = true, optional = true }
 
 [dev-dependencies]
+ghast-client = { path = "../ghast-client", version = "0.3.0" }
 proptest = { workspace = true }
 criterion = { workspace = true }
 

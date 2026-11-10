@@ -48,16 +48,17 @@
 mod client;
 pub mod common;
 mod engine;
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 mod engine_bench;
 mod error;
 pub mod hands;
 mod interest;
 pub mod movement;
+#[cfg(any(feature = "v1_8", feature = "v1_16_5"))]
 mod record;
 pub mod rotation;
 mod sim;
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8"))]
 mod trace_replay;
 pub mod version;
 

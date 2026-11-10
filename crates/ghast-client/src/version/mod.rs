@@ -13,12 +13,20 @@ use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, PacketFilter, RawPa
 use crate::common::{Inbound, LoginInbound, Outbound, Pose, Teleport};
 use crate::interest::Interests;
 
+mod caps;
+#[cfg(feature = "v1_12_2")]
 mod v1_12_2;
+#[cfg(feature = "v1_16_5")]
 mod v1_16_5;
+#[cfg(feature = "v1_8")]
 mod v1_8;
 
+pub use caps::{Capabilities, DataSet, ItemModel, PhysicsRules};
+#[cfg(feature = "v1_8")]
 pub use ghast_protocol::v1_8::V1_8;
+#[cfg(feature = "v1_12_2")]
 pub use ghast_protocol::v1_12_2::V1_12_2;
+#[cfg(feature = "v1_16_5")]
 pub use ghast_protocol::v1_16_5::V1_16_5;
 
 /// A protocol version the client supports, chosen at run time.
@@ -42,18 +50,36 @@ impl GameVersion {
         GameVersion::V1_16_5,
     ];
 
-    /// Protocol number.
+    /// What this version can do (the row the client core reads instead of comparing
+    /// versions).
     #[must_use]
-    pub const fn protocol(self) -> i32 {
+    pub const fn caps(self) -> &'static Capabilities {
         match self {
-            Self::V1_8_9 => <V1_8 as Version>::PROTOCOL,
-            Self::V1_12_2 => <V1_12_2 as Version>::PROTOCOL,
-            Self::V1_16_5 => <V1_16_5 as Version>::PROTOCOL,
+            Self::V1_8_9 => &caps::V1_8_9,
+            Self::V1_12_2 => &caps::V1_12_2,
+            Self::V1_16_5 => &caps::V1_16_5,
         }
     }
 
+    /// Whether this build of the library includes the version (its cargo feature is on).
+    #[must_use]
+    pub const fn enabled(self) -> bool {
+        match self {
+            Self::V1_8_9 => cfg!(feature = "v1_8"),
+            Self::V1_12_2 => cfg!(feature = "v1_12_2"),
+            Self::V1_16_5 => cfg!(feature = "v1_16_5"),
+        }
+    }
+
+    /// Protocol number.
+    #[must_use]
+    pub const fn protocol(self) -> i32 {
+        self.caps().protocol
+    }
+
     /// This version's row in the protocol table ([`ghast_protocol::versions`]): module,
-    /// feature, every game version sharing the protocol number, wire facts.
+    /// feature, every game version sharing the protocol number, wire facts (the row exists
+    /// whether or not the version is compiled in; see its `enabled`).
     #[must_use]
     pub fn protocol_info(self) -> &'static ghast_protocol::ProtocolVersion {
         ghast_protocol::versions::by_protocol(self.protocol())
@@ -71,28 +97,23 @@ impl GameVersion {
     }
 
     /// `true` for 1.9 and later: the attack cooldown, the off hand, swinging after the click,
-    /// no 0.1 targeting border on entity boxes.
+    /// no 0.1 targeting border on entity boxes ([`Capabilities::combat_1_9`]).
     #[must_use]
     pub const fn combat_1_9(self) -> bool {
-        !matches!(self, Self::V1_8_9)
+        self.caps().combat_1_9
     }
 
-    /// Eye height above the feet while standing: `1.62F` widened to double (every supported
-    /// version).
+    /// Eye height above the feet while standing ([`Capabilities::eye_height`]).
     #[must_use]
-    pub fn eye_height(self) -> f64 {
-        f64::from(1.62_f32)
+    pub const fn eye_height(self) -> f64 {
+        self.caps().eye_height
     }
 
     /// Eye height while sneaking: 1.54 in 1.8 – 1.12 (`getEyeHeight` − 0.08), 1.27 in 1.16
-    /// (the crouching pose).
+    /// (the crouching pose) ([`Capabilities::sneak_eye_height`]).
     #[must_use]
-    pub fn sneak_eye_height(self) -> f64 {
-        match self {
-            // `1.62F - 0.08F` in float.
-            Self::V1_8_9 | Self::V1_12_2 => f64::from(1.62_f32 - 0.08_f32),
-            Self::V1_16_5 => f64::from(1.27_f32),
-        }
+    pub const fn sneak_eye_height(self) -> f64 {
+        self.caps().sneak_eye_height
     }
 }
 
@@ -179,8 +200,11 @@ mod sealed {
     // Deliberately unnameable: downstream crates cannot implement `ClientVersion`.
     #[allow(unnameable_types, reason = "sealed trait pattern")]
     pub trait Sealed {}
+    #[cfg(feature = "v1_8")]
     impl Sealed for super::V1_8 {}
+    #[cfg(feature = "v1_12_2")]
     impl Sealed for super::V1_12_2 {}
+    #[cfg(feature = "v1_16_5")]
     impl Sealed for super::V1_16_5 {}
 }
 
@@ -239,9 +263,10 @@ mod tests {
     #[test]
     fn protocol_rows() {
         for &v in GameVersion::ALL {
+            assert_eq!(v.caps().version, v);
             let row = v.protocol_info();
             assert_eq!(row.protocol, v.protocol());
-            assert!(row.enabled);
+            assert!(row.enabled || !v.enabled());
             assert!(row.game_versions.contains(&v.name()));
         }
     }
