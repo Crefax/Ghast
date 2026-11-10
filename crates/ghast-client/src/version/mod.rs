@@ -52,6 +52,14 @@ impl GameVersion {
         }
     }
 
+    /// This version's row in the protocol table ([`ghast_protocol::versions`]): module,
+    /// feature, every game version sharing the protocol number, wire facts.
+    #[must_use]
+    pub fn protocol_info(self) -> &'static ghast_protocol::ProtocolVersion {
+        ghast_protocol::versions::by_protocol(self.protocol())
+            .expect("every GameVersion has a row in the protocol table")
+    }
+
     /// Display name (`"1.8.9"`, `"1.12.2"`, `"1.16.5"`).
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -227,6 +235,16 @@ pub(crate) fn teleport_target(pose: &mut Pose, t: &Teleport) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_rows() {
+        for &v in GameVersion::ALL {
+            let row = v.protocol_info();
+            assert_eq!(row.protocol, v.protocol());
+            assert!(row.enabled);
+            assert!(row.game_versions.contains(&v.name()));
+        }
+    }
 
     #[test]
     fn parse_versions() {
