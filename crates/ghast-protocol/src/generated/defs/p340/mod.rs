@@ -5,7 +5,7 @@
 
 //! Definitions first used by protocol 340 (Minecraft 1.12.2).
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 pub mod play;
 #[cfg(feature = "v1_12_2")]
 pub mod types;

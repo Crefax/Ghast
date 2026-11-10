@@ -70,7 +70,7 @@ impl<const V: i32> Generate for Success<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `login_plugin_request` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginPluginRequest<const V: i32> {
@@ -81,7 +81,7 @@ pub struct LoginPluginRequest<const V: i32> {
     /// `data`
     pub data: Bytes,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for LoginPluginRequest<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -96,7 +96,7 @@ impl<const V: i32> Decode for LoginPluginRequest<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for LoginPluginRequest<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).message_id);
@@ -105,7 +105,7 @@ impl<const V: i32> Encode for LoginPluginRequest<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LoginPluginRequest<V> {
     fn generate(g: &mut Gen) -> Self {

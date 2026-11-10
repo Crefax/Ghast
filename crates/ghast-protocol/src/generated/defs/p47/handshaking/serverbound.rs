@@ -25,7 +25,12 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `set_protocol` (serverbound handshaking).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetProtocol<const V: i32> {
@@ -38,7 +43,12 @@ pub struct SetProtocol<const V: i32> {
     /// `nextState`
     pub next_state: i32,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for SetProtocol<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -55,7 +65,12 @@ impl<const V: i32> Decode for SetProtocol<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for SetProtocol<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).protocol_version);
@@ -65,7 +80,12 @@ impl<const V: i32> Encode for SetProtocol<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for SetProtocol<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -84,14 +104,24 @@ impl<const V: i32> Generate for SetProtocol<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `legacy_server_list_ping` (serverbound handshaking).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LegacyServerListPing<const V: i32> {
     /// `payload`
     pub payload: u8,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for LegacyServerListPing<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -100,14 +130,24 @@ impl<const V: i32> Decode for LegacyServerListPing<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for LegacyServerListPing<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_u8((*self).payload);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LegacyServerListPing<V> {
     fn generate(g: &mut Gen) -> Self {

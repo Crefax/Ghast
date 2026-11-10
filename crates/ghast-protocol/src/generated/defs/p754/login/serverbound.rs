@@ -25,7 +25,7 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `login_plugin_response` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginPluginResponse<const V: i32> {
@@ -34,7 +34,7 @@ pub struct LoginPluginResponse<const V: i32> {
     /// `data`
     pub data: Option<Bytes>,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for LoginPluginResponse<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -51,7 +51,7 @@ impl<const V: i32> Decode for LoginPluginResponse<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for LoginPluginResponse<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).message_id);
@@ -65,7 +65,7 @@ impl<const V: i32> Encode for LoginPluginResponse<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LoginPluginResponse<V> {
     fn generate(g: &mut Gen) -> Self {

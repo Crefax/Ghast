@@ -25,14 +25,14 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 /// `teleport_confirm` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeleportConfirm<const V: i32> {
     /// `teleportId`
     pub teleport_id: i32,
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for TeleportConfirm<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -41,14 +41,14 @@ impl<const V: i32> Decode for TeleportConfirm<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for TeleportConfirm<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).teleport_id);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for TeleportConfirm<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -371,14 +371,14 @@ impl<const V: i32> Generate for UseEntity<V> {
     }
 }
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 /// `keep_alive` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeepAlive<const V: i32> {
     /// `keepAliveId`
     pub keep_alive_id: i64,
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for KeepAlive<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -387,14 +387,14 @@ impl<const V: i32> Decode for KeepAlive<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for KeepAlive<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i64((*self).keep_alive_id);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for KeepAlive<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -471,7 +471,7 @@ impl<const V: i32> Generate for VehicleMove<V> {
     }
 }
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 /// `steer_boat` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SteerBoat<const V: i32> {
@@ -480,7 +480,7 @@ pub struct SteerBoat<const V: i32> {
     /// `rightPaddle`
     pub right_paddle: bool,
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for SteerBoat<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -493,7 +493,7 @@ impl<const V: i32> Decode for SteerBoat<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for SteerBoat<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_bool((*self).left_paddle);
@@ -501,7 +501,7 @@ impl<const V: i32> Encode for SteerBoat<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for SteerBoat<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -845,7 +845,7 @@ impl<const V: i32> Generate for ResourcePackReceive<V> {
     }
 }
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 /// `advancement_tab` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdvancementTab<const V: i32> {
@@ -854,7 +854,7 @@ pub struct AdvancementTab<const V: i32> {
     /// `tabId`
     pub tab_id: Option<ByteString>,
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for AdvancementTab<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -871,7 +871,7 @@ impl<const V: i32> Decode for AdvancementTab<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for AdvancementTab<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).action);
@@ -889,7 +889,7 @@ impl<const V: i32> Encode for AdvancementTab<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for AdvancementTab<V> {
     fn generate(g: &mut Gen) -> Self {

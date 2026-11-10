@@ -524,6 +524,19 @@ impl<'a> Resolver<'a> {
             compare_to: None,
             shared,
         };
+        // A root that is just the name of another container type (26.1
+        // `spawn_position` = `RespawnData`) takes that type's fields.
+        let mut def = def;
+        while let Some(name) = def.as_str() {
+            match self
+                .local
+                .and_then(|l| l.get(name))
+                .or_else(|| self.types.get(name))
+            {
+                Some(d) if d.as_array().and_then(|a| a.first()).and_then(Value::as_str) == Some("container") => def = d,
+                _ => break,
+            }
+        }
         match self.resolve(def, &ctx) {
             Ty::Container(c) => {
                 let mut c = *c;
@@ -553,6 +566,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_name(&mut self, name: &str, args: Option<&Value>, ctx: &Ctx) -> Ty {
+        assert!(ctx.prefix.len() < 400, "{}: runaway type nesting at {name} ({})", ctx.path, ctx.prefix);
         let prim = match name {
             "varint" | "optvarint" => Some(Prim::VarInt),
             "varlong" => Some(Prim::VarLong),

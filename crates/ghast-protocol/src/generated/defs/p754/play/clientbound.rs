@@ -373,7 +373,7 @@ impl<const V: i32> Generate for NamedEntitySpawn<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatisticsEntries {
@@ -385,14 +385,14 @@ pub struct StatisticsEntries {
     pub value: i32,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `statistics` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Statistics<const V: i32> {
     /// `entries`
     pub entries: Vec<crate::defs::p754::play::clientbound::StatisticsEntries>,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for Statistics<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -420,7 +420,7 @@ impl<const V: i32> Decode for Statistics<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for Statistics<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_len_varint((*self).entries.len())?;
@@ -432,7 +432,7 @@ impl<const V: i32> Encode for Statistics<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Statistics<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -518,7 +518,7 @@ impl<const V: i32> Generate for AcknowledgePlayerDigging<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `block_break_animation` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockBreakAnimation<const V: i32> {
@@ -529,7 +529,7 @@ pub struct BlockBreakAnimation<const V: i32> {
     /// `destroyStage`
     pub destroy_stage: i8,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for BlockBreakAnimation<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -544,7 +544,7 @@ impl<const V: i32> Decode for BlockBreakAnimation<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for BlockBreakAnimation<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).entity_id);
@@ -553,7 +553,7 @@ impl<const V: i32> Encode for BlockBreakAnimation<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for BlockBreakAnimation<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -622,7 +622,7 @@ impl<const V: i32> Generate for TileEntityData<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `block_action` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockAction<const V: i32> {
@@ -635,7 +635,7 @@ pub struct BlockAction<const V: i32> {
     /// `blockId`
     pub block_id: i32,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for BlockAction<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -652,7 +652,7 @@ impl<const V: i32> Decode for BlockAction<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for BlockAction<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).location.write(w, PositionLayout::Xzy)?;
@@ -662,7 +662,7 @@ impl<const V: i32> Encode for BlockAction<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for BlockAction<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -681,7 +681,7 @@ impl<const V: i32> Generate for BlockAction<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `block_change` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockChange<const V: i32> {
@@ -690,7 +690,7 @@ pub struct BlockChange<const V: i32> {
     /// `type`
     pub r#type: i32,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for BlockChange<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -703,7 +703,7 @@ impl<const V: i32> Decode for BlockChange<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for BlockChange<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).location.write(w, PositionLayout::Xzy)?;
@@ -711,7 +711,7 @@ impl<const V: i32> Encode for BlockChange<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for BlockChange<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -1431,7 +1431,7 @@ impl<const V: i32> Generate for MapChunk<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `world_event` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorldEvent<const V: i32> {
@@ -1444,7 +1444,7 @@ pub struct WorldEvent<const V: i32> {
     /// `global`
     pub global: bool,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for WorldEvent<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1461,7 +1461,7 @@ impl<const V: i32> Decode for WorldEvent<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for WorldEvent<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i32((*self).effect_id);
@@ -1471,7 +1471,7 @@ impl<const V: i32> Encode for WorldEvent<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for WorldEvent<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -3008,7 +3008,7 @@ impl<const V: i32> Generate for MultiBlockChange<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `update_view_position` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateViewPosition<const V: i32> {
@@ -3017,7 +3017,7 @@ pub struct UpdateViewPosition<const V: i32> {
     /// `chunkZ`
     pub chunk_z: i32,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for UpdateViewPosition<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3030,7 +3030,7 @@ impl<const V: i32> Decode for UpdateViewPosition<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for UpdateViewPosition<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).chunk_x);
@@ -3038,7 +3038,7 @@ impl<const V: i32> Encode for UpdateViewPosition<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for UpdateViewPosition<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -3053,14 +3053,14 @@ impl<const V: i32> Generate for UpdateViewPosition<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `update_view_distance` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateViewDistance<const V: i32> {
     /// `viewDistance`
     pub view_distance: i32,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for UpdateViewDistance<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3069,14 +3069,14 @@ impl<const V: i32> Decode for UpdateViewDistance<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for UpdateViewDistance<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).view_distance);
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for UpdateViewDistance<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -4381,7 +4381,7 @@ impl<const V: i32> Generate for EntitySoundEffect<V> {
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// `stop_sound` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StopSound<const V: i32> {
@@ -4392,7 +4392,7 @@ pub struct StopSound<const V: i32> {
     /// `sound`
     pub sound: Option<ByteString>,
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Decode for StopSound<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4415,7 +4415,7 @@ impl<const V: i32> Decode for StopSound<V> {
         })
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl<const V: i32> Encode for StopSound<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i8((*self).flags);
@@ -4447,7 +4447,7 @@ impl<const V: i32> Encode for StopSound<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for StopSound<V> {
     fn generate(g: &mut Gen) -> Self {

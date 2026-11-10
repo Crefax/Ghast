@@ -5,13 +5,33 @@
 
 //! Definitions first used by protocol 47 (Minecraft 1.8 – 1.8.9).
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 pub mod handshaking;
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 pub mod login;
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 pub mod play;
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 pub mod status;
 #[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 pub mod types;

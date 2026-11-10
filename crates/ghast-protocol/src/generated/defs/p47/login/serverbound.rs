@@ -59,7 +59,12 @@ impl<const V: i32> Generate for LoginStart<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `encryption_begin` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncryptionBegin<const V: i32> {
@@ -68,7 +73,12 @@ pub struct EncryptionBegin<const V: i32> {
     /// `verifyToken`
     pub verify_token: Bytes,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for EncryptionBegin<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -81,7 +91,12 @@ impl<const V: i32> Decode for EncryptionBegin<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for EncryptionBegin<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_byte_array(&(*self).shared_secret)?;
@@ -89,7 +104,12 @@ impl<const V: i32> Encode for EncryptionBegin<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EncryptionBegin<V> {
     fn generate(g: &mut Gen) -> Self {

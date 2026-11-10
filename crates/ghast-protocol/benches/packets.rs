@@ -115,5 +115,17 @@ fn bench_v1_16_5(c: &mut Criterion) {
     bench_set(c, "1_16_5", k, cb::ClientboundPlayPacket::generate_by_id);
 }
 
-criterion_group!(benches, bench_v1_8, bench_v1_12_2, bench_v1_16_5);
+#[cfg(feature = "v26_1")]
+fn bench_v26_1(c: &mut Criterion) {
+    use ghast_protocol::v26_1::play::clientbound as cb;
+    let k: &[(&str, i32)] = kinds!(ghast_protocol::v26_1::play::clientbound:
+        KEEP_ALIVE, MAP_CHUNK, WINDOW_ITEMS, SET_SLOT, PLAYER_INFO, REL_ENTITY_MOVE,
+        ENTITY_MOVE_LOOK, SYNC_ENTITY_POSITION, ENTITY_METADATA, ENTITY_VELOCITY,
+        MULTI_BLOCK_CHANGE, SYSTEM_CHAT, POSITION, TEAMS, BUNDLE_DELIMITER);
+    bench_set(c, "26_1", k, cb::ClientboundPlayPacket::generate_by_id);
+}
+#[cfg(not(feature = "v26_1"))]
+fn bench_v26_1(_: &mut Criterion) {}
+
+criterion_group!(benches, bench_v1_8, bench_v1_12_2, bench_v1_16_5, bench_v26_1);
 criterion_main!(benches);

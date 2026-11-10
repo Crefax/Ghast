@@ -158,3 +158,16 @@ sets!(v1_16_5:
     play::clientbound::ClientboundPlayPacket,
     play::serverbound::ServerboundPlayPacket,
 );
+
+#[cfg(feature = "v26_1")]
+sets!(v26_1:
+    handshaking::serverbound::ServerboundHandshakingPacket,
+    status::clientbound::ClientboundStatusPacket,
+    status::serverbound::ServerboundStatusPacket,
+    login::clientbound::ClientboundLoginPacket,
+    login::serverbound::ServerboundLoginPacket,
+    configuration::clientbound::ClientboundConfigurationPacket,
+    configuration::serverbound::ServerboundConfigurationPacket,
+    play::clientbound::ClientboundPlayPacket,
+    play::serverbound::ServerboundPlayPacket,
+);

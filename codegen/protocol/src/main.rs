@@ -165,7 +165,80 @@ const VERSIONS: &[VersionSpec] = &[
         ],
         presence: &[],
     },
+    VersionSpec {
+        module: "v26_1",
+        feature: "v26_1",
+        marker: "V26_1",
+        name: "26.1.2",
+        covers: "26.1 – 26.1.2",
+        data_key: "26.1",
+        protocol: 775,
+        layout: "Xzy",
+        // `Slot` is a protodef container (data components) in this version.
+        slot: None,
+        configuration: true,
+        variant_names: &[],
+        // Vanilla 26.1 (`ItemStack.createOptionalStreamCodec`) reads an item stack as
+        // empty when the count is <= 0; minecraft-data 3.119.0 only treats 0 as empty.
+        presence: &[
+            (
+                "types.Slot.body",
+                "{d} > 0",
+                &["0", "1", "-1", "64"],
+                "present iff `itemCount > 0`, as vanilla reads it (minecraft-data says `!= 0`)",
+            ),
+            (
+                "types.UntrustedSlot.body",
+                "{d} > 0",
+                &["0", "1", "-1", "64"],
+                "present iff `itemCount > 0`, as vanilla reads it (minecraft-data says `!= 0`)",
+            ),
+        ],
+    },
 ];
+
+/// A correction of minecraft-data's `protocol.json` where it disagrees with the vanilla
+/// jar. Applied before code generation; the generator panics when the target no longer
+/// holds `expect` (upstream fixed or changed it), so a stale patch cannot survive.
+pub struct Patch {
+    /// minecraft-data version key (`VersionSpec::data_key`).
+    pub data_key: &'static str,
+    /// JSON pointer into `protocol.json`.
+    pub pointer: &'static str,
+    /// The current (wrong) value, as JSON.
+    pub expect: &'static str,
+    /// The vanilla value, as JSON.
+    pub replace: &'static str,
+    /// What vanilla does, and where.
+    pub why: &'static str,
+}
+
+pub const PATCHES: &[Patch] = &[Patch {
+    data_key: "26.1",
+    pointer: "/play/toClient/types/packet_multi_block_change/1/1/type/1/type",
+    expect: "\"varint\"",
+    replace: "\"varlong\"",
+    why: "ClientboundSectionBlocksUpdatePacket reads/writes each record with \
+          readVarLong/writeVarLong (state id << 12 | position); minecraft-data has varint \
+          since 1.20.2 (1.16.2 - 1.20.1 had varlong)",
+}];
+
+/// Applies the [`PATCHES`] of one minecraft-data version.
+pub fn apply_patches(data_key: &str, proto: &mut Value) {
+    for p in PATCHES.iter().filter(|p| p.data_key == data_key) {
+        let target = proto
+            .pointer_mut(p.pointer)
+            .unwrap_or_else(|| panic!("patch {}: {} is gone from minecraft-data", data_key, p.pointer));
+        let expect: Value = serde_json::from_str(p.expect).unwrap();
+        assert!(
+            *target == expect,
+            "stale patch {data_key} {}: minecraft-data now has {target}, expected {expect} \
+             (fixed upstream? then remove the patch)",
+            p.pointer
+        );
+        *target = serde_json::from_str(p.replace).unwrap();
+    }
+}
 
 /// `(protocol.json key, Rust module, State variant)`.
 const STATES: &[(&str, &str, &str)] = &[
@@ -209,7 +282,8 @@ fn main() {
         let proto_dir = paths["pc"][spec.data_key]["protocol"]
             .as_str()
             .unwrap_or_else(|| panic!("no protocol path for {}", spec.data_key));
-        let proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
+        let mut proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
+        apply_patches(spec.data_key, &mut proto);
         let rel = format!("data/{proto_dir}/protocol.json");
         outs.push(emit_version(spec, &proto, rel));
     }
@@ -1025,4 +1099,33 @@ fn packet_enum(name: &str, state: &str, dir: &str, packets: &[(String, String, i
         )),
     );
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every patch still matches the pinned minecraft-data (needs the cache; run
+    /// `cargo run -p ghast-codegen-protocol` once). Fails once upstream fixes a patched
+    /// value, so the patch gets removed.
+    #[test]
+    fn patches_still_apply() {
+        let root = workspace_root();
+        let data = root
+            .join(".cache/minecraft-data")
+            .join(MCDATA_VERSION)
+            .join("package/minecraft-data/data");
+        let Ok(paths) = std::fs::read_to_string(data.join("dataPaths.json")) else {
+            eprintln!("skipped: no minecraft-data cache");
+            return;
+        };
+        let paths: Value = serde_json::from_str(&paths).unwrap();
+        for p in PATCHES {
+            let dir = paths["pc"][p.data_key]["protocol"].as_str().unwrap();
+            let mut proto = read_json(&data.join(dir).join("protocol.json"));
+            apply_patches(p.data_key, &mut proto);
+            let now = proto.pointer(p.pointer).unwrap();
+            assert_eq!(*now, serde_json::from_str::<Value>(p.replace).unwrap());
+        }
+    }
 }

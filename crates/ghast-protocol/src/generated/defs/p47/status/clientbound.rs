@@ -25,14 +25,24 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `server_info` (clientbound status).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerInfo<const V: i32> {
     /// `response`
     pub response: ByteString,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for ServerInfo<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -41,14 +51,24 @@ impl<const V: i32> Decode for ServerInfo<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for ServerInfo<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).response)?;
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for ServerInfo<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -59,14 +79,24 @@ impl<const V: i32> Generate for ServerInfo<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `ping` (clientbound status).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ping<const V: i32> {
     /// `time`
     pub time: i64,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for Ping<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -75,14 +105,24 @@ impl<const V: i32> Decode for Ping<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for Ping<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i64((*self).time);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Ping<V> {
     fn generate(g: &mut Gen) -> Self {

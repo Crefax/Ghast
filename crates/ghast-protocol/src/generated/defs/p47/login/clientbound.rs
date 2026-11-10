@@ -25,14 +25,24 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `disconnect` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Disconnect<const V: i32> {
     /// `reason`
     pub reason: ByteString,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for Disconnect<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -41,14 +51,24 @@ impl<const V: i32> Decode for Disconnect<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for Disconnect<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).reason)?;
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Disconnect<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -156,14 +176,24 @@ impl<const V: i32> Generate for Success<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `compress` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Compress<const V: i32> {
     /// `threshold`
     pub threshold: i32,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for Compress<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -172,14 +202,24 @@ impl<const V: i32> Decode for Compress<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for Compress<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).threshold);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Compress<V> {
     fn generate(g: &mut Gen) -> Self {

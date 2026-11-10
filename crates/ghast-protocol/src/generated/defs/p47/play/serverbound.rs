@@ -520,14 +520,24 @@ impl<const V: i32> Generate for BlockPlace<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `held_item_slot` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeldItemSlot<const V: i32> {
     /// `slotId`
     pub slot_id: i16,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for HeldItemSlot<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -536,14 +546,24 @@ impl<const V: i32> Decode for HeldItemSlot<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for HeldItemSlot<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i16((*self).slot_id);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for HeldItemSlot<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -1284,7 +1304,12 @@ impl<const V: i32> Generate for ClientCommand<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `custom_payload` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomPayload<const V: i32> {
@@ -1293,7 +1318,12 @@ pub struct CustomPayload<const V: i32> {
     /// `data`
     pub data: Bytes,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for CustomPayload<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1306,7 +1336,12 @@ impl<const V: i32> Decode for CustomPayload<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for CustomPayload<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).channel)?;
@@ -1314,7 +1349,12 @@ impl<const V: i32> Encode for CustomPayload<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CustomPayload<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -1329,14 +1369,24 @@ impl<const V: i32> Generate for CustomPayload<V> {
     }
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 /// `spectate` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spectate<const V: i32> {
     /// `target`
     pub target: Uuid,
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Decode for Spectate<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1345,14 +1395,24 @@ impl<const V: i32> Decode for Spectate<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl<const V: i32> Encode for Spectate<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_uuid(&(*self).target);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Spectate<V> {
     fn generate(g: &mut Gen) -> Self {

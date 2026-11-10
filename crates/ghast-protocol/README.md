@@ -53,6 +53,13 @@ writer.queue(&v1_8::play::serverbound::KeepAlive { keep_alive_id: 1 })?;
 writer.flush().await?;
 ```
 
+Since 1.20.2 (here: `v26_1`) a configuration state sits between login and play: after
+`login::clientbound::Success` the client sends `LoginAcknowledged` and switches to
+`configuration` (answer `SelectKnownPacks`, `KeepAlive`, `Ping`; finish with
+`FinishConfiguration`), and a server can send play `StartConfiguration` at any time, which
+the client answers with `ConfigurationAcknowledged` before switching back.
+`examples/login_26_1.rs` is a complete, minimal client loop.
+
 Each generated module has, per state and direction: one struct per packet (implementing
 `Packet`, `Decode`, `Encode`), an enum of all packets (`ClientboundPlayPacket`, …,
 implementing `PacketSet`), and `id::*` constants. `V1_8` / `V1_16_5` implement `Version`
@@ -136,10 +143,26 @@ How protodef types map to Rust:
 | `entityMetadataLoop`, `topBitSetTerminatedArray` | `Vec<T>` with the terminator/flag handled by the codec |
 | `$compareTo`-parametrised types (`particleData`, `entityMetadataItem`) | one enum in `types`, instantiated inline per use |
 
-Vanilla overrides (`VersionSpec::presence` in the generator, tested in
-`tests/overrides.rs`): 1.8 `spawn_entity.velocity` is present iff `objectData > 0`, as vanilla
-reads it (minecraft-data says `!= 0`). The generator panics if an override no longer matches
-an option-like switch, so a changed minecraft-data cannot silently drop it.
+Vanilla overrides — the vanilla jar is the source of truth; minecraft-data is corrected
+where it disagrees, and the generator panics when a correction no longer matches (fixed or
+changed upstream), so a stale one cannot survive:
+
+- `VersionSpec::presence` (tested in `tests/overrides.rs`): 1.8 `spawn_entity.velocity` is
+  present iff `objectData > 0` (minecraft-data says `!= 0`); 26.1 `Slot` and
+  `UntrustedSlot` carry an item iff `itemCount > 0` (vanilla's
+  `ItemStack.createOptionalStreamCodec` reads any count <= 0 as empty; minecraft-data
+  says `!= 0`).
+- `PATCHES` (JSON-pointer patches of `protocol.json`, checked by
+  `cargo test -p ghast-codegen-protocol`): 26.1 `multi_block_change.records` are VarLongs
+  (vanilla `ClientboundSectionBlocksUpdatePacket`; minecraft-data has had `varint` since
+  1.20.2).
+
+Packet ids of 26.1 are cross-checked against the vanilla server's own report:
+`java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports` writes
+`packets.json` (never committed); `cargo run -p ghast-codegen-protocol -- packets-report
+26.1 <packets.json> tests/data/packets_775.tsv` pairs it by id with the minecraft-data names
+(a plain id/name table, committed), and `tests/packets_report.rs` checks the generated sets
+against the table (and against the report too when it is in `/.cache/mojang/`).
 
 Renames: `entityMetadataItem` → `EntityMetadataValue`, with readable variant names for the
 metadata type ids (`Byte`, `VarInt`, `Slot`, `Position`, `Pose`, …).
@@ -154,10 +177,18 @@ cargo bench -p ghast-protocol
 
 - `src/**` unit tests: known-answer vectors (VarInt/VarLong edges, both position layouts,
   NIST SP 800-38A CFB8-AES128, `hello_world.nbt`, Modified UTF-8, slots, frames).
-- `tests/roundtrip.rs`: every packet of both versions, 400 seeds each plus proptest; value
+- `tests/roundtrip.rs`: every packet of every version, 400 seeds each plus proptest; value
   and bytes must survive encode → decode → encode; random/mutated bodies never panic.
 - `tests/robustness.rs`: NBT and framing (all compression/encryption/filter modes, random
   chunking) round trips, and garbage/mutation inputs.
+- `tests/capture_26_1.rs`: real bytes from a vanilla 26.1.2 server (offline login,
+  configuration, 40 s of play with items, block changes, chat, scoreboard, …; recorded by
+  `examples/login_26_1.rs`): every packet decodes strictly and re-encodes to identical
+  bytes, chunk sections parse completely.
+- `tests/packets_report.rs`: 26.1 packet ids/names against the vanilla report table.
+- `examples/login_26_1.rs`: handshake → status → login → configuration → play against a
+  live 26.1.x server, answering keep-alives, pings, teleports and chunk batches, using only
+  this crate.
 - `tests/differential.rs`: byte-exact agreement with node-minecraft-protocol in both
   directions, plus value-level checks for positions, bit fields, UUIDs, i64, mappers, slots
   and entity metadata.

@@ -149,7 +149,7 @@ pub struct EntityMetadataEntry {
     pub value: crate::defs::p754::types::EntityMetadataValue,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tags {
@@ -175,7 +175,7 @@ pub struct CommandNodeFlags {
     pub command_node_type: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase1 {
@@ -183,7 +183,7 @@ pub struct CommandNodeExtraNodeDataCase1 {
     pub name: ByteString,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierFloatFlags {
@@ -195,7 +195,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierFloatFlags {
     pub min_present: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierFloat {
@@ -207,7 +207,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierFloat {
     pub max: Option<f32>,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierDoubleFlags {
@@ -219,7 +219,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierDoubleFlags {
     pub min_present: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierDouble {
@@ -232,7 +232,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierDouble {
     pub max: Option<f64>,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierIntegerFlags {
@@ -244,7 +244,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierIntegerFlags {
     pub min_present: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierInteger {
@@ -257,7 +257,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierInteger {
     pub max: Option<i32>,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierLongFlags {
@@ -269,7 +269,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierLongFlags {
     pub min_present: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierLong {
@@ -281,11 +281,11 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierLong {
     pub max: Option<i64>,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesBrigadierString(pub i32);
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl CommandNodeExtraNodeDataCase2PropertiesBrigadierString {
     /// `SINGLE_WORD`
     pub const SINGLE_WORD: Self = Self(0);
@@ -303,7 +303,7 @@ impl CommandNodeExtraNodeDataCase2PropertiesBrigadierString {
         }
     }
 }
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 impl std::fmt::Debug for CommandNodeExtraNodeDataCase2PropertiesBrigadierString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -320,7 +320,7 @@ impl std::fmt::Debug for CommandNodeExtraNodeDataCase2PropertiesBrigadierString 
     }
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesEntity {
@@ -332,7 +332,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesEntity {
     pub only_allow_entities: u8,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesScoreHolder {
@@ -350,7 +350,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesRange {
     pub allow_decimals: bool,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesResourceOrTag {
@@ -358,7 +358,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesResourceOrTag {
     pub registry: ByteString,
 }
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesResource {

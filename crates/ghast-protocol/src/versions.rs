@@ -72,6 +72,11 @@ mod tests {
         }
         assert_eq!(by_game_version("1.8.8").map(|v| v.protocol), Some(47));
         assert_eq!(by_game_version("1.16.4").map(|v| v.protocol), Some(754));
+        assert_eq!(
+            by_protocol(775).map(|v| v.game_versions),
+            Some(&["26.1", "26.1.1", "26.1.2"][..])
+        );
+        assert!(by_protocol(775).is_some_and(|v| v.configuration));
         assert!(by_protocol(1).is_none());
     }
 }

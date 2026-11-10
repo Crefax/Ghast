@@ -41,4 +41,14 @@ pub const TABLE: &[ProtocolVersion] = &[
         configuration: false,
         enabled: cfg!(feature = "v1_16_5"),
     },
+    ProtocolVersion {
+        protocol: 775,
+        module: "v26_1",
+        feature: "v26_1",
+        name: "26.1.2",
+        game_versions: &["26.1", "26.1.1", "26.1.2"],
+        position_layout: PositionLayout::Xzy,
+        configuration: true,
+        enabled: cfg!(feature = "v26_1"),
+    },
 ];

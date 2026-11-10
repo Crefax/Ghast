@@ -5,7 +5,7 @@
 
 //! Definitions of the play state.
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod clientbound;
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod serverbound;

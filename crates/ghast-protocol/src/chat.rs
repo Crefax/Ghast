@@ -4,14 +4,14 @@
 //! ([`ByteString`](crate::types::ByteString)). Parsing is opt-in: with the `chat-json`
 //! feature, [`parse`] and [`to_plain_text`] turn it into a JSON value or plain text.
 //!
-//! Since 1.20.3 chat is unnamed network NBT ([`AnonNbt`](crate::nbt::AnonNbt)) with the
+//! Since 1.20.3 chat is unnamed network NBT ([`AnonNbt`]) with the
 //! same structure (a bare string tag, a compound, or a list); [`nbt_to_plain_text`]
 //! extracts the text without any extra dependency.
 
 use crate::nbt::{AnonNbt, Tag};
 
 /// Converts an NBT chat component (1.20.3+) to plain text: `text`, `extra`, and
-/// `translate` keys with their `with` arguments appended, like [`to_plain_text`].
+/// `translate` keys with their `with` arguments appended, like `to_plain_text`.
 /// Undecodable NBT gives an empty string.
 pub fn nbt_to_plain_text(nbt: &AnonNbt) -> String {
     fn walk(t: &Tag, out: &mut String) {

@@ -33,6 +33,8 @@ enum Kind<'t> {
     Mapper(&'t Mapper),
     BitStruct(&'t Bitfield),
     Flags(&'t Bitflags),
+    /// An integer under `n` levels of `Option`.
+    OptInt(usize, Prim),
     Other,
 }
 
@@ -91,6 +93,8 @@ pub struct Emitter<'t> {
     local_names: HashMap<String, &'t Ty>,
     hints: HashMap<(usize, String), Hint>,
     tmp: usize,
+    /// Root being emitted (for error messages).
+    cur_root: String,
 }
 
 fn int_type(size: u32, signed: bool) -> &'static str {
@@ -131,6 +135,7 @@ impl<'t> Emitter<'t> {
             local_names: HashMap::new(),
             hints: HashMap::new(),
             tmp: 0,
+            cur_root: String::new(),
         }
     }
 
@@ -250,7 +255,8 @@ impl<'t> Emitter<'t> {
             Ty::Bitflags(b) => self.min_size(&Ty::Prim(b.underlying)),
             Ty::Holder(_) | Ty::HolderSet => 1,
             Ty::FixedBytes(n) => *n,
-            Ty::Boxed(e) => self.min_size(e),
+            // Only recursive references are boxed; they sit under an option or a switch.
+            Ty::Boxed(_) => 0,
             Ty::Container(c) => self.fields_min(&c.fields),
             Ty::Switch(s) => s
                 .cases
@@ -572,12 +578,18 @@ impl<'t> Emitter<'t> {
             }
         }
         let first = segs[0];
-        let e = sc[lvl]
-            .entries
-            .iter()
+        // A name not found at its level is looked up in the enclosing containers, like
+        // node-protodef's generated code does (lexical scoping of container fields).
+        let e = (0..=lvl)
             .rev()
-            .find(|e| e.name == first)
-            .unwrap_or_else(|| panic!("cannot resolve `{path}`"))
+            .find_map(|l| sc[l].entries.iter().rev().find(|e| e.name == first))
+            .unwrap_or_else(|| {
+                let names: Vec<Vec<&str>> = sc
+                    .iter()
+                    .map(|l| l.entries.iter().map(|e| e.name.as_str()).collect())
+                    .collect();
+                panic!("cannot resolve `{path}` in {}; scope {names:?}", self.cur_root)
+            })
             .clone();
         match segs.get(1) {
             None => e,
@@ -614,8 +626,19 @@ impl<'t> Emitter<'t> {
         }
     }
 
-    fn kind_of(t: &'t Ty) -> Kind<'t> {
+    fn kind_of(&self, t: &'t Ty) -> Kind<'t> {
+        let opt = |k: Kind<'t>| match k {
+            Kind::Int(p) => Kind::OptInt(1, p),
+            Kind::OptInt(n, p) => Kind::OptInt(n + 1, p),
+            _ => Kind::Other,
+        };
         match t {
+            Ty::Option(e) => opt(self.kind_of(e)),
+            Ty::Switch(s) => match s.classify(&self.variant_names) {
+                SwitchKind::Optional(inner) => opt(self.kind_of(inner)),
+                SwitchKind::Always(inner) => self.kind_of(inner),
+                _ => Kind::Other,
+            },
             Ty::Prim(Prim::Bool) => Kind::Bool,
             Ty::Prim(Prim::String) => Kind::Str,
             Ty::Prim(p) if p.is_int() => Kind::Int(*p),
@@ -654,6 +677,18 @@ impl<'t> Emitter<'t> {
                 match v {
                     Some(v) => format!("({}.0 == {v})", e.expr),
                     None => "false".into(),
+                }
+            }
+            Kind::OptInt(n, p) => {
+                let (lo, hi) = p.int_range();
+                match parse_int(key) {
+                    Some(v) if (v as i128) >= lo && (v as i128) <= hi => format!(
+                        "({} == {}{v}{})",
+                        e.expr,
+                        "Some(".repeat(n),
+                        ")".repeat(n)
+                    ),
+                    _ => "false".to_string(),
                 }
             }
             Kind::BitStruct(_) | Kind::Flags(_) | Kind::Other => {
@@ -1022,7 +1057,7 @@ impl<'t> Emitter<'t> {
                         sc.last_mut().unwrap().entries.push(Entry {
                             name: f.name.clone(),
                             expr: v,
-                            kind: Self::kind_of(t),
+                            kind: self.kind_of(t),
                         });
                     }
                 }
@@ -1200,7 +1235,7 @@ impl<'t> Emitter<'t> {
                         sc.last_mut().unwrap().entries.push(Entry {
                             name: f.name.clone(),
                             expr: place,
-                            kind: Self::kind_of(t),
+                            kind: self.kind_of(t),
                         });
                     }
                 }
@@ -1256,6 +1291,7 @@ impl<'t> Emitter<'t> {
     /// `Decode` body expression for a root container (constructs `Self`).
     pub fn root_decode(&mut self, c: &'t Container) -> String {
         self.tmp = 0;
+        self.cur_root = c.rust_name.clone();
         let mut sc = Vec::new();
         self.container_value("Self".into(), c, &mut sc, Mode::Decode, None)
     }
@@ -1263,6 +1299,7 @@ impl<'t> Emitter<'t> {
     /// `Generate` body expression for a root container (constructs `Self`).
     pub fn root_generate(&mut self, c: &'t Container) -> String {
         self.tmp = 0;
+        self.cur_root = c.rust_name.clone();
         let mut sc = Vec::new();
         self.container_value("Self".into(), c, &mut sc, Mode::Generate, None)
     }
@@ -1270,6 +1307,7 @@ impl<'t> Emitter<'t> {
     /// `Encode` body statements for a root container (value is `self`).
     pub fn root_encode(&mut self, c: &'t Container) -> String {
         self.tmp = 0;
+        self.cur_root = c.rust_name.clone();
         let mut sc = vec![Level {
             id: c.id,
             entries: Vec::new(),

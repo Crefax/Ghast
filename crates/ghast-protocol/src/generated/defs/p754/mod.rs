@@ -5,9 +5,9 @@
 
 //! Definitions first used by protocol 754 (Minecraft 1.16.4 – 1.16.5).
 
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod login;
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod play;
-#[cfg(feature = "v1_16_5")]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod types;
