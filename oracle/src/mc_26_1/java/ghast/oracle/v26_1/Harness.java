@@ -198,6 +198,7 @@ final class Harness {
             this.sc = sc;
             releaseKeys();
             options.autoJump().set(sc.autoJump);
+            options.sprintWindow().set(sc.sprintWindow != null ? sc.sprintWindow : 7);
             client.player = null;
             client.level = null;
             client.gameRenderer.getMainCamera().setEntity(null);
@@ -283,8 +284,8 @@ final class Harness {
             for (Map.Entry<Integer, Integer> e : sc.effects.entrySet()) {
                 addEffect(e.getKey(), e.getValue());
             }
-            if (sc.soulSpeed > 0 || sc.depthStrider > 0) {
-                ItemStack boots = new ItemStack(Items.DIAMOND_BOOTS);
+            if (sc.soulSpeed > 0 || sc.depthStrider > 0 || sc.leatherBoots) {
+                ItemStack boots = new ItemStack(sc.leatherBoots ? Items.LEATHER_BOOTS : Items.DIAMOND_BOOTS);
                 var enchantments = registries.lookupOrThrow(Registries.ENCHANTMENT);
                 if (sc.soulSpeed > 0) {
                     boots.enchant(enchantments.getOrThrow(Enchantments.SOUL_SPEED), sc.soulSpeed);
@@ -300,7 +301,14 @@ final class Harness {
             }
             if (sc.usesItem()) {
                 // A shield in the selected hotbar slot: using it blocks (input x0.2, no sprinting) until released.
-                player.getInventory().setItem(player.getInventory().getSelectedSlot(), new ItemStack(Items.SHIELD));
+                ItemStack shield = new ItemStack(Items.SHIELD);
+                if (sc.useSpeed != null || sc.useCanSprint != null) {
+                    // An item with its own use effects (a server-defined component): use slowdown and
+                    // whether sprinting continues come from it.
+                    shield.set(net.minecraft.core.component.DataComponents.USE_EFFECTS, new net.minecraft.world.item.component.UseEffects(
+                            sc.useCanSprint != null && sc.useCanSprint, true, sc.useSpeed != null ? sc.useSpeed : 0.2F));
+                }
+                player.getInventory().setItem(player.getInventory().getSelectedSlot(), shield);
             }
 
             // --- position packet (absolute) ---
@@ -544,6 +552,15 @@ final class Harness {
                 for (int[] f : fx.effects()) {
                     addEffect(f[0], f[1]);
                 }
+            } else if (e instanceof Scenario.Attribute at) {
+                AttributeInstance inst = new AttributeInstance(attribute(at.attribute()), i -> {});
+                inst.setBaseValue(at.base());
+                for (Scenario.AttributeModifierSpec m : at.modifiers()) {
+                    inst.addPermanentModifier(new AttributeModifier(Identifier.parse(m.id()), m.amount(),
+                            AttributeModifier.Operation.BY_ID.apply(m.operation())));
+                }
+                listener.handleUpdateAttributes(roundTrip(ClientboundUpdateAttributesPacket.STREAM_CODEC,
+                        new ClientboundUpdateAttributesPacket(PLAYER_ENTITY_ID, List.of(inst))));
             } else if (e instanceof Scenario.Abilities a) {
                 Abilities ab = new Abilities();
                 ab.invulnerable = a.invulnerable();

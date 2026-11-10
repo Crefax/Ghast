@@ -140,6 +140,15 @@ final class ScenarioReader {
                         f64(a.get(2)), a.get(3).getAsInt()));
             }
         }
+        sc.leatherBoots = s.has("leather_boots") && s.get("leather_boots").getAsBoolean();
+        if (s.has("use_effects")) {
+            JsonObject u = s.getAsJsonObject("use_effects");
+            sc.useCanSprint = u.get("can_sprint").getAsBoolean();
+            sc.useSpeed = f32(u.get("speed_multiplier"));
+        }
+        if (s.has("sprint_window")) {
+            sc.sprintWindow = s.get("sprint_window").getAsInt();
+        }
         return sc;
     }
 
@@ -185,6 +194,15 @@ final class ScenarioReader {
                             fx.add(new int[] {f.getAsJsonArray().get(0).getAsInt(), f.getAsJsonArray().get(1).getAsInt()});
                         }
                         events.add(new Scenario.Effects(List.copyOf(fx)));
+                    }
+                    case "attribute" -> {
+                        List<Scenario.AttributeModifierSpec> mods = new ArrayList<>();
+                        String attr = ev.get("attribute").getAsString();
+                        for (JsonElement m : ev.getAsJsonArray("modifiers")) {
+                            JsonArray a = m.getAsJsonArray();
+                            mods.add(new Scenario.AttributeModifierSpec(attr, a.get(0).getAsString(), f64(a.get(1)), a.get(2).getAsInt()));
+                        }
+                        events.add(new Scenario.Attribute(attr, f64(ev.get("base")), List.copyOf(mods)));
                     }
                     default -> throw new IllegalArgumentException("unknown event " + ev);
                 }

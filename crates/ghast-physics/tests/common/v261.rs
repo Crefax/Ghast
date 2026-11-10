@@ -257,6 +257,9 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     }
     p.effects = effects_of(&setup["effects"]);
     p.options.auto_jump = setup["auto_jump"].as_bool().unwrap_or(false);
+    if let Some(w) = setup.get("sprint_window").and_then(Value::as_i64) {
+        p.options.sprint_window = w as i32;
+    }
     p.leather_boots = setup
         .get("leather_boots")
         .and_then(Value::as_bool)
@@ -577,6 +580,23 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             })
                             .collect();
                         p.apply_attribute(AttributeKind::MovementSpeed, f64_of(&e["base"]), &mods);
+                    }
+                    "attribute" => {
+                        let kind = AttributeKind::from_name(e["attribute"].as_str().unwrap())
+                            .expect("movement attribute");
+                        let mods: Vec<(ModifierId, f64, u8)> = e["modifiers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|m| {
+                                (
+                                    ModifierId::new(m[0].as_str().unwrap()),
+                                    f64_of(&m[1]),
+                                    i(&m[2]) as u8,
+                                )
+                            })
+                            .collect();
+                        p.apply_attribute(kind, f64_of(&e["base"]), &mods);
                     }
                     other => panic!("unknown event {other}"),
                 }

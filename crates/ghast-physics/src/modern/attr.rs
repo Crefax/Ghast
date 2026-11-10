@@ -3,7 +3,8 @@
 //! An attribute instance keeps its modifiers of each operation in a fastutil
 //! `Object2ObjectOpenHashMap<Identifier, AttributeModifier>` and sums them in that map's iteration
 //! order, so with several modifiers of one operation the floating-point result depends on the
-//! table layout. [`OpTable`] reproduces it: 16 slots, linear probing from
+//! table layout. [`Attribute`] reproduces it: 32 slots (the default expected size 16 at load factor
+//! 0.75), linear probing from
 //! `mix(identifier.hashCode())`, backward-shift deletion, and iteration from the last slot down.
 
 /// Java `String.hashCode` of a UTF-16 string given as UTF-8 (BMP characters only; identifiers
@@ -82,9 +83,11 @@ pub struct Modifier {
     pub amount: f64,
 }
 
-const SLOTS: usize = 16;
-/// fastutil's `maxFill` for 16 slots at load factor 0.75: the 13th entry would grow the table.
-const MAX_ENTRIES: usize = 12;
+/// Slots of fastutil's default `Object2ObjectOpenHashMap` (expected size 16 at load factor 0.75).
+const SLOTS: usize = 32;
+/// Modifiers kept per attribute (all operations together); vanilla keeps any number, more than
+/// this are dropped (no movement attribute carries that many in practice).
+pub const MAX_MODIFIERS: usize = 12;
 
 /// `it.unimi.dsi.fastutil.HashCommon.mix`.
 #[inline]
@@ -93,180 +96,204 @@ fn mix(x: i32) -> i32 {
     h ^ ((h as u32) >> 16) as i32
 }
 
-/// The modifiers of one operation, laid out like fastutil's open hash map of 16 slots.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct OpTable {
-    slots: [Option<Modifier>; SLOTS],
+#[inline]
+fn home(id: ModifierId) -> usize {
+    (mix(id.hash) as u32 as usize) & (SLOTS - 1)
+}
+
+/// A stored modifier: its operation and its slot in that operation's hash table.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Entry {
+    m: Modifier,
+    op: u8,
+    slot: u8,
+}
+
+const EMPTY_ENTRY: Entry = Entry {
+    m: Modifier {
+        id: ModifierId { hash: 0, key: 0 },
+        amount: 0.0,
+    },
+    op: 0,
+    slot: 0,
+};
+
+/// An attribute's base value and modifiers (vanilla `AttributeInstance`), with the value cached.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Attribute {
+    base: f64,
+    min: f64,
+    max: f64,
+    value: f64,
+    entries: [Entry; MAX_MODIFIERS],
     len: u8,
 }
 
-impl OpTable {
-    #[inline]
-    fn home(id: ModifierId) -> usize {
-        (mix(id.hash) as u32 as usize) & (SLOTS - 1)
+impl Attribute {
+    /// An attribute with no modifiers and vanilla's range.
+    #[must_use]
+    pub fn new(base: f64, min: f64, max: f64) -> Attribute {
+        let mut a = Attribute {
+            base,
+            min,
+            max,
+            value: 0.0,
+            entries: [EMPTY_ENTRY; MAX_MODIFIERS],
+            len: 0,
+        };
+        a.recompute();
+        a
     }
 
-    fn find(&self, id: ModifierId) -> Option<usize> {
-        let mut pos = Self::home(id);
-        loop {
-            match self.slots[pos] {
-                None => return None,
-                Some(m) if m.id == id => return Some(pos),
-                Some(_) => pos = (pos + 1) & (SLOTS - 1),
+    /// The base value.
+    #[must_use]
+    pub fn base(&self) -> f64 {
+        self.base
+    }
+
+    /// `AttributeInstance.getValue()` (cached).
+    #[inline]
+    #[must_use]
+    pub fn value(&self) -> f64 {
+        self.value
+    }
+
+    /// Sets the base value.
+    pub fn set_base(&mut self, base: f64) {
+        self.base = base;
+        self.recompute();
+    }
+
+    fn entries(&self) -> &[Entry] {
+        &self.entries[..usize::from(self.len)]
+    }
+
+    /// The operation's slot table: slot -> entry index + 1 (0 = empty).
+    fn table(&self, op: u8) -> [u8; SLOTS] {
+        let mut t = [0u8; SLOTS];
+        for (i, e) in self.entries().iter().enumerate() {
+            if e.op == op {
+                t[usize::from(e.slot)] = i as u8 + 1;
             }
         }
+        t
     }
 
-    /// `put`: replaces the amount in place when the id is present, else inserts. More than 12
-    /// modifiers of one operation are not modelled (vanilla would grow the table); extra ones are
-    /// dropped.
-    pub fn put(&mut self, m: Modifier) {
-        if let Some(i) = self.find(m.id) {
-            self.slots[i] = Some(m);
+    fn recompute(&mut self) {
+        // fastutil iterates each table from the last slot down.
+        let mut base = self.base;
+        for &i in self.table(0).iter().rev() {
+            if i != 0 {
+                base += self.entries[usize::from(i - 1)].m.amount;
+            }
+        }
+        let mut result = base;
+        for &i in self.table(1).iter().rev() {
+            if i != 0 {
+                result += base * self.entries[usize::from(i - 1)].m.amount;
+            }
+        }
+        for &i in self.table(2).iter().rev() {
+            if i != 0 {
+                result *= 1.0 + self.entries[usize::from(i - 1)].m.amount;
+            }
+        }
+        // RangedAttribute.sanitizeValue: NaN -> min, else clamp.
+        self.value = if result.is_nan() || result < self.min {
+            self.min
+        } else {
+            crate::math::java_min(result, self.max)
+        };
+    }
+
+    /// `true` when a modifier with this id is present.
+    #[must_use]
+    pub fn contains(&self, id: ModifierId) -> bool {
+        self.entries().iter().any(|e| e.m.id == id)
+    }
+
+    /// `addTransientModifier` (vanilla refuses an id that is already present; so does this).
+    pub fn add(&mut self, id: ModifierId, amount: f64, operation: u8) {
+        if operation > 2 || self.contains(id) || usize::from(self.len) >= MAX_MODIFIERS {
             return;
         }
-        if usize::from(self.len) >= MAX_ENTRIES {
-            return;
-        }
-        let mut pos = Self::home(m.id);
-        while self.slots[pos].is_some() {
+        let t = self.table(operation);
+        let mut pos = home(id);
+        while t[pos] != 0 {
             pos = (pos + 1) & (SLOTS - 1);
         }
-        self.slots[pos] = Some(m);
+        self.entries[usize::from(self.len)] = Entry {
+            m: Modifier { id, amount },
+            op: operation,
+            slot: pos as u8,
+        };
         self.len += 1;
+        self.recompute();
     }
 
-    /// `remove` with fastutil's backward-shift deletion; `true` if the id was present.
+    /// `removeModifier(id)` with fastutil's backward-shift deletion in that operation's table;
+    /// `true` if the id was present.
     pub fn remove(&mut self, id: ModifierId) -> bool {
-        let Some(mut pos) = self.find(id) else {
+        let Some(idx) = self.entries().iter().position(|e| e.m.id == id) else {
             return false;
         };
-        self.len -= 1;
+        let op = self.entries[idx].op;
+        let mut t = self.table(op);
+        let mut pos = usize::from(self.entries[idx].slot);
+        t[pos] = 0;
         // shiftKeys(pos)
-        loop {
+        'outer: loop {
             let last = pos;
             pos = (last + 1) & (SLOTS - 1);
-            let curr = loop {
-                let Some(curr) = self.slots[pos] else {
-                    self.slots[last] = None;
-                    return true;
-                };
-                let slot = Self::home(curr.id);
+            loop {
+                let cur = t[pos];
+                if cur == 0 {
+                    break 'outer;
+                }
+                let slot = home(self.entries[usize::from(cur - 1)].m.id);
                 let stays = if last <= pos {
                     last >= slot || slot > pos
                 } else {
                     last >= slot && slot > pos
                 };
                 if stays {
-                    break curr;
+                    t[last] = cur;
+                    t[pos] = 0;
+                    break;
                 }
                 pos = (pos + 1) & (SLOTS - 1);
-            };
-            self.slots[last] = Some(curr);
+            }
         }
-    }
-
-    /// Removes everything.
-    pub fn clear(&mut self) {
-        *self = OpTable::default();
-    }
-
-    /// Number of modifiers.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        usize::from(self.len)
-    }
-
-    /// `true` when empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// The modifiers in vanilla's iteration order (last slot first).
-    pub fn iter(&self) -> impl Iterator<Item = &Modifier> {
-        self.slots.iter().rev().flatten()
-    }
-}
-
-/// An attribute's base value and modifiers (vanilla `AttributeInstance`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Attribute {
-    /// Base value.
-    pub base: f64,
-    /// Modifiers of operations 0 (add value), 1 (add multiplied base), 2 (add multiplied total).
-    pub ops: [OpTable; 3],
-    /// Vanilla range (`RangedAttribute` min / max).
-    pub min: f64,
-    /// Upper bound.
-    pub max: f64,
-}
-
-impl Attribute {
-    /// An attribute with no modifiers.
-    #[must_use]
-    pub fn new(base: f64, min: f64, max: f64) -> Attribute {
-        Attribute {
-            base,
-            ops: [OpTable::default(); 3],
-            min,
-            max,
+        for (s, &i) in t.iter().enumerate() {
+            if i != 0 {
+                self.entries[usize::from(i - 1)].slot = s as u8;
+            }
         }
-    }
-
-    /// `AttributeInstance.getValue()`.
-    #[must_use]
-    pub fn value(&self) -> f64 {
-        let mut base = self.base;
-        for m in self.ops[0].iter() {
-            base += m.amount;
-        }
-        let mut result = base;
-        for m in self.ops[1].iter() {
-            result += base * m.amount;
-        }
-        for m in self.ops[2].iter() {
-            result *= 1.0 + m.amount;
-        }
-        // RangedAttribute.sanitizeValue: NaN -> min, else clamp.
-        if result.is_nan() || result < self.min {
-            self.min
-        } else {
-            crate::math::java_min(result, self.max)
-        }
-    }
-
-    /// Removes the modifier with this id from every operation (`removeModifier`).
-    pub fn remove(&mut self, id: ModifierId) -> bool {
-        self.ops.iter_mut().any(|t| t.remove(id))
-    }
-
-    /// `addTransientModifier` (vanilla refuses an id that is already present; so does this).
-    pub fn add(&mut self, id: ModifierId, amount: f64, operation: u8) {
-        if self.ops.iter().any(|t| t.find(id).is_some()) {
-            return;
-        }
-        if let Some(t) = self.ops.get_mut(usize::from(operation)) {
-            t.put(Modifier { id, amount });
-        }
+        // Drop the entry (indices of the others shift, slots stay).
+        let n = usize::from(self.len);
+        self.entries.copy_within(idx + 1..n, idx);
+        self.len -= 1;
+        self.recompute();
+        true
     }
 
     /// What the attributes packet does: set the base, remove every modifier, add the packet's
     /// modifiers `(id, amount, operation)` in packet order.
     pub fn apply_packet(&mut self, base: f64, modifiers: &[(ModifierId, f64, u8)]) {
         self.base = base;
-        for t in &mut self.ops {
-            t.clear();
-        }
+        self.len = 0;
         for &(id, amount, op) in modifiers {
             self.add(id, amount, op);
         }
+        self.recompute();
     }
 
-    /// `true` when a modifier with this id is present.
-    #[must_use]
-    pub fn contains(&self, id: ModifierId) -> bool {
-        self.ops.iter().any(|t| t.find(id).is_some())
+    /// The modifiers of one operation in vanilla's iteration order.
+    pub fn modifiers(&self, operation: u8) -> impl Iterator<Item = Modifier> + '_ {
+        let t = self.table(operation);
+        (0..SLOTS)
+            .rev()
+            .filter_map(move |s| (t[s] != 0).then(|| self.entries[usize::from(t[s] - 1)].m))
     }
 }
 
@@ -289,22 +316,30 @@ mod tests {
 
     #[test]
     fn shift_delete_keeps_chain() {
-        let mut t = OpTable::default();
-        let ids: Vec<ModifierId> = (0..10)
-            .map(|i| ModifierId::new(&format!("t:m{i}")))
-            .collect();
+        let mut a = Attribute::new(0.0, -1.0e9, 1.0e9);
+        let ids: Vec<ModifierId> = (0..10).map(|i| ModifierId::new(&format!("t:m{i}"))).collect();
         for (i, &id) in ids.iter().enumerate() {
-            t.put(Modifier {
-                id,
-                amount: i as f64,
-            });
+            a.add(id, i as f64, 0);
         }
         for &id in &ids[..5] {
-            assert!(t.remove(id));
+            assert!(a.remove(id));
         }
         for &id in &ids[5..] {
-            assert!(t.find(id).is_some());
+            assert!(a.contains(id));
         }
-        assert_eq!(t.len(), 5);
+        assert_eq!(a.value(), 5.0 + 6.0 + 7.0 + 8.0 + 9.0);
+    }
+
+    /// JDK 25 + fastutil 8.5.18: an `Object2ObjectOpenHashMap` holding these two ids iterates
+    /// `m9346f493eec5` first (slot 22 of 32) and `mb720f71bb819` second (slot 14).
+    #[test]
+    fn iteration_order_matches_fastutil() {
+        let mut a = Attribute::new(0.0, -1.0e9, 1.0e9);
+        let first = ModifierId::new("oracle:m9346f493eec5");
+        let second = ModifierId::new("oracle:mb720f71bb819");
+        a.add(second, 1.0, 0);
+        a.add(first, 2.0, 0);
+        let order: Vec<ModifierId> = a.modifiers(0).map(|m| m.id).collect();
+        assert_eq!(order, vec![first, second]);
     }
 }

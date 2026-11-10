@@ -34,7 +34,7 @@ public final class Scenario {
     public record Fill(int x0, int y0, int z0, int x1, int y1, int z1, int id, int meta) {}
 
     /** A server packet applied at the start of a tick (before the keys / tick). */
-    public sealed interface Event permits Velocity, Teleport, Abilities, SpeedAttribute, Effects {}
+    public sealed interface Event permits Velocity, Teleport, Abilities, SpeedAttribute, Effects, Attribute {}
 
     /** Entity velocity packet: raw protocol units (1/8000 block per tick). */
     public record Velocity(int x, int y, int z) implements Event {}
@@ -64,6 +64,12 @@ public final class Scenario {
 
     /** The player's full active effect set after an add/remove effect packet: {id, amplifier} pairs. */
     public record Effects(List<int[]> effects) implements Event {}
+
+    /**
+     * Attributes packet entry for any attribute (26.x: modifiers are identified by name): the base is set
+     * and all modifiers are replaced by these, in this order.
+     */
+    public record Attribute(String attribute, double base, List<AttributeModifierSpec> modifiers) implements Event {}
 
     public record Tick(int keys, float yaw, float pitch, List<Event> events) {}
 
@@ -118,6 +124,14 @@ public final class Scenario {
     public final Map<String, Double> attributeBases = new LinkedHashMap<>();
     /** 26.1+: extra attribute modifiers the server sends at setup (other than the movement speed ones above). */
     public final List<AttributeModifierSpec> attributeModifiers = new ArrayList<>();
+
+    /** 26.x: leather boots in the feet slot (walk on powder snow); enchanted with the boots enchantments. */
+    public boolean leatherBoots;
+    /** 26.x: the used item's {@code use_effects} component (null = the item's default). */
+    public Float useSpeed;
+    public Boolean useCanSprint;
+    /** 26.x: the client's sprint double-tap window option (null = vanilla default 7). */
+    public Integer sprintWindow;
 
     public final List<Tick> ticks = new ArrayList<>();
 

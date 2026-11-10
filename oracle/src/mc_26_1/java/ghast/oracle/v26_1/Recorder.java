@@ -121,6 +121,17 @@ final class Recorder {
         j.field("auto_jump", sc.autoJump);
         j.field("soul_speed", sc.soulSpeed);
         j.field("depth_strider", sc.depthStrider);
+        // 26.x setup extras (only when set, so older files keep their bytes).
+        if (sc.leatherBoots) {
+            j.field("leather_boots", true);
+        }
+        if (sc.useSpeed != null || sc.useCanSprint != null) {
+            j.key("use_effects").beginObject().field("can_sprint", sc.useCanSprint != null && sc.useCanSprint)
+                    .fieldF32("speed_multiplier", sc.useSpeed != null ? sc.useSpeed : 0.2F).endObject();
+        }
+        if (sc.sprintWindow != null) {
+            j.field("sprint_window", sc.sprintWindow);
+        }
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -178,6 +189,13 @@ final class Recorder {
             j.key("effects").beginArray();
             for (int[] f : fx.effects()) {
                 j.beginArray().value(f[0]).value(f[1]).endArray();
+            }
+            j.endArray();
+        } else if (e instanceof Scenario.Attribute at) {
+            j.field("type", "attribute").field("attribute", at.attribute()).fieldF64("base", at.base());
+            j.key("modifiers").beginArray();
+            for (Scenario.AttributeModifierSpec m : at.modifiers()) {
+                j.beginArray().value(m.id()).f64(m.amount()).value(m.operation()).endArray();
             }
             j.endArray();
         } else if (e instanceof Scenario.Abilities a) {
