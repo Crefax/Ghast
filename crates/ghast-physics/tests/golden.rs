@@ -1,5 +1,6 @@
 //! Replays the committed 1.8.9 golden vectors (`tests/golden/1.8.9/*.jsonl.gz`, made by the
 //! vanilla oracle) and requires every recorded field of every tick to match bit for bit.
+#![cfg(feature = "v1_8")]
 #![recursion_limit = "256"]
 
 mod common;

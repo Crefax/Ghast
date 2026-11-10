@@ -1,4 +1,5 @@
 //! Replays the committed 1.12.2 golden vectors (`tests/golden/1.12.2/`) bit for bit.
+#![cfg(feature = "v1_12")]
 #![recursion_limit = "256"]
 
 mod common;

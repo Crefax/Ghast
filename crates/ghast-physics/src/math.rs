@@ -259,6 +259,7 @@ impl BoxOps for Aabb {
 
 /// Vanilla's `Vec3d` constructor turns `-0.0` into `0.0`; that sign matters when the vector is
 /// later added to a velocity, so flow-vector maths goes through this.
+#[cfg_attr(not(any(feature = "v1_8", feature = "v1_12")), allow(dead_code))]
 #[inline]
 #[must_use]
 pub(crate) fn vec_component(v: f64) -> f64 {
@@ -266,6 +267,7 @@ pub(crate) fn vec_component(v: f64) -> f64 {
 }
 
 /// A `Vec3d`-like triple with vanilla's zero-sign normalisation.
+#[cfg_attr(not(any(feature = "v1_8", feature = "v1_12")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Vec3 {
     pub x: f64,
@@ -273,6 +275,7 @@ pub(crate) struct Vec3 {
     pub z: f64,
 }
 
+#[cfg_attr(not(any(feature = "v1_8", feature = "v1_12")), allow(dead_code))]
 impl Vec3 {
     pub(crate) const ZERO: Vec3 = Vec3 {
         x: 0.0,

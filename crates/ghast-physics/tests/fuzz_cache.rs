@@ -16,7 +16,9 @@ mod common;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use common::{Summary, replay_file, repo_root};
+#[cfg(feature = "v1_8")]
+use common::replay_file;
+use common::{Summary, repo_root};
 
 fn inputs() -> Vec<PathBuf> {
     let specs = match std::env::var("GHAST_FUZZ") {
@@ -55,17 +57,27 @@ fn inputs() -> Vec<PathBuf> {
 }
 
 fn replay_any(path: &std::path::Path) -> Summary {
+    let name = path.to_string_lossy();
     #[cfg(feature = "v26_1")]
-    if path.to_string_lossy().contains("26.1") {
+    if name.contains("26.1") {
         return common::v261::replay_file(path);
     }
-    if path.to_string_lossy().contains("1.16.5") {
-        common::v116::replay_file(path)
-    } else if path.to_string_lossy().contains("1.12.2") {
-        common::v112::replay_file(path)
-    } else {
-        replay_file(path)
+    #[cfg(feature = "v1_16_5")]
+    if name.contains("1.16.5") {
+        return common::v116::replay_file(path);
     }
+    #[cfg(feature = "v1_12")]
+    if name.contains("1.12.2") {
+        return common::v112::replay_file(path);
+    }
+    #[cfg(feature = "v1_8")]
+    if !["26.1", "1.16.5", "1.12.2"]
+        .iter()
+        .any(|v| name.contains(v))
+    {
+        return replay_file(path);
+    }
+    panic!("{name}: its version feature is off")
 }
 
 #[test]

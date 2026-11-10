@@ -7,11 +7,16 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use flate2::read::MultiGzDecoder;
+#[cfg(feature = "v1_8")]
 use ghast_physics::v1_8::{self, Effects, MovementInput, PlayerState, SentState};
-use ghast_physics::{Abilities, Keys, Packet, Packets, TickInput};
+#[cfg(feature = "v1_8")]
+use ghast_physics::{Abilities, Packets, TickInput};
+use ghast_physics::{Keys, Packet};
 use serde_json::{Value, json};
 
+#[cfg(feature = "v1_12")]
 pub mod v112;
+#[cfg(feature = "v1_16_5")]
 pub mod v116;
 #[cfg(feature = "v26_1")]
 pub mod v261;
@@ -99,6 +104,7 @@ pub fn jf32(x: f32) -> Value {
     json!([null, format!("{:08x}", x.to_bits())])
 }
 
+#[cfg(feature = "v1_8")]
 /// Builds the case's world.
 pub fn world_of(header: &Value) -> v1_8::MemoryWorld {
     let mut w = v1_8::memory_world();
@@ -114,6 +120,7 @@ pub fn world_of(header: &Value) -> v1_8::MemoryWorld {
     w
 }
 
+#[cfg(feature = "v1_8")]
 /// The player state from the tick-0 record (plus header-only data: speed base, effects).
 pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     let s = &t0["state"];
@@ -202,6 +209,7 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     p
 }
 
+#[cfg(feature = "v1_8")]
 /// The state in the oracle's record layout.
 pub fn state_json(p: &PlayerState, w: &v1_8::MemoryWorld, using_item: bool) -> Value {
     let bb = p.bb;
@@ -412,6 +420,7 @@ pub const MOVEMENT_PACKETS: [&str; 6] = [
     "position_look",
 ];
 
+#[cfg(feature = "v1_8")]
 /// Replays one case. Returns the number of ticks compared or the first mismatch.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
@@ -501,6 +510,7 @@ pub struct Summary {
     pub failures: Vec<Mismatch>,
 }
 
+#[cfg(feature = "v1_8")]
 /// Replays every case of a file.
 pub fn replay_file(path: &Path) -> Summary {
     let mut s = Summary::default();

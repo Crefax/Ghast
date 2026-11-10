@@ -221,6 +221,15 @@ impl<S: Copy> BlockView for MemoryWorld<S> {
 }
 
 /// Side of the per-tick block cache cube.
+#[cfg_attr(
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(dead_code)
+)]
 const CACHE_SIDE: i32 = 8;
 
 /// A per-tick memo of block lookups in an 8×8×8 cube around the player.
@@ -228,6 +237,15 @@ const CACHE_SIDE: i32 = 8;
 /// One tick asks for the same few dozen positions many times (pose checks, push-out probes, the
 /// collision sweeps, step-up retries); the cache turns the repeats into an array read. Anything
 /// outside the cube goes straight to the world. Purely an optimisation: results are identical.
+#[cfg_attr(
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(dead_code)
+)]
 pub(crate) struct TickCache<'w, W: BlockView> {
     world: &'w W,
     origin: [i32; 3],
@@ -237,6 +255,15 @@ pub(crate) struct TickCache<'w, W: BlockView> {
     cells: [std::cell::Cell<Option<W::State>>; (CACHE_SIDE * CACHE_SIDE * CACHE_SIDE) as usize],
 }
 
+#[cfg_attr(
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(dead_code)
+)]
 impl<'w, W: BlockView> TickCache<'w, W> {
     /// A cache centred on block `(x, y, z)`.
     pub(crate) fn new(world: &'w W, x: i32, y: i32, z: i32) -> Self {

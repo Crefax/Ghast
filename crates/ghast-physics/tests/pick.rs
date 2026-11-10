@@ -2,6 +2,7 @@
 //! (random worlds of random states, random viewpoints, the real client's pick) and
 //! `selection_shapes.jsonl.gz` (per-state outline / interaction shapes, model offsets), for 1.16.5
 //! and 26.1. Every field is compared bit for bit.
+#![cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
@@ -191,6 +192,7 @@ fn dumped_shapes(version: &str) -> (Vec<String>, Vec<Value>) {
     (shapes, states)
 }
 
+#[cfg(feature = "v1_16_5")]
 #[test]
 fn selection_shapes_match_vanilla_1_16_5() {
     use ghast_data::v1_16_5::BlockState;
@@ -294,12 +296,14 @@ fn report(version: &str, ok: usize, fails: &[String]) {
     eprintln!("{version}: {ok} rays identical");
 }
 
+#[cfg(feature = "v1_16_5")]
 #[test]
 fn crosshair_matches_vanilla_1_16_5() {
     let (ok, fails) = replay_1_16_5(golden("1.16.5", "raytrace.jsonl.gz"));
     report("1.16.5", ok, &fails);
 }
 
+#[cfg(feature = "v1_16_5")]
 fn replay_1_16_5(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
     use ghast_data::v1_16_5::{Block, BlockState};
     use ghast_physics::pick::v1_16_5 as pick;
@@ -444,7 +448,10 @@ fn crosshair_matches_vanilla_cached_rays() {
         for f in files {
             let path = f.to_string_lossy().into_owned();
             let (ok, fails) = match version {
+                #[cfg(feature = "v1_16_5")]
                 "1.16.5" => replay_1_16_5(lines(&path)),
+                #[cfg(not(feature = "v1_16_5"))]
+                "1.16.5" => continue,
                 #[cfg(feature = "v26_1")]
                 _ => replay_26_1(lines(&path)),
                 #[cfg(not(feature = "v26_1"))]

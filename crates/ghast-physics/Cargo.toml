@@ -14,7 +14,11 @@ documentation = "https://docs.rs/ghast-physics"
 readme = "README.md"
 
 [features]
-default = ["v26_1"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
+# One feature per version module (with its ghast-data tables); any subset builds.
+v1_8 = ["ghast-data/v1_8"]
+v1_12 = ["ghast-data/v1_12"]
+v1_16_5 = ["ghast-data/v1_16_5"]
 # The modern core with the 26.1 rule set (ghast-data's 26.1 tables).
 v26_1 = ["ghast-data/v26_1"]
 # Large-fuzz replay test (`tests/fuzz_cache.rs`): replays oracle output from `oracle/cache/` that
@@ -22,10 +26,10 @@ v26_1 = ["ghast-data/v26_1"]
 oracle-cache = []
 
 [dependencies]
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
 
 [dev-dependencies]
-ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "v26_1"] }
+ghast-data = { path = "../ghast-data", default-features = false }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
 criterion = { workspace = true }

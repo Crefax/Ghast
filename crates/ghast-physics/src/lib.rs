@@ -20,6 +20,7 @@
 //! [`pick`] is the crosshair target (block, face, hit point, or entity) for 1.16.5 and 26.1.
 //!
 //! ```
+//! # #[cfg(feature = "v1_8")] {
 //! use ghast_physics::{Keys, Packets, TickInput, v1_8};
 //!
 //! let mut world = v1_8::memory_world();
@@ -34,6 +35,7 @@
 //!     v1_8::tick(&mut player, &input, &world, &mut out);
 //! }
 //! assert!(player.on_ground && player.pos[2] > 2.0);
+//! # }
 //! ```
 
 #![forbid(unsafe_code)]
@@ -44,10 +46,14 @@ mod input;
 pub mod math;
 #[cfg(feature = "v26_1")]
 pub mod modern;
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod pick;
 pub mod rotation;
+#[cfg(feature = "v1_12")]
 pub mod v1_12;
+#[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
+#[cfg(feature = "v1_8")]
 pub mod v1_8;
 pub mod voxel;
 mod world;

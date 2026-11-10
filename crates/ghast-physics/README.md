@@ -12,6 +12,11 @@ vanilla's constant 65536-entry sine table, built once).
 | `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
 | `modern` with `V26_1` (feature `v26_1`, default) | 26.1 (protocol 775) | bit-exact against the vanilla oracle (see "Modern core") |
 
+Each version module has a cargo feature of the same name (`v1_8`, `v1_12`, `v1_16_5`, `v26_1`;
+all on by default) that also selects its `ghast-data` tables; any subset builds, so a client for
+one version can turn the others off (`default-features = false, features = ["v26_1"]`). `pick`
+needs `v1_16_5` or `v26_1`.
+
 ## Use
 
 ```rust

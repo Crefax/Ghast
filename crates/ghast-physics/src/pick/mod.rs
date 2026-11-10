@@ -28,6 +28,7 @@
 
 use ghast_data::{Aabb, SelectionShape};
 
+#[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;

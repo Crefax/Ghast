@@ -4,12 +4,24 @@
 //! Each iteration replays a fixed 20-tick input sequence from the same start state, so the
 //! numbers are per 20 ticks (criterion reports the per-element time with `Throughput`).
 
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_16_5", feature = "v26_1")),
+    allow(unused_imports, dead_code)
+)]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(feature = "v1_8")]
 use ghast_data::v1_8::BlockState;
+#[cfg(feature = "v1_8")]
 use ghast_physics::v1_8::{self, PlayerState};
+#[cfg(feature = "v1_8")]
 use ghast_physics::{BlockView, Keys, Packets, TickInput};
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_16_5", feature = "v26_1")),
+    allow(unused_imports, dead_code)
+)]
 use std::hint::black_box;
 
+#[cfg(feature = "v1_8")]
 /// A dense array over a fixed region: the cheapest possible block lookup, to separate the cost
 /// of the physics from the cost of the world representation.
 struct DenseWorld {
@@ -18,6 +30,7 @@ struct DenseWorld {
     blocks: Vec<BlockState>,
 }
 
+#[cfg(feature = "v1_8")]
 impl DenseWorld {
     fn copy_of(w: &v1_8::MemoryWorld, origin: [i32; 2], side: i32) -> DenseWorld {
         let mut blocks = Vec::with_capacity((side * side * 256) as usize);
@@ -36,6 +49,7 @@ impl DenseWorld {
     }
 }
 
+#[cfg(feature = "v1_8")]
 impl BlockView for DenseWorld {
     type State = BlockState;
 
@@ -54,12 +68,18 @@ impl BlockView for DenseWorld {
     }
 }
 
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_16_5", feature = "v26_1")),
+    allow(unused_imports, dead_code)
+)]
 const TICKS: usize = 20;
 
+#[cfg(feature = "v1_8")]
 fn raw(id: u16, meta: u16) -> u16 {
     (id << 4) | meta
 }
 
+#[cfg(feature = "v1_8")]
 /// Flat stone, player walking forward on it (warmed up so it is on the ground and moving).
 fn flat() -> (v1_8::MemoryWorld, PlayerState, Vec<TickInput>) {
     let mut w = v1_8::memory_world();
@@ -83,6 +103,7 @@ fn flat() -> (v1_8::MemoryWorld, PlayerState, Vec<TickInput>) {
     (w, p, vec![input; TICKS])
 }
 
+#[cfg(feature = "v1_8")]
 /// A cluttered corner: sneaking on a ledge edge (edge-guard probing every tick) while pushing into
 /// fences, panes, a wall, stairs and slabs (neighbour-dependent shapes, step-up attempts), with a
 /// ceiling of slabs above, jumping every few ticks.
@@ -124,6 +145,7 @@ fn busy() -> (v1_8::MemoryWorld, PlayerState, Vec<TickInput>) {
     (w, p, inputs)
 }
 
+#[cfg(feature = "v1_8")]
 fn bench(c: &mut Criterion) {
     let mut g = c.benchmark_group("v1_8_tick");
     g.throughput(Throughput::Elements(TICKS as u64));
@@ -139,6 +161,7 @@ fn bench(c: &mut Criterion) {
     g.finish();
 }
 
+#[cfg(feature = "v1_8")]
 fn run<W: BlockView<State = BlockState>>(
     b: &mut criterion::Bencher<'_>,
     w: &W,
@@ -159,6 +182,7 @@ fn run<W: BlockView<State = BlockState>>(
 /// A world shaped like `ghast-world`'s: columns in a hash map with a cheap integer hasher,
 /// 16-high sections that are uniform or palette-indexed (one byte per block), states decoded from
 /// raw ids. Built from another world's region; every other column is unloaded.
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 mod column_world {
     use ghast_physics::BlockView;
     use std::collections::HashMap;
@@ -296,6 +320,7 @@ mod column_world {
     }
 }
 
+#[cfg(feature = "v1_16_5")]
 mod modern {
     //! 1.16.5: the same two shapes of work, plus a swimming case (fluid pushing, pose changes).
     use super::{Criterion, TICKS, Throughput, black_box};
@@ -535,6 +560,7 @@ mod modern {
     }
 }
 
+#[cfg(feature = "v26_1")]
 mod modern26 {
     //! The modern core (26.1 rules): the same three shapes of work as `v1_16_5_tick`, in the same
     //! kind of hash-map world, plus a dense-array world that isolates the physics from the world.
@@ -756,5 +782,15 @@ mod modern26 {
     }
 }
 
-criterion_group!(benches, bench, modern::bench, modern26::bench);
+fn all(c: &mut Criterion) {
+    #[cfg(feature = "v1_8")]
+    bench(c);
+    #[cfg(feature = "v1_16_5")]
+    modern::bench(c);
+    #[cfg(feature = "v26_1")]
+    modern26::bench(c);
+    let _ = c;
+}
+
+criterion_group!(benches, all);
 criterion_main!(benches);
