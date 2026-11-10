@@ -68,6 +68,8 @@ final class VoxelDump {
         Field shapeCache = BlockBehaviour.BlockStateBase.class.getDeclaredField("cache");
         shapeCache.setAccessible(true);
 
+        Field offsetDelegate = net.minecraft.world.phys.shapes.OffsetDoubleList.class.getDeclaredField("delegate");
+        offsetDelegate.setAccessible(true);
         Map<String, Integer> shapeIds = new HashMap<>();
         Map<VoxelShape, Integer> byInstance = new IdentityHashMap<>();
 
@@ -85,8 +87,29 @@ final class VoxelDump {
             j.field("climbable", d.is(BlockTags.CLIMBABLE)).field("fences", d.is(BlockTags.FENCES))
                     .field("walls", d.is(BlockTags.WALLS)).field("fence_gates", d.is(BlockTags.FENCE_GATES))
                     .field("trapdoors", d.is(BlockTags.TRAPDOORS)).field("soul_speed_blocks", d.is(BlockTags.SOUL_SPEED_BLOCKS))
-                    .field("fire", d.is(BlockTags.FIRE));
+                    .field("fire", d.is(BlockTags.FIRE))
+                    .field("fall_damage_resetting", d.is(BlockTags.FALL_DAMAGE_RESETTING));
             j.endObject();
+            // The block's class (movement hooks are per class: TrapDoorBlock, FenceGateBlock, BedBlock, ...).
+            j.field("class", b.getClass().getSimpleName());
+            // instanceof tests the movement code makes (subclasses such as copper trapdoors count).
+            j.key("is").beginObject()
+                    .field("trapdoor", b instanceof net.minecraft.world.level.block.TrapDoorBlock)
+                    .field("fence_gate", b instanceof net.minecraft.world.level.block.FenceGateBlock)
+                    .field("ice", b instanceof net.minecraft.world.level.block.IceBlock)
+                    .field("bed", b instanceof net.minecraft.world.level.block.BedBlock)
+                    .field("ladder", b instanceof net.minecraft.world.level.block.LadderBlock)
+                    .endObject();
+            // Offset function (bamboo, pointed dripstone, plants): its limits and kind.
+            if (d.hasOffsetFunction()) {
+                j.key("offset").beginObject();
+                j.fieldF32("max_h", (float) invokeFloat(b, "getMaxHorizontalOffset"));
+                j.fieldF32("max_v", (float) invokeFloat(b, "getMaxVerticalOffset"));
+                j.field("xyz", d.getOffset(new BlockPos(5, 0, 7)).y != 0.0 || d.getOffset(new BlockPos(1, 0, 2)).y != 0.0);
+                j.endObject();
+            } else {
+                j.key("offset").raw("null");
+            }
             sink.accept(j.endObject().toString());
         }
 
@@ -129,6 +152,21 @@ final class VoxelDump {
             j.field("blocks_motion", state.blocksMotion());
             j.field("liquid", state.liquid()).field("solid", state.isSolid()).field("replaceable", state.canBeReplaced());
             j.field("has_offset", state.hasOffsetFunction());
+            if (state.hasOffsetFunction() && !shape.isEmpty()) {
+                // The collision shape here is base.move(offset at this position): its point lists are
+                // OffsetDoubleLists over the block's own (unshifted) points, recorded as base_points_*.
+                j.key("offset_at_dump").beginArray().f64(state.getOffset(pos).x).f64(state.getOffset(pos).y)
+                        .f64(state.getOffset(pos).z).endArray();
+                for (Direction.Axis axis : Direction.Axis.values()) {
+                    DoubleList list = (DoubleList) points.invoke(shape, axis);
+                    DoubleList base = (DoubleList) offsetDelegate.get(list);
+                    j.key("base_points_" + axis.getName()).beginArray();
+                    for (int i = 0; i < base.size(); i++) {
+                        j.f64(base.getDouble(i));
+                    }
+                    j.endArray();
+                }
+            }
             j.key("side_solid_full_square").beginArray();
             for (Direction d : SIDES) {
                 j.value(state.isFaceSturdy(run.level, pos, d));
@@ -209,6 +247,12 @@ final class VoxelDump {
         }
         byInstance.put(shape, sid);
         return sid;
+    }
+
+    private static double invokeFloat(Block b, String name) throws Exception {
+        Method m = BlockBehaviour.class.getDeclaredMethod(name);
+        m.setAccessible(true);
+        return (float) m.invoke(b);
     }
 
     private static Harness.Run runAround() {

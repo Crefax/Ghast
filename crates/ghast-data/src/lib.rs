@@ -7,6 +7,7 @@
 //! | [`v1_8`] | `v1_8` | 1.8.x (protocol 47) | `id << 4 \| meta` |
 //! | [`v1_12`] | `v1_12` | 1.12.x (protocol 335 – 340) | `id << 4 \| meta` |
 //! | [`v1_16_5`] | `v1_16_5` | 1.16.5 (protocol 754) | global palette with properties |
+//! | [`v26_1`] | `v26_1` | 26.1 (protocol 775) | global palette with properties; movement facts from the jar |
 //!
 //! All tables are generated (`codegen/data`) from PrismarineJS minecraft-data 3.119.0 plus a small
 //! hand-maintained file of physics facts, and live in `static` memory: no runtime parsing, no lazy
@@ -42,6 +43,8 @@ pub mod v1_12;
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
+#[cfg(feature = "v26_1")]
+pub mod v26_1;
 
 pub use common::{
     Aabb, BiomeInfo, BlockInfo, BlockPhysics, BoundingBox, Collision, DigMaterial, Drop,
