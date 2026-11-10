@@ -26,7 +26,7 @@ set. Other commands (`oracle/run.sh help` lists them):
 
 | Command | What it does |
 |---|---|
-| `fuzz --seed S --count N --ticks T [--use-item true] [--edges true] [--out F]` | N random cases (streamed; default `cache/1.8.9/fuzz/…jsonl.gz`). ~20k ticks/s. `--use-item true` adds random spans of the `use` key (cases get a `_use` suffix; everything else is the same case). `--extras true` (1.8.9) additionally sprinkles server speed modifiers (ops 0/1/2), depth strider boots and spectator mode from a separate random stream (cases get an `_x` suffix). `--palette edges` (or `--edges true`; 1.8.9) switches to the edge generator: strips of partial-height blocks (soul sand, slabs, snow layers, farmland, carpets, stairs, trapdoors, …) next to each other, to full blocks and to one-block steps, crossed with mostly forward + jump input, so landings and step-ups at small height differences are frequent (cases `edge_s<seed>_<i>`). |
+| `fuzz --seed S --count N --ticks T [--use-item true] [--edges true] [--out F]` | N random cases (streamed; default `cache/1.8.9/fuzz/…jsonl.gz`). ~20k ticks/s. `--use-item true` adds random spans of the `use` key (cases get a `_use` suffix; everything else is the same case). `--extras true` (1.8.9, 1.12.2; 1.16.5 see its section) additionally sprinkles server speed modifiers (ops 0/1/2), depth strider boots and spectator mode from a separate random stream (cases get an `_x` suffix). `--palette edges` (or `--edges true`; every version) switches to the edge generator: strips of partial-height blocks (soul sand, slabs, snow layers, farmland, carpets, stairs, trapdoors, …) next to each other, to full blocks and to one-block steps, crossed with mostly forward + jump input, so landings and step-ups at small height differences are frequent (cases `edge_s<seed>_<i>`). |
 | `scenarios [--only NAME] [--out F]` | the hand-written scenarios |
 | `replay --in F [--out F]` | read cases in the golden format (header + tick `input`s) and run them in vanilla |
 | `boxes [--out F]` | the collision box dump |
@@ -379,8 +379,9 @@ piglins, … via `setBaby`), `size_1..4` (slime, magma cube), armor stand `small
 Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 oracle/run.sh verify`,
 `MC=1.16.5 oracle/run.sh fuzz --seed 7 --count 1000`. Mappings: Fabric **Yarn** `1.16.5+build.10`
 (CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
-Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` (100 x 60),
-`collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`, `voxel_shapes.jsonl.gz`.
+Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` and
+`fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
+`voxel_shapes.jsonl.gz`.
 
 Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
 and javac refuses to compile against them, so `prepareVanilla` drops parameter annotations from the
@@ -409,8 +410,44 @@ More of the client is real than in 1.8.9:
   `interactItem` → `use_item` packet; falling edge → `stopUsingItem` → `block_dig` status 5.
 - `auto_jump` is a setup field (vanilla's option default is on; bots turn it off; the scenarios use
   off except `auto_jump`).
-- Not covered: elytra / fall flying (needs the server to set the flag), riptide, boats and other
-  vehicles, entity collisions, powder snow (1.17), held-item packets, `ClientWorld.tick()`.
+- Not covered: elytra / fall flying (the 1.16.5 client starts gliding itself — `checkFallFlying` sets
+  the flag when an elytra is in the chest slot — but only the server clears it; no case equips one),
+  riptide, boats and other vehicles, entity collisions, pistons pushing the player, a non-default or
+  moving world border, the nether (lava pushes 0.007 instead of 0.0023333), powder snow (1.17),
+  held-item packets, `ClientWorld.tick()`.
+
+### 1.16.5 fuzz
+
+`fuzz` takes the same options as 1.8.9 / 1.12.2; what they generate in 1.16.5:
+- plain (`Fuzz.one`): random terrain from a palette of movement-relevant blocks, each in a random one
+  of its states; pools, deep water, climbable walls (ladder / vine / scaffolding), ceilings; creative
+  flight, initial velocity, low food, an op-2 speed modifier, jump boost / levitation / slow falling /
+  dolphin's grace, soul speed / depth strider boots, auto-jump, velocity events.
+- `--palette edges` (`Fuzz.edge`, cases `edge_s<seed>_<i>`): strips of partial-height 1.16 blocks
+  (soul sand / soil, slabs, snow layers, farmland, grass paths, carpets, honey, slime, stairs,
+  trapdoors, scaffolding, sea pickles, lanterns, lily pads, stonecutters, chests, campfires, bells,
+  fences, walls, ice kinds, water, cobwebs, berry bushes, bamboo, …) next to each other and to one-block
+  steps, mostly forward + jump input; now and then auto-jump, soul speed boots, jump boost and a low
+  ceiling (stone, slabs or scaffolding three or four blocks up).
+- `--extras true` (`Fuzz.withExtras`, the plain case plus a separate stream, cases `…_x`): speed
+  modifiers of every operation, another movement speed base, depth strider / soul speed up to level 5,
+  food 5–7, fly speeds, the client-read effects (jump boost, blindness, levitation, slow falling,
+  dolphin's grace), spectator mode, a pool with a bubble column through the spawn, the whole case
+  moved next to the world border (mostly just inside it, facing it), and inbound packets during the
+  case: entity properties (sometimes echoing the client's sprint modifier), effect changes, abilities
+  (a spectator may be sent `flying` false), teleports with random relative flags. Combines with
+  `--use-item true` (spectators cannot use items: `interactItem` passes).
+
+Big runs (git-ignored `oracle/cache/1.16.5/`, ~4.4 M ticks, ~1 GB; replayed by the Rust large-fuzz
+test, all at 0 diffs):
+
+```sh
+for s in 11 12 13 14 15 16 17 18 19 20; do MC=1.16.5 oracle/run.sh fuzz --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz/physics_s$s.jsonl.gz"; done
+MC=1.16.5 oracle/run.sh fuzz --seed 21 --count 2000 --ticks 100 --use-item true --out "$PWD/oracle/cache/1.16.5/fuzz/physics_use_s21.jsonl.gz"
+for s in 31 32 33 34 35; do MC=1.16.5 oracle/run.sh fuzz --palette edges --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-edges/edges_s$s.jsonl.gz"; done
+for s in 41 42 43 44 45; do MC=1.16.5 oracle/run.sh fuzz --extras true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-extras/extras_s$s.jsonl.gz"; done
+MC=1.16.5 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-extras/extras_use_s46.jsonl.gz"
+```
 
 ### 1.16.5 format differences
 
