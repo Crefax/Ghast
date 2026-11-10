@@ -58,6 +58,22 @@ impl Decode for HolderSet {
     }
 }
 
+impl HolderSet {
+    /// Skips one encoded holder set without building it.
+    pub fn skip(r: &mut Reader<'_>) -> DecodeResult<()> {
+        let n = r.read_varint()?;
+        if n == 0 {
+            r.read_string()?;
+            return Ok(());
+        }
+        let count = r.check_count(i64::from(n) - 1, 1)?;
+        for _ in 0..count {
+            r.read_varint()?;
+        }
+        Ok(())
+    }
+}
+
 impl Encode for HolderSet {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match self {

@@ -221,6 +221,18 @@ pub const PATCHES: &[Patch] = &[Patch {
     why: "ClientboundSectionBlocksUpdatePacket reads/writes each record with \
           readVarLong/writeVarLong (state id << 12 | position); minecraft-data has varint \
           since 1.20.2 (1.16.2 - 1.20.1 had varlong)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/play/toClient/types/packet_initialize_world_border/1/4/type",
+    expect: "\"varint\"",
+    replace: "\"varlong\"",
+    why: "ClientboundInitializeBorderPacket reads the lerp time with readVarLong",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/play/toClient/types/packet_world_border_lerp_size/1/2/type",
+    expect: "\"varint\"",
+    replace: "\"varlong\"",
+    why: "ClientboundSetBorderLerpSizePacket reads the lerp time with readVarLong",
 }];
 
 /// Applies the [`PATCHES`] of one minecraft-data version.
@@ -679,6 +691,15 @@ fn named_text<'t>(em: &mut Emitter<'t>, name: &str, c: &'t ir::Container) -> Str
          {CFG}impl Encode for {r} {{\n    fn encode(&self, w: &mut BytesMut) -> EncodeResult {{ {enc} Ok(()) }}\n}}\n\
          {CFG}#[cfg(feature = \"testgen\")]\nimpl Generate for {r} {{\n    fn generate(g: &mut Gen) -> Self {{ {gen_} }}\n}}\n"
     );
+    if emit::SKIP_ROOTS.contains(&r.as_str()) {
+        let skip = em.root_skip(c);
+        let _ = write!(
+            text,
+            "{CFG}impl {r} {{\n    /// Skips one encoded value: reads exactly the bytes [`Decode::decode`] reads, \
+             builds nothing and allocates nothing.\n    #[allow(unused_variables, clippy::let_unit_value)]\n    \
+             pub fn skip(r: &mut Reader<'_>) -> DecodeResult<()> {{ {skip}; Ok(()) }}\n}}\n"
+        );
+    }
     text
 }
 

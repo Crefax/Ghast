@@ -3840,7 +3840,7 @@ pub struct InitializeWorldBorder<const V: i32> {
     /// `newDiameter`
     pub new_diameter: f64,
     /// `speed`
-    pub speed: i32,
+    pub speed: i64,
     /// `portalTeleportBoundary`
     pub portal_teleport_boundary: i32,
     /// `warningBlocks`
@@ -3856,7 +3856,7 @@ impl<const V: i32> Decode for InitializeWorldBorder<V> {
             let v2 = r.read_f64()?;
             let v3 = r.read_f64()?;
             let v4 = r.read_f64()?;
-            let v5 = r.read_varint()?;
+            let v5 = r.read_varlong()?;
             let v6 = r.read_varint()?;
             let v7 = r.read_varint()?;
             let v8 = r.read_varint()?;
@@ -3880,7 +3880,7 @@ impl<const V: i32> Encode for InitializeWorldBorder<V> {
         w.put_f64((*self).z);
         w.put_f64((*self).old_diameter);
         w.put_f64((*self).new_diameter);
-        w.put_varint((*self).speed);
+        w.put_varlong((*self).speed);
         w.put_varint((*self).portal_teleport_boundary);
         w.put_varint((*self).warning_blocks);
         w.put_varint((*self).warning_time);
@@ -3896,7 +3896,7 @@ impl<const V: i32> Generate for InitializeWorldBorder<V> {
             let v2 = g.f64();
             let v3 = g.f64();
             let v4 = g.f64();
-            let v5 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+            let v5 = g.varlong();
             let v6 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
             let v7 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
             let v8 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
@@ -7507,7 +7507,7 @@ pub struct WorldBorderLerpSize<const V: i32> {
     /// `newDiameter`
     pub new_diameter: f64,
     /// `speed`
-    pub speed: i32,
+    pub speed: i64,
 }
 #[cfg(feature = "v26_1")]
 impl<const V: i32> Decode for WorldBorderLerpSize<V> {
@@ -7515,7 +7515,7 @@ impl<const V: i32> Decode for WorldBorderLerpSize<V> {
         Ok({
             let v1 = r.read_f64()?;
             let v2 = r.read_f64()?;
-            let v3 = r.read_varint()?;
+            let v3 = r.read_varlong()?;
             Self {
                 old_diameter: v1,
                 new_diameter: v2,
@@ -7529,7 +7529,7 @@ impl<const V: i32> Encode for WorldBorderLerpSize<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_f64((*self).old_diameter);
         w.put_f64((*self).new_diameter);
-        w.put_varint((*self).speed);
+        w.put_varlong((*self).speed);
         Ok(())
     }
 }
@@ -7540,7 +7540,7 @@ impl<const V: i32> Generate for WorldBorderLerpSize<V> {
         {
             let v1 = g.f64();
             let v2 = g.f64();
-            let v3 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+            let v3 = g.varlong();
             Self {
                 old_diameter: v1,
                 new_diameter: v2,

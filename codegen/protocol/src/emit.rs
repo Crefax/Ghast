@@ -58,7 +58,14 @@ type Scope<'t> = Vec<Level<'t>>;
 enum Mode {
     Decode,
     Generate,
+    /// Structural skip: reads exactly what `Decode` reads, keeps only the values later
+    /// fields depend on (switch discriminants, counts) and builds nothing.
+    Skip,
 }
+
+/// Named types that get an inherent `skip` (see [`Mode::Skip`]); every other named type a skip
+/// reaches is inlined.
+pub const SKIP_ROOTS: &[&str] = &["SlotComponent", "Slot"];
 
 /// Marker written before every top-level item; replaced by the item's
 /// `#[cfg(any(feature = ...))]` once it is known which versions share the item.
@@ -95,6 +102,8 @@ pub struct Emitter<'t> {
     tmp: usize,
     /// Root being emitted (for error messages).
     cur_root: String,
+    /// Named types being inlined by a skip (cycle guard).
+    skip_stack: Vec<String>,
 }
 
 fn int_type(size: u32, signed: bool) -> &'static str {
@@ -136,6 +145,7 @@ impl<'t> Emitter<'t> {
             hints: HashMap::new(),
             tmp: 0,
             cur_root: String::new(),
+            skip_stack: Vec::new(),
         }
     }
 
@@ -747,6 +757,11 @@ impl<'t> Emitter<'t> {
         name: &str,
     ) -> String {
         let gen_ = mode == Mode::Generate;
+        if mode == Mode::Skip
+            && let Some(v) = self.skip_value(t, sc, name)
+        {
+            return v;
+        }
         match t {
             Ty::Void => "()".into(),
             Ty::Prim(p) => {
@@ -932,6 +947,86 @@ impl<'t> Emitter<'t> {
         }
     }
 
+    /// [`Mode::Skip`] forms that differ from decoding (`None`: decode the value, it is
+    /// cheap and may be needed by a later field).
+    fn skip_value(&mut self, t: &'t Ty, sc: &mut Scope<'t>, name: &str) -> Option<String> {
+        Some(match t {
+            Ty::Named(n, shared) => {
+                let tr = self.tref(n, *shared);
+                if SKIP_ROOTS.contains(&n.as_str()) {
+                    format!("{{ {tr}::skip(r)?; }}")
+                } else if self.skip_stack.contains(n) || !self.named.contains_key(n) {
+                    format!("{{ let _ = <{tr} as Decode>::decode(r)?; }}")
+                } else {
+                    let c = self.named[n];
+                    self.skip_stack.push(n.clone());
+                    let mut inner = Vec::new();
+                    let v = self.container_value(String::new(), c, &mut inner, Mode::Skip, None);
+                    self.skip_stack.pop();
+                    v
+                }
+            }
+            Ty::Prim(Prim::Slot) => format!("{{ let _ = {}; }}", self.dec_prim(Prim::Slot)),
+            Ty::Holder(e) => {
+                let inner = self.value(e, sc, Mode::Skip, None, name);
+                format!("{{ let id = r.read_varint()?; if id == 0 {{ let _ = {inner}; }} }}")
+            }
+            Ty::HolderSet => "{ HolderSet::skip(r)?; }".into(),
+            Ty::FixedBytes(n) => format!("{{ r.skip({n})?; }}"),
+            Ty::Array { count, elem, .. } => {
+                let n = self.var();
+                let count_expr = match count {
+                    Count::Prefix(p) => {
+                        let min = self.min_size(elem);
+                        format!(
+                            "{{ let c = {}; r.check_count(i64::from(c), {min})? }}",
+                            self.dec_prim(*p)
+                        )
+                    }
+                    Count::Fixed(k) => k.to_string(),
+                    Count::Field(f) => {
+                        let e = self.lookup(f, sc);
+                        let min = self.min_size(elem);
+                        format!("r.check_count(i64::from({}), {min})?", e.expr)
+                    }
+                };
+                let ev = self.value(elem, sc, Mode::Skip, None, name);
+                format!("{{ let {n} = {count_expr}; for _ in 0..{n} {{ let _ = {ev}; }} }}")
+            }
+            Ty::MetaLoop { end, elem, .. } => {
+                let ev = self.value(elem, sc, Mode::Skip, None, name);
+                format!(
+                    "{{ loop {{ if r.peek_u8()? == {end} {{ r.skip(1)?; break; }} let _ = {ev}; }} }}"
+                )
+            }
+            Ty::TopBitArray { elem, .. } => {
+                let Ty::Container(c) = &**elem else {
+                    panic!("topBitSetTerminatedArray of non-container")
+                };
+                let first_ty = match &c.fields.first().map(|f| &f.ty) {
+                    Some(Ty::Prim(Prim::I8)) => "i8",
+                    Some(Ty::Prim(Prim::U8)) => "u8",
+                    _ => panic!("topBitSetTerminatedArray element must start with a byte"),
+                };
+                let b0 = self.var();
+                let first = format!("(({b0} & 0x7f) as {first_ty})");
+                let ev = self.container_value(String::new(), c, sc, Mode::Skip, Some(first));
+                format!(
+                    "{{ loop {{ let {b0} = r.read_u8()?; let _ = {ev}; if {b0} & 0x80 == 0 {{ break; }} }} }}"
+                )
+            }
+            _ => return None,
+        })
+    }
+
+    /// Statements skipping one value of a root container (see [`Mode::Skip`]).
+    pub fn root_skip(&mut self, c: &'t Container) -> String {
+        self.tmp = 0;
+        self.cur_root = c.rust_name.clone();
+        let mut sc = Vec::new();
+        self.container_value(String::new(), c, &mut sc, Mode::Skip, None)
+    }
+
     fn gen_prim(&self, p: Prim, hint: Option<&Hint>) -> String {
         if p.is_int() {
             let (lo, hi) = p.int_range();
@@ -996,6 +1091,9 @@ impl<'t> Emitter<'t> {
         let mut inits = Vec::new();
         self.fields_value(c, sc, mode, &mut body, &mut inits, first);
         sc.pop();
+        if mode == Mode::Skip {
+            return format!("{{ {body} }}");
+        }
         format!("{{ {body} {tr} {{ {} }} }}", inits.join(", "))
     }
 
@@ -1085,11 +1183,19 @@ impl<'t> Emitter<'t> {
                     }
                     let c = self.any_cond(&s.compare_to, &v.keys, sc);
                     let val = self.variant_value(&tr, v, sc, mode);
-                    let _ = write!(out, "if {c} {{ {val} }} else ");
+                    if mode == Mode::Skip {
+                        let _ = write!(out, "if {c} {{ let _ = {val}; }} else ");
+                    } else {
+                        let _ = write!(out, "if {c} {{ {val} }} else ");
+                    }
                 }
                 let d = default.expect("default variant");
                 let val = self.variant_value(&tr, d, sc, mode);
-                let _ = write!(out, "{{ {val} }}");
+                if mode == Mode::Skip {
+                    let _ = write!(out, "{{ let _ = {val}; }}");
+                } else {
+                    let _ = write!(out, "{{ {val} }}");
+                }
                 format!("({out})")
             }
         }
@@ -1102,6 +1208,13 @@ impl<'t> Emitter<'t> {
         sc: &mut Scope<'t>,
         mode: Mode,
     ) -> String {
+        if mode == Mode::Skip {
+            return if is_void(v.ty, &self.variant_names) {
+                "()".into()
+            } else {
+                self.value(v.ty, sc, mode, None, "")
+            };
+        }
         if is_void(v.ty, &self.variant_names) {
             format!("{tr}::{}", v.name)
         } else {

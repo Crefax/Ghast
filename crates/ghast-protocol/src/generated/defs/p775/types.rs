@@ -6410,6 +6410,43 @@ impl Generate for Slot {
         }
     }
 }
+#[cfg(feature = "v26_1")]
+impl Slot {
+    /// Skips one encoded value: reads exactly the bytes [`Decode::decode`] reads, builds nothing and allocates nothing.
+    #[allow(unused_variables, clippy::let_unit_value)]
+    pub fn skip(r: &mut Reader<'_>) -> DecodeResult<()> {
+        {
+            let v1 = r.read_varint()?;
+            let v2 = if (v1 > 0) {
+                Some({
+                    let v3 = r.read_varint()?;
+                    let v4 = r.read_varint()?;
+                    let v5 = r.read_varint()?;
+                    let v6 = {
+                        let v7 = r.check_count(i64::from(v4), 1)?;
+                        for _ in 0..v7 {
+                            let _ = {
+                                crate::defs::p775::types::SlotComponent::skip(r)?;
+                            };
+                        }
+                    };
+                    let v8 = {
+                        let v9 = r.check_count(i64::from(v5), 1)?;
+                        for _ in 0..v9 {
+                            let _ = {
+                                let v10 =
+                                    crate::defs::p775::types::SlotComponentType(r.read_varint()?);
+                            };
+                        }
+                    };
+                })
+            } else {
+                None
+            };
+        };
+        Ok(())
+    }
+}
 
 #[cfg(feature = "v26_1")]
 /// Nested container.
@@ -11416,6 +11453,1561 @@ impl Generate for SlotComponent {
                 data: v2,
             }
         }
+    }
+}
+#[cfg(feature = "v26_1")]
+impl SlotComponent {
+    /// Skips one encoded value: reads exactly the bytes [`Decode::decode`] reads, builds nothing and allocates nothing.
+    #[allow(unused_variables, clippy::let_unit_value)]
+    pub fn skip(r: &mut Reader<'_>) -> DecodeResult<()> {
+        {
+            let v1 = crate::defs::p775::types::SlotComponentType(r.read_varint()?);
+            let v2 = (if (v1.0 == 0) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 1) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 2) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 3) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 4) {
+                let _ = ();
+            } else if (v1.0 == 5) {
+                let _ = {
+                    let v3 = r.read_bool()?;
+                    let v4 = r.read_bool()?;
+                    let v5 = r.read_f32()?;
+                };
+            } else if (v1.0 == 6) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 7) {
+                let _ = r.read_f32()?;
+            } else if (v1.0 == 8) {
+                let _ = {
+                    let v6 = r.read_bool()?;
+                    let v7 = (if v6 {
+                        let _ = {
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v8 = r.read_string()?;
+                                    let v9 = crate::defs::p775::types::DamageTypeDataScaling(
+                                        r.read_varint()?,
+                                    );
+                                    let v10 = r.read_f32()?;
+                                    let v11 = crate::defs::p775::types::DamageTypeDataEffects(
+                                        r.read_varint()?,
+                                    );
+                                    let v12 =
+                                        crate::defs::p775::types::DamageTypeDataDeathMessageType(
+                                            r.read_varint()?,
+                                        );
+                                };
+                            }
+                        };
+                    } else if (!v6) {
+                        let _ = r.read_string()?;
+                    } else {
+                        let _ = ();
+                    });
+                };
+            } else if (v1.0 == 9) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 10) {
+                let _ = r.read_string()?;
+            } else if (v1.0 == 11) {
+                let _ = {
+                    let v13 = {
+                        let c = r.read_varint()?;
+                        r.check_count(i64::from(c), 1)?
+                    };
+                    for _ in 0..v13 {
+                        let _ = AnonNbt::read(r)?;
+                    }
+                };
+            } else if (v1.0 == 12) {
+                let _ = crate::defs::p775::types::SlotComponentDataRarity(r.read_varint()?);
+            } else if (v1.0 == 13) {
+                let _ = {
+                    let v14 = {
+                        let v15 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v15 {
+                            let _ = {
+                                let v16 = r.read_varint()?;
+                                let v17 = r.read_varint()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 42) {
+                let _ = {
+                    let v18 = {
+                        let v19 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v19 {
+                            let _ = {
+                                let v20 = r.read_varint()?;
+                                let v21 = r.read_varint()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 14) {
+                let _ = {
+                    let v22 = {
+                        let v23 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 5)?
+                        };
+                        for _ in 0..v23 {
+                            let _ = {
+                                let v24 = if r.read_bool()? {
+                                    Some({
+                                        HolderSet::skip(r)?;
+                                    })
+                                } else {
+                                    None
+                                };
+                                let v25 = if r.read_bool()? {
+                                    Some({
+                                        let v26 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 2)?
+                                        };
+                                        for _ in 0..v26 {
+                                            let _ = {
+                                                let v27 = r.read_string()?;
+                                                let v28 = r.read_bool()?;
+                                                let v29 = (if v28 {
+                                                    let _ = {
+                                                        let v30 = r.read_string()?;
+                                                    };
+                                                } else if (!v28) {
+                                                    let _ = {
+                                                        let v31 = r.read_string()?;
+                                                        let v32 = r.read_string()?;
+                                                    };
+                                                } else {
+                                                    let _ = ();
+                                                });
+                                            };
+                                        }
+                                    })
+                                } else {
+                                    None
+                                };
+                                let v33 = AnonNbt::read_optional(r)?;
+                                let v34 = {
+                                    let v35 = {
+                                        let v36 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 1)?
+                                        };
+                                        for _ in 0..v36 {
+                                            let _ = {
+                                                crate::defs::p775::types::SlotComponent::skip(r)?;
+                                            };
+                                        }
+                                    };
+                                    let v37 = {
+                                        let v38 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 1)?
+                                        };
+                                        for _ in 0..v38 {
+                                            let _ = r.read_varint()?;
+                                        }
+                                    };
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 15) {
+                let _ = {
+                    let v39 = {
+                        let v40 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 5)?
+                        };
+                        for _ in 0..v40 {
+                            let _ = {
+                                let v41 = if r.read_bool()? {
+                                    Some({
+                                        HolderSet::skip(r)?;
+                                    })
+                                } else {
+                                    None
+                                };
+                                let v42 = if r.read_bool()? {
+                                    Some({
+                                        let v43 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 2)?
+                                        };
+                                        for _ in 0..v43 {
+                                            let _ = {
+                                                let v44 = r.read_string()?;
+                                                let v45 = r.read_bool()?;
+                                                let v46 = (if v45 {
+                                                    let _ = {
+                                                        let v47 = r.read_string()?;
+                                                    };
+                                                } else if (!v45) {
+                                                    let _ = {
+                                                        let v48 = r.read_string()?;
+                                                        let v49 = r.read_string()?;
+                                                    };
+                                                } else {
+                                                    let _ = ();
+                                                });
+                                            };
+                                        }
+                                    })
+                                } else {
+                                    None
+                                };
+                                let v50 = AnonNbt::read_optional(r)?;
+                                let v51 = {
+                                    let v52 = {
+                                        let v53 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 1)?
+                                        };
+                                        for _ in 0..v53 {
+                                            let _ = {
+                                                crate::defs::p775::types::SlotComponent::skip(r)?;
+                                            };
+                                        }
+                                    };
+                                    let v54 = {
+                                        let v55 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 1)?
+                                        };
+                                        for _ in 0..v55 {
+                                            let _ = r.read_varint()?;
+                                        }
+                                    };
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 16) {
+                let _ = {
+                    let v56 = {
+                        let c = r.read_varint()?;
+                        r.check_count(i64::from(c), 13)?
+                    };
+                    for _ in 0..v56 {
+                        let _ = {
+                            let v57 = r.read_varint()?;
+                            let v58 = r.read_string()?;
+                            let v59 = r.read_f64()?;
+                            let v60 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(r.read_varint()?);
+                            let v61 =
+                                crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(
+                                    r.read_varint()?,
+                                );
+                            let v62 = {
+                                let v63 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(r.read_varint()?);
+                                let v64 = if (v63.0 == 2) {
+                                    Some(AnonNbt::read(r)?)
+                                } else {
+                                    None
+                                };
+                            };
+                        };
+                    }
+                };
+            } else if (v1.0 == 17) {
+                let _ = {
+                    let v65 = {
+                        let v66 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v66 {
+                            let _ = r.read_f32()?;
+                        }
+                    };
+                    let v67 = {
+                        let v68 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v68 {
+                            let _ = r.read_bool()?;
+                        }
+                    };
+                    let v69 = {
+                        let v70 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v70 {
+                            let _ = r.read_string()?;
+                        }
+                    };
+                    let v71 = {
+                        let v72 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v72 {
+                            let _ = r.read_i32()?;
+                        }
+                    };
+                };
+            } else if (v1.0 == 18) {
+                let _ = {
+                    let v73 = r.read_bool()?;
+                    let v74 = {
+                        let v75 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v75 {
+                            let _ = r.read_varint()?;
+                        }
+                    };
+                };
+            } else if (v1.0 == 19) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 20) {
+                let _ = ();
+            } else if (v1.0 == 21) {
+                let _ = r.read_bool()?;
+            } else if (v1.0 == 22) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 37) {
+                let _ = {
+                    let v76 = r.read_f32()?;
+                    let v77 = r.read_f32()?;
+                    let v78 = {
+                        let v79 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 13)?
+                        };
+                        for _ in 0..v79 {
+                            let _ = {
+                                let v80 = r.read_f32()?;
+                                let v81 = if r.read_bool()? {
+                                    Some({
+                                        HolderSet::skip(r)?;
+                                    })
+                                } else {
+                                    None
+                                };
+                                let v82 = r.read_f32()?;
+                                let v83 = r.read_f32()?;
+                            };
+                        }
+                    };
+                    let v84 = {
+                        let v85 = r.read_f32()?;
+                        let v86 = r.read_f32()?;
+                        let v87 = r.read_f32()?;
+                    };
+                    let v88 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                    let v89 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v90 = r.read_string()?;
+                                    let v91 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    let v92 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v93 = r.read_string()?;
+                                    let v94 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                };
+            } else if (v1.0 == 23) {
+                let _ = {
+                    let v95 = r.read_varint()?;
+                    let v96 = r.read_f32()?;
+                    let v97 = r.read_bool()?;
+                };
+            } else if (v1.0 == 24) {
+                let _ = {
+                    let v98 = r.read_f32()?;
+                    let v99 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
+                        r.read_varint()?,
+                    );
+                    let v100 = {
+                        let id = r.read_varint()?;
+                        if id == 0 {
+                            let _ = {
+                                let v101 = r.read_string()?;
+                                let v102 = if r.read_bool()? {
+                                    Some(r.read_f32()?)
+                                } else {
+                                    None
+                                };
+                            };
+                        }
+                    };
+                    let v103 = r.read_bool()?;
+                    let v104 = {
+                        let v105 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v105 {
+                            let _ = {
+                                let v106 = crate::defs::p775::types::ItemConsumeEffectType(
+                                    r.read_varint()?,
+                                );
+                                let v107 = (if (v106.0 == 0) {
+                                    let _ = {
+                                        let v108 = {
+                                            let v109 = {
+                                                let c = r.read_varint()?;
+                                                r.check_count(i64::from(c), 7)?
+                                            };
+                                            for _ in 0..v109 {
+                                                let _ = {
+                                                    let v110 = r.read_varint()?;
+                                                    let v111 = {
+                                                        let v112 = r.read_varint()?;
+                                                        let v113 = r.read_varint()?;
+                                                        let v114 = r.read_bool()?;
+                                                        let v115 = r.read_bool()?;
+                                                        let v116 = r.read_bool()?;
+                                                        let v117 = if r.read_bool()? {
+                                                            Some(Box::new({
+                                                                let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
+                                                            }))
+                                                        } else {
+                                                            None
+                                                        };
+                                                    };
+                                                };
+                                            }
+                                        };
+                                        let v118 = r.read_f32()?;
+                                    };
+                                } else if (v106.0 == 1) {
+                                    let _ = {
+                                        let v119 = {
+                                            HolderSet::skip(r)?;
+                                        };
+                                    };
+                                } else if (v106.0 == 2) {
+                                    let _ = ();
+                                } else if (v106.0 == 3) {
+                                    let _ = {
+                                        let v120 = r.read_f32()?;
+                                    };
+                                } else if (v106.0 == 4) {
+                                    let _ = {
+                                        let v121 = {
+                                            let id = r.read_varint()?;
+                                            if id == 0 {
+                                                let _ = {
+                                                    let v122 = r.read_string()?;
+                                                    let v123 = if r.read_bool()? {
+                                                        Some(r.read_f32()?)
+                                                    } else {
+                                                        None
+                                                    };
+                                                };
+                                            }
+                                        };
+                                    };
+                                } else {
+                                    let _ = ();
+                                });
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 25) {
+                let _ = {
+                    let v124 = r.read_varint()?;
+                    let v125 = r.read_varint()?;
+                    let v126 = r.read_varint()?;
+                    let v127 = r.read_varint()?;
+                    let v128 = {
+                        let v129 = r.check_count(i64::from(v126), 1)?;
+                        for _ in 0..v129 {
+                            let _ = {
+                                crate::defs::p775::types::SlotComponent::skip(r)?;
+                            };
+                        }
+                    };
+                    let v130 = {
+                        let v131 = r.check_count(i64::from(v127), 1)?;
+                        for _ in 0..v131 {
+                            let _ = {
+                                let v132 =
+                                    crate::defs::p775::types::SlotComponentType(r.read_varint()?);
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 26) {
+                let _ = {
+                    let v133 = r.read_f32()?;
+                    let v134 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                };
+            } else if (v1.0 == 27) {
+                let _ = r.read_string()?;
+            } else if (v1.0 == 28) {
+                let _ = {
+                    let v135 = {
+                        let v136 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 3)?
+                        };
+                        for _ in 0..v136 {
+                            let _ = {
+                                let v137 = {
+                                    HolderSet::skip(r)?;
+                                };
+                                let v138 = if r.read_bool()? {
+                                    Some(r.read_f32()?)
+                                } else {
+                                    None
+                                };
+                                let v139 = if r.read_bool()? {
+                                    Some(r.read_bool()?)
+                                } else {
+                                    None
+                                };
+                            };
+                        }
+                    };
+                    let v140 = r.read_f32()?;
+                    let v141 = r.read_varint()?;
+                    let v142 = r.read_bool()?;
+                };
+            } else if (v1.0 == 29) {
+                let _ = {
+                    let v143 = r.read_varint()?;
+                    let v144 = r.read_f32()?;
+                };
+            } else if (v1.0 == 30) {
+                let _ = {
+                    let v145 = r.read_f32()?;
+                    let v146 = r.read_f32()?;
+                    let v147 = r.read_f32()?;
+                    let v148 = r.read_f32()?;
+                    let v149 = r.read_f32()?;
+                    let v150 = r.read_f32()?;
+                };
+            } else if (v1.0 == 31) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 32) {
+                let _ = {
+                    let v151 =
+                        crate::defs::p775::types::SlotComponentDataEquippableSlot(r.read_varint()?);
+                    let v152 = {
+                        let id = r.read_varint()?;
+                        if id == 0 {
+                            let _ = {
+                                let v153 = r.read_string()?;
+                                let v154 = if r.read_bool()? {
+                                    Some(r.read_f32()?)
+                                } else {
+                                    None
+                                };
+                            };
+                        }
+                    };
+                    let v155 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                    let v156 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                    let v157 = if r.read_bool()? {
+                        Some({
+                            HolderSet::skip(r)?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v158 = r.read_bool()?;
+                    let v159 = r.read_bool()?;
+                    let v160 = r.read_bool()?;
+                    let v161 = r.read_bool()?;
+                    let v162 = r.read_bool()?;
+                    let v163 = {
+                        let id = r.read_varint()?;
+                        if id == 0 {
+                            let _ = {
+                                let v164 = r.read_string()?;
+                                let v165 = if r.read_bool()? {
+                                    Some(r.read_f32()?)
+                                } else {
+                                    None
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 33) {
+                let _ = {
+                    let v166 = {
+                        HolderSet::skip(r)?;
+                    };
+                };
+            } else if (v1.0 == 34) {
+                let _ = ();
+            } else if (v1.0 == 35) {
+                let _ = r.read_string()?;
+            } else if (v1.0 == 36) {
+                let _ = {
+                    let v167 = {
+                        let v168 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v168 {
+                            let _ = {
+                                let v169 = crate::defs::p775::types::ItemConsumeEffectType(
+                                    r.read_varint()?,
+                                );
+                                let v170 = (if (v169.0 == 0) {
+                                    let _ = {
+                                        let v171 = {
+                                            let v172 = {
+                                                let c = r.read_varint()?;
+                                                r.check_count(i64::from(c), 7)?
+                                            };
+                                            for _ in 0..v172 {
+                                                let _ = {
+                                                    let v173 = r.read_varint()?;
+                                                    let v174 = {
+                                                        let v175 = r.read_varint()?;
+                                                        let v176 = r.read_varint()?;
+                                                        let v177 = r.read_bool()?;
+                                                        let v178 = r.read_bool()?;
+                                                        let v179 = r.read_bool()?;
+                                                        let v180 = if r.read_bool()? {
+                                                            Some(Box::new({
+                                                                let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
+                                                            }))
+                                                        } else {
+                                                            None
+                                                        };
+                                                    };
+                                                };
+                                            }
+                                        };
+                                        let v181 = r.read_f32()?;
+                                    };
+                                } else if (v169.0 == 1) {
+                                    let _ = {
+                                        let v182 = {
+                                            HolderSet::skip(r)?;
+                                        };
+                                    };
+                                } else if (v169.0 == 2) {
+                                    let _ = ();
+                                } else if (v169.0 == 3) {
+                                    let _ = {
+                                        let v183 = r.read_f32()?;
+                                    };
+                                } else if (v169.0 == 4) {
+                                    let _ = {
+                                        let v184 = {
+                                            let id = r.read_varint()?;
+                                            if id == 0 {
+                                                let _ = {
+                                                    let v185 = r.read_string()?;
+                                                    let v186 = if r.read_bool()? {
+                                                        Some(r.read_f32()?)
+                                                    } else {
+                                                        None
+                                                    };
+                                                };
+                                            }
+                                        };
+                                    };
+                                } else {
+                                    let _ = ();
+                                });
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 38) {
+                let _ = {
+                    let v187 = r.read_bool()?;
+                    let v188 = r.read_bool()?;
+                    let v189 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v190 = r.read_string()?;
+                                    let v191 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    let v192 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v193 = r.read_string()?;
+                                    let v194 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                };
+            } else if (v1.0 == 39) {
+                let _ = {
+                    let v195 = r.read_varint()?;
+                    let v196 = r.read_varint()?;
+                    let v197 = if r.read_bool()? {
+                        Some({
+                            let v198 = r.read_varint()?;
+                            let v199 = r.read_f32()?;
+                            let v200 = r.read_f32()?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v201 = if r.read_bool()? {
+                        Some({
+                            let v202 = r.read_varint()?;
+                            let v203 = r.read_f32()?;
+                            let v204 = r.read_f32()?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v205 = if r.read_bool()? {
+                        Some({
+                            let v206 = r.read_varint()?;
+                            let v207 = r.read_f32()?;
+                            let v208 = r.read_f32()?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v209 = r.read_f32()?;
+                    let v210 = r.read_f32()?;
+                    let v211 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v212 = r.read_string()?;
+                                    let v213 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                    let v214 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v215 = r.read_string()?;
+                                    let v216 = if r.read_bool()? {
+                                        Some(r.read_f32()?)
+                                    } else {
+                                        None
+                                    };
+                                };
+                            }
+                        })
+                    } else {
+                        None
+                    };
+                };
+            } else if (v1.0 == 40) {
+                let _ = {
+                    let v217 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
+                        r.read_varint()?,
+                    );
+                    let v218 = r.read_varint()?;
+                };
+            } else if (v1.0 == 41) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 43) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 44) {
+                let _ = r.read_i32()?;
+            } else if (v1.0 == 45) {
+                let _ = r.read_i32()?;
+            } else if (v1.0 == 46) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 47) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 48) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 52) {
+                let _ = r.read_f32()?;
+            } else if (v1.0 == 49) {
+                let _ = {
+                    let v219 = {
+                        let v220 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v220 {
+                            let _ = {
+                                let v221 = r.read_varint()?;
+                                let v222 = r.read_varint()?;
+                                let v223 = r.read_varint()?;
+                                let v224 = r.read_varint()?;
+                                let v225 = {
+                                    let v226 = r.check_count(i64::from(v223), 1)?;
+                                    for _ in 0..v226 {
+                                        let _ = {
+                                            crate::defs::p775::types::SlotComponent::skip(r)?;
+                                        };
+                                    }
+                                };
+                                let v227 = {
+                                    let v228 = r.check_count(i64::from(v224), 1)?;
+                                    for _ in 0..v228 {
+                                        let _ = {
+                                            let v229 = crate::defs::p775::types::SlotComponentType(
+                                                r.read_varint()?,
+                                            );
+                                        };
+                                    }
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 50) {
+                let _ = {
+                    let v230 = {
+                        let v231 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v231 {
+                            let _ = {
+                                let v232 = r.read_varint()?;
+                                let v233 = r.read_varint()?;
+                                let v234 = r.read_varint()?;
+                                let v235 = r.read_varint()?;
+                                let v236 = {
+                                    let v237 = r.check_count(i64::from(v234), 1)?;
+                                    for _ in 0..v237 {
+                                        let _ = {
+                                            crate::defs::p775::types::SlotComponent::skip(r)?;
+                                        };
+                                    }
+                                };
+                                let v238 = {
+                                    let v239 = r.check_count(i64::from(v235), 1)?;
+                                    for _ in 0..v239 {
+                                        let _ = {
+                                            let v240 = crate::defs::p775::types::SlotComponentType(
+                                                r.read_varint()?,
+                                            );
+                                        };
+                                    }
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 51) {
+                let _ = {
+                    let v241 = if r.read_bool()? {
+                        Some(r.read_varint()?)
+                    } else {
+                        None
+                    };
+                    let v242 = if r.read_bool()? {
+                        Some(r.read_i32()?)
+                    } else {
+                        None
+                    };
+                    let v243 = {
+                        let v244 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 7)?
+                        };
+                        for _ in 0..v244 {
+                            let _ = {
+                                let v245 = r.read_varint()?;
+                                let v246 = {
+                                    let v247 = r.read_varint()?;
+                                    let v248 = r.read_varint()?;
+                                    let v249 = r.read_bool()?;
+                                    let v250 = r.read_bool()?;
+                                    let v251 = r.read_bool()?;
+                                    let v252 = if r.read_bool()? {
+                                        Some(Box::new({
+                                            let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
+                                        }))
+                                    } else {
+                                        None
+                                    };
+                                };
+                            };
+                        }
+                    };
+                    let v253 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                };
+            } else if (v1.0 == 53) {
+                let _ = {
+                    let v254 = {
+                        let v255 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v255 {
+                            let _ = {
+                                let v256 = r.read_varint()?;
+                                let v257 = r.read_varint()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 54) {
+                let _ = {
+                    let v258 = {
+                        let v259 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v259 {
+                            let _ = {
+                                let v260 = r.read_string()?;
+                                let v261 = if r.read_bool()? {
+                                    Some(r.read_string()?)
+                                } else {
+                                    None
+                                };
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 55) {
+                let _ = {
+                    let v262 = r.read_string()?;
+                    let v263 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
+                    let v264 = r.read_string()?;
+                    let v265 = r.read_varint()?;
+                    let v266 = {
+                        let v267 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v267 {
+                            let _ = {
+                                let v268 = AnonNbt::read(r)?;
+                                let v269 = AnonNbt::read_optional(r)?;
+                            };
+                        }
+                    };
+                    let v270 = r.read_bool()?;
+                };
+            } else if (v1.0 == 56) {
+                let _ = {
+                    let v271 = {
+                        let id = r.read_varint()?;
+                        if id == 0 {
+                            let _ = {
+                                let v272 = r.read_string()?;
+                                let v273 = {
+                                    let v274 = {
+                                        let c = r.read_varint()?;
+                                        r.check_count(i64::from(c), 2)?
+                                    };
+                                    for _ in 0..v274 {
+                                        let _ = {
+                                            let v275 = r.read_string()?;
+                                            let v276 = r.read_string()?;
+                                        };
+                                    }
+                                };
+                                let v277 = AnonNbt::read(r)?;
+                            };
+                        }
+                    };
+                    let v278 = {
+                        let id = r.read_varint()?;
+                        if id == 0 {
+                            let _ = {
+                                let v279 = r.read_string()?;
+                                let v280 = AnonNbt::read(r)?;
+                                let v281 = r.read_bool()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 57) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 58) {
+                let _ = {
+                    let v282 = r.read_varint()?;
+                    let v283 = AnonNbt::read(r)?;
+                };
+            } else if (v1.0 == 60) {
+                let _ = {
+                    let v284 = r.read_varint()?;
+                    let v285 = AnonNbt::read(r)?;
+                };
+            } else if (v1.0 == 59) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 61) {
+                let _ = {
+                    let v286 = r.read_bool()?;
+                    let v287 = (if v286 {
+                        let _ = {
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v288 = {
+                                        let id = r.read_varint()?;
+                                        if id == 0 {
+                                            let _ = {
+                                                let v289 = r.read_string()?;
+                                                let v290 = if r.read_bool()? {
+                                                    Some(r.read_f32()?)
+                                                } else {
+                                                    None
+                                                };
+                                            };
+                                        }
+                                    };
+                                    let v291 = r.read_f32()?;
+                                    let v292 = r.read_f32()?;
+                                    let v293 = AnonNbt::read(r)?;
+                                };
+                            }
+                        };
+                    } else if (!v286) {
+                        let _ = r.read_string()?;
+                    } else {
+                        let _ = ();
+                    });
+                };
+            } else if (v1.0 == 62) {
+                let _ = {
+                    let v294 = r.read_bool()?;
+                    let v295 = (if v294 {
+                        let _ = {
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v296 = r.read_string()?;
+                                    let v297 = {
+                                        let v298 = {
+                                            let c = r.read_varint()?;
+                                            r.check_count(i64::from(c), 2)?
+                                        };
+                                        for _ in 0..v298 {
+                                            let _ = {
+                                                let v299 = r.read_string()?;
+                                                let v300 = r.read_string()?;
+                                            };
+                                        }
+                                    };
+                                    let v301 = AnonNbt::read(r)?;
+                                };
+                            }
+                        };
+                    } else if (!v294) {
+                        let _ = r.read_string()?;
+                    } else {
+                        let _ = ();
+                    });
+                };
+            } else if (v1.0 == 63) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 64) {
+                let _ = {
+                    let v302 = r.read_bool()?;
+                    let v303 = (if v302 {
+                        let _ = {
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                let _ = {
+                                    let v304 = {
+                                        let id = r.read_varint()?;
+                                        if id == 0 {
+                                            let _ = {
+                                                let v305 = r.read_string()?;
+                                                let v306 = if r.read_bool()? {
+                                                    Some(r.read_f32()?)
+                                                } else {
+                                                    None
+                                                };
+                                            };
+                                        }
+                                    };
+                                    let v307 = AnonNbt::read(r)?;
+                                    let v308 = r.read_f32()?;
+                                    let v309 = r.read_varint()?;
+                                };
+                            }
+                        };
+                    } else if (!v302) {
+                        let _ = r.read_string()?;
+                    } else {
+                        let _ = ();
+                    });
+                };
+            } else if (v1.0 == 65) {
+                let _ = r.read_string()?;
+            } else if (v1.0 == 66) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 67) {
+                let _ = {
+                    let v310 = if r.read_bool()? {
+                        Some({
+                            let v311 = r.read_string()?;
+                            let v312 = BlockPos::read(r, PositionLayout::Xzy)?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v313 = r.read_bool()?;
+                };
+            } else if (v1.0 == 68) {
+                let _ = {
+                    let v314 =
+                        crate::defs::p775::types::ItemFireworkExplosionShape(r.read_varint()?);
+                    let v315 = {
+                        let v316 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v316 {
+                            let _ = r.read_i32()?;
+                        }
+                    };
+                    let v317 = {
+                        let v318 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 4)?
+                        };
+                        for _ in 0..v318 {
+                            let _ = r.read_i32()?;
+                        }
+                    };
+                    let v319 = r.read_bool()?;
+                    let v320 = r.read_bool()?;
+                };
+            } else if (v1.0 == 69) {
+                let _ = {
+                    let v321 = r.read_varint()?;
+                    let v322 = {
+                        let v323 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 5)?
+                        };
+                        for _ in 0..v323 {
+                            let _ = {
+                                let v324 = crate::defs::p775::types::ItemFireworkExplosionShape(
+                                    r.read_varint()?,
+                                );
+                                let v325 = {
+                                    let v326 = {
+                                        let c = r.read_varint()?;
+                                        r.check_count(i64::from(c), 4)?
+                                    };
+                                    for _ in 0..v326 {
+                                        let _ = r.read_i32()?;
+                                    }
+                                };
+                                let v327 = {
+                                    let v328 = {
+                                        let c = r.read_varint()?;
+                                        r.check_count(i64::from(c), 4)?
+                                    };
+                                    for _ in 0..v328 {
+                                        let _ = r.read_i32()?;
+                                    }
+                                };
+                                let v329 = r.read_bool()?;
+                                let v330 = r.read_bool()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 70) {
+                let _ = {
+                    let v331 = crate::defs::p775::types::ResolvableProfileType(r.read_varint()?);
+                    let v332 = (if (v331.0 == 0) {
+                        let _ = {
+                            let v333 = if r.read_bool()? {
+                                Some(r.read_string()?)
+                            } else {
+                                None
+                            };
+                            let v334 = if r.read_bool()? {
+                                Some(r.read_uuid()?)
+                            } else {
+                                None
+                            };
+                            let v335 = {
+                                let v336 = {
+                                    let c = r.read_varint()?;
+                                    r.check_count(i64::from(c), 3)?
+                                };
+                                for _ in 0..v336 {
+                                    let _ = {
+                                        let v337 = r.read_string()?;
+                                        let v338 = r.read_string()?;
+                                        let v339 = if r.read_bool()? {
+                                            Some(r.read_string()?)
+                                        } else {
+                                            None
+                                        };
+                                    };
+                                }
+                            };
+                        };
+                    } else if (v331.0 == 1) {
+                        let _ = {
+                            let v340 = r.read_uuid()?;
+                            let v341 = r.read_string()?;
+                            let v342 = {
+                                let v343 = {
+                                    let c = r.read_varint()?;
+                                    r.check_count(i64::from(c), 3)?
+                                };
+                                for _ in 0..v343 {
+                                    let _ = {
+                                        let v344 = r.read_string()?;
+                                        let v345 = r.read_string()?;
+                                        let v346 = if r.read_bool()? {
+                                            Some(r.read_string()?)
+                                        } else {
+                                            None
+                                        };
+                                    };
+                                }
+                            };
+                        };
+                    } else {
+                        let _ = ();
+                    });
+                    let v347 = {
+                        let v348 = if r.read_bool()? {
+                            Some(r.read_string()?)
+                        } else {
+                            None
+                        };
+                        let v349 = if r.read_bool()? {
+                            Some(r.read_string()?)
+                        } else {
+                            None
+                        };
+                        let v350 = if r.read_bool()? {
+                            Some(r.read_string()?)
+                        } else {
+                            None
+                        };
+                        let v351 = if r.read_bool()? {
+                            Some(crate::defs::p775::types::PlayerSkinPatchModel(
+                                r.read_varint()?,
+                            ))
+                        } else {
+                            None
+                        };
+                    };
+                };
+            } else if (v1.0 == 71) {
+                let _ = r.read_string()?;
+            } else if (v1.0 == 72) {
+                let _ = {
+                    let v352 = {
+                        let v353 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v353 {
+                            let _ = {
+                                let v354 = {
+                                    let id = r.read_varint()?;
+                                    if id == 0 {
+                                        let _ = {
+                                            let v355 = r.read_string()?;
+                                            let v356 = r.read_string()?;
+                                        };
+                                    }
+                                };
+                                let v357 = r.read_varint()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 73) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 74) {
+                let _ = {
+                    let v358 = {
+                        let v359 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v359 {
+                            let _ = r.read_varint()?;
+                        }
+                    };
+                };
+            } else if (v1.0 == 75) {
+                let _ = {
+                    let v360 = {
+                        let v361 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 1)?
+                        };
+                        for _ in 0..v361 {
+                            let _ = if r.read_bool()? {
+                                Some({
+                                    let v362 = r.read_varint()?;
+                                    let v363 = r.read_varint()?;
+                                    let v364 = r.read_varint()?;
+                                    let v365 = r.read_varint()?;
+                                    let v366 = {
+                                        let v367 = r.check_count(i64::from(v364), 1)?;
+                                        for _ in 0..v367 {
+                                            let _ = {
+                                                crate::defs::p775::types::SlotComponent::skip(r)?;
+                                            };
+                                        }
+                                    };
+                                    let v368 = {
+                                        let v369 = r.check_count(i64::from(v365), 1)?;
+                                        for _ in 0..v369 {
+                                            let _ = {
+                                                let v370 =
+                                                    crate::defs::p775::types::SlotComponentType(
+                                                        r.read_varint()?,
+                                                    );
+                                            };
+                                        }
+                                    };
+                                })
+                            } else {
+                                None
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 76) {
+                let _ = {
+                    let v371 = {
+                        let v372 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 2)?
+                        };
+                        for _ in 0..v372 {
+                            let _ = {
+                                let v373 = r.read_string()?;
+                                let v374 = r.read_string()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 77) {
+                let _ = {
+                    let v375 = {
+                        let v376 = {
+                            let c = r.read_varint()?;
+                            r.check_count(i64::from(c), 3)?
+                        };
+                        for _ in 0..v376 {
+                            let _ = {
+                                let v377 = AnonNbt::read(r)?;
+                                let v378 = r.read_varint()?;
+                                let v379 = r.read_varint()?;
+                            };
+                        }
+                    };
+                };
+            } else if (v1.0 == 78) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 79) {
+                let _ = AnonNbt::read(r)?;
+            } else if (v1.0 == 80) {
+                let _ = {
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        let _ = {
+                            let v380 = r.read_string()?;
+                            let v381 = if r.read_bool()? {
+                                Some(r.read_f32()?)
+                            } else {
+                                None
+                            };
+                        };
+                    }
+                };
+            } else if (v1.0 == 81) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 82) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 83) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 84) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 85) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 86) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 87) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 88) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 89) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 90) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 91) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 92) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 93) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 94) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 95) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 96) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 97) {
+                let _ = {
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        let _ = r.read_string()?;
+                    }
+                };
+            } else if (v1.0 == 98) {
+                let _ = {
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        let _ = r.read_string()?;
+                    }
+                };
+            } else if (v1.0 == 99) {
+                let _ = {
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        let _ = r.read_string()?;
+                    }
+                };
+            } else if (v1.0 == 100) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 101) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 102) {
+                let _ = {
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        let _ = {
+                            let v382 = r.read_i32()?;
+                            let v383 = r.read_i32()?;
+                            let v384 = r.read_string()?;
+                            let v385 = if r.read_bool()? {
+                                Some(AnonNbt::read(r)?)
+                            } else {
+                                None
+                            };
+                            let v386 = if r.read_bool()? {
+                                Some(AnonNbt::read(r)?)
+                            } else {
+                                None
+                            };
+                        };
+                    }
+                };
+            } else if (v1.0 == 103) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 104) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 105) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 106) {
+                let _ = r.read_varint()?;
+            } else if (v1.0 == 107) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 108) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else if (v1.0 == 109) {
+                let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
+            } else {
+                let _ = ();
+            });
+        };
+        Ok(())
     }
 }
 
