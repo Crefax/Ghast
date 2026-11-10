@@ -278,9 +278,9 @@ fn compact<const B: u32, const W: usize, const P: usize>(p: &Packed<B, W, P>) ->
             k += 1;
         }
     }
-    Some(build_from_indices(&palette[..k], |f| {
-        p.for_each_index(|i, e| f(i, usize::from(remap[e])));
-    }))
+    let mut idx = [0u8; VOLUME];
+    p.for_each_index(|i, e| idx[i] = remap[e]);
+    Some(build_from_buffer(&palette[..k], &idx))
 }
 
 fn widen1(p: &Packed1) -> Section {
@@ -316,30 +316,45 @@ fn repack<
     q
 }
 
-/// Builds the smallest section for `palette` (distinct states) and an index source that calls
-/// its argument `(block, palette index)` for every block.
-fn build_from_indices(palette: &[u16], fill: impl FnOnce(&mut dyn FnMut(usize, usize))) -> Section {
+/// Builds the smallest section for `palette` (at most 256 distinct states) from palette indices.
+fn build_from_buffer(palette: &[u16], idx: &[u8; VOLUME]) -> Section {
     fn mk<const B: u32, const W: usize, const P: usize>(
         palette: &[u16],
-        fill: impl FnOnce(&mut dyn FnMut(usize, usize)),
+        idx: &[u8; VOLUME],
     ) -> Box<Packed<B, W, P>> {
         let mut q = Packed::<B, W, P>::zeroed();
         q.palette[..palette.len()].copy_from_slice(palette);
         q.len = palette.len() as u16;
-        fill(&mut |i, k| q.set_index(i, k));
+        let per = VOLUME / W;
+        for (w, chunk) in q.words.iter_mut().zip(idx.chunks_exact(per)) {
+            let mut x = 0u64;
+            for (j, &k) in chunk.iter().enumerate() {
+                x |= u64::from(k) << (j as u32 * B);
+            }
+            *w = x;
+        }
         q
     }
     match palette.len() {
         0 => Section::Uniform(0),
         1 => Section::Uniform(palette[0]),
-        2 => Section::Bits1(mk(palette, fill)),
-        3..=4 => Section::Bits2(mk(palette, fill)),
-        5..=16 => Section::Bits4(mk(palette, fill)),
-        17..=256 => Section::Bits8(mk(palette, fill)),
-        _ => {
-            let mut d = Box::new([0u16; VOLUME]);
-            fill(&mut |i, k| d[i] = palette[k]);
-            Section::Direct(d)
+        2 => Section::Bits1(mk(palette, idx)),
+        3..=4 => Section::Bits2(mk(palette, idx)),
+        5..=16 => Section::Bits4(mk(palette, idx)),
+        _ => Section::Bits8(mk(palette, idx)),
+    }
+}
+
+/// Unpacks `sb`-bit big-endian wire indices into `out` (values above 255 are truncated: only
+/// used for widths up to 8).
+fn unpack_indices(data: &[u8], sb: u32, out: &mut [u8; VOLUME]) {
+    let per = (64 / sb) as usize;
+    let mask = (1u64 << sb) - 1;
+    for (chunk, b) in out.chunks_mut(per).zip(data.as_chunks::<8>().0) {
+        let mut x = u64::from_be_bytes(*b);
+        for o in chunk {
+            *o = (x & mask) as u8;
+            x >>= sb;
         }
     }
 }
@@ -385,40 +400,35 @@ impl Builder {
         };
         match w.palette {
             Some(pal) => {
-                // Which palette entries are used.
-                let mut used = [0u64; 4];
-                let mut n = 0usize;
-                for word in words() {
-                    let mut x = word;
-                    for _ in 0..per {
-                        if n == VOLUME {
-                            break;
-                        }
-                        let k = (x & mask) as usize;
-                        used[k >> 6] |= 1 << (k & 63);
-                        x >>= sb;
-                        n += 1;
-                    }
-                }
-                // Indices past the palette: vanilla throws when such a block is read.
                 let len = pal.len();
-                for k in len..(1usize << sb).min(256) {
-                    if used[k >> 6] & (1 << (k & 63)) != 0 {
-                        return Err("palette index past the palette");
-                    }
-                }
-                let distinct: u32 = used.iter().map(|x| x.count_ones()).sum();
-                // Fast path: the wire packing is the target packing.
-                if sb == 4 && distinct > 4 {
+                if sb == 4 && len >= 5 {
+                    // The common case: the wire packing is the target packing. Copy, check the
+                    // indices against the palette (SWAR: one add per nibble lane), and notice a
+                    // section whose blocks all use one entry.
                     let mut q = Packed4::zeroed();
+                    let lo = 0x0F0F_0F0F_0F0F_0F0Fu64;
+                    let k = (0x80 - len as u64) * 0x0101_0101_0101_0101;
+                    let mut bad = 0u64;
                     for (dst, word) in q.words.iter_mut().zip(words()) {
                         *dst = word;
+                        bad |= ((word & lo) + k) | (((word >> 4) & lo) + k);
+                    }
+                    if len < 16 && bad & 0x8080_8080_8080_8080 != 0 {
+                        return Err("palette index past the palette");
+                    }
+                    let first = q.words[0] & 15;
+                    if q.words.iter().all(|&x| x == first * 0x1111_1111_1111_1111) {
+                        return Ok(Section::Uniform(pal[first as usize]));
                     }
                     q.palette[..len].copy_from_slice(pal);
                     q.len = len as u16;
                     return Ok(Section::Bits4(q));
                 }
-                if sb == 8 && distinct > 16 {
+                if sb == 8 && len > 16 {
+                    let max = w.data[..VOLUME].iter().copied().max().unwrap_or(0);
+                    if usize::from(max) >= len {
+                        return Err("palette index past the palette");
+                    }
                     let mut q = Packed8::zeroed();
                     for (dst, word) in q.words.iter_mut().zip(words()) {
                         *dst = word;
@@ -427,12 +437,31 @@ impl Builder {
                     q.len = len as u16;
                     return Ok(Section::Bits8(q));
                 }
-                // Compact the used entries (duplicate palette ids merge too).
+                if sb == 4 {
+                    // Small palette: a section whose blocks all use one entry is common (flat
+                    // layers, and palettes the server never shrinks after edits).
+                    let first = u64::from_be_bytes(w.data[..8].try_into().unwrap_or([0; 8])) & 15;
+                    let pat = first * 0x1111_1111_1111_1111;
+                    if (first as usize) < len && words().all(|x| x == pat) {
+                        return Ok(Section::Uniform(pal[first as usize]));
+                    }
+                }
+                // Small palettes and 5 - 7 bit storage: unpack, keep only the used entries
+                // (duplicate palette ids merge too), pack at the smallest width.
+                let mut idx = [0u8; VOLUME];
+                unpack_indices(w.data, sb, &mut idx);
+                let mut used = [false; 256];
+                for &k in &idx {
+                    used[usize::from(k)] = true;
+                }
+                if used[len..].iter().any(|&u| u) {
+                    return Err("palette index past the palette");
+                }
                 let mut palette = [0u16; 256];
-                let mut remap = [0u16; 256];
+                let mut remap = [0u8; 256];
                 let mut k = 0usize;
                 for (e, &s) in pal.iter().enumerate() {
-                    if used[e >> 6] & (1 << (e & 63)) == 0 {
+                    if !used[e] {
                         continue;
                     }
                     let slot = &mut self.lookup[usize::from(s)];
@@ -441,25 +470,15 @@ impl Builder {
                         k += 1;
                         *slot = k as u16;
                     }
-                    remap[e] = *slot - 1;
+                    remap[e] = (*slot - 1) as u8;
                 }
                 for &s in &palette[..k] {
                     self.lookup[usize::from(s)] = 0;
                 }
-                Ok(build_from_indices(&palette[..k], |f| {
-                    let mut i = 0usize;
-                    for word in words() {
-                        let mut x = word;
-                        for _ in 0..per {
-                            if i == VOLUME {
-                                return;
-                            }
-                            f(i, usize::from(remap[(x & mask) as usize]));
-                            x >>= sb;
-                            i += 1;
-                        }
-                    }
-                }))
+                for i in &mut idx {
+                    *i = remap[usize::from(*i)];
+                }
+                Ok(build_from_buffer(&palette[..k], &idx))
             }
             None => {
                 // Global ids: build a palette of the distinct states.
@@ -497,11 +516,11 @@ impl Builder {
                 if palette.len() > 256 {
                     return Ok(Section::Direct(states));
                 }
-                Ok(build_from_indices(&palette, |f| {
-                    for (i, &k) in idx.iter().enumerate() {
-                        f(i, usize::from(k));
-                    }
-                }))
+                let mut small = [0u8; VOLUME];
+                for (d, &k) in small.iter_mut().zip(idx.iter()) {
+                    *d = k as u8;
+                }
+                Ok(build_from_buffer(&palette, &small))
             }
         }
     }
@@ -572,7 +591,7 @@ mod tests {
     #[test]
     fn unused_entries_and_errors() {
         let mut b = Builder::new(100);
-        // palette of 10, only entries 3 and 7 used -> 1 bit
+        // palette of 10, only entries 3 and 7 used: kept as sent (no scan for 5+ entries)
         let pal: Vec<u16> = (10..20).collect();
         let idx: Vec<u32> = (0..VOLUME as u32)
             .map(|i| if i % 3 == 0 { 3 } else { 7 })
@@ -584,11 +603,36 @@ mod tests {
                 data: &pack(4, &idx),
             })
             .unwrap();
-        assert_eq!(s.bits(), 1);
+        assert_eq!(s.bits(), 4);
         check(
             &s,
             &idx.iter().map(|&k| pal[k as usize]).collect::<Vec<_>>(),
         );
+        // palette of 3 with 2 used -> 1 bit; palette of 6 all blocks one entry -> uniform
+        let pal3: Vec<u16> = vec![5, 6, 7];
+        let idx: Vec<u32> = (0..VOLUME as u32)
+            .map(|i| if i % 5 == 0 { 0 } else { 2 })
+            .collect();
+        let s = b
+            .build(&WireBlocks {
+                storage_bits: 4,
+                palette: Some(&pal3),
+                data: &pack(4, &idx),
+            })
+            .unwrap();
+        assert_eq!(s.bits(), 1);
+        check(
+            &s,
+            &idx.iter().map(|&k| pal3[k as usize]).collect::<Vec<_>>(),
+        );
+        let s = b
+            .build(&WireBlocks {
+                storage_bits: 4,
+                palette: Some(&pal[..6]),
+                data: &pack(4, &vec![4; VOLUME]),
+            })
+            .unwrap();
+        assert!(matches!(s, Section::Uniform(14)), "{s:?}");
         // index past the palette
         let idx = vec![12u32; VOLUME];
         assert!(

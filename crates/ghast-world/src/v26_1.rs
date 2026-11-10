@@ -755,6 +755,12 @@ impl World {
         Applied::Changed
     }
 
+    /// Enters a dimension without a `login` packet (tests, offline planning): a new client
+    /// level like [`World::apply_login`]; `type_index` names a `dimension_type` registry entry.
+    pub fn enter_dimension(&mut self, name: &str, type_index: i32, view_distance: i32) -> Applied {
+        self.enter(name, type_index, Some(view_distance))
+    }
+
     /// Join game: a new client level (everything unloaded, window centred on 0, 0).
     pub fn apply_login(&mut self, p: &Login) -> Applied {
         self.enter(

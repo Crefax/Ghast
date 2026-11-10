@@ -41,6 +41,11 @@ name = "world"
 harness = false
 required-features = ["v1_8", "v1_16_5"]
 
+[[bench]]
+name = "world_26_1"
+harness = false
+required-features = ["v26_1", "physics"]
+
 [[example]]
 name = "chunk_stats_26_1"
 required-features = ["v26_1"]

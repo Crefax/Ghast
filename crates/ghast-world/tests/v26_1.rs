@@ -411,22 +411,7 @@ fn state_ids_match_the_mojang_report() {
         }
     }
     assert_eq!(n, STATE_COUNT);
-    // ghast-data's v26_1 tables label integer properties that start at 1 from 0 (reported to the
-    // ghast-data owner, 2026-11-11). When this assertion fails, the labels were fixed: replace
-    // it with `assert!(mislabelled.is_empty())`.
-    let known = [
-        "candles",
-        "delay",
-        "distance",
-        "eggs",
-        "flower_amount",
-        "layers",
-        "level",
-        "pickles",
-        "segment_amount",
-    ];
-    assert_eq!(
-        mislabelled.iter().map(String::as_str).collect::<Vec<_>>(),
-        known
-    );
+    // Every property value label matches too (ghast-data once labelled integer properties that
+    // start at 1 from 0; found by this test, 2026-11-11).
+    assert!(mislabelled.is_empty(), "{mislabelled:?}");
 }
