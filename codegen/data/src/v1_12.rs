@@ -414,8 +414,21 @@ pub fn generate(
         notes,
     )?);
     files.push((
+        "dig.rs".to_string(),
+        crate::dig_tables::generate(
+            "Minecraft 1.12.2 dig tables (oracle).",
+            &oracle_selection.with_file_name("dig_facts.jsonl.gz"),
+            "tests/golden/1.12.2/dig_facts.jsonl.gz",
+            "strength",
+            "no_tool_needed",
+        )?,
+    ));
+    let mut mods = generate::MODS.to_vec();
+    mods.push("dig");
+    mods.sort_unstable();
+    files.push((
         "mod.rs".to_string(),
-        generate::mod_rs("Generated 1.12 tables.", generate::MODS),
+        generate::mod_rs("Generated 1.12 tables.", &mods),
     ));
     Ok(files
         .into_iter()

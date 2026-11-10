@@ -832,4 +832,5 @@ pub fn break_time(progress: f32, destroy_delay: u32, limit: u32) -> BreakTime {
 
 /// One row of a version's generated `ITEM_DIG` table: item id, `(block, speed multiplier)` sorted
 /// by block, effective blocks sorted.
+#[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 pub(crate) type ItemDig = (u16, &'static [(u16, f32)], &'static [u16]);

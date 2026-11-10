@@ -992,6 +992,26 @@ events (break particles / sounds) are no-ops in this dump (they need the rendere
 Replayed by `crates/ghast-data/src/v26_1/tests.rs` (`dig_matches_the_client`); a 40k-case run
 (seed 2) also matched.
 
+## Dig vectors (1.8.9, 1.12.2, 1.16.5)
+
+`DigDump` in each harness (`dig-facts`, `dig [--seed --count]`, both in `golden`), the 26.1 dump's
+counterpart through `ClientPlayerInteractionManager.attackBlock` (start; an instant break happens
+here, without a stop packet) and `updateBlockBreakingProgress` (in the start tick and once per
+later tick; `STOP_DESTROY_BLOCK` when the progress reaches 1, then a 5-call cooldown).
+
+`dig_facts.jsonl.gz`: `block` lines (`id`, `name`, `strength` (1.8 / 1.12) or `hardness` (1.16.5),
+`no_tool_needed` (1.8 / 1.12: the material's Legacy Yarn `doesBlockMovement`, MCP
+`isToolNotRequired`) or `requires_tool` (1.16.5 `isToolRequired`), `differing_states` (1.12 / 1.16.5:
+states where they differ from the default state; none)); `item` lines (`id`, `name`,
+`speed_blocks` = blocks where the real stack's mining speed multiplier is not 1, `effective_blocks`
+= blocks it harvests (`isEffectiveOn` / `method_11396` / `isSuitableFor`), `differing_states`).
+
+`dig.jsonl.gz` (3000 cases each): block (1.8 / 1.12 `raw` = id << 4 | meta, 1.16.5 `state`),
+`held` / `held_id`, `efficiency` level (enchanted stack), `haste`, `mining_fatigue` (1.16.5 also
+`conduit_power`) amplifiers, `eye_in_water` (water blocks at the eyes; the game's own test),
+`aqua_affinity` (enchanted helmet), `on_ground`, `creative`; `mining_speed`, `effective_tool`,
+`progress` and `first` as in the 26.1 dump. Replayed by `crates/ghast-data/tests/oracle_dig.rs`.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or

@@ -89,6 +89,12 @@ public final class Main {
                 write(out, sink -> SelectionDump.rays(seed, worlds, rays, sink));
             }
             case "recipes" -> write(a.path("--out", golden.resolve("recipes.jsonl.gz")), RecipeDump::lines);
+            case "dig-facts" -> write(a.path("--out", golden.resolve("dig_facts.jsonl.gz")), DigDump::facts);
+            case "dig" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", DigDump.CASES);
+                write(a.path("--out", golden.resolve("dig.jsonl.gz")), sink -> dig(seed, count, sink));
+            }
             case "clicks" -> {
                 // window click vectors (ClickDump): --seed, --count cases (1..10 clicks each)
                 long seed = a.lng("--seed", 1);
@@ -147,6 +153,14 @@ public final class Main {
     /** Golden files are compressed harder; big fuzz runs favour speed. */
     private static boolean bestCompression;
 
+    static void dig(long seed, int count, java.util.function.Consumer<String> sink) {
+        try {
+            DigDump.cases(seed, count, sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     static void writeGolden(Path dir) throws IOException {
         bestCompression = true;
         write(dir.resolve("scenarios.jsonl.gz"), sink -> runAll(Scenarios.all(), sink));
@@ -164,6 +178,8 @@ public final class Main {
         write(dir.resolve("selection_boxes.jsonl.gz"), sink -> SelectionDump.lines().forEach(sink));
         write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(GOLDEN_RAY_SEED, GOLDEN_RAY_WORLDS, GOLDEN_RAYS, sink));
         write(dir.resolve("recipes.jsonl.gz"), RecipeDump::lines);
+        write(dir.resolve("dig_facts.jsonl.gz"), DigDump::facts);
+        write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
         bestCompression = false;

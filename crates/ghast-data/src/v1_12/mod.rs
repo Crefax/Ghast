@@ -21,6 +21,8 @@ use crate::common::{
 };
 use crate::generated::v1_12 as g;
 
+pub mod dig;
+
 /// Size of the block id space (`0..=255`; not every id is a block, see [`Block::from_id`]).
 pub const BLOCK_ID_SPACE: usize = 256;
 
