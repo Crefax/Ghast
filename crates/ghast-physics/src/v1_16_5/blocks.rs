@@ -137,6 +137,20 @@ fn model_offset_xz(x: i32, z: i32) -> (f64, f64) {
     (f(l), f(l >> 8))
 }
 
+/// Bamboo's collision box at `(x, z)` with its model offset, block-local (the shifted shape's
+/// `getBoundingBoxes`: each boundary is `point + offset`).
+pub(crate) fn bamboo_box(x: i32, z: i32) -> Aabb {
+    let (ox, oz) = model_offset_xz(x, z);
+    Aabb::new(
+        BAMBOO_XZ[0] + ox,
+        BAMBOO_Y[0],
+        BAMBOO_XZ[0] + oz,
+        BAMBOO_XZ[1] + ox,
+        BAMBOO_Y[1],
+        BAMBOO_XZ[1] + oz,
+    )
+}
+
 /// The collision shape of a state at `(x, y, z)` for a player context.
 pub(crate) fn collision_shape(
     s: BlockState,

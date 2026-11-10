@@ -10,8 +10,8 @@ use ghast_data::PhysicsFlags;
 use ghast_data::v1_16_5::{Block, BlockState};
 
 use super::blocks::{
-    ShapeCtx, collision_boxes, flags, is_bed, is_climbable_at, jump_multiplier, should_suffocate,
-    slipperiness, state_at, velocity_multiplier,
+    ShapeCtx, bamboo_box, collision_boxes, flags, is_bed, is_climbable_at, jump_multiplier,
+    should_suffocate, slipperiness, state_at, velocity_multiplier,
 };
 use super::collide::{BorderShape, Collider, bx, contract, offset};
 use super::fluid::{
@@ -1280,7 +1280,12 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
         col.each_block_collision(&p.bb, &search, |[x, y, z]| {
             let s = state_at(self.w, x, y, z);
             for b in collision_boxes(s, y, Some(&ctx)) {
-                let bb = b.at(x, y, z);
+                // Bamboo's boxes carry its per-position model offset (the static one does not).
+                let bb = if s.block() == Block::BAMBOO {
+                    bamboo_box(x, z).at(x, y, z)
+                } else {
+                    b.at(x, y, z)
+                };
                 if seg(&bb, a0, a1) || seg(&bb, b0, b1) {
                     hit = Some(bb);
                     return false;

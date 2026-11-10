@@ -39,3 +39,8 @@ fn scenarios_1_16_5() {
 fn fuzz_seed1_1_16_5() {
     check("fuzz_seed1.jsonl.gz");
 }
+
+#[test]
+fn fuzz_edges_seed1_1_16_5() {
+    check("fuzz_edges_seed1.jsonl.gz");
+}

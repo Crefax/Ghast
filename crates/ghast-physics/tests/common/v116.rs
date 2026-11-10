@@ -45,6 +45,26 @@ fn pose_name(p: Pose) -> &'static str {
     }
 }
 
+/// Effects from an `[[id, amplifier], …]` list (setup or an `effects` event).
+fn effects_of(list: &Value) -> Effects {
+    let mut effects = Effects::default();
+    for e in list.as_array().unwrap() {
+        match (i(&e[0]), i(&e[1])) {
+            (8, amp) => effects.jump_boost = Some(amp),
+            (15, _) => effects.blindness = true,
+            (25, amp) => effects.levitation = Some(amp),
+            (28, _) => effects.slow_falling = true,
+            (30, _) => effects.dolphins_grace = true,
+            (id, _) => panic!("effect {id} not modelled"),
+        }
+    }
+    effects
+}
+
+fn uuid_of(s: &str) -> u128 {
+    u128::from_str_radix(&s.replace('-', ""), 16).expect("uuid")
+}
+
 /// Player state from the tick-0 record plus header-only data.
 pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     let s = &t0["state"];
@@ -89,8 +109,17 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     p.flying_speed = f32_of(&s["flying_speed"]);
     p.movement_speed = f32_of(&s["movement_speed"]);
     p.movement_speed_base = f64_of(&setup["movement_speed_base"]);
-    for m in setup["speed_modifiers"].as_array().unwrap() {
-        p.speed_modifiers.push(f64_of(&m[0]), i(&m[1]) as u8);
+    // The oracle gives setup modifier k the UUID (most 0x6f7261636c65, least k); the UUID decides
+    // the order modifiers of one operation are applied in.
+    for (k, m) in setup["speed_modifiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let uuid = (0x6f72_6163_6c65_u128 << 64) | k as u128;
+        p.speed_modifiers
+            .insert(uuid, f64_of(&m[0]), i(&m[1]) as u8);
     }
     // The client's sprint modifier comes after the server's (setup applies properties first).
     p.speed_modifiers.set_sprint(p.sprinting);
@@ -124,18 +153,7 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
         sneaking: b(&sent["sneaking"]),
         ticks_since_pos: i(&sent["ticks_since_pos"]),
     };
-    let mut effects = Effects::default();
-    for e in setup["effects"].as_array().unwrap() {
-        match (i(&e[0]), i(&e[1])) {
-            (8, amp) => effects.jump_boost = Some(amp),
-            (15, _) => effects.blindness = true,
-            (25, amp) => effects.levitation = Some(amp),
-            (28, _) => effects.slow_falling = true,
-            (30, _) => effects.dolphins_grace = true,
-            (id, _) => panic!("effect {id} not modelled"),
-        }
-    }
-    p.effects = effects;
+    p.effects = effects_of(&setup["effects"]);
     p.enchantments = Enchantments {
         depth_strider: i(&setup["depth_strider"]) as u8,
         soul_speed: i(&setup["soul_speed"]) as u8,
@@ -275,11 +293,13 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 match e["type"].as_str().unwrap() {
                     "velocity" => p.apply_velocity_packet(i(&e["x"]), i(&e["y"]), i(&e["z"])),
                     "teleport" => {
+                        let flags = e.get("flags").and_then(Value::as_u64).unwrap_or(0);
+                        let rel = [0, 1, 2, 3, 4].map(|bit| flags & (1 << bit) != 0);
                         let reply = p.apply_teleport(
                             f3(&e["pos"]),
                             f32_of(&e["yaw"]),
                             f32_of(&e["pitch"]),
-                            [false; 5],
+                            rel,
                         );
                         sent.push(packet_json(&reply));
                     }
@@ -291,6 +311,22 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         fly_speed: f32_of(&e["fly_speed"]),
                         walk_speed: f32_of(&e["walk_speed"]),
                     }),
+                    "effects" => p.effects = effects_of(&e["effects"]),
+                    "speed_attribute" => {
+                        let mods: Vec<(u128, f64, u8)> = e["modifiers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|m| {
+                                (
+                                    uuid_of(m[0].as_str().unwrap()),
+                                    f64_of(&m[1]),
+                                    i(&m[2]) as u8,
+                                )
+                            })
+                            .collect();
+                        p.apply_speed_attribute(f64_of(&e["base"]), &mods);
+                    }
                     other => panic!("unknown event {other}"),
                 }
             }

@@ -36,10 +36,13 @@ public final class Main {
                 int count = (int) a.lng("--count", 100);
                 int ticks = (int) a.lng("--ticks", 60);
                 boolean useItem = Boolean.parseBoolean(a.str("--use-item", "false"));
+                boolean edges = Boolean.parseBoolean(a.str("--edges", "false")) || "edges".equals(a.str("--palette", ""));
+                boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 Io.write(out, sink -> {
                     for (int i = 0; i < count; i++) {
-                        run(Fuzz.one(seed, i, ticks, useItem), sink);
+                        run(edges ? Fuzz.edge(seed, i, ticks)
+                                : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
             }
@@ -77,7 +80,7 @@ public final class Main {
                 ghast oracle (Minecraft %s)
                   golden   [--out DIR]                 write the committed golden set
                   scenarios [--out FILE] [--only NAME] run the hand-written scenarios
-                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--out FILE(.gz)]
+                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--out FILE(.gz)]
                   replay --in FILE [--out FILE]        rerun scenarios read from golden-format JSON lines
                   boxes [--out FILE]                   collision shapes of every block state
                   boxes-far [--out FILE]               the same at far positions, absolute
@@ -99,6 +102,11 @@ public final class Main {
         Io.write(dir.resolve("scenarios.jsonl.gz"), sink -> runAll(Scenarios.all(), sink));
         Io.write(dir.resolve("fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"),
                 sink -> runAll(Fuzz.cases(GOLDEN_FUZZ_SEED, GOLDEN_FUZZ_COUNT, GOLDEN_FUZZ_TICKS), sink));
+        Io.write(dir.resolve("fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"), sink -> {
+            for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
+                run(Fuzz.edge(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS), sink);
+            }
+        });
         Io.write(dir.resolve("collision_shapes.jsonl.gz"), CollisionDump::lines);
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
@@ -147,6 +155,9 @@ public final class Main {
         boolean ok = Io.compare(a, b);
         List<Scenario> all = new ArrayList<>(Scenarios.all());
         all.addAll(Fuzz.cases(GOLDEN_FUZZ_SEED, GOLDEN_FUZZ_COUNT, GOLDEN_FUZZ_TICKS));
+        for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
+            all.add(Fuzz.edge(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
+        }
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -163,7 +174,8 @@ public final class Main {
         int clickMismatches = ClickDump.reverseMismatches(GOLDEN_CLICK_SEED, 500);
         System.out.println((clickMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 500 click cases");
         ok &= clickMismatches == 0;
-        for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"}) {
+        for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             Io.write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = Io.sha256(replayed).equals(Io.sha256(a.resolve(f)));
