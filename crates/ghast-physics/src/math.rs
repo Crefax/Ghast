@@ -26,6 +26,13 @@ static SIN_TABLE: LazyLock<Box<[f32; SIN_TABLE_LEN]>> = LazyLock::new(|| {
     t
 });
 
+/// The shared sine table (also the 26.x table: a JDK builds identical entries from
+/// `i / 10430.378350470453`).
+#[inline]
+pub(crate) fn sin_table() -> &'static [f32; SIN_TABLE_LEN] {
+    &SIN_TABLE
+}
+
 /// Radians to sine-table index scale, `65536 / (2 PI)` as vanilla's float literal.
 const SIN_SCALE: f32 = 10430.378;
 

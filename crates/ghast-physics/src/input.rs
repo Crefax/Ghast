@@ -118,6 +118,20 @@ pub enum Packet {
         /// On ground.
         on_ground: bool,
     },
+    /// A modern (26.x) movement packet: position and / or rotation (both absent = status only),
+    /// on-ground and horizontal-collision flags.
+    Move {
+        /// Position (feet), when included.
+        pos: Option<[f64; 3]>,
+        /// `(yaw, pitch)`, when included.
+        look: Option<(f32, f32)>,
+        /// On ground.
+        on_ground: bool,
+        /// Horizontal collision.
+        horizontal_collision: bool,
+    },
+    /// The modern `player_input` packet: the key state, sent when it changes.
+    PlayerInput(Keys),
     /// Position and rotation.
     PositionLook {
         /// X.

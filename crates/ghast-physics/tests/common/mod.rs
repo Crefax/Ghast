@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 
 pub mod v112;
 pub mod v116;
+#[cfg(feature = "v26_1")]
+pub mod v261;
 
 /// Repository root (`crates/ghast-physics/../..`).
 pub fn repo_root() -> PathBuf {

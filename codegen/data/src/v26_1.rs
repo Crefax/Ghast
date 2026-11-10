@@ -43,7 +43,8 @@ fn hex32(v: &Value) -> R<f32> {
 }
 
 fn flag(v: &Value, k: &str) -> R<bool> {
-    v[k].as_bool().ok_or_else(|| format!("missing bool {k}: {v}"))
+    v[k].as_bool()
+        .ok_or_else(|| format!("missing bool {k}: {v}"))
 }
 
 /// Block kinds the movement code treats specially (`v26_1::BlockKind` discriminants).
@@ -120,7 +121,10 @@ fn voxel_of(v: &Value) -> R<Voxel> {
     let filled = v["filled"].as_str().ok_or("filled")?;
     let n = (sizes[0] * sizes[1] * sizes[2]) as usize;
     if filled.len() != n {
-        return Err(format!("voxel shape: {} cells, sizes {sizes:?}", filled.len()));
+        return Err(format!(
+            "voxel shape: {} cells, sizes {sizes:?}",
+            filled.len()
+        ));
     }
     let mut cells = vec![0u64; n.div_ceil(64).max(1)];
     for (i, c) in filled.bytes().enumerate() {
@@ -245,7 +249,11 @@ fn same_union(a: &[[f64; 6]], b: &[[f64; 6]]) -> bool {
     for x in axes[0].windows(2) {
         for y in axes[1].windows(2) {
             for z in axes[2].windows(2) {
-                let p = [(x[0] + x[1]) / 2.0, (y[0] + y[1]) / 2.0, (z[0] + z[1]) / 2.0];
+                let p = [
+                    (x[0] + x[1]) / 2.0,
+                    (y[0] + y[1]) / 2.0,
+                    (z[0] + z[1]) / 2.0,
+                ];
                 if covered(a, p) != covered(b, p) {
                     return false;
                 }
@@ -255,7 +263,11 @@ fn same_union(a: &[[f64; 6]], b: &[[f64; 6]]) -> bool {
     true
 }
 
-pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<String>) -> R<Vec<File>> {
+pub fn generate(
+    p: &Paths,
+    oracle_voxels: &std::path::Path,
+    notes: &mut Vec<String>,
+) -> R<Vec<File>> {
     let blocks = model::blocks(&p.json("blocks")?)?;
     for (i, b) in blocks.iter().enumerate() {
         if usize::from(b.id) != i {
@@ -304,10 +316,7 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
                         flags |= bit;
                     }
                 }
-                let kind = KINDS
-                    .iter()
-                    .find(|k| k.0 == short)
-                    .map_or("Other", |k| k.1);
+                let kind = KINDS.iter().find(|k| k.0 == short).map_or("Other", |k| k.1);
                 let offset = match &v["offset"] {
                     Value::Null => None,
                     o => Some((hex32(&o["max_h"])?, hex32(&o["max_v"])?, flag(o, "xyz")?)),
@@ -346,18 +355,16 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
             Some("state") => {
                 let id = v["id"].as_u64().ok_or("state id")? as usize;
                 if id >= state_count {
-                    return Err(format!("26.1 dump state {id} beyond minecraft-data's {state_count}"));
+                    return Err(format!(
+                        "26.1 dump state {id} beyond minecraft-data's {state_count}"
+                    ));
                 }
                 let sid = v["collision_shape"].as_u64().ok_or("collision_shape")?;
                 let shape = dump_shapes
                     .get(&sid)
                     .ok_or_else(|| format!("state {id}: shape {sid} not yet defined"))?
                     .clone();
-                boxes_of_state[id] = shape
-                    .boxes
-                    .iter()
-                    .map(|b| b.map(f64::from_bits))
-                    .collect();
+                boxes_of_state[id] = shape.boxes.iter().map(|b| b.map(f64::from_bits)).collect();
                 let mut f = 0u32;
                 let bit = |k: &str, b: u32| -> R<u32> { Ok(if flag(v, k)? { b } else { 0 }) };
                 f |= bit("full_cube_identity", 1)?;
@@ -378,13 +385,19 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
                 }
                 if v.get("context_shapes").is_some_and(Value::is_object) {
                     f |= 1 << 10;
-                    ctx_shapes.insert(id, v["context_shapes"].as_object().cloned().unwrap_or_default());
+                    ctx_shapes.insert(
+                        id,
+                        v["context_shapes"].as_object().cloned().unwrap_or_default(),
+                    );
                 }
                 if v.get("base_points_x").is_some() {
                     f |= 1 << 11;
                     let mut base = shape.clone();
                     base.class = "Array";
-                    for (k, axis) in ["base_points_x", "base_points_y", "base_points_z"].iter().enumerate() {
+                    for (k, axis) in ["base_points_x", "base_points_y", "base_points_z"]
+                        .iter()
+                        .enumerate()
+                    {
                         base.pts[k] = v[*axis]
                             .as_array()
                             .ok_or("base points")?
@@ -392,27 +405,27 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
                             .map(|c| hex64(c).map(f64::to_bits))
                             .collect::<R<_>>()?;
                     }
-                    // Box list without the dump position's offset (the block-local unshifted boxes).
-                    let off: Vec<f64> = v["offset_at_dump"]
-                        .as_array()
-                        .ok_or("offset_at_dump")?
-                        .iter()
-                        .map(hex64)
-                        .collect::<R<_>>()?;
-                    base.boxes = shape
-                        .boxes
-                        .iter()
-                        .map(|b| {
-                            let mut o = *b;
-                            for k in 0..6 {
-                                o[k] = (f64::from_bits(b[k]) - off[k % 3]).to_bits();
-                            }
-                            o
-                        })
-                        .collect();
+                    // Box list of the unshifted shape: each dumped box coordinate is a point of the
+                    // shifted shape; take the unshifted point with the same index.
+                    let mut boxes = Vec::new();
+                    for b in &shape.boxes {
+                        let mut o = [0u64; 6];
+                        for k in 0..6 {
+                            let axis = k % 3;
+                            let i = shape.pts[axis].iter().position(|&p| p == b[k]).ok_or_else(
+                                || format!("state {id}: box coordinate not a shape point"),
+                            )?;
+                            o[k] = base.pts[axis][i];
+                        }
+                        boxes.push(o);
+                    }
+                    base.boxes = boxes;
                     state_offset_shape.insert(id, base);
                 }
-                if v["state"].as_str().is_some_and(|s| s.starts_with("minecraft:moving_piston")) {
+                if v["state"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("minecraft:moving_piston"))
+                {
                     f |= 1 << 12;
                 }
                 state_flags[id] = f;
@@ -465,7 +478,10 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         let o = ob
             .get(&b.name)
             .ok_or_else(|| format!("26.1: minecraft-data block {} not in the jar", b.name))?;
-        if o.first != b.min_state || o.count != b.max_state + 1 - b.min_state || o.default != b.default_state {
+        if o.first != b.min_state
+            || o.count != b.max_state + 1 - b.min_state
+            || o.default != b.default_state
+        {
             return Err(format!(
                 "26.1 {}: jar states {}+{} default {}, minecraft-data {}..={} default {}",
                 b.name, o.first, o.count, o.default, b.min_state, b.max_state, b.default_state
@@ -483,7 +499,10 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         for s in b.min_state..=b.max_state {
             let k = (s - b.min_state) as usize;
             let sid = if ids.len() == 1 { ids[0] } else { ids[k] };
-            let md = md_shapes.shapes.get(&sid).ok_or("minecraft-data shape id")?;
+            let md = md_shapes
+                .shapes
+                .get(&sid)
+                .ok_or("minecraft-data shape id")?;
             let jar = &boxes_of_state[s as usize];
             let mut a: Vec<[u64; 6]> = md.iter().map(|x| x.map(f64::to_bits)).collect();
             let mut j: Vec<[u64; 6]> = jar.iter().map(|x| x.map(f64::to_bits)).collect();
@@ -534,8 +553,9 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
             let sid = sidv.as_u64().ok_or("ctx sid")?;
             let got = dump_shapes.get(&sid).ok_or("ctx shape")?.clone();
             let got_i = shapes.iter().position(|s| *s == got).map(|i| i as u32);
-            let &(dy, descending, fall, boots) =
-                contexts.get(cname).ok_or_else(|| format!("unknown context {cname}"))?;
+            let &(dy, descending, fall, boots) = contexts
+                .get(cname)
+                .ok_or_else(|| format!("unknown context {cname}"))?;
             // Contexts sit on the block at y = 64 with feet at 64 + dy.
             let feet = 64.0 + dy;
             match b.name.as_str() {
@@ -636,12 +656,19 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         "26.1 block table: per-block data, state layout, per-state packed physics record, collision voxel shapes.",
         &[
             format!("{}/blocks.json", p.dir("blocks")?),
-            format!("{}/blockCollisionShapes.json (cross-check only)", p.dir("blockCollisionShapes")?),
+            format!(
+                "{}/blockCollisionShapes.json (cross-check only)",
+                p.dir("blockCollisionShapes")?
+            ),
             ORACLE_VOXELS.into(),
         ],
     );
     out.push_str("use crate::common::Aabb;\nuse crate::v26_1::{BlockData, BlockKind, PropertyDef, StateLayout, VoxelClass, VoxelShapeRef};\n\n");
-    let _ = writeln!(out, "pub(crate) static BLOCKS: [BlockData; {}] = [", blocks.len());
+    let _ = writeln!(
+        out,
+        "pub(crate) static BLOCKS: [BlockData; {}] = [",
+        blocks.len()
+    );
     for (b, o) in blocks.iter().zip(&block_rows) {
         let offset = match o.offset {
             None => "None".to_owned(),
@@ -652,7 +679,8 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
             "    BlockData {{ name: {}, display_name: {}, hardness: {}, resistance: {}, diggable: {}, transparent: {}, emit_light: {}, filter_light: {}, friction: {}, speed_factor: {}, jump_factor: {}, flags: {}, kind: BlockKind::{}, offset: {offset} }},",
             lit(&b.name),
             lit(&b.display_name),
-            b.hardness.map_or("None".into(), |h| format!("Some({})", f32l(h as f32))),
+            b.hardness
+                .map_or("None".into(), |h| format!("Some({})", f32l(h as f32))),
             f32l(b.resistance as f32),
             b.diggable,
             b.transparent,
@@ -670,7 +698,10 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         &mut out,
         "pub(crate) static BLOCK_NAMES",
         "u16",
-        blocks.iter().map(|b| (b.name.clone(), u32::from(b.id))).collect(),
+        blocks
+            .iter()
+            .map(|b| (b.name.clone(), u32::from(b.id)))
+            .collect(),
     );
     out.push_str("\n/// Block constants.\nimpl crate::v26_1::Block {\n");
     for b in &blocks {
@@ -689,15 +720,28 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
     }
     out.push_str("}\n\nimpl Property {\n    /// The property's name as used in block-state strings.\n    #[must_use]\n    pub const fn name(self) -> &'static str {\n        match self {\n");
     for n in &prop_names {
-        let _ = writeln!(out, "            Property::{} => {},", camel_ident(n), lit(n));
+        let _ = writeln!(
+            out,
+            "            Property::{} => {},",
+            camel_ident(n),
+            lit(n)
+        );
     }
     out.push_str("        }\n    }\n}\n\n");
-    let _ = writeln!(out, "pub(crate) static PROPERTY_NAMES: [(&str, Property); {}] = [", prop_names.len());
+    let _ = writeln!(
+        out,
+        "pub(crate) static PROPERTY_NAMES: [(&str, Property); {}] = [",
+        prop_names.len()
+    );
     for n in &prop_names {
         let _ = writeln!(out, "    ({}, Property::{}),", lit(n), camel_ident(n));
     }
     out.push_str("];\n\n");
-    let _ = writeln!(out, "pub(crate) static PROPERTY_DEFS: [PropertyDef; {}] = [", defs.len());
+    let _ = writeln!(
+        out,
+        "pub(crate) static PROPERTY_DEFS: [PropertyDef; {}] = [",
+        defs.len()
+    );
     for (name, values) in &defs {
         let vs: Vec<String> = values.iter().map(|v| lit(v)).collect();
         let _ = writeln!(
@@ -708,7 +752,11 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         );
     }
     out.push_str("];\n\n");
-    let _ = writeln!(out, "pub(crate) static LAYOUTS: [StateLayout; {}] = [", blocks.len());
+    let _ = writeln!(
+        out,
+        "pub(crate) static LAYOUTS: [StateLayout; {}] = [",
+        blocks.len()
+    );
     for (b, props) in blocks.iter().zip(&block_props) {
         let ps: Vec<String> = props.iter().map(usize::to_string).collect();
         let _ = writeln!(
@@ -721,9 +769,19 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         );
     }
     out.push_str("];\n\n/// Block id per state.\n");
-    crate::emit::num_table(&mut out, "pub(crate) static STATE_BLOCK", "u16", &state_block, 20);
+    crate::emit::num_table(
+        &mut out,
+        "pub(crate) static STATE_BLOCK",
+        "u16",
+        &state_block,
+        20,
+    );
     out.push_str("\n/// Packed per-state record (see `v26_1::StatePhys`).\n");
-    let _ = writeln!(out, "pub(crate) static STATE_PHYS: [u64; {}] = [", packed.len());
+    let _ = writeln!(
+        out,
+        "pub(crate) static STATE_PHYS: [u64; {}] = [",
+        packed.len()
+    );
     for chunk in packed.chunks(8) {
         out.push_str("    ");
         for (i, v) in chunk.iter().enumerate() {
@@ -754,4 +812,3 @@ pub fn generate(p: &Paths, oracle_voxels: &std::path::Path, notes: &mut Vec<Stri
         ("v26_1/mod.rs".into(), mods),
     ])
 }
-

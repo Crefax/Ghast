@@ -39,10 +39,18 @@ fn suffocating_large_shapes_stay_in_their_cube() {
             continue;
         }
         if p.has(state_flags::LARGE) || p.has(state_flags::MOVING_PISTON) {
-            assert!(!p.has(state_flags::CONTEXT) && !p.has(state_flags::OFFSET), "{s}");
+            assert!(
+                !p.has(state_flags::CONTEXT) && !p.has(state_flags::OFFSET),
+                "{s}"
+            );
             for b in s.voxel_shape().boxes {
                 assert!(
-                    b.min_x >= 0.0 && b.min_y >= 0.0 && b.min_z >= 0.0 && b.max_x <= 1.0 && b.max_y <= 1.0 && b.max_z <= 1.0,
+                    b.min_x >= 0.0
+                        && b.min_y >= 0.0
+                        && b.min_z >= 0.0
+                        && b.max_x <= 1.0
+                        && b.max_y <= 1.0
+                        && b.max_z <= 1.0,
                     "{s}: {b:?}"
                 );
             }

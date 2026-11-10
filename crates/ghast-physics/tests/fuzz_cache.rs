@@ -31,6 +31,9 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/1.12.2/fuzz"),
             repo_root().join("oracle/cache/1.12.2/fuzz-edges"),
             repo_root().join("oracle/cache/1.12.2/fuzz-extras"),
+            repo_root().join("oracle/cache/26.1/fuzz"),
+            repo_root().join("oracle/cache/26.1/fuzz-edges"),
+            repo_root().join("oracle/cache/26.1/fuzz-extras"),
         ],
     };
     let mut files = Vec::new();
@@ -52,6 +55,10 @@ fn inputs() -> Vec<PathBuf> {
 }
 
 fn replay_any(path: &std::path::Path) -> Summary {
+    #[cfg(feature = "v26_1")]
+    if path.to_string_lossy().contains("26.1") {
+        return common::v261::replay_file(path);
+    }
     if path.to_string_lossy().contains("1.16.5") {
         common::v116::replay_file(path)
     } else if path.to_string_lossy().contains("1.12.2") {

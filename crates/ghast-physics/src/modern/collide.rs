@@ -1,0 +1,725 @@
+//! Block collision of the modern client: vanilla's `BlockCollisions` cursor, the world border
+//! shape, `collideWithShapes`, step-up by candidate heights, `noCollision`, the suffocation probe
+//! and the supporting-block search.
+
+use ghast_data::v26_1::{BlockKind, StatePhys, VoxelClass, VoxelShapeRef, state_flags as sf};
+
+use super::math::{V3, bx, expand_towards, floor, hi, intersects, java_max, java_min, lo, mv};
+use super::rules::Rules;
+use crate::math::Aabb;
+use crate::voxel::{EPSILON, Points, VoxelShape};
+use crate::world::{BlockView, WorldBorder};
+
+/// What a block's collision shape may depend on from the colliding player
+/// (`EntityCollisionContext`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ShapeCtx {
+    /// `entity.getY()` when the context was made.
+    pub feet_y: f64,
+    /// `isDescending()` (shift key).
+    pub descending: bool,
+    /// `fallDistance` (powder snow).
+    pub fall_distance: f64,
+    /// Leather boots in the feet slot (powder snow walkable).
+    pub leather_boots: bool,
+}
+
+/// The world-border collision shape (everything outside the block-rounded border) and the
+/// border's exact bounds.
+pub(crate) struct Border {
+    xs: [f64; 4],
+    ys: [f64; 2],
+    zs: [f64; 4],
+    min_x: f64,
+    max_x: f64,
+    min_z: f64,
+    max_z: f64,
+}
+
+/// Cells of the 3 x 1 x 3 border grid minus the centre column.
+const BORDER_CELLS: [u64; 1] = [0b1_1110_1111];
+
+impl Border {
+    pub(crate) fn new(b: &WorldBorder) -> Border {
+        Border {
+            xs: [
+                f64::NEG_INFINITY,
+                b.west().floor(),
+                b.east().ceil(),
+                f64::INFINITY,
+            ],
+            ys: [f64::NEG_INFINITY, f64::INFINITY],
+            zs: [
+                f64::NEG_INFINITY,
+                b.north().floor(),
+                b.south().ceil(),
+                f64::INFINITY,
+            ],
+            min_x: b.west(),
+            max_x: b.east(),
+            min_z: b.north(),
+            max_z: b.south(),
+        }
+    }
+
+    pub(crate) fn shape(&self) -> VoxelShape<'_> {
+        VoxelShape {
+            axes: [
+                Points::Explicit(&self.xs),
+                Points::Explicit(&self.ys),
+                Points::Explicit(&self.zs),
+            ],
+            cells: &BORDER_CELLS,
+        }
+    }
+
+    /// `WorldBorder.isInsideCloseToBorder(source, box)` for a source at `(x, z)`.
+    pub(crate) fn inside_close(&self, x: f64, z: f64, query: &Aabb) -> bool {
+        let size = java_max(
+            (query.max_x - query.min_x).abs(),
+            (query.max_z - query.min_z).abs(),
+        );
+        let bb_max = java_max(size, 1.0);
+        let dist = java_min(
+            java_min(java_min(x - self.min_x, self.max_x - x), z - self.min_z),
+            self.max_z - z,
+        );
+        dist < bb_max * 2.0
+            && x >= self.min_x - bb_max
+            && x < self.max_x + bb_max
+            && z >= self.min_z - bb_max
+            && z < self.max_z + bb_max
+    }
+}
+
+/// A collision shape placed in the world.
+#[derive(Clone, Copy)]
+pub(crate) enum Placed {
+    /// `Shapes.block()` at a block position (corner).
+    Cube([f64; 3]),
+    /// Any other block shape (table entry, optional model offset), moved to its block position.
+    Shape(&'static VoxelShapeRef, Option<[f64; 3]>, [f64; 3]),
+    /// The world-border shape.
+    Border,
+}
+
+/// A voxel table entry as a [`VoxelShape`] (moved shapes always binary-search their points).
+pub(crate) fn voxel(r: &'static VoxelShapeRef, shift: Option<[f64; 3]>) -> VoxelShape<'static> {
+    let axis = |k: usize, n: u8, pts: &'static [f64]| match (shift, r.class) {
+        (Some(s), _) => Points::Shifted(pts, s[k]),
+        (None, VoxelClass::Simple) => Points::Fractional(u32::from(n)),
+        (None, VoxelClass::Array) => Points::Explicit(pts),
+    };
+    VoxelShape {
+        axes: [
+            axis(0, r.sizes[0], r.xs),
+            axis(1, r.sizes[1], r.ys),
+            axis(2, r.sizes[2], r.zs),
+        ],
+        cells: r.cells,
+    }
+}
+
+/// `VoxelShape.collide` of a full cube placed at `o` (vanilla's generic grid walk specialised to
+/// one cell; identical results).
+#[inline]
+fn cube_collide(axis: usize, b: &Aabb, d: f64, o: [f64; 3]) -> f64 {
+    if d.abs() < EPSILON {
+        return 0.0;
+    }
+    let (a2, a3) = ((axis + 1) % 3, (axis + 2) % 3);
+    // findIndex over the moved points [o, o + 1]: -1 below, 0 inside, 1 at or above the top.
+    let overlaps = |ax: usize| {
+        let p0 = 0.0 + o[ax];
+        let p1 = 1.0 + o[ax];
+        lo(b, ax) + EPSILON < p1 && hi(b, ax) - EPSILON >= p0
+    };
+    if !overlaps(a2) || !overlaps(a3) {
+        return d;
+    }
+    let p0 = 0.0 + o[axis];
+    let p1 = 1.0 + o[axis];
+    if d > 0.0 {
+        let max_a = hi(b, axis);
+        if max_a - EPSILON < p0 {
+            let gap = p0 - max_a;
+            if gap >= -EPSILON {
+                return java_min(d, gap);
+            }
+        }
+        d
+    } else {
+        let min_a = lo(b, axis);
+        if min_a + EPSILON >= p1 {
+            let gap = p1 - min_a;
+            if gap <= EPSILON {
+                return java_max(d, gap);
+            }
+        }
+        d
+    }
+}
+
+impl Placed {
+    /// The shape's world boxes (`toAabbs()` of the moved shape), in vanilla's order.
+    pub(crate) fn for_boxes(&self, mut f: impl FnMut(Aabb) -> bool) {
+        match self {
+            Placed::Cube(o) => {
+                let _ = f(Aabb::new(
+                    0.0 + o[0],
+                    0.0 + o[1],
+                    0.0 + o[2],
+                    1.0 + o[0],
+                    1.0 + o[1],
+                    1.0 + o[2],
+                ));
+            }
+            Placed::Shape(r, sh, o) => {
+                let k = sh.unwrap_or([0.0; 3]);
+                for b in r.boxes {
+                    let w = match sh {
+                        Some(_) => Aabb::new(
+                            b.min_x + k[0] + o[0],
+                            b.min_y + k[1] + o[1],
+                            b.min_z + k[2] + o[2],
+                            b.max_x + k[0] + o[0],
+                            b.max_y + k[1] + o[1],
+                            b.max_z + k[2] + o[2],
+                        ),
+                        None => Aabb::new(
+                            b.min_x + o[0],
+                            b.min_y + o[1],
+                            b.min_z + o[2],
+                            b.max_x + o[0],
+                            b.max_y + o[1],
+                            b.max_z + o[2],
+                        ),
+                    };
+                    if !f(w) {
+                        return;
+                    }
+                }
+            }
+            Placed::Border => {}
+        }
+    }
+
+    /// `VoxelShape.max(Y)` of the block-local shape (model offset included, block position not).
+    pub(crate) fn local_max_y(&self) -> Option<f64> {
+        match self {
+            Placed::Cube(_) => Some(1.0),
+            Placed::Shape(r, sh, _) => {
+                if r.empty {
+                    return None;
+                }
+                let [nx, ny, nz] = r.sizes.map(usize::from);
+                let top = (0..ny)
+                    .rev()
+                    .find(|&y| (0..nx).any(|x| (0..nz).any(|z| r.filled(x, y, z))))?;
+                let s = voxel(r, *sh);
+                Some(s.axes[1].get(top + 1))
+            }
+            Placed::Border => None,
+        }
+    }
+
+    /// `true` for an empty shape.
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Placed::Shape(r, _, _) => r.empty,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn collide(&self, border: &Border, axis: usize, b: &Aabb, d: f64) -> f64 {
+        match self {
+            Placed::Cube(o) => cube_collide(axis, b, d, *o),
+            Placed::Shape(r, sh, o) => voxel(r, *sh).max_distance(axis, b, d, Some(*o)),
+            Placed::Border => border.shape().max_distance(axis, b, d, None),
+        }
+    }
+
+    /// The shape's Y points (`getCoords(Y)` of the placed shape), passed one by one.
+    pub(crate) fn for_y_coords(&self, border: &Border, mut f: impl FnMut(f64) -> bool) {
+        match self {
+            Placed::Cube(o) => {
+                let _ = f(0.0 + o[1]) && f(1.0 + o[1]);
+            }
+            Placed::Shape(r, sh, o) => {
+                let s = voxel(r, *sh);
+                let n = s.axes[1].cells();
+                for i in 0..=n {
+                    if !f(s.axes[1].get(i) + o[1]) {
+                        return;
+                    }
+                }
+            }
+            Placed::Border => {
+                for &y in &border.ys {
+                    if !f(y) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Fixed-capacity collider list that spills to the heap only for huge queries.
+pub(crate) struct Colliders {
+    buf: [Placed; INLINE],
+    len: usize,
+    spill: Vec<Placed>,
+}
+
+const INLINE: usize = 48;
+
+impl Colliders {
+    pub(crate) fn new() -> Colliders {
+        Colliders {
+            buf: [Placed::Border; INLINE],
+            len: 0,
+            spill: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn push(&mut self, p: Placed) {
+        if self.len < INLINE {
+            self.buf[self.len] = p;
+            self.len += 1;
+        } else {
+            self.spill.push(p);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Placed> {
+        self.buf[..self.len].iter().chain(self.spill.iter())
+    }
+}
+
+/// `Shapes.collide(axis, box, shapes, distance)`.
+#[inline]
+pub(crate) fn shapes_collide(
+    shapes: &Colliders,
+    border: &Border,
+    axis: usize,
+    b: &Aabb,
+    mut d: f64,
+) -> f64 {
+    for s in shapes.iter() {
+        if d.abs() < EPSILON {
+            return 0.0;
+        }
+        d = s.collide(border, axis, b, d);
+    }
+    d
+}
+
+/// `Entity.collideWithShapes(movement, box, shapes)`.
+pub(crate) fn collide_with_shapes(m: V3, b: &Aabb, shapes: &Colliders, border: &Border) -> V3 {
+    if shapes.is_empty() {
+        return m;
+    }
+    let mut r = V3::ZERO;
+    // Direction.axisStepOrder: Y, then the smaller of X / Z first... (YZX when |x| < |z|).
+    let order: [usize; 3] = if m.x.abs() < m.z.abs() {
+        [1, 2, 0]
+    } else {
+        [1, 0, 2]
+    };
+    for axis in order {
+        let am = m.get(axis);
+        if am != 0.0 {
+            let c = shapes_collide(shapes, border, axis, &mv(b, r.x, r.y, r.z), am);
+            r = r.with(axis, c);
+        }
+    }
+    r
+}
+
+/// The block collision queries of one player for one tick.
+pub(crate) struct World<'a, R: Rules, W> {
+    pub w: &'a W,
+    pub border: &'a Border,
+    /// Build height `[min_y, max_y]`.
+    pub min_y: i32,
+    pub max_y: i32,
+    pub _r: core::marker::PhantomData<R>,
+}
+
+impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
+    /// `Level.getBlockState`: air outside the build height (and in unloaded columns, which the
+    /// world view returns as air).
+    #[inline]
+    pub(crate) fn state(&self, x: i32, y: i32, z: i32) -> R::State {
+        if y < self.min_y || y > self.max_y {
+            R::AIR
+        } else {
+            self.w.block(x, y, z)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn phys(&self, x: i32, y: i32, z: i32) -> StatePhys {
+        R::phys(self.state(x, y, z))
+    }
+
+    /// The collision shape of a state at a position for a context (`None` = the empty context).
+    #[inline]
+    pub(crate) fn shape_of_state(
+        &self,
+        s: R::State,
+        x: i32,
+        y: i32,
+        z: i32,
+        ctx: Option<&ShapeCtx>,
+    ) -> Option<Placed> {
+        let p = R::phys(s);
+        let f = p.flags();
+        let o = [f64::from(x), f64::from(y), f64::from(z)];
+        if f & sf::FULL_CUBE != 0 {
+            return Some(Placed::Cube(o));
+        }
+        if f & sf::CONTEXT != 0 {
+            return context_shape::<R>(p, y, ctx).map(|i| {
+                if i == R::FULL_CUBE_VOXEL {
+                    Placed::Cube(o)
+                } else {
+                    Placed::Shape(R::voxel(i), None, o)
+                }
+            });
+        }
+        if f & sf::EMPTY != 0 {
+            return None;
+        }
+        let r = R::voxel(p.shape());
+        if f & sf::OFFSET != 0 {
+            let shift = model_offset(R::block(s).offset, x, z);
+            return Some(Placed::Shape(r, Some(shift), o));
+        }
+        Some(Placed::Shape(r, None, o))
+    }
+
+    /// Vanilla's `BlockCollisions` over `query`: calls `f(x, y, z, state, shape)` for every block
+    /// shape that collides, in cursor order; `f` returns `false` to stop.
+    #[inline]
+    pub(crate) fn each_collision(
+        &self,
+        query: &Aabb,
+        ctx: Option<&ShapeCtx>,
+        only_suffocating: bool,
+        mut f: impl FnMut(i32, i32, i32, Placed) -> bool,
+    ) {
+        let x0 = floor(query.min_x - EPSILON) - 1;
+        let x1 = floor(query.max_x + EPSILON) + 1;
+        let y0 = floor(query.min_y - EPSILON) - 1;
+        let y1 = floor(query.max_y + EPSILON) + 1;
+        let z0 = floor(query.min_z - EPSILON) - 1;
+        let z1 = floor(query.max_z + EPSILON) + 1;
+        // Rows of the cursor outside the build height hold only air.
+        let (ya, yb) = (y0.max(self.min_y), y1.min(self.max_y));
+        for z in z0..=z1 {
+            let ez = u8::from(z == z0 || z == z1);
+            let mut chunk = (i32::MIN, false);
+            for y in ya..=yb {
+                let ey = u8::from(y == y0 || y == y1);
+                for x in x0..=x1 {
+                    let edges = u8::from(x == x0 || x == x1) + ey + ez;
+                    if edges == 3 {
+                        continue;
+                    }
+                    let cx = x >> 4;
+                    if chunk.0 != cx {
+                        chunk = (cx, self.w.is_chunk_loaded(cx, z >> 4));
+                    }
+                    if !chunk.1 {
+                        continue;
+                    }
+                    let s = self.w.block(x, y, z);
+                    let p = R::phys(s);
+                    let fl = p.flags();
+                    if (only_suffocating && fl & sf::SUFFOCATING == 0)
+                        || (edges == 1 && fl & sf::LARGE == 0)
+                        || (edges == 2 && fl & sf::MOVING_PISTON == 0)
+                    {
+                        continue;
+                    }
+                    // Empty context-free shapes never collide (context / offset shapes are
+                    // resolved below).
+                    if fl & (sf::EMPTY | sf::CONTEXT) == sf::EMPTY {
+                        continue;
+                    }
+                    let Some(shape) = self.shape_of_state(s, x, y, z, ctx) else {
+                        continue;
+                    };
+                    let hit = match shape {
+                        Placed::Cube(o) => {
+                            intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
+                        }
+                        Placed::Shape(r, sh, o) => {
+                            !r.empty && voxel(r, sh).intersects(query, Some(o))
+                        }
+                        Placed::Border => false,
+                    };
+                    if hit && !f(x, y, z, shape) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// `collidesWithSuffocatingBlock(box)` for the client push-out probe of one block column.
+    ///
+    /// Only the cursor's interior cells are read: face and edge cells count only for suffocating
+    /// states with large shapes (or moving pistons), and every such state's shape stays inside
+    /// its own cube (`ghast-data` test `suffocating_large_shapes_stay_in_their_cube`), so it can
+    /// never reach a probe area that lies inside the column.
+    pub(crate) fn suffocates_in_column(&self, query: &Aabb, ctx: &ShapeCtx) -> bool {
+        let x0 = floor(query.min_x - EPSILON) - 1;
+        let x1 = floor(query.max_x + EPSILON) + 1;
+        let y0 = floor(query.min_y - EPSILON) - 1;
+        let y1 = floor(query.max_y + EPSILON) + 1;
+        let z0 = floor(query.min_z - EPSILON) - 1;
+        let z1 = floor(query.max_z + EPSILON) + 1;
+        for z in z0 + 1..z1 {
+            for y in (y0 + 1).max(self.min_y)..y1.min(self.max_y + 1) {
+                for x in x0 + 1..x1 {
+                    if !self.w.is_chunk_loaded(x >> 4, z >> 4) {
+                        continue;
+                    }
+                    let s = self.w.block(x, y, z);
+                    let p = R::phys(s);
+                    if p.flags() & sf::SUFFOCATING == 0 {
+                        continue;
+                    }
+                    let Some(shape) = self.shape_of_state(s, x, y, z, Some(ctx)) else {
+                        continue;
+                    };
+                    let hit = match shape {
+                        Placed::Cube(o) => {
+                            intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
+                        }
+                        Placed::Shape(r, sh, o) => {
+                            !r.empty && voxel(r, sh).intersects(query, Some(o))
+                        }
+                        Placed::Border => false,
+                    };
+                    if hit {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// `noCollision(entity, box)`: no block shape, no entity, no world-border overlap.
+    pub(crate) fn no_collision(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx) -> bool {
+        let mut empty = true;
+        self.each_collision(query, Some(ctx), false, |_, _, _, _| {
+            empty = false;
+            false
+        });
+        if !empty {
+            return false;
+        }
+        if self.border.inside_close(src[0], src[2], query) {
+            return !self.border.shape().intersects(query, None);
+        }
+        true
+    }
+
+    /// `collectColliders(entity, [], box)`: the border shape when the entity is inside and close
+    /// to it, then every block shape.
+    pub(crate) fn colliders(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx) -> Colliders {
+        let mut c = Colliders::new();
+        if self.border.inside_close(src[0], src[2], query) {
+            c.push(Placed::Border);
+        }
+        self.each_collision(query, Some(ctx), false, |_, _, _, s| {
+            c.push(s);
+            true
+        });
+        c
+    }
+
+    /// `findSupportingBlock(entity, box)`: the colliding block whose centre is closest to the
+    /// entity position (ties: the larger position by y, z, x).
+    pub(crate) fn supporting_block(
+        &self,
+        pos: [f64; 3],
+        query: &Aabb,
+        ctx: &ShapeCtx,
+    ) -> Option<[i32; 3]> {
+        let mut best: Option<[i32; 3]> = None;
+        let mut best_d = f64::MAX;
+        self.each_collision(query, Some(ctx), false, |x, y, z, _| {
+            let dx = f64::from(x) + 0.5 - pos[0];
+            let dy = f64::from(y) + 0.5 - pos[1];
+            let dz = f64::from(z) + 0.5 - pos[2];
+            let d = dx * dx + dy * dy + dz * dz;
+            if d < best_d || d == best_d && best.is_none_or(|b| cmp_pos(b, [x, y, z]) < 0) {
+                best = Some([x, y, z]);
+                best_d = d;
+            }
+            true
+        });
+        best
+    }
+}
+
+/// `Vec3i.compareTo`: by y, then z, then x.
+fn cmp_pos(a: [i32; 3], b: [i32; 3]) -> i32 {
+    if a[1] != b[1] {
+        a[1] - b[1]
+    } else if a[2] != b[2] {
+        a[2] - b[2]
+    } else {
+        a[0] - b[0]
+    }
+}
+
+/// The voxel index of a context-dependent shape (scaffolding, powder snow); `None` = empty.
+fn context_shape<R: Rules>(p: StatePhys, y: i32, ctx: Option<&ShapeCtx>) -> Option<u16> {
+    let eps = f64::from(1.0e-5f32);
+    if p.kind() == BlockKind::Scaffolding as u8 {
+        // isAbove(shape, pos, default): feet > y + shape.maxY - 1.0E-5F; the empty context answers
+        // the default (true) and is not descending.
+        let above = |top: f64| ctx.is_none_or(|c| c.feet_y > f64::from(y) + top - eps);
+        let descending = ctx.is_some_and(|c| c.descending);
+        if above(1.0) && !descending {
+            return Some(p.shape());
+        }
+        if p.aux() & 1 != 0 && above(0.0) {
+            return Some(R::SCAFFOLDING_BOTTOM_VOXEL);
+        }
+        return None;
+    }
+    if p.kind() == BlockKind::PowderSnow as u8 {
+        let c = ctx?;
+        if c.fall_distance > 2.5 {
+            return Some(R::POWDER_SNOW_FALLING_VOXEL);
+        }
+        if c.leather_boots && c.feet_y > f64::from(y) + 1.0 - eps && !c.descending {
+            return Some(R::FULL_CUBE_VOXEL);
+        }
+        return None;
+    }
+    if p.flags() & sf::EMPTY != 0 {
+        None
+    } else {
+        Some(p.shape())
+    }
+}
+
+/// `BlockBehaviour.OffsetFunction` at `(x, z)` for a block's `(max_h, max_v, xyz)` limits.
+pub(crate) fn model_offset(limits: Option<(f32, f32, bool)>, x: i32, z: i32) -> [f64; 3] {
+    let Some((max_h, max_v, xyz)) = limits else {
+        return [0.0; 3];
+    };
+    // Mth.getSeed(x, 0, z)
+    let mut seed = i64::from(x.wrapping_mul(3_129_871)) ^ i64::from(z).wrapping_mul(116_129_781);
+    seed = seed
+        .wrapping_mul(seed)
+        .wrapping_mul(42_317_861)
+        .wrapping_add(seed.wrapping_mul(11));
+    let seed = seed >> 16;
+    let h = f64::from(max_h);
+    let comp = |bits: i64| {
+        let v = (f64::from((bits & 15) as f32 / 15.0) - 0.5) * 0.5;
+        super::math::clamp(v, -h, h)
+    };
+    let y = if xyz {
+        (f64::from(((seed >> 4) & 15) as f32 / 15.0) - 1.0) * f64::from(max_v)
+    } else {
+        0.0
+    };
+    [comp(seed), y, comp(seed >> 8)]
+}
+
+/// `Entity.collide(movement)` for the player: block collision, then step-up by the candidate
+/// heights taken from the colliders' Y coordinates.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
+    world: &World<'_, R, W>,
+    src: [f64; 3],
+    bb: &Aabb,
+    movement: V3,
+    on_ground: bool,
+    step: f32,
+    ctx: &ShapeCtx,
+) -> V3 {
+    let step_v = if movement.length_sqr() == 0.0 {
+        movement
+    } else {
+        let c = world.colliders(src, &expand_towards(bb, movement), ctx);
+        collide_with_shapes(movement, bb, &c, world.border)
+    };
+    let cx = movement.x != step_v.x;
+    let cy = movement.y != step_v.y;
+    let cz = movement.z != step_v.z;
+    let landing = cy && movement.y < 0.0;
+    if step > 0.0 && (landing || on_ground) && (cx || cz) {
+        let grounded = if landing {
+            mv(bb, 0.0, step_v.y, 0.0)
+        } else {
+            *bb
+        };
+        let mut up = expand_towards(&grounded, V3::new(movement.x, f64::from(step), movement.z));
+        if !landing {
+            up = expand_towards(&up, V3::new(0.0, f64::from(-1.0e-5f32), 0.0));
+        }
+        let colliders = world.colliders(src, &up, ctx);
+        let skip = step_v.y as f32;
+        let mut cands = [0.0f32; 16];
+        let mut n = 0usize;
+        for c in colliders.iter() {
+            c.for_y_coords(world.border, |coord| {
+                let rel = (coord - grounded.min_y) as f32;
+                if rel < 0.0 || rel == skip {
+                    return true;
+                }
+                if rel > step {
+                    return false;
+                }
+                // FloatArraySet: bitwise-distinct values.
+                if !cands[..n].iter().any(|c| c.to_bits() == rel.to_bits()) && n < cands.len() {
+                    cands[n] = rel;
+                    n += 1;
+                }
+                true
+            });
+        }
+        let cands = &mut cands[..n];
+        cands.sort_by(f32::total_cmp);
+        for &h in cands.iter() {
+            let s = collide_with_shapes(
+                V3::new(movement.x, f64::from(h), movement.z),
+                &grounded,
+                &colliders,
+                world.border,
+            );
+            if s.horizontal_sqr() > step_v.horizontal_sqr() {
+                let d = bb.min_y - grounded.min_y;
+                return V3::new(s.x, s.y - d, s.z);
+            }
+        }
+    }
+    step_v
+}
+
+/// A box of a pose at a position (`EntityDimensions.makeBoundingBox`).
+#[inline]
+pub(crate) fn make_box(width: f32, height: f32, x: f64, y: f64, z: f64) -> Aabb {
+    let w = f64::from(width / 2.0);
+    bx(x - w, y, z - w, x + w, y + f64::from(height), z + w)
+}
