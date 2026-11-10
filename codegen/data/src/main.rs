@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod dig_tables;
 mod emit;
 mod facts;
 mod fetch;

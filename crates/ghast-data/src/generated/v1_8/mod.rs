@@ -7,6 +7,8 @@ pub(crate) mod biomes;
 #[rustfmt::skip]
 pub(crate) mod blocks;
 #[rustfmt::skip]
+pub(crate) mod dig;
+#[rustfmt::skip]
 pub(crate) mod effects;
 #[rustfmt::skip]
 pub(crate) mod enchantments;

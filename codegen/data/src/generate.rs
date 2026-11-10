@@ -751,10 +751,20 @@ pub fn v1_8(
         "recipes.rs".to_string(),
         v1_8_recipes(oracle_recipes, &items)?,
     ));
+    files.push((
+        "dig.rs".to_string(),
+        crate::dig_tables::generate(
+            "Minecraft 1.8.9 dig tables (oracle).",
+            &oracle_recipes.with_file_name("dig_facts.jsonl.gz"),
+            "tests/golden/1.8.9/dig_facts.jsonl.gz",
+            "strength",
+            "no_tool_needed",
+        )?,
+    ));
     let mods: Vec<&str> = MODS
         .iter()
         .copied()
-        .chain(["recipes"])
+        .chain(["recipes", "dig"])
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();

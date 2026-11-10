@@ -18,6 +18,8 @@ use crate::common::{
 };
 use crate::generated::v1_8 as g;
 
+pub mod dig;
+
 /// Number of blocks (ids `0..BLOCK_COUNT`).
 pub const BLOCK_COUNT: usize = g::blocks::BLOCKS.len();
 

@@ -107,40 +107,4 @@ pub fn destroy_progress_with(state: BlockState, held: Option<Item>, c: &DigCondi
     destroy_progress(state, speed, correct, c)
 }
 
-/// When a survival dig with a constant per-tick progress finishes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BreakTime {
-    /// Broken by the start packet itself (`START_DESTROY_BLOCK`, progress ≥ 1 in one tick).
-    Instant,
-    /// Broken on the `n`-th `continueDestroyBlock` call, counting the one in the start tick:
-    /// the client sends `STOP_DESTROY_BLOCK` on that tick (`n` = 1 is the start tick itself).
-    Ticks(u32),
-    /// Never (progress 0: unbreakable, or a speed of 0).
-    Never,
-}
-
-/// The tick the client finishes the block, accumulating `progress` in `f32` as
-/// `MultiPlayerGameMode` does: the start tick runs `startDestroyBlock` and then
-/// `continueDestroyBlock`, every later tick `continueDestroyBlock`. The first `destroy_delay`
-/// continue calls only count the delay down (5 after the client finished a block, else 0).
-/// `limit` bounds the search (vanilla has none).
-#[must_use]
-pub fn break_time(progress: f32, destroy_delay: u32, limit: u32) -> BreakTime {
-    if progress >= 1.0 {
-        return BreakTime::Instant;
-    }
-    if progress.is_nan() || progress <= 0.0 {
-        return BreakTime::Never;
-    }
-    let mut acc = 0.0f32;
-    for n in 1..=limit {
-        if n <= destroy_delay {
-            continue;
-        }
-        acc += progress;
-        if acc >= 1.0 {
-            return BreakTime::Ticks(n);
-        }
-    }
-    BreakTime::Never
-}
+pub use crate::common::{BreakTime, break_time};
