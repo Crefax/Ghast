@@ -975,6 +975,23 @@ Generated into `crates/ghast-data/src/generated/v26_1/items.rs`; cross-checked w
 minecraft-data (ids, names, stack sizes, durabilities, hardness: all equal) and, in tests, with the
 Mojang item-component report when `.cache/mojang/26.1.2` is present.
 
+## `dig.jsonl.gz` (26.1): block breaking through the real client
+
+`DigDump` (`dig [--seed --count]`, part of `golden`: 3000 cases, seed 1). Per case a random block
+state (80 % with destroy time ≤ 5), held item (empty / a tool / any other item), and conditions:
+`mining_efficiency`, `block_break_speed`, `submerged_mining_speed` attribute bases, haste / conduit
+power / mining fatigue amplifiers (`-1` = none; added as `handleUpdateMobEffect` does), eyes in
+water (water blocks around the player, fluid tracker updated), on ground, creative. Recorded:
+`destroy_speed` (`Player.getDestroySpeed`), `correct_tool` (`hasCorrectToolForDrops`), `progress`
+(`BlockState.getDestroyProgress`), and `first`: the dig driven like `Minecraft.handleKeybinds`
+(`startDestroyBlock`, then `continueDestroyBlock` in the start tick and once per later tick, up to
+2000 calls) with `result` (`instant` = the start packet broke it, `ticks` = `STOP_DESTROY_BLOCK`
+went out on call `calls`, `none` = not within the limit) — and, for 15 % of the cases that
+finished, a second dig of the same block right after (the client's 5-call destroy delay). Level
+events (break particles / sounds) are no-ops in this dump (they need the renderer's models).
+Replayed by `crates/ghast-data/src/v26_1/tests.rs` (`dig_matches_the_client`); a 40k-case run
+(seed 2) also matched.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or

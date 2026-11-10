@@ -385,3 +385,71 @@ fn destroy_time_matches_minecraft_data_hardness() {
     }
     assert!(diffs.is_empty(), "{diffs:?}");
 }
+
+/// Block breaking against the real client (`MultiPlayerGameMode` driven tick by tick, oracle
+/// `dig.jsonl.gz`): destroy speed, correct-tool flag and per-tick progress bit for bit, and the
+/// call on which `STOP_DESTROY_BLOCK` went out (second digs right after a break: 5-tick delay).
+#[test]
+fn dig_matches_the_client() {
+    use super::dig::{BreakTime, DigConditions, break_time, destroy_progress_with, destroy_speed};
+    const LIMIT: u32 = 2000;
+    let f64_hex = |v: &serde_json::Value| {
+        f64::from_bits(u64::from_str_radix(v[1].as_str().unwrap(), 16).unwrap())
+    };
+    let amp = |v: &serde_json::Value| Some(v.as_i64().unwrap() as i32).filter(|a| *a >= 0);
+    let (mut n, mut timed) = (0, 0);
+    for v in golden_26_1("dig.jsonl.gz") {
+        let state = BlockState::from_id(v["state"].as_u64().unwrap() as u16).unwrap();
+        assert_eq!(state.to_string(), v["name"].as_str().unwrap());
+        let held = v["held"].as_str().map(|n| Item::from_name(n).unwrap());
+        let c = DigConditions {
+            mining_efficiency: f64_hex(&v["mining_efficiency"]),
+            block_break_speed: f64_hex(&v["block_break_speed"]),
+            submerged_mining_speed: f64_hex(&v["submerged_mining_speed"]),
+            haste: amp(&v["haste"]),
+            conduit_power: amp(&v["conduit_power"]),
+            mining_fatigue: amp(&v["mining_fatigue"]),
+            eye_in_water: v["eye_in_water"].as_bool().unwrap(),
+            on_ground: v["on_ground"].as_bool().unwrap(),
+        };
+        let k = v["k"].as_u64().unwrap();
+        let b = state.block();
+        let tool_speed = held.map_or(1.0, |i| i.destroy_speed(b));
+        let correct = held.is_some_and(|i| i.correct_for_drops(b));
+        assert_eq!(
+            destroy_speed(tool_speed, &c).to_bits(),
+            f32_hex(&v["destroy_speed"]).to_bits(),
+            "case {k}"
+        );
+        assert_eq!(
+            !state.requires_correct_tool_for_drops() || correct,
+            v["correct_tool"].as_bool().unwrap(),
+            "case {k}"
+        );
+        let progress = destroy_progress_with(state, held, &c);
+        assert_eq!(
+            progress.to_bits(),
+            f32_hex(&v["progress"]).to_bits(),
+            "case {k}"
+        );
+        for (i, d) in v["first"].as_array().unwrap().iter().enumerate() {
+            let calls = d["calls"].as_u64().unwrap() as u32;
+            let got = d["result"].as_str().unwrap();
+            if v["creative"].as_bool().unwrap() {
+                assert_eq!(got, "instant", "case {k}: creative");
+                continue;
+            }
+            let want = match got {
+                "instant" => BreakTime::Instant,
+                "ticks" => BreakTime::Ticks(calls),
+                "none" => BreakTime::Never,
+                r => panic!("case {k}: result {r}"),
+            };
+            let delay = if i == 0 { 0 } else { 5 };
+            assert_eq!(break_time(progress, delay, LIMIT), want, "case {k} dig {i}");
+            timed += 1;
+        }
+        n += 1;
+    }
+    assert!(n >= 3000 && timed > 3000, "{n} cases, {timed} digs");
+}

@@ -57,6 +57,11 @@ public final class Main {
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
             case "items" -> Io.write(a.path("--out", golden.resolve("items.jsonl.gz")), ItemDump::lines);
+            case "dig" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", DigDump.CASES);
+                Io.write(a.path("--out", golden.resolve("dig.jsonl.gz")), sink -> dig(seed, count, sink));
+            }
             case "rays" -> {
                 long seed = a.lng("--seed", 1);
                 int worlds = (int) a.lng("--worlds", SelectionDump.RAY_WORLDS);
@@ -87,6 +92,7 @@ public final class Main {
                   entity-sizes [--out FILE]            dimensions / eye heights of every entity type, poses, variants
                   selection [--out FILE]               outline / interaction shapes of every block state
                   items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
+                  dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
@@ -117,6 +123,7 @@ public final class Main {
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
         Io.write(dir.resolve("items.jsonl.gz"), ItemDump::lines);
+        Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
     }
@@ -124,6 +131,14 @@ public final class Main {
     static void voxels(Consumer<String> sink) {
         try {
             VoxelDump.lines(sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static void dig(long seed, int count, Consumer<String> sink) {
+        try {
+            DigDump.cases(seed, count, sink);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
