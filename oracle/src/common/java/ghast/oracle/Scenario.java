@@ -111,6 +111,14 @@ public final class Scenario {
     /** Extra movement speed attribute modifiers {amount, operation} as an entity properties packet sends them. */
     public final List<double[]> speedModifiers = new ArrayList<>();
 
+    /** 26.1+: one attribute modifier of an update-attributes packet (attribute and modifier ids are identifiers). */
+    public record AttributeModifierSpec(String attribute, String id, double amount, int operation) {}
+
+    /** 26.1+: attribute base values the server sends at setup (attribute id -> base), e.g. step height, gravity, scale. */
+    public final Map<String, Double> attributeBases = new LinkedHashMap<>();
+    /** 26.1+: extra attribute modifiers the server sends at setup (other than the movement speed ones above). */
+    public final List<AttributeModifierSpec> attributeModifiers = new ArrayList<>();
+
     public final List<Tick> ticks = new ArrayList<>();
 
     /** Whether any tick holds the use key. */

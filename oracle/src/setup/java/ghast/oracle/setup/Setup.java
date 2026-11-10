@@ -116,6 +116,12 @@ public final class Setup {
             libs.add(target);
         }
 
+        // Unobfuscated versions (26.1+) have no mappings: the official jar is the named jar.
+        if (cfg.getProperty("mappings.repo") == null) {
+            writeRecord(dir, libs, mc, clientSha1, null, null, null, clientJar);
+            return;
+        }
+
         // 4. Mappings from maven (hash from the repository's .sha1 file).
         String repo = require(cfg, "mappings.repo");
         if (!repo.endsWith("/")) {
@@ -153,6 +159,11 @@ public final class Setup {
         }
 
         // 6. Classpath + record.
+        writeRecord(dir, libs, mc, clientSha1, mavenUrl, mappingSha1, mver, named);
+    }
+
+    private static void writeRecord(Path dir, List<Path> libs, String mc, String clientSha1, String mavenUrl,
+                                    String mappingSha1, String mver, Path named) throws IOException {
         StringBuilder cp = new StringBuilder();
         for (Path p : libs) {
             cp.append(p).append('\n');
@@ -161,9 +172,11 @@ public final class Setup {
         Properties rec = new Properties();
         rec.setProperty("minecraft.version", mc);
         rec.setProperty("client.sha1", clientSha1);
-        rec.setProperty("mappings.url", mavenUrl);
-        rec.setProperty("mappings.sha1", mappingSha1);
-        rec.setProperty("mappings.version", mver);
+        if (mavenUrl != null) {
+            rec.setProperty("mappings.url", mavenUrl);
+            rec.setProperty("mappings.sha1", mappingSha1);
+            rec.setProperty("mappings.version", mver);
+        }
         rec.setProperty("named.jar", named.toString());
         try (var w = Files.newBufferedWriter(dir.resolve("setup.properties"))) {
             rec.store(w, "written by ghast oracle setup");

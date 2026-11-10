@@ -58,6 +58,7 @@ oracle/
   src/mc_1_8_9/              the 1.8.9 harness (Harness, Recorder, Scenarios, Fuzz, CollisionDump, …)
   src/mc_1_12_2/             the 1.12.2 harness (same structure as 1.8.9, see "1.12.2" below)
   src/mc_1_16_5/             the 1.16.5 harness
+  src/mc_26_1/               the 26.1 harness (unobfuscated jar, Java 25 toolchain; see "26.1")
   cache/                     (git-ignored) jars, libraries, mappings, remapped jar, fuzz output
 tests/golden/1.8.9/
   scenarios.jsonl.gz         hand-written scenarios
@@ -73,7 +74,7 @@ tests/golden/1.8.9/
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
 version-agnostic, a version needs `versions/<mc>.properties` + `versions/<mc>.coverage` and its own
 harness source set (`src/mc_x_y_z`) compiled against that version's named jar. Implemented: 1.8.9,
-1.16.5 (see "1.16.5" below) and 1.12.2 (see "1.12.2" below).
+1.16.5 (see "1.16.5" below), 1.12.2 (see "1.12.2" below) and 26.1 (see "26.1" below).
 
 ## How a run works (1.8.9)
 
@@ -690,6 +691,161 @@ The 1.12.2 fuzz palette is the 1.8.9 one plus frosted ice, grass paths, magma, b
 (powder), glazed terracotta, purpur blocks / slabs / stairs / pillars, observers, shulker boxes, end rods,
 chorus plants / flowers, beds, anvils, chests, doors, more fences / gates, hay, barriers, structure voids,
 open trapdoors above ladders, and the levitation effect.
+
+## 26.1 (fourth version, protocol 775)
+
+Run everything with `MC=26.1`, e.g. `MC=26.1 oracle/run.sh`, `MC=26.1 oracle/run.sh verify`,
+`MC=26.1 oracle/run.sh selftest`, `MC=26.1 oracle/run.sh fuzz --seed 7 --count 1000 --ticks 100`.
+Output: `tests/golden/26.1/` — `scenarios.jsonl.gz` (73 cases: the 61 of 1.16.5 plus 12 for 26.1
+mechanics), `fuzz_seed1.jsonl.gz` (100 × 60), `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
+`voxel_shapes.jsonl.gz`, `entity_sizes.jsonl.gz`. Commands: `golden`, `scenarios`, `fuzz` (plain and
+`--use-item true`), `replay`, `boxes`, `boxes-far`, `voxels`, `entity-sizes`, `list`, `selftest`, `compare`
+(no click vectors and no edge / extras generators yet).
+
+Setup: **26.1 ships unobfuscated** — its version json has no `client_mappings` download and the classes
+carry their real names (`net.minecraft.client.player.LocalPlayer`, …). There is nothing to remap:
+`versions/26.1.properties` has no `mappings.repo`, `prepareVanilla` only fetches the jar and libraries
+(SHA-1 checked) and the harness compiles against `client-official.jar` in the git-ignored cache. So the
+harness is written against the jar's own names (it only calls vanilla; nothing from the jar is copied
+into the repository). There is no name coverage report (`coverage` refuses). The jar is Java 25 class
+files: `java.version=25` makes Gradle compile and run this harness with a Java 25 toolchain (detected,
+or downloaded through the foojay resolver plugin in `settings.gradle`); Gradle itself and the other
+versions keep the JDK Gradle runs on (17 or 21; Gradle 8.5 cannot run on 25).
+
+### How a 26.1 run works
+
+Real vanilla code:
+- **Configuration phase.** The vanilla data pack inside the jar is loaded with the server's own loaders
+  in `WorldLoader.load` order (static-registry tags, worldgen registries, dimension registries; the
+  reloadable server resources — recipes, loot, advancements, functions — are not part of the
+  configuration phase and are not loaded). The server's registry sync (`RegistrySynchronization.
+  packRegistries`, no packs known to the client, so every element is sent in full) and tag sync
+  (`TagNetworkSerialization`) are encoded into real `ClientboundRegistryDataPacket` /
+  `ClientboundUpdateTagsPacket` bytes, decoded, and handed to the real `RegistryDataCollector`, which
+  builds the client's registry access as `handleConfigurationFinished` does for a remote connection
+  (this also binds the block / fluid / item / entity tags the movement code reads: climbable, water,
+  lava, soul speed blocks, …). Dimension type, biomes, enchantments, damage types come from there.
+- A real `ClientPacketListener` per run (constructed from a `CommonListenerCookie`), the movement part of
+  its `handleLogin` (game mode object, `ClientLevel` with the overworld dimension type, `LocalPlayer`
+  from `MultiPlayerGameMode.createPlayer`, `resetPos`, `addEntity`, `KeyboardInput`, `adjustPlayer`,
+  camera entity, `setLocalMode`), and real inbound packets, each encoded with its `STREAM_CODEC` and
+  decoded again before its real handler runs: player info (tab list entry: game mode, so spectator
+  works), chunk cache centre, abilities, update attributes, health / food, mob effects, equipment,
+  player position (`handleMovePlayer`, which sends the real `teleport_confirm` + `position_look`), entity
+  motion.
+- **Chunks** are built like a server holds them (`LevelChunk` sections, primed heightmaps), serialised as
+  `ClientboundLevelChunkPacketData` and decoded by `ClientChunkCache.replaceWithPacketData`.
+- Real `Options` (constructed on an empty directory: vanilla defaults — auto-jump off, sprint window 7,
+  hold-to-sneak / sprint) and real `KeyMapping` / `ToggleKeyMapping`s. A key press is `setDown` plus a
+  queued click, as the keyboard handler does.
+- Each tick runs the movement part of `Minecraft.tick` in its order: inbound packets (events), keys,
+  yaw / pitch (mouse look happens between ticks), `tickRateManager().tick()`, `MultiPlayerGameMode.tick`
+  (held-item sync), the use-key part of `handleKeybinds` (release while using; queued clicks and the
+  held key with the 4-tick right-click delay start `MultiPlayerGameMode.useItem` with the crosshair on
+  nothing), `ClientLevel.tickEntities()` (the whole `LocalPlayer.tick`: input, sprint / fly toggles,
+  pose, travel, collisions, block effects, movement packets, the player-input packet), then the
+  `ServerboundClientTickEndPacket` that `Minecraft.tick` sends.
+
+Faked, and why it does not change movement:
+- `Minecraft` is allocated without its constructor (no window, GL, sound device). Set: the instance,
+  game thread + packet processor (packet handlers check the thread), options, tutorial (real, never
+  started), user properties / profile futures and offline services (read by the chat abilities of a new
+  player and by the player info handler), a game renderer holding only a real `Camera` (camera entity,
+  sound / particle distance), a `Gui` holding an allocated debug overlay (the packet listener's
+  constructor asks it for a ping logger), and the stand-ins below. The tick paths that run only read
+  these fields.
+- Stand-ins (allocated subclasses whose reachable hooks are no-ops): sound manager, particle engine,
+  level renderer, block entity render dispatcher, player social manager. None of them returns anything
+  the movement code reads (the particle engine returns no particle; particles and sounds draw from the
+  level / entity randoms, which are seeded with 0 instead of the time so every run is identical).
+- The `Connection` is the real class with no channel; `send` captures every packet in order.
+- The rest of `handleLogin` (level loading screen, debug renderer, chat session, telemetry, toasts) is
+  not run. The level counts as loaded right after setup: the harness calls the listener's own
+  `notifyPlayerLoaded` (sends `player_loaded`), so the player ticks from tick 1 — a real client keeps
+  the player frozen until `LevelLoadTracker` reports the level ready.
+- Light is not sent (no light packet): no movement code reads light.
+
+Weakest points (where it could differ from a real session): (1) the login is a hand-picked subset of
+`handleLogin` — a future change that puts movement state into one of the skipped calls would be missed;
+(2) attributes, depth strider and soul speed reach a 26.1 client only as server-sent attribute
+modifiers; the harness sends what a server would send at setup (soul speed's *location-dependent*
+modifiers are server-side and only appear when a scenario lists them in `attribute_modifiers`); (3) the
+server always sends the full registry contents (no known packs) — a real vanilla server with a vanilla
+client sends references to the client's own copy of the same data pack, which gives the same values;
+(4) `Minecraft.tick` steps that are skipped (gui, screen, `ClientLevel.tick` time / weather, particles,
+`gameRenderer.tick`) were read and found not to touch the player's movement state.
+
+### 26.1 format differences
+
+- Header: `fills` are `[x0, y0, z0, x1, y1, z1, state]` with the **26.1** global block state id;
+  `states` names every state id a fill uses (also fills that later fills overwrite). `setup` adds
+  `attribute_bases` (`{attribute id: base}`, e.g. `minecraft:step_height`, `minecraft:gravity`,
+  `minecraft:scale`) and `attribute_modifiers` (`[[attribute id, modifier id, amount, operation], …]`),
+  sent in the setup attributes packet. `effects` are `[[26.1 registry id, amplifier, name], …]`
+  (registry ids are 0-based: jump boost 7, blindness 14, levitation 24, slow falling 27, dolphin's grace
+  29). `soul_speed` / `depth_strider`: diamond boots with that enchantment; the enchantment's
+  `minecraft:attributes` effects (depth strider: `water_movement_efficiency`) are sent as the server
+  sends them. Velocity events keep the 1/8000 units; 26.1 sends the vector as an `LpVec3` (lossy).
+  Speed attribute events: modifier UUIDs become `oracle:<uuid>` identifiers (the sprint UUID is
+  `minecraft:sprinting`).
+- `state` fields: as 1.16.5 where the concept exists (`pos`, `bb`, `vel`, `yaw`, `pitch`, `on_ground`,
+  `horizontal_collision`, `vertical_collision`, `velocity_modified` (`hurtMarked`), `movement_multiplier`
+  (`stuckSpeedMultiplier`, **zero** when unset), `pose`, `width`, `height`, `eye_height`,
+  `touching_water` (`isInWater`), `submerged_in_water` (`isUnderWater`), `submerged_fluid`,
+  `water_height`, `lava_height`, `in_lava`, `first_update` (`firstTick`), `climbing` (`onClimbable`),
+  `swimming`, `sprinting`, `sneaking` (shift key), `in_sneaking_pose` (`LocalPlayer.crouching`),
+  `fall_flying`, `using_item`, `no_clip`, `step_height` (`maxUpStep`), abilities, `jump_cooldown`
+  (`noJumpDelay`), `jumping`, `forward_speed` (`zza`), `sideways_speed` (`xxa`), `upward_speed` (`yya`),
+  `flying_speed` (`Player.getFlyingSpeed()`, computed live in 26.1), `movement_speed` (`getSpeed()`),
+  `movement_speed_attr`, `last_block_pos`, `fly_toggle_timer` (`jumpTriggerTime`), `sprint_toggle_timer`
+  (`sprintTriggerTime`), `auto_jump_enabled`, `ticks_to_next_autojump` (`autoJumpTime`), `food_level`,
+  `age` (`tickCount`)), with these changes: `fall_distance` is **f64** (26.1 keeps it in a double), no
+  `ticks_since_sprinting_changed`; new: `minor_horizontal_collision`, `vertical_collision_below`,
+  `supporting_block` (`mainSupportingBlockPos`, `[x, y, z]` or null), `on_ground_no_blocks`,
+  `in_powder_snow`, `was_in_powder_snow`, `visually_crawling`, `attributes` (values of movement_speed,
+  step_height, gravity, jump_strength, sneaking_speed, movement_efficiency, water_movement_efficiency,
+  scale, safe_fall_distance). `input` is `{"move_vector": [x (left), y (forward)] f32, "keys": {forward,
+  backward, left, right, jump, shift, sprint}}` (26.1's `ClientInput`); `sent` has `pos` (`xLast`,
+  `yLast`, `zLast`), `yaw`, `pitch`, `on_ground`, `horizontal_collision`, `sprinting` (`wasSprinting`),
+  `ticks_since_pos` (`positionReminder`) and `input` (`lastSentInput`).
+- `packets` use minecraft-data 1.21.x names: `flying` / `position` / `look` / `position_look` (now with
+  `horizontal_collision`), `entity_action` (`ServerboundPlayerCommandPacket`: the sprint actions;
+  sneaking is no longer an entity action), `player_input` (the seven key flags, sent when they change),
+  `tick_end` (every tick), `player_loaded`, `abilities` (`flying`), `teleport_confirm`, `use_item`
+  (`hand`, `sequence`, `yaw`, `pitch`), `block_dig` (`status`, `sequence`), `held_item_slot`,
+  `arm_animation`.
+- `collision_shapes.jsonl.gz`: as 1.16.5; block lines have `offset` (the block has an offset function)
+  instead of `offset_type`; contexts add `above_falling` / `inside_falling` (fall distance 3) and
+  `above_leather_boots` / `above_leather_boots_descending` — powder snow reads both from the entity.
+  Context-dependent states: scaffolding (32) and powder snow.
+- `voxel_shapes.jsonl.gz`: as 1.16.5 (same `simple` / `array` / `sliced` class names for
+  `CubeVoxelShape` / `ArrayVoxelShape` / `SliceShape`); 26.1 has no block materials, so the `material*`
+  fields are replaced by `blocks_motion`, `liquid`, `solid`, `replaceable`, `has_offset`; context lines
+  add `fall_distance`, `leather_boots`.
+- `entity_sizes.jsonl.gz`: as 1.16.5; `entity_type` lines add `eye_height`; instances are created with
+  `EntityType.create(level, EntitySpawnReason.LOAD)` (what the add-entity handler does).
+
+Fuzz: the 1.16.5 generator (same palette and random stream; `grass_path` is `dirt_path` and `chain` is
+`iron_chain` in 26.1) with 26.1 effect ids. Same-named block states of both versions have identical
+collision geometry (only the box decomposition of 938 states — stairs, beds, anvils, … — differs) and
+identical slipperiness / speed / jump factors. Big runs (git-ignored):
+
+```sh
+MC=26.1 oracle/run.sh fuzz --seed 11 --count 1600 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz/physics_s11.jsonl.gz"
+MC=26.1 oracle/run.sh fuzz --seed 21 --count 400 --ticks 100 --use-item true --out "$PWD/oracle/cache/26.1/fuzz/physics_use_s21.jsonl.gz"
+```
+
+### 26.1 quirks (observed in the vectors)
+
+- Position packets are sent when the squared move exceeds `(2.0E-4)^2` (1.16.5: 9.0E-4) or every 20
+  ticks; a bare on-ground packet when `on_ground` or `horizontal_collision` changed.
+- Every tick ends with `tick_end`; key state changes produce `player_input` after the movement packet.
+- The position handler sets the position but not `xLast` / `yLast` / `zLast`: the tick after a teleport
+  sends a position again.
+- The bounding box is derived from the position after every move (`setPos` → `makeBoundingBox`), not
+  moved by the offset; differs from 1.16.5 in the last bit.
+- Soul sand slows a player with soul speed boots unless the server sends `movement_efficiency`
+  (`soul_speed_boots` vs `attr_movement_efficiency`).
 
 ## Notes for implementers
 

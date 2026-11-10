@@ -79,8 +79,18 @@ def prepareVanilla = tasks.register('prepareVanilla', JavaExec) {
     maxHeapSize = '1g'
 }
 
+// Versions whose jar needs a newer JDK than Gradle runs on (26.1: Java 25) declare java.version; their
+// harness is compiled and run with that toolchain. Every other version keeps Gradle's own JDK.
+def harnessJava = versionProps.getProperty('java.version')
+def harnessLauncher = harnessJava == null ? null
+        : javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(harnessJava as int) }
+
 tasks.named("compile${harnessSetName.capitalize()}Java") {
     dependsOn prepareVanilla
+    if (harnessJava != null) {
+        javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(harnessJava as int) }
+        options.release = harnessJava as int
+    }
 }
 
 tasks.register('oracle', JavaExec) {
@@ -91,6 +101,9 @@ tasks.register('oracle', JavaExec) {
     mainClass = harnessMain
     workingDir = projectDir
     maxHeapSize = '1g'
+    if (harnessLauncher != null) {
+        javaLauncher = harnessLauncher
+    }
     // Makes the run independent of the host's locale / timezone defaults.
     jvmArgs '-Duser.language=en', '-Duser.country=US', '-Duser.timezone=UTC', '-Dfile.encoding=UTF-8',
             '-Dlog4j.configurationFile=' + file('log4j2-quiet.xml').absolutePath
@@ -102,6 +115,11 @@ tasks.register('coverage', JavaExec) {
     group = 'oracle'
     description = 'Regenerate YARN_COVERAGE.md from the downloaded mappings.'
     dependsOn prepareVanilla
+    doFirst {
+        if (versionProps.getProperty('mappings.repo') == null) {
+            throw new GradleException("Minecraft ${mcVersion} ships unobfuscated: there are no mappings to report on")
+        }
+    }
     classpath = sourceSets.setup.runtimeClasspath
     mainClass = 'ghast.oracle.setup.Coverage'
     // 1.8.9 keeps the original file name; later versions get a suffix.
@@ -118,6 +136,9 @@ tasks.register('decompile', JavaExec) {
     classpath = configurations.decompiler
     mainClass = 'org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler'
     maxHeapSize = '2g'
+    if (harnessLauncher != null) {
+        javaLauncher = harnessLauncher
+    }
     doFirst {
         def out = new File(cacheDir, 'decompiled')
         out.mkdirs()
