@@ -331,7 +331,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 }
             }
         }
-        let (keys, using_item) = keys_of(input["keys"].as_str().unwrap());
+        let (keys, use_key) = keys_of(input["keys"].as_str().unwrap());
+        // Spectators cannot use items (`interactItem` passes in spectator mode), so the shield
+        // is never raised; the physics only sees whether an item is in use.
+        let using_item = use_key && !p.spectator;
         let ti = TickInput {
             keys,
             yaw: f32_of(&input["yaw"]),

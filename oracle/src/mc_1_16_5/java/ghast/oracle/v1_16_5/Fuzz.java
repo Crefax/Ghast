@@ -171,8 +171,14 @@ final class Fuzz {
         if (r.chance(0.1)) {
             sc.soulSpeed = r.range(1, 3);
         }
-        if (r.chance(0.08)) {
-            sc.effect(8, r.range(0, 1));
+        if (r.chance(0.12)) {
+            sc.effect(8, r.range(0, 2));
+        }
+        if (r.chance(0.15)) {
+            // A low ceiling over the strips: head bumps, crouch-only gaps, blocked auto-jumps.
+            int cy = floorY + r.range(3, 4);
+            String c = r.pick(new String[] {"stone", "smooth_stone_slab", "smooth_stone_slab[type=top]", "scaffolding"});
+            sc.fill(ox - 14, cy, oz - 14, ox + 14, cy, oz + 14, States.id(c), 0);
         }
         int t = 0;
         while (t < ticks) {
@@ -250,10 +256,26 @@ final class Fuzz {
             sc.movementSpeedBase = 0.05 + 0.15 * x.nextDouble();
         }
         if (x.chance(0.3)) {
-            sc.depthStrider = x.range(1, 3);
+            sc.depthStrider = x.range(1, 5); // vanilla caps the effect at 3; commands give more
         }
         if (x.chance(0.2)) {
-            sc.soulSpeed = x.range(1, 3);
+            sc.soulSpeed = x.range(1, 5);
+        }
+        if (x.chance(0.08)) {
+            // Move the whole case next to the default world border (radius 29,999,984).
+            int bx = x.chance(0.5) ? 29_999_984 : -29_999_984, bz = x.chance(0.5) ? 29_999_984 : -29_999_984;
+            boolean both = x.chance(0.3), alongX = x.chance(0.5);
+            int dx = both || alongX ? bx + x.range(-4, 4) - (int) Math.floor(sc.x) : 0;
+            int dz = both || !alongX ? bz + x.range(-4, 4) - (int) Math.floor(sc.z) : 0;
+            List<Scenario.Fill> moved = new ArrayList<>();
+            for (Scenario.Fill f : sc.fills) {
+                moved.add(new Scenario.Fill(f.x0() + dx, f.y0(), f.z0() + dz, f.x1() + dx, f.y1(), f.z1() + dz, f.id(), f.meta()));
+            }
+            sc.fills.clear();
+            sc.fills.addAll(moved);
+            sc.x += dx;
+            sc.z += dz;
+            sc.description += ", at the world border";
         }
         if (x.chance(0.15)) {
             sc.foodLevel = x.range(5, 7);
@@ -293,7 +315,8 @@ final class Fuzz {
                     case 1 -> addEvent(sc, at, new Scenario.Effects(randomEffects(x)));
                     case 2 -> {
                         boolean allow = creative || spectator || x.chance(0.5);
-                        boolean flying = spectator || (allow && x.chance(0.5));
+                        // Spectators may be sent flying=false: the client turns flight back on.
+                        boolean flying = allow && x.chance(0.5);
                         float fly = x.chance(0.6) ? 0.05f : (float) (0.01 + 0.2 * x.nextDouble());
                         addEvent(sc, at, new Scenario.Abilities(creative || spectator, flying, allow, creative, fly, 0.1f));
                     }
