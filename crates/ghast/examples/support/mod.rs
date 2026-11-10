@@ -24,13 +24,15 @@ pub struct Options {
     pub grim_compat: bool,
     /// `--grim-compat-up`: the narrower step-up-only rule.
     pub grim_compat_up: bool,
+    /// `--view-distance`: the client's view distance setting.
+    pub view_distance: Option<i8>,
 }
 
 pub const USAGE: &str = "options:
   --host <host>         server host (default localhost)
   --port <port>         server port (default 25565)
   --username <name>     offline username (default GhastBot)
-  --version <v>         1.8.9 | 1.16.5 (default 1.8.9)
+  --version <v>         1.8.9 | 1.12.2 | 1.16.5 | 26.1 (default 1.8.9)
   --proxy <url>         socks5h://[user:pass@]host:port
   --policy <p>          except-local (default) | require | prefer | direct
   --minutes <m>         quit after m minutes
@@ -39,6 +41,7 @@ pub const USAGE: &str = "options:
   --sensitivity <s>     mouse sensitivity 0..1 (default 0.5)
   --record <file>       record movement in the oracle replay format (1.8.9)
   --grim-compat         send the position on sub-0.03 step-ups (not vanilla)
+  --view-distance <n>   client view distance in chunks (default 8)
   -v, --verbose         debug logging";
 
 impl Options {
@@ -69,6 +72,7 @@ impl Options {
             record: None,
             grim_compat: false,
             grim_compat_up: false,
+            view_distance: None,
         };
         let mut args = args.peekable();
         while let Some(a) = args.next() {
@@ -97,6 +101,13 @@ impl Options {
                 "--grim-compat" => o.grim_compat = true,
                 "--grim-compat-up" => o.grim_compat_up = true,
                 "--seed" => o.seed = val()?.parse().map_err(|e| format!("--seed: {e}"))?,
+                "--view-distance" => {
+                    o.view_distance = Some(
+                        val()?
+                            .parse()
+                            .map_err(|e| format!("--view-distance: {e}"))?,
+                    );
+                }
                 "--sensitivity" => {
                     o.sensitivity =
                         Some(val()?.parse().map_err(|e| format!("--sensitivity: {e}"))?);
@@ -118,6 +129,9 @@ impl Options {
             .connector(connector);
         if let Some(s) = self.sensitivity {
             c = c.sensitivity(s);
+        }
+        if let Some(v) = self.view_distance {
+            c = c.settings(ghast::ClientSettings::default().with_view_distance(v));
         }
         if let Some(r) = &self.record {
             c = c.record(r);

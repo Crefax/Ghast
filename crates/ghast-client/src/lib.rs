@@ -4,16 +4,19 @@
 //!   handshake, login (offline; online mode with the `microsoft` feature), compression and
 //!   encryption, then the play state: keep-alives, teleports, window confirms, health,
 //!   respawn, chat.
-//! - A fixed 50 ms tick loop with vanilla 1.8.9's tick order (see [`engine`](crate::TickContext)
+//! - A fixed 50 ms tick loop with vanilla's tick order (see [`engine`](crate::TickContext)
 //!   for the details): inbound packets → [`Behavior::tick`] (actions written immediately) →
-//!   rotation → movement → exactly one movement packet.
+//!   rotation → movement → exactly one movement packet (26.1 also: `player_loaded` once the
+//!   level is in, `player_input`, and `tick_end` closing every tick).
 //! - A version-agnostic API: behaviours see [`TickContext`] and the types of [`common`],
 //!   never packets. The connection is generic over the protocol version
 //!   ([`version::ClientVersion`]), so each supported version is monomorphised.
 //! - Packets nobody needs are dropped before they are decoded; a behaviour opts into more
 //!   with [`Behavior::interests`].
 //!
-//! Supported versions: 1.8.9 (protocol 47) and 1.16.5 (protocol 754).
+//! Supported versions: 1.8.9 (protocol 47), 1.12.2 (340), 1.16.5 (754) and 26.1 – 26.1.2 (775),
+//! one cargo feature each (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`; default: all). What a version
+//! can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
 //!
 //! ```no_run
 //! use ghast_client::{Account, Behavior, Client, GameVersion, Interests, TickContext};

@@ -2,7 +2,10 @@
 
 Headless Minecraft Java Edition client for the ghast library: connection, login, the fixed
 50 ms tick loop and a version-agnostic bot API. Supports **1.8.9** (protocol 47),
-**1.12.2** (protocol 340) and **1.16.5** (protocol 754).
+**1.12.2** (protocol 340), **1.16.5** (protocol 754) and **26.1 – 26.1.2** (protocol 775). Each
+version is a cargo feature (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`; default: all) and builds
+alone; what a version can do is its `version::Capabilities` row (`GameVersion::caps()`), which
+the core reads instead of comparing version numbers.
 
 ```rust,no_run
 use ghast_client::connect::{Connector, ProxyPolicy};
@@ -91,6 +94,51 @@ writes the first rejected bodies there for a bug report; a behaviour
 panic is caught, the behaviour is stopped and the player keeps standing; sessions share no
 state, the session future is `Send` for `Send` behaviours, so many bots can run on one
 multi-threaded runtime or one bot per process on a `current_thread` runtime (examples).
+
+## 26.1 (protocol 775)
+
+Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `sendPosition`,
+`ClientPacketListener`, `ClientConfigurationPacketListenerImpl`, `MultiPlayerGameMode`):
+
+- **Login → configuration → play.** After `login_success` the client sends
+  `login_acknowledged`, its brand and client information (in the configuration state, not on
+  join), answers keep-alives and pings, selects the server's `minecraft` packs of the 775 family
+  as known (`core` and the feature packs; the server then sends vanilla registry entries without
+  data), keeps the registries the world needs (dimension types with their height, biome count;
+  chat types and enchantment names for the wire layer), answers cookie requests (stored cookies
+  or none), accepts the code of conduct, reports optional resource packs declined and required
+  ones accepted + loaded (`Client::accept_required_resource_packs`, nothing is downloaded), and
+  enters play on `finish_configuration`. `start_configuration` in play acknowledges, runs the
+  configuration state again (no ticks meanwhile: vanilla has no level then) and resumes.
+- **Tick order** (one client tick): held slot sync → `player_loaded` (once per level, from the
+  connection tick inside `gameMode.tick`) → key handling: dig / place / use / attack, written
+  immediately → `LocalPlayer.tick`: abilities (flight toggle), `player_input` when the keys
+  changed, sprint `player_command`, the movement packet (`on_ground` and
+  `horizontal_collision` flags; squared threshold 2e-4, a position at least every 20 ticks) →
+  `tick_end`. So the server still judges a tick's actions with the previous tick's sent pose.
+- **Level loading.** The player does not tick until the level is loaded: after the server's
+  `LEVEL_CHUNKS_LOAD_START` game event, once the player's chunk is there (vanilla waits for the
+  section mesh; spectators and dead players at once; after 30 s anyway). Until then each tick
+  sends only `tick_end`. A respawn starts over (with the respawn packet's kept data: attributes,
+  last input and sprint state).
+- **Wire layer** (`Wire26_1`, per connection): block action sequence numbers (start and finish
+  digging, `use_item_on`, `use_item` take a new one; abort and release send 0; reset per level),
+  `use_item` with the current look, unsigned chat with the last-seen acknowledgement state
+  (offset, 20-bit set, checksum; `message_acknowledgement` after 64 pending signed messages),
+  commands as `chat_command`, chunk batch answers with vanilla's chunks-per-tick estimate.
+- **Physics** is `ghast_physics::modern` (`V26_1`), fed every movement attribute in packet order,
+  effects (weaving too), abilities, teleports with all nine relative bits and their delta,
+  `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
+  **Digging** uses `ghast_data::v26_1::dig` (oracle-verified) with the server's
+  `mining_efficiency`, `block_break_speed` and `submerged_mining_speed` attributes. The
+  crosshair is the oracle-verified 26.1 block pick.
+- **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
+  pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
+- **Not yet on 26.1**: online mode (encryption compiles, untested), signed chat / commands with
+  signable arguments (sent unsigned as `chat_command`: offline-mode servers accept them),
+  entity tracking (and with it entity picks and attacks), movement recording, the Grim step
+  compatibility, `WorldView::column` (the 26.1 column type differs), click results from the
+  inventory (26.1 has no window confirms).
 
 ## Packet filter
 

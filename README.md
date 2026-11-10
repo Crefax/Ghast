@@ -2,9 +2,9 @@
 
 A headless Minecraft: Java Edition client / bot library in Rust.
 
-- **Old and popular versions first:** 1.8.9 (protocol 47), 1.12.2 (protocol 340) and 1.16.5
-  (protocol 754), in one workspace with a version-agnostic bot API on top. A bot written once
-  runs on all three.
+- **Old and popular versions first, current ones too:** 1.8.9 (protocol 47), 1.12.2 (protocol
+  340), 1.16.5 (protocol 754) and 26.1 – 26.1.2 (protocol 775), in one workspace with a
+  version-agnostic bot API on top. A bot written once runs on all of them.
 - **Vanilla-exact physics, proven:** player movement is compared bit for bit with the real
   vanilla client code, run headless as an *oracle*. Not "close enough".
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
@@ -18,6 +18,7 @@ Status: early (0.3, on crates.io). APIs will still change; see CONTRIBUTING.md f
 |---|---|---|
 | AFK bot on a Raspberry Pi 5, 300 s, side by side with a mineflayer 4.39 / Node 22 AFK bot on the same 1.8 server | **0.33 %** of one core, **4.1 MB** RSS, 1 thread | mineflayer: 2.19 %, 120 MB RSS, 7 threads |
 | Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 9.32 million ticks | positions, velocities, flags and packets compared by their bits |
+| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use) | **0 diffs** over 4.0 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
@@ -79,26 +80,74 @@ Other examples in `crates/ghast/examples/`: `chat`, `dig_place`, `use_item`, `at
 `inventory_probe`, `movement_course`, `soak`, and `goto` (`--features ext,pathfinder`: walks
 planned paths with the async helpers).
 
+## Versions
+
+| game versions | protocol | status |
+|---|---|---|
+| 1.8 – 1.8.9 | 47 | oracle-verified, lab-tested (Paper 1.8.8 + Grim) |
+| 1.12.2 | 340 | oracle-verified, lab-tested (Paper 1.12.2 + Grim) |
+| 1.16.4 – 1.16.5 | 754 | oracle-verified, lab-tested (Paper 1.16.5 + Grim) |
+| 26.1, 26.1.1, 26.1.2 | 775 | oracle-verified (physics, crosshair, block breaking), lab-tested (Paper 26.1.2 + Grim 2.3.74) |
+
+*Oracle-verified*: the behaviour is replayed against the real client code of that version
+(26.1, 26.1.1 and 26.1.2 share one protocol number and give identical oracle records, so they
+are one row). *Lab-tested*: sessions on a local Paper server with the Grim anticheat, 0 flags.
+Name the exact version you connect with (`GameVersion`, `"26.1.2".parse()`); versions sharing a
+protocol are served by the same code.
+
 ## Features per version
 
-| | 1.8.9 | 1.12.2 | 1.16.5 |
-|---|---|---|---|
-| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes |
-| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes |
-| chunks and block changes | yes | yes | yes |
-| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified |
-| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | yes (ray boxes approximated) |
-| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified |
-| entities: tracking, crosshair, attack / interact | yes | yes | yes |
-| mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes |
-| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested |
-| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet |
-| movement recording / trace replay (`Client::record`) | yes | not yet | yes |
+| | 1.8.9 | 1.12.2 | 1.16.5 | 26.1 |
+|---|---|---|---|---|
+| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes | offline and compression lab-tested; online mode not tested yet |
+| configuration state (known packs, registries, resource packs, cookies, reconfiguration) | – | – | – | yes (reconfiguration not tested live) |
+| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (unsigned chat and commands; signed chat not yet) |
+| chunks and block changes | yes | yes | yes | yes |
+| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block) |
+| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | yes (ray boxes approximated) | oracle-verified rays and dig progress |
+| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows and hashed clicks; click results not reported yet |
+| entities: tracking, crosshair, attack / interact | yes | yes | yes | not yet |
+| mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
+| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested | not yet |
+| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | not yet |
+| movement recording / trace replay (`Client::record`) | yes | not yet | yes | not yet |
 
-Planned: 1.21 / latest, one version at a time, each verified the same way; 1.9 – 1.12.1 as small
-deltas of the 1.12.2 family on demand. Not
+Planned: more versions from 1.8 up, family by family, each verified the same way. Not
 planned for now: a game client with its own window (`ghast-viewer` only draws the bot's view
 in a browser page, read-only).
+
+## Cargo features
+
+`ghast` (and `ghast-client`) compile every version by default. Each version is a feature, and
+each one builds alone, so a bot that only ever joins one server version can drop the rest
+(less compile time, a smaller binary):
+
+| feature | |
+|---|---|
+| `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` | the game versions (default: all) |
+| `libdeflate` | packet compression with libdeflate (C, faster; default). Without it: pure Rust (flate2 + zlib-rs) |
+| `microsoft` | online-mode servers (Microsoft accounts) |
+| `ext`, `pathfinder`, `viewer` | the optional crates (see above) |
+
+```toml
+ghast = { version = "0.4", default-features = false, features = ["v1_8", "libdeflate"] }
+```
+
+A `GameVersion` whose feature is off still exists; running it returns
+`ClientError::VersionNotEnabled`. The `afk` example, stripped, release profile below: about
+3.1 MB with every version, 2.0 MB with 1.8.9 only.
+
+### Recommended release profile
+
+A library cannot set your build profile. For small, fast bots (what the numbers above use):
+
+```toml
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+```
 
 ## How verification works
 
@@ -121,7 +170,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) and [oracle/README.md](oracle/README.md).
   oracle downloads the vanilla jar from Mojang at run time into a git-ignored cache, as
   Fabric Loom does. The Rust crates are an independent implementation.
 - Names in code and comments come from [Yarn](https://github.com/FabricMC/yarn) /
-  [Legacy Yarn](https://github.com/Legacy-Fabric/yarn) (CC0), fetched at run time.
+  [Legacy Yarn](https://github.com/Legacy-Fabric/yarn) (CC0), fetched at run time. 26.x jars
+  are published unobfuscated with Mojang's own names, which are used for those versions.
 - Packet and game-data tables are generated from
   [PrismarineJS minecraft-data](https://github.com/PrismarineJS/minecraft-data) (MIT); see
   `crates/ghast-protocol/src/generated/NOTICE` and `crates/ghast-data/src/generated/NOTICE`.

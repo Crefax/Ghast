@@ -762,6 +762,8 @@ pub(crate) struct HandsIo<'a> {
     pub broken: &'a mut Vec<BlockPos>,
     /// The held stack's count went down by one (a block was placed).
     pub placed: &'a mut bool,
+    /// Spectator mode: items are never used (vanilla's `useItem` passes without a packet).
+    pub spectator: bool,
 }
 
 impl HandsIo<'_> {
@@ -1066,7 +1068,7 @@ impl Hands {
         if let Some(e) = io.entity {
             // 1.8: interact-at, interact; not handled -> the item is used.
             self.interact(e, false, io);
-            if let Some(h) = io.held {
+            if let Some(h) = io.held.filter(|_| !io.spectator) {
                 io.out.push(Outbound::UseItem {
                     held: io.held_stack.clone(),
                     off_hand: false,
@@ -1089,7 +1091,10 @@ impl Hands {
                 return;
             }
         }
-        if fall_through && let Some(h) = io.held {
+        if fall_through
+            && !io.spectator
+            && let Some(h) = io.held
+        {
             // interactItem: the item itself (position -1, face 255).
             io.out.push(Outbound::UseItem {
                 held: io.held_stack.clone(),
@@ -1150,7 +1155,7 @@ impl Hands {
                     return;
                 }
             }
-            if let Some(h) = held {
+            if let Some(h) = held.filter(|_| !io.spectator) {
                 io.out.push(Outbound::UseItem {
                     held: stack,
                     off_hand,
@@ -1314,6 +1319,7 @@ mod tests {
                 out: &mut out,
                 broken: &mut broken,
                 placed: &mut placed,
+                spectator: false,
             };
             h.tick(false, true, &mut io);
             kinds(&out)
@@ -1384,6 +1390,7 @@ mod tests {
                     out: &mut out,
                     broken: &mut broken,
                     placed: &mut placed,
+                    spectator: false,
                 };
                 h.tick(true, false, &mut io);
                 let starts = out
@@ -1462,6 +1469,7 @@ mod tests {
                 out: &mut out,
                 broken: &mut broken,
                 placed: &mut placed,
+                spectator: false,
             };
             h.click_mouse(hit, &mut io);
             assert_eq!(kinds(&out)[..2], want);
@@ -1514,6 +1522,7 @@ mod tests {
                 out: &mut out,
                 broken: &mut broken,
                 placed: &mut placed,
+                spectator: false,
             };
             h.tick(true, false, &mut io);
             ticks += 1;

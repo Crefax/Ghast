@@ -803,6 +803,10 @@ impl<S: Sim> Engine<S> {
                 3 => {
                     c.game_mode = GameMode::from_wire(value as u8);
                     sim.spectator(c.game_mode == GameMode::Spectator);
+                    if c.game_mode == GameMode::Spectator {
+                        // Spectators cannot use items (vanilla `useItem` passes).
+                        c.hands.stop_using();
+                    }
                     c.pending.game_mode_changed = true;
                 }
                 // 1.15+: "immediate respawn" gamerule (1 = no respawn screen).
@@ -1120,6 +1124,7 @@ impl<S: Sim> Engine<S> {
                 out: &mut c.out,
                 broken: &mut c.broken_now,
                 placed: &mut placed,
+                spectator: c.game_mode == GameMode::Spectator,
             };
             let (left, right) = (c.buttons.left && !gui, c.buttons.right && !gui);
             c.hands.tick(left, right, &mut io);
@@ -1795,6 +1800,7 @@ impl TickContext<'_> {
             out: &mut c.out,
             broken: &mut c.broken_now,
             placed: &mut placed,
+            spectator: c.game_mode == GameMode::Spectator,
         };
         if !modern {
             io.out.push(Outbound::Swing);
@@ -1939,6 +1945,7 @@ impl TickContext<'_> {
             out: &mut c.out,
             broken: &mut c.broken_now,
             placed: &mut placed,
+            spectator: c.game_mode == GameMode::Spectator,
         };
         c.hands.click_block(pos, face, &mut io);
         c.out.push(Outbound::Swing);
@@ -1980,6 +1987,7 @@ impl TickContext<'_> {
             out: &mut c.out,
             broken: &mut c.broken_now,
             placed: &mut placed,
+            spectator: c.game_mode == GameMode::Spectator,
         };
         c.hands
             .right_click_block(BlockHit { hit, ..t }, &b, &mut io);
