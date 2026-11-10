@@ -154,7 +154,7 @@ impl WindowKind {
             WindowKind::Furnace => 3,
             WindowKind::BrewingStand => match version {
                 Version::V1_8 => 4,
-                Version::V1_12 | Version::V1_16_5 => 5,
+                Version::V1_12 | Version::V1_16_5 | Version::V26_1 => 5,
             },
             WindowKind::Enchanting => 2,
             WindowKind::Anvil => 3,

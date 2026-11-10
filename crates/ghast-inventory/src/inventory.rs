@@ -160,6 +160,32 @@ pub enum Outgoing {
     /// 1.8 only: `client_command` "open inventory achievement" (vanilla sends it when E opens
     /// the inventory).
     OpenInventory,
+    /// 26.1 `container_click` (no confirm exists: the server applies every click and resends
+    /// the slots whose hashes differ from its own result).
+    ContainerClick(ContainerClick),
+}
+
+/// A 26.1 click as sent: what vanilla `MultiPlayerGameMode.handleContainerInput` writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerClick {
+    /// Container id (0 = player inventory).
+    pub window_id: i32,
+    /// The screen's state id (from the last `container_set_content` / `container_set_slot`).
+    pub state_id: i32,
+    /// Slot, or -999.
+    pub slot: i16,
+    /// Mouse button / hotbar key.
+    pub button: u8,
+    /// Click mode (`ContainerInput`).
+    pub mode: u8,
+    /// Slots whose stack the prediction changed, with the new stack (vanilla compares every slot
+    /// before and after the simulated click).
+    pub changed: Vec<(i16, Option<Stack>)>,
+    /// The cursor after the click.
+    pub carried: Option<Stack>,
+    /// `false` when ghast could not predict this click (see [`Inventory::click`]): nothing
+    /// changed locally, `changed` is empty, and the server's corrections bring the result.
+    pub predicted: bool,
 }
 
 /// What became of a click.
@@ -271,12 +297,25 @@ pub struct Inventory {
     timeout: u32,
     events: Events,
     book: RecipeBook,
+    /// 26.1 state ids: window 0 (`inventoryMenu`) and the open container.
+    state_player: i32,
+    state_window: i32,
+    /// 26.1 registry names for click hashes and the binding curse.
+    #[cfg(feature = "v26_1")]
+    reg26: crate::v26_1::HashRegistries,
 }
 
 impl Inventory {
     /// An empty inventory (a fresh player entity).
+    ///
+    /// # Panics
+    /// When the version's crate feature is disabled ([`Version::is_enabled`]).
     #[must_use]
     pub fn new(version: Version) -> Inventory {
+        assert!(
+            version.is_enabled(),
+            "ghast-inventory was built without the feature of {version:?}"
+        );
         Inventory {
             version,
             m: Model::default(),
@@ -288,6 +327,10 @@ impl Inventory {
             timeout: DEFAULT_CLICK_TIMEOUT_TICKS,
             events: Events::default(),
             book: RecipeBook::default(),
+            state_player: 0,
+            state_window: 0,
+            #[cfg(feature = "v26_1")]
+            reg26: crate::v26_1::HashRegistries::default(),
         }
     }
 
@@ -307,9 +350,13 @@ impl Inventory {
     /// The selected hotbar slot restarts at 0 too (a new `PlayerInventory`).
     pub fn reset(&mut self) {
         // the recipe book belongs to the connection, not to the player entity
+        #[cfg(feature = "v26_1")]
+        let reg26 = std::mem::take(&mut self.reg26);
         *self = Inventory {
             timeout: self.timeout,
             book: std::mem::take(&mut self.book),
+            #[cfg(feature = "v26_1")]
+            reg26,
             ..Inventory::new(self.version)
         };
         self.events.player_changed = true;
@@ -568,22 +615,27 @@ impl Inventory {
             return Err(ClickError::InvalidSlot);
         }
         if let Click::Swap { hotbar, .. } = click {
-            let ok = hotbar < 9 || (hotbar == 40 && self.version == Version::V1_16_5);
+            let ok = hotbar < 9
+                || (hotbar == 40 && matches!(self.version, Version::V1_16_5 | Version::V26_1));
             if !ok {
                 return Err(ClickError::InvalidButton);
             }
         }
         let mut m = self.m.clone();
-        let item = {
+        let simulated = {
             let mut sim = Sim {
                 v: self.version,
                 lay,
                 m: &mut m,
                 book: &self.book,
+                binding_curse: self.binding_curse(),
             };
             sim.click(slot, button, mode)
-                .map_err(|_| ClickError::Unpredictable)?
         };
+        if self.version == Version::V26_1 {
+            return Ok(self.click_26_1(lay, m, simulated.is_ok(), slot, button, mode));
+        }
+        let item = simulated.map_err(|_| ClickError::Unpredictable)?;
         self.commit(m, lay);
         let (window_id, action) = match &mut self.screen {
             ScreenState::Window(w) => {
@@ -609,6 +661,89 @@ impl Inventory {
             action,
             item,
         }))
+    }
+
+    fn binding_curse(&self) -> Option<i32> {
+        #[cfg(feature = "v26_1")]
+        {
+            self.reg26
+                .enchantments
+                .iter()
+                .position(|n| n == "minecraft:binding_curse")
+                .map(|i| i as i32)
+        }
+        #[cfg(not(feature = "v26_1"))]
+        None
+    }
+
+    /// 26.1: the registry names click hashes and the binding curse check need (the
+    /// configuration phase's `minecraft:enchantment` keys in order). Without them, clicks with
+    /// enchanted items send hashes the server corrects, and taking enchanted armor off is not
+    /// predicted.
+    #[cfg(feature = "v26_1")]
+    pub fn set_registries_26_1(&mut self, reg: crate::v26_1::HashRegistries) {
+        self.reg26 = reg;
+    }
+
+    /// 26.1: the registry names set with [`Inventory::set_registries_26_1`].
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn registries_26_1(&self) -> &crate::v26_1::HashRegistries {
+        &self.reg26
+    }
+
+    /// 26.1: the state id the next click of the current screen carries.
+    #[must_use]
+    pub fn state_id(&self) -> i32 {
+        match &self.screen {
+            ScreenState::Window(_) => self.state_window,
+            _ => self.state_player,
+        }
+    }
+
+    /// The 26.1 click: vanilla predicts, then lists every slot whose stack changed and the
+    /// cursor. A click ghast cannot predict is sent unpredicted (nothing changes locally; the
+    /// server applies it and sends the true slots), never refused.
+    fn click_26_1(
+        &mut self,
+        lay: Layout,
+        m: Model,
+        predicted: bool,
+        slot: i16,
+        button: u8,
+        mode: u8,
+    ) -> Outgoing {
+        let mut changed = Vec::new();
+        if predicted {
+            for i in 0..lay.len {
+                let Some(l) = lay.loc(i) else { break };
+                let (a, b) = (self.m.at(l), m.at(l));
+                let same = match (a, b) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.count == b.count && a.id == b.id && a.data_eq(b),
+                    _ => false,
+                };
+                if !same {
+                    changed.push((i as i16, b.clone()));
+                }
+            }
+            self.commit(m, lay);
+        }
+        let window_id = match &self.screen {
+            ScreenState::Window(w) => w.id,
+            _ => 0,
+        };
+        self.flags.clicked = true;
+        Outgoing::ContainerClick(ContainerClick {
+            window_id,
+            state_id: self.state_id(),
+            slot,
+            button,
+            mode,
+            changed,
+            carried: self.m.cursor.clone(),
+            predicted,
+        })
     }
 
     /// Replaces the model with the simulated one, records which parts changed and marks a
@@ -690,7 +825,11 @@ impl Inventory {
 
     /// The client side of closing the current screen handler (`closeScreen` + `close`).
     fn close_screen(&mut self) {
-        if self.m.cursor.take().is_some() {
+        // 26.1: only the server empties the cursor (`removed` checks for a ServerPlayer); the
+        // client's player inventory menu keeps its own, so closing window 0 keeps the cursor,
+        // and closing a container returns to window 0's (empty) one.
+        let keep_cursor = self.version == Version::V26_1 && self.screen == ScreenState::Inventory;
+        if !keep_cursor && self.m.cursor.take().is_some() {
             self.events.cursor_changed = true;
         }
         match std::mem::replace(&mut self.screen, ScreenState::None) {
@@ -703,7 +842,8 @@ impl Inventory {
                     self.m.craft = Default::default();
                 }
                 self.m.craft_result = None;
-                self.m.craft_result_known = self.version != Version::V1_16_5;
+                self.m.craft_result_known =
+                    !matches!(self.version, Version::V1_16_5 | Version::V26_1);
                 self.m.craft_fresh = false;
             }
             ScreenState::Window(_) => {
@@ -825,7 +965,7 @@ impl Inventory {
             touched_grid |= is_grid(lay, l);
             let mut s = self.normalize(s);
             if lay.clamps(l) {
-                crate::sim::clamp(&mut s);
+                crate::sim::clamp_v(self.version, &mut s);
             }
             let slot = self.m.at_mut(l);
             if *slot != s {
@@ -883,7 +1023,7 @@ impl Inventory {
         let Some(l) = loc else { return };
         let mut item = item;
         if self.layout().clamps(l) {
-            crate::sim::clamp(&mut item);
+            crate::sim::clamp_v(self.version, &mut item);
         }
         let crafting_table = matches!(
             self.layout().screen,
@@ -923,6 +1063,99 @@ impl Inventory {
             if is_grid(lay, l) {
                 crate::sim::recompute_1_8(&mut self.m, lay);
             }
+        }
+    }
+
+    /// 26.1 `container_set_content` (vanilla `initializeContents`): window 0 or the open
+    /// container's slots, its carried stack and its state id. Window 0's carried stack only
+    /// shows while no container is open (the client keeps one per menu).
+    pub fn on_window_items_26_1(
+        &mut self,
+        window_id: i32,
+        state_id: i32,
+        items: impl IntoIterator<Item = Option<Stack>>,
+        carried: Option<Stack>,
+    ) {
+        let current = window_id == self.open_id();
+        if window_id != 0 && !current {
+            return;
+        }
+        self.on_window_items(window_id, items);
+        if window_id == 0 {
+            self.state_player = state_id;
+        } else {
+            self.state_window = state_id;
+        }
+        if current {
+            self.on_set_cursor(carried);
+        }
+    }
+
+    /// 26.1 `container_set_slot`: window 0 slots always reach window 0 (any slot), the open
+    /// container's only that container; the menu's state id follows.
+    pub fn on_set_slot_26_1(
+        &mut self,
+        window_id: i32,
+        state_id: i32,
+        slot: i16,
+        item: Option<Stack>,
+    ) {
+        let item = self.normalize(item);
+        let lay = if window_id == 0 {
+            Layout::new(self.version, Screen::Player)
+        } else if window_id == self.open_id() {
+            self.layout()
+        } else {
+            return;
+        };
+        if window_id == 0 {
+            self.state_player = state_id;
+        } else {
+            self.state_window = state_id;
+        }
+        let Some(l) = usize::try_from(slot).ok().and_then(|i| lay.loc(i)) else {
+            return;
+        };
+        let mut item = item;
+        if lay.clamps(l) {
+            crate::sim::clamp_v(self.version, &mut item);
+        }
+        match l {
+            Loc::CraftResult => self.m.craft_result_known = true,
+            Loc::Container(0) if lay.screen == Screen::Container(WindowKind::Crafting) => {
+                self.m.container_result_known = true;
+            }
+            _ => {}
+        }
+        let s = self.m.at_mut(l);
+        if *s != item {
+            *s = item;
+            match l {
+                Loc::Container(_) => self.events.window_changed = true,
+                _ => self.events.player_changed = true,
+            }
+        }
+    }
+
+    /// 26.1 `set_cursor_item`: the open menu's carried stack.
+    pub fn on_set_cursor(&mut self, item: Option<Stack>) {
+        let item = self.normalize(item);
+        if self.m.cursor != item {
+            self.m.cursor = item;
+            self.events.cursor_changed = true;
+        }
+    }
+
+    /// 26.1 `set_player_inventory`: a `PlayerInventory` index (0..=40; the body armor and saddle
+    /// slots 41 and 42 are not kept).
+    pub fn on_set_player_inventory(&mut self, slot: i32, item: Option<Stack>) {
+        let item = self.normalize(item);
+        let Some(k) = usize::try_from(slot).ok().filter(|&k| k < 41) else {
+            return;
+        };
+        if self.m.player[k] != item {
+            self.m.player[k] = item;
+            self.events.player_changed = true;
         }
     }
 
@@ -988,7 +1221,7 @@ impl Inventory {
         match self.version {
             Version::V1_8 => s,
             Version::V1_12 => s.filter(|s| s.count > 0 && s.id != 0),
-            Version::V1_16_5 => s
+            Version::V1_16_5 | Version::V26_1 => s
                 .filter(|s| s.count > 0 && s.id != 0)
                 .map(|s| Stack { damage: 0, ..s }),
         }

@@ -283,11 +283,11 @@ fn special_result(sp: SpecialRecipe, g: &Grid<'_>) -> Craft {
             };
             let mut out = Stack::new(FILLED_MAP, n + 1, src.damage);
             if let Some(name) = custom_name(src) {
-                out.nbt = build(|c| {
+                out.data = crate::stack::ItemData::from_nbt(build(|c| {
                     let mut d = Compound::default();
                     put(&mut d, "Name", Tag::String(name));
                     put(c, "display", Tag::Compound(d));
-                });
+                }));
             }
             Craft::Known(Some(out))
         }
@@ -421,7 +421,7 @@ pub(crate) fn remainders_1_12(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
     const BANNER: i32 = 425;
     const DRAGON_BREATH: i32 = 437;
     const GLASS_BOTTLE: i32 = 374;
-    if g.items().any(|s| s.id == BANNER && s.nbt.is_some()) {
+    if g.items().any(|s| s.id == BANNER && s.nbt().is_some()) {
         return Err(());
     }
     let mut v: Vec<Rem> = g
@@ -448,7 +448,7 @@ pub(crate) fn remainders_1_12(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
 // ---------------------------------------------------------------- NBT helpers
 
 fn tree(s: &Stack) -> Option<Compound> {
-    match s.nbt.as_ref()?.parse().ok()?? {
+    match s.nbt()?.parse().ok()?? {
         NamedTag {
             tag: Tag::Compound(c),
             ..
@@ -594,7 +594,7 @@ fn armor_dye(g: &Grid<'_>) -> Option<Stack> {
     };
     put(&mut d, "color", Tag::Int(color));
     put(&mut c, "display", Tag::Compound(d));
-    a.nbt = write(c);
+    a.data = crate::stack::ItemData::from_nbt(write(c));
     Some(a)
 }
 
@@ -642,7 +642,7 @@ fn firework(g: &Grid<'_>) -> Option<Stack> {
                     },
                 )
                 .collect();
-            out.nbt = build(|c| {
+            out.data = crate::stack::ItemData::from_nbt(build(|c| {
                 let mut f = Compound::default();
                 let elem_type = if explosions.is_empty() {
                     tag::END
@@ -659,7 +659,7 @@ fn firework(g: &Grid<'_>) -> Option<Stack> {
                 );
                 put(&mut f, "Flight", Tag::Byte(gunpowder as i8));
                 put(c, "Fireworks", Tag::Compound(f));
-            });
+            }));
         }
         return Some(out);
     }
@@ -682,7 +682,8 @@ fn firework(g: &Grid<'_>) -> Option<Stack> {
         put(&mut e, "Colors", Tag::IntArray(colors));
         put(&mut e, "Type", Tag::Byte(kind));
         let mut out = Stack::new(FIREWORK_CHARGE, 1, 0);
-        out.nbt = build(|c| put(c, "Explosion", Tag::Compound(e)));
+        out.data =
+            crate::stack::ItemData::from_nbt(build(|c| put(c, "Explosion", Tag::Compound(e))));
         return Some(out);
     }
     if gunpowder == 0 && paper == 0 && charges == 1 && dyes > 0 && dyes == m {
@@ -703,7 +704,7 @@ fn firework(g: &Grid<'_>) -> Option<Stack> {
             let mut e = e.clone();
             put(&mut e, "FadeColors", Tag::IntArray(fade));
             put(&mut c, "Explosion", Tag::Compound(e));
-            charge.nbt = write(c);
+            charge.data = crate::stack::ItemData::from_nbt(write(c));
         }
         // (without an Explosion compound vanilla edits a detached compound: no change)
         return Some(charge);
@@ -746,7 +747,7 @@ fn book_cloning(g: &Grid<'_>) -> Craft {
     }
     put(&mut c, "generation", Tag::Int(generation + 1));
     let mut out = Stack::new(WRITTEN_BOOK, n, 0);
-    out.nbt = write(c);
+    out.data = crate::stack::ItemData::from_nbt(write(c));
     Craft::Known(Some(out))
 }
 

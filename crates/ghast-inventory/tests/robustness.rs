@@ -123,7 +123,7 @@ fn mk(v: Version, t: (i32, i32, i16, Option<u8>), valid: bool) -> Stack {
         },
         // 1.16.5 slots carry no damage field
         damage: if v == Version::V1_16_5 { 0 } else { t.2 },
-        nbt: t.3.map(nbt),
+        data: ghast_inventory::ItemData::from_nbt(t.3.map(nbt)),
     }
 }
 

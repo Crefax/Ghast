@@ -19,6 +19,8 @@ pub enum Version {
     V1_12,
     /// 1.16.4 – 1.16.5 (protocol 754).
     V1_16_5,
+    /// 26.1 – 26.1.2 (protocol 775).
+    V26_1,
 }
 
 /// 1.8.9 items with damage variants (Legacy Yarn `Item.isUnbreakable()` is true; the damage value selects a variant, so merging
@@ -40,26 +42,57 @@ const SUBTYPES_1_12: &[i32] = &[
 pub(crate) type ArmorIndex = u8;
 
 impl Version {
-    fn info(self, id: i32) -> Option<&'static ghast_data::ItemInfo> {
-        let id = u16::try_from(id).ok()?;
+    /// Whether this crate was built with the version's feature (`v1_8`, `v1_12`, `v1_16_5`,
+    /// `v26_1`). An [`Inventory`](crate::Inventory) can only be created for enabled versions.
+    #[must_use]
+    pub const fn is_enabled(self) -> bool {
         match self {
-            Version::V1_8 => ghast_data::v1_8::Item::from_id(id).map(|i| i.info()),
-            Version::V1_12 => ghast_data::v1_12::Item::from_id(id).map(|i| i.info()),
-            Version::V1_16_5 => ghast_data::v1_16_5::Item::from_id(id).map(|i| i.info()),
+            Version::V1_8 => cfg!(feature = "v1_8"),
+            Version::V1_12 => cfg!(feature = "v1_12"),
+            Version::V1_16_5 => cfg!(feature = "v1_16_5"),
+            Version::V26_1 => cfg!(feature = "v26_1"),
         }
     }
 
-    fn name(self, id: i32) -> &'static str {
+    /// Item facts from `ghast-data` (1.8 – 1.16.5; 26.1 items come from [`crate::v26_1`]).
+    #[allow(unused_variables)]
+    fn info(self, id: i32) -> Option<&'static ghast_data::ItemInfo> {
+        let id = u16::try_from(id).ok()?;
+        match self {
+            #[cfg(feature = "v1_8")]
+            Version::V1_8 => ghast_data::v1_8::Item::from_id(id).map(|i| i.info()),
+            #[cfg(feature = "v1_12")]
+            Version::V1_12 => ghast_data::v1_12::Item::from_id(id).map(|i| i.info()),
+            #[cfg(feature = "v1_16_5")]
+            Version::V1_16_5 => ghast_data::v1_16_5::Item::from_id(id).map(|i| i.info()),
+            _ => None,
+        }
+    }
+
+    /// Registry name of an item id (`""` when unknown).
+    pub(crate) fn name(self, id: i32) -> &'static str {
+        #[cfg(feature = "v26_1")]
+        if self == Version::V26_1 {
+            return crate::v26_1::defaults(id).map_or("", |d| d.name);
+        }
         self.info(id).map_or("", |i| i.name)
     }
 
     /// Whether the item id exists in this version.
     pub(crate) fn known(self, id: i32) -> bool {
+        #[cfg(feature = "v26_1")]
+        if self == Version::V26_1 {
+            return crate::v26_1::defaults(id).is_some();
+        }
         self.info(id).is_some()
     }
 
-    /// `Item.getMaxCount()`. Unknown ids get 64.
+    /// `Item.getMaxCount()` (26.1: the stack's `max_stack_size` component). Unknown ids get 64.
     pub(crate) fn max_count(self, s: &Stack) -> i32 {
+        #[cfg(feature = "v26_1")]
+        if self == Version::V26_1 {
+            return crate::v26_1::max_stack_size(s);
+        }
         if self == Version::V1_16_5 && s.id == 843 {
             // warped_fungus_on_a_stick: minecraft-data says 64, vanilla 1.16.5 says 1.
             return 1;
@@ -71,17 +104,29 @@ impl Version {
         self.info(s.id).map_or(64, |i| i32::from(i.stack_size))
     }
 
+    /// Durability from `ghast-data` (1.8 – 1.16.5).
+    pub(crate) fn max_durability(self, id: i32) -> Option<i32> {
+        self.info(id)
+            .and_then(|i| i.max_durability)
+            .map(i32::from)
+            .filter(|&d| d > 0)
+    }
+
     /// Whether the item has damage variants (1.8 / 1.12; 1.16 has no damage-selected variants).
     pub(crate) fn has_subtypes(self, id: i32) -> bool {
         match self {
             Version::V1_8 => SUBTYPES_1_8.binary_search(&id).is_ok(),
             Version::V1_12 => SUBTYPES_1_12.binary_search(&id).is_ok(),
-            Version::V1_16_5 => false,
+            Version::V1_16_5 | Version::V26_1 => false,
         }
     }
 
     /// `ItemStack.isDamageable()`: the item has durability and the stack is not `Unbreakable`.
     pub(crate) fn is_damageable(self, s: &Stack) -> bool {
+        #[cfg(feature = "v26_1")]
+        if self == Version::V26_1 {
+            return crate::v26_1::is_damageable(s);
+        }
         self.info(s.id)
             .and_then(|i| i.max_durability)
             .is_some_and(|d| d > 0)
@@ -94,6 +139,7 @@ impl Version {
             && match self {
                 Version::V1_8 | Version::V1_12 => s.damage > 0,
                 Version::V1_16_5 => s.nbt_int("Damage") > 0,
+                Version::V26_1 => damage_26(s) > 0,
             }
     }
 
@@ -112,6 +158,7 @@ impl Version {
                 .then(|| ((s.id - 298) % 4) as u8),
             Version::V1_12 => equipment_1_12(s.id).filter(|&e| e < 4),
             Version::V1_16_5 => self.equipment_1_16(s.id).filter(|&e| e < 4),
+            Version::V26_1 => equip_26(s).and_then(|e| e.filter(|&e| e < 4)),
         }
     }
 
@@ -128,6 +175,7 @@ impl Version {
             }
             Version::V1_12 => equipment_1_12(s.id) == Some(a),
             Version::V1_16_5 => self.equipment_1_16(s.id) == Some(a),
+            Version::V26_1 => equip_26(s) == Some(Some(a)),
         }
     }
 
@@ -138,6 +186,7 @@ impl Version {
             Version::V1_8 => false,
             Version::V1_12 => equipment_1_12(s.id) == Some(4),
             Version::V1_16_5 => self.equipment_1_16(s.id) == Some(4),
+            Version::V26_1 => equip_26(s) == Some(Some(4)),
         }
     }
 
@@ -172,6 +221,36 @@ impl Version {
     /// 1.12 / 1.16.5 shulker box slots refuse shulker boxes.
     pub(crate) fn is_shulker_box(self, s: &Stack) -> bool {
         self != Version::V1_8 && self.name(s.id).ends_with("shulker_box")
+    }
+}
+
+/// 26.1 `ItemStack.getDamageValue()`.
+fn damage_26(s: &Stack) -> i32 {
+    #[cfg(feature = "v26_1")]
+    return crate::v26_1::damage_value(s);
+    #[cfg(not(feature = "v26_1"))]
+    {
+        let _ = s;
+        0
+    }
+}
+
+/// 26.1 equipment slot of the `equippable` component as 0..=3 armor, 4 offhand; `None`
+/// (outer) when the stack patches `equippable` (unknown to ghast).
+fn equip_26(s: &Stack) -> Option<Option<u8>> {
+    #[cfg(feature = "v26_1")]
+    {
+        use crate::v26_1::Equip;
+        let e = crate::v26_1::equip(s).ok()?;
+        Some(match e {
+            Equip::Offhand => Some(4),
+            e => e.armor_index(),
+        })
+    }
+    #[cfg(not(feature = "v26_1"))]
+    {
+        let _ = s;
+        None
     }
 }
 

@@ -13,9 +13,18 @@ categories = ["game-development"]
 readme = "README.md"
 documentation = "https://docs.rs/ghast-inventory"
 
+[features]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
+# Per-version item rules, packets and recipes.
+v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
+v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
+v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
+# 26.1: data components (lazy), hashed click stacks, item defaults from Mojang's reports.
+v26_1 = ["ghast-protocol/v26_1"]
+
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5"] }
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
 bytes = { workspace = true }
 bytestring = { workspace = true }
 
@@ -25,8 +34,15 @@ proptest = { workspace = true }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
 # examples/live_clicks.rs (lab test tool)
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "tokio"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["tokio"] }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
+
+[[example]]
+name = "live_clicks"
+required-features = ["v1_8", "v1_12", "v1_16_5"]
+
+[[example]]
+name = "gen_items_26_1"
 
 [package.metadata.docs.rs]
 all-features = true

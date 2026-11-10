@@ -1,39 +1,91 @@
-//! Item stacks: one version-independent type over the 1.8 (`slot::legacy`) and 1.16.5
-//! (`slot::modern`) wire formats.
+//! Item stacks: one version-independent type over the 1.8 / 1.12 (`slot::legacy`), 1.16.5
+//! (`slot::modern`) and 26.1 (`slot::v775`) wire formats.
 //!
-//! NBT stays raw ([`RawNbt`]): converting a `window_items` packet into stacks only moves the
-//! reference-counted bytes. Comparisons compare the raw bytes first and parse only when the bytes
-//! differ (vanilla compares NBT trees, which ignore compound key order and the root name).
+//! Item data stays raw: NBT as [`RawNbt`], 26.1 data components as a
+//! [`ComponentPatch`](ghast_protocol::types::slot::v775::ComponentPatch) slice. Converting a
+//! `window_items` packet into stacks only moves reference-counted bytes. Comparisons compare
+//! the raw bytes first and only look inside when the bytes differ (vanilla compares NBT trees,
+//! which ignore compound key order and the root name, and component maps, which ignore order).
 
 use ghast_protocol::nbt::{RawNbt, Tag};
 use ghast_protocol::types::slot::{legacy, modern};
 
+/// The item data a stack carries, in its version's form.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum ItemData {
+    /// Nothing beyond the item id (no NBT; 26.1: the item's default components).
+    #[default]
+    None,
+    /// 1.8 – 1.16.5 item NBT exactly as received.
+    Nbt(RawNbt),
+    /// 26.1 data component patch (added / removed against the item's defaults) exactly as
+    /// received; components are decoded only when asked for.
+    #[cfg(feature = "v26_1")]
+    Components(ghast_protocol::types::slot::v775::ComponentPatch),
+}
+
+impl ItemData {
+    /// From optional NBT.
+    #[must_use]
+    pub fn from_nbt(nbt: Option<RawNbt>) -> ItemData {
+        nbt.map_or(ItemData::None, ItemData::Nbt)
+    }
+}
+
 /// A non-empty item stack as the client holds it.
 ///
-/// `count` is a Java `int` in vanilla (sent as a byte). 1.8 keeps stacks with a count of zero
-/// or less as real stacks (they render as a red "0"); 1.16.5 treats them as empty, so a 1.16.5
-/// [`Inventory`](crate::Inventory) never stores one.
+/// `count` is a Java `int` in vanilla (sent as a byte before 26.1). 1.8 keeps stacks with a
+/// count of zero or less as real stacks (they render as a red "0"); later versions treat them as
+/// empty, so their [`Inventory`](crate::Inventory) never stores one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Stack {
-    /// Numeric item id (1.8: legacy id; 1.16.5: item registry id).
+    /// Numeric item id (1.8 / 1.12: legacy id; 1.16.5 / 26.1: item registry id).
     pub id: i32,
     /// Stack size.
     pub count: i32,
-    /// 1.8 damage / metadata. Always 0 on 1.16.5 (damage lives in the `Damage` NBT tag).
+    /// 1.8 / 1.12 damage / metadata. Always 0 on 1.16.5 (the `Damage` NBT tag) and 26.1 (the
+    /// `damage` component); see [`Stack::damage_value`].
     pub damage: i16,
-    /// Item NBT exactly as received, if any.
-    pub nbt: Option<RawNbt>,
+    /// NBT or data components exactly as received.
+    pub data: ItemData,
 }
 
 impl Stack {
-    /// A stack without NBT.
+    /// A stack without NBT or component changes.
     #[must_use]
     pub fn new(id: i32, count: i32, damage: i16) -> Stack {
         Stack {
             id,
             count,
             damage,
-            nbt: None,
+            data: ItemData::None,
+        }
+    }
+
+    /// The NBT (1.8 – 1.16.5), if any.
+    #[must_use]
+    pub fn nbt(&self) -> Option<&RawNbt> {
+        match &self.data {
+            ItemData::Nbt(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// This stack with its NBT replaced.
+    #[must_use]
+    pub fn with_nbt(mut self, nbt: Option<RawNbt>) -> Stack {
+        self.data = ItemData::from_nbt(nbt);
+        self
+    }
+
+    /// The 26.1 component patch, if the stack changes any component.
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn components(&self) -> Option<&ghast_protocol::types::slot::v775::ComponentPatch> {
+        match &self.data {
+            ItemData::Components(c) => Some(c),
+            _ => None,
         }
     }
 
@@ -53,7 +105,7 @@ impl Stack {
             id: i32::from(s.id),
             count: i32::from(s.count),
             damage: s.damage,
-            nbt: s.nbt,
+            data: ItemData::from_nbt(s.nbt),
         }
     }
 
@@ -64,7 +116,34 @@ impl Stack {
             id: s.id,
             count: i32::from(s.count),
             damage: 0,
-            nbt: s.nbt,
+            data: ItemData::from_nbt(s.nbt),
+        }
+    }
+
+    /// Converts a 26.1 wire stack (an empty patch becomes [`ItemData::None`]).
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn from_v775(s: ghast_protocol::types::slot::v775::ItemStack) -> Stack {
+        Stack {
+            id: s.id,
+            count: s.count,
+            damage: 0,
+            data: if s.components.is_empty() {
+                ItemData::None
+            } else {
+                ItemData::Components(s.components)
+            },
+        }
+    }
+
+    /// The 26.1 wire form (any NBT is dropped: 26.1 has none).
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn to_v775(&self) -> ghast_protocol::types::slot::v775::ItemStack {
+        ghast_protocol::types::slot::v775::ItemStack {
+            id: self.id,
+            count: self.count,
+            components: self.components().cloned().unwrap_or_default(),
         }
     }
 
@@ -79,7 +158,7 @@ impl Stack {
                 .unwrap_or(0),
             count: self.count as i8,
             damage: self.damage,
-            nbt: self.nbt.clone(),
+            nbt: self.nbt().cloned(),
         }
     }
 
@@ -89,21 +168,37 @@ impl Stack {
         modern::ItemStack {
             id: self.id,
             count: self.count as i8,
-            nbt: self.nbt.clone(),
+            nbt: self.nbt().cloned(),
         }
     }
 
-    /// Same item, damage and NBT (vanilla's item + damage check and its NBT check); counts are
-    /// not compared.
+    /// Same item, damage and data (vanilla's item + damage check and its NBT check; 26.1
+    /// `isSameItemSameComponents`); counts are not compared.
     #[must_use]
     pub fn same_item(&self, other: &Stack) -> bool {
-        self.id == other.id && self.damage == other.damage && self.nbt_eq(other)
+        self.id == other.id && self.damage == other.damage && self.data_eq(other)
     }
 
-    /// Vanilla's tag comparison: both absent, or both present and equal as trees.
+    /// Vanilla's data comparison: NBT both absent, or both present and equal as trees; 26.1
+    /// component patches equal as maps.
+    #[must_use]
+    pub fn data_eq(&self, other: &Stack) -> bool {
+        match (&self.data, &other.data) {
+            (ItemData::None, ItemData::None) => true,
+            (ItemData::Nbt(a), ItemData::Nbt(b)) => nbt_eq(Some(a), Some(b)),
+            #[cfg(feature = "v26_1")]
+            (ItemData::Components(a), ItemData::Components(b)) => a.same_components(b),
+            #[cfg(feature = "v26_1")]
+            (ItemData::Components(c), ItemData::None)
+            | (ItemData::None, ItemData::Components(c)) => c.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Same as [`Stack::data_eq`] (kept from 0.3, where item data was always NBT).
     #[must_use]
     pub fn nbt_eq(&self, other: &Stack) -> bool {
-        nbt_eq(self.nbt.as_ref(), other.nbt.as_ref())
+        self.data_eq(other)
     }
 
     /// Exact equality as the server checks the clicked item (count, id, damage, NBT).
@@ -123,7 +218,7 @@ impl Stack {
     }
 
     fn nbt_number(&self, key: &str) -> Option<i64> {
-        let tree = self.nbt.as_ref()?.parse().ok()??;
+        let tree = self.nbt()?.parse().ok()??;
         let c = tree.tag.as_compound()?;
         number(last(c, key)?)
     }
@@ -131,7 +226,7 @@ impl Stack {
     /// 1.16.5 `EnchantmentHelper.hasBindingCurse`: an `Enchantments` entry with id
     /// `minecraft:binding_curse` and `lvl` > 0.
     pub(crate) fn has_binding_curse(&self) -> bool {
-        let Some(Ok(Some(tree))) = self.nbt.as_ref().map(RawNbt::parse) else {
+        let Some(Ok(Some(tree))) = self.nbt().map(RawNbt::parse) else {
             return false;
         };
         let Some(Tag::List(list)) = tree.tag.as_compound().and_then(|c| last(c, "Enchantments"))
@@ -157,7 +252,7 @@ impl Stack {
     /// 1.12 `EnchantmentHelper.hasBindingCurse`: the first `ench` entry whose short `id` is 10
     /// (binding curse) decides, by its short `lvl` > 0.
     pub(crate) fn has_binding_curse_1_12(&self) -> bool {
-        let Some(Ok(Some(tree))) = self.nbt.as_ref().map(RawNbt::parse) else {
+        let Some(Ok(Some(tree))) = self.nbt().map(RawNbt::parse) else {
             return false;
         };
         let Some(Tag::List(list)) = tree.tag.as_compound().and_then(|c| last(c, "ench")) else {
@@ -176,11 +271,11 @@ impl Stack {
 }
 
 /// The value of the last entry named `key` (a Java `HashMap` keeps the last duplicate).
-fn last<'a>(c: &'a ghast_protocol::nbt::Compound, key: &str) -> Option<&'a Tag> {
+pub(crate) fn last<'a>(c: &'a ghast_protocol::nbt::Compound, key: &str) -> Option<&'a Tag> {
     c.0.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v)
 }
 
-fn number(t: &Tag) -> Option<i64> {
+pub(crate) fn number(t: &Tag) -> Option<i64> {
     Some(match *t {
         Tag::Byte(v) => i64::from(v),
         Tag::Short(v) => i64::from(v),
@@ -333,13 +428,13 @@ mod tests {
     fn nbt_helpers() {
         let mut s = Stack::new(1, 1, 0);
         assert!(!s.nbt_bool("Unbreakable"));
-        s.nbt = Some(raw(
+        s.data = ItemData::Nbt(raw(
             vec![("Unbreakable", Tag::Byte(1)), ("Damage", Tag::Int(7))],
             "",
         ));
         assert!(s.nbt_bool("Unbreakable"));
         assert_eq!(s.nbt_int("Damage"), 7);
-        s.nbt = Some(raw(vec![("Unbreakable", Tag::Int(256))], ""));
+        s.data = ItemData::Nbt(raw(vec![("Unbreakable", Tag::Int(256))], ""));
         assert!(!s.nbt_bool("Unbreakable"), "(byte) 256 == 0");
         let ench = |id: &str, lvl: i16| {
             Tag::List(ghast_protocol::nbt::List {
@@ -350,23 +445,23 @@ mod tests {
                 ]))],
             })
         };
-        s.nbt = Some(raw(
+        s.data = ItemData::Nbt(raw(
             vec![("Enchantments", ench("minecraft:binding_curse", 1))],
             "",
         ));
         assert!(s.has_binding_curse());
-        s.nbt = Some(raw(
+        s.data = ItemData::Nbt(raw(
             vec![("Enchantments", ench("minecraft:binding_curse", 0))],
             "",
         ));
         assert!(!s.has_binding_curse());
-        s.nbt = Some(raw(
+        s.data = ItemData::Nbt(raw(
             vec![("StoredEnchantments", ench("minecraft:binding_curse", 1))],
             "",
         ));
         assert!(!s.has_binding_curse());
         // Garbage NBT never panics.
-        s.nbt = RawNbt::from_bytes(Bytes::from_static(&[0x0a, 0, 0, 0])).ok();
+        s.data = ItemData::from_nbt(RawNbt::from_bytes(Bytes::from_static(&[0x0a, 0, 0, 0])).ok());
         assert!(!s.has_binding_curse());
     }
 

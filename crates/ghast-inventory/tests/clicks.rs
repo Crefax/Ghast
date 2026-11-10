@@ -1018,7 +1018,7 @@ fn binding_curse_keeps_armor_on() {
     })
     .unwrap();
     let mut helmet = s16("iron_helmet", 1);
-    helmet.nbt = Some(nbt);
+    helmet.data = ghast_inventory::ItemData::Nbt(nbt);
     let mut inv = player_inv(Version::V1_16_5, &[(5, helmet)]);
     let p = click(
         &mut inv,

@@ -49,20 +49,27 @@
 
 mod crafting;
 mod inventory;
+mod item;
 mod packets;
 mod rules;
 mod sim;
 mod stack;
+#[cfg(feature = "v26_1")]
+pub mod v26_1;
 mod window;
 
 pub use crafting::RecipeBook;
 pub use inventory::{
-    Click, ClickError, ClickOutcome, ClickPacket, ClickResult, DEFAULT_CLICK_TIMEOUT_TICKS, Events,
-    Inventory, Outgoing, Window,
+    Click, ClickError, ClickOutcome, ClickPacket, ClickResult, ContainerClick,
+    DEFAULT_CLICK_TIMEOUT_TICKS, Events, Inventory, Outgoing, Window,
 };
+pub use item::{Enchantment, EnchantmentId, ItemText};
+#[cfg(feature = "v26_1")]
+pub use packets::PACKET_IDS_26_1;
 pub use rules::Version;
 pub use sim::OUTSIDE;
 pub use stack::{
-    Stack, from_legacy_slot, from_modern_slot, nbt_eq, stacks_equal, to_legacy_slot, to_modern_slot,
+    ItemData, Stack, from_legacy_slot, from_modern_slot, nbt_eq, stacks_equal, to_legacy_slot,
+    to_modern_slot,
 };
 pub use window::{SlotKind, WindowKind};

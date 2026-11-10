@@ -246,7 +246,7 @@ impl Driver {
                     );
                     let key = |s: &Option<Stack>| {
                         s.as_ref()
-                            .map(|s| (s.id, s.count, s.damage, s.nbt.is_some()))
+                            .map(|s| (s.id, s.count, s.damage, s.nbt().is_some()))
                     };
                     if key(&x) != key(&y) {
                         bad += 1;
