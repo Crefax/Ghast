@@ -8,10 +8,13 @@ types per protocol version, framing, compression, encryption, NBT. No game logic
 | `v1_8` (feature `v1_8`) | Protocol 47 (1.8 – 1.8.9) |
 | `v1_12_2` (feature `v1_12_2`) | Protocol 340 (1.12.2) |
 | `v1_16_5` (feature `v1_16_5`) | Protocol 754 (1.16.4 – 1.16.5) |
+| `v26_1` (feature `v26_1`) | Protocol 775 (26.1 – 26.1.2), with the configuration state |
+| `defs` | every generated definition once, shared by the versions whose code for it is identical (see below) |
+| `versions` | the protocol table: number → module, feature, game versions, layout, configuration state |
 | `codec` | `Reader` (bounds-checked, zero-copy over `Bytes`), `McWrite`, VarInt/VarLong, `Decode`/`Encode` |
-| `types` | `BlockPos` (both bit layouts), slots (`slot::legacy` 1.8–1.12, `slot::modern` 1.13.2–1.20.4), angle/fixed-point helpers |
-| `nbt` | `RawNbt` (validated raw bytes, lazily parsed), `NamedTag`/`Tag` tree, Modified UTF-8 |
-| `chat` | chat components stay raw JSON strings; `to_plain_text`/`parse` with feature `chat-json` |
+| `types` | `BlockPos` (both bit layouts), slots (`slot::legacy` 1.8–1.12, `slot::modern` 1.13.2–1.20.4), `Holder`/`HolderSet` (registry id or inline value), `LpVec3` (1.21.9+ velocity), `chunk` (26.1 chunk sections and paletted containers, zero-copy), angle/fixed-point helpers |
+| `nbt` | `RawNbt` (named root, up to 1.20.1) and `AnonNbt` (unnamed root, 1.20.2+): validated raw bytes, lazily parsed; `NamedTag`/`Tag` tree, Modified UTF-8 |
+| `chat` | JSON chat stays a raw string (`to_plain_text`/`parse` with feature `chat-json`); NBT chat (1.20.3+) is `AnonNbt` (`nbt_to_plain_text`) |
 | `frame` | `FrameDecoder`/`FrameEncoder`: length prefix, zlib, CFB8 hook, `PacketFilter` |
 | `crypto` | AES-128-CFB8 (`Cfb8Encryptor`, batched `Cfb8Decryptor`) |
 | `io` (feature `tokio`) | `FramedReader`/`FramedWriter` over `AsyncRead`/`AsyncWrite` halves |
@@ -79,9 +82,32 @@ vanilla does); `Decode::decode` on a `Reader` is available for lenient use.
 `codegen/protocol` (`cargo run -p ghast-codegen-protocol`) downloads minecraft-data 3.119.0
 from npm into the git-ignored `/.cache/minecraft-data/3.119.0/` (sha512-checked), follows
 `dataPaths.json` (pc 1.8 → `pc/1.8`, pc 1.16.5 → `pc/1.16.2`), and writes
-`src/generated/<version>/` (committed; plain `cargo build` needs no network). Output is
+`src/generated/` (committed; plain `cargo build` needs no network). Output is
 deterministic and rustfmt-formatted. minecraft-data is MIT licensed; see
 `src/generated/NOTICE`.
+
+Layout of the generated code:
+
+- `defs/p<N>/`: every packet struct, nested type and named type exactly once, in the module
+  of the first protocol `N` that has it. A later version reuses a definition when the
+  emitted Rust code is identical (the concrete slot type and position layout are part of
+  the code) and every definition it refers to is shared as well (a greatest-fixpoint
+  partition refinement, so recursive types work). Each item is gated with
+  `#[cfg(any(feature = ...))]` on the versions that use it, so a version feature that is
+  off removes all code only it uses. Adding a version never moves an existing definition.
+- Packet structs take the protocol number as a const parameter
+  (`struct KeepAlive<const V: i32>`), so one definition serves versions with different
+  packet ids. Decoding and encoding are monomorphised per version: the machine code is the
+  same as with one copy per version, without run-time version branches.
+- `<version>/`: the per-version layer — `id` constants, `pub type KeepAlive =
+  defs::p340::play::clientbound::KeepAlive<340>;`, re-exports of the nested types, the
+  `Packet` impls (id, name, state, direction), the packet-set enums and the `Version`
+  marker. Struct literals, patterns, `decode_as::<cb::KeepAlive>()` and
+  `write_packet(&sb::KeepAlive { .. })` work through the aliases.
+- `versions_table.rs`: rows of `versions::TABLE` (game versions per protocol number come
+  from minecraft-data's `protocolVersions.json`).
+
+`cargo run -p ghast-codegen-protocol` prints how many definitions each version reuses.
 
 How protodef types map to Rust:
 
@@ -92,6 +118,13 @@ How protodef types map to Rust:
 | `buffer` (varint count), `restBuffer` | `bytes::Bytes` (zero-copy) |
 | `UUID` | `uuid::Uuid` |
 | `nbt` / `optionalNbt` | `RawNbt` / `Option<RawNbt>` (hand-written, lazy) |
+| `anonymousNbt` / `anonOptionalNbt` | `AnonNbt` / `Option<AnonNbt>` (hand-written, lazy) |
+| `registryEntryHolder` / `registryEntryHolderSet` | `Holder<T>` / `HolderSet` |
+| `bitflags` | newtype over the integer with one constant per flag; switches can test a flag (`../action/add_player`) |
+| `lpVec3` | `LpVec3` (exact wire form, `to_vec3`/`from_vec3`) |
+| `buffer` with a fixed count | `bytes::Bytes`, length checked on encode |
+| recursive named types | `Box<T>` on the references that close a cycle |
+| state-local types (`play.toClient.types`) | named types of that packet module |
 | `position` | `BlockPos` with the version's layout (hand-written) |
 | `slot` | `types::Slot` = `slot::legacy::Slot` / `slot::modern::Slot` (hand-written) |
 | `container` | struct (anonymous containers and bit fields are flattened into the parent) |

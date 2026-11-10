@@ -6,10 +6,12 @@
 //!   and strings), [`McWrite`] for encoding, VarInt/VarLong.
 //! - [`types`], [`nbt`], [`chat`]: hand-written shared types — [`BlockPos`] with the
 //!   per-version bit layout, slots, lazily parsed NBT ([`nbt::RawNbt`]), chat JSON.
-//! - Generated packet modules per protocol version ([`v1_8`] = protocol 47,
-//!   [`v1_12_2`] = protocol 340, [`v1_16_5`] = protocol 754), each with typed packet structs, one enum per state and
-//!   direction, and id constants. A [`Version`] marker type ties a version's packet sets
-//!   together so a version-agnostic layer can be written generically.
+//! - Generated packet modules per protocol version (`v1_8` = protocol 47, `v1_12_2` =
+//!   340, `v1_16_5` = 754, `v26_1` = 775), each with typed packets, one enum per state
+//!   and direction, and id constants. The definitions themselves live once in [`defs`]
+//!   and are shared by every version whose code for them is identical. A [`Version`]
+//!   marker type ties a version's packet sets together so a version-agnostic layer can be
+//!   written generically; [`versions`] is the table of known protocol numbers.
 //! - [`frame`]: length framing, zlib compression with partial inflation, the
 //!   AES-128-CFB8 hook ([`crypto`]), and the per-id [`PacketFilter`] that drops unwanted
 //!   packets before they are decoded.
@@ -46,6 +48,10 @@ pub mod packet;
 #[cfg(feature = "testgen")]
 pub mod testgen;
 pub mod types;
+pub mod versions;
+
+#[path = "generated/defs/mod.rs"]
+pub mod defs;
 
 #[cfg(feature = "v1_8")]
 #[path = "generated/v1_8/mod.rs"]
@@ -64,5 +70,8 @@ pub use error::{DecodeError, EncodeError, FrameError};
 pub use frame::{FrameDecoder, FrameEncoder, FrameLimits};
 #[cfg(feature = "tokio")]
 pub use io::{FramedReader, FramedWriter};
-pub use packet::{Direction, Packet, PacketFilter, PacketSet, RawPacket, State, Version};
+pub use packet::{
+    Direction, NoPackets, Packet, PacketFilter, PacketSet, RawPacket, State, Version,
+};
+pub use versions::ProtocolVersion;
 pub use types::BlockPos;

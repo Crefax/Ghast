@@ -15,6 +15,9 @@ pub enum State {
     Status,
     /// Login (encryption, compression, login success).
     Login,
+    /// Configuration (1.20.2+): registries, tags, resource packs, between login and play
+    /// and again whenever the server sends `start_configuration`.
+    Configuration,
     /// In game.
     Play,
 }
@@ -180,6 +183,32 @@ impl PacketFilter {
     }
 }
 
+/// The packet set of a state a version does not have (the configuration state before
+/// 1.20.2). Uninhabited: decoding always fails with [`DecodeError::UnknownPacketId`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NoPackets {}
+
+impl PacketSet for NoPackets {
+    const STATE: State = State::Configuration;
+    const DIRECTION: Direction = Direction::Clientbound;
+
+    fn decode_raw(raw: &RawPacket) -> DecodeResult<Self> {
+        Err(DecodeError::UnknownPacketId(raw.id))
+    }
+    fn id(&self) -> i32 {
+        match *self {}
+    }
+    fn name(&self) -> &'static str {
+        match *self {}
+    }
+    fn encode_body(&self, _: &mut BytesMut) -> EncodeResult {
+        match *self {}
+    }
+    fn name_of(_: i32) -> Option<&'static str> {
+        None
+    }
+}
+
 /// A protocol version: its number and the packet sets of every state and direction.
 ///
 /// Implemented by the generated marker types (e.g. [`crate::v1_8::V1_8`]). A
@@ -192,6 +221,8 @@ pub trait Version: Copy + Send + Sync + 'static {
     const NAME: &'static str;
     /// Bit layout of packed block positions.
     const POSITION_LAYOUT: crate::types::PositionLayout;
+    /// This version's row in [`crate::versions::TABLE`].
+    const INFO: &'static crate::versions::ProtocolVersion;
 
     /// Serverbound handshaking packets.
     type HandshakingServerbound: PacketSet;
@@ -203,6 +234,10 @@ pub trait Version: Copy + Send + Sync + 'static {
     type LoginClientbound: PacketSet;
     /// Serverbound login packets.
     type LoginServerbound: PacketSet;
+    /// Clientbound configuration packets ([`NoPackets`] before 1.20.2).
+    type ConfigurationClientbound: PacketSet;
+    /// Serverbound configuration packets ([`NoPackets`] before 1.20.2).
+    type ConfigurationServerbound: PacketSet;
     /// Clientbound play packets.
     type PlayClientbound: PacketSet;
     /// Serverbound play packets.

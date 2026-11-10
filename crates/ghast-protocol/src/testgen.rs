@@ -12,7 +12,7 @@ use bytestring::ByteString;
 use uuid::Uuid;
 
 use crate::codec::EncodeResult;
-use crate::nbt::{Compound, List, NamedTag, RawNbt, Tag, tag};
+use crate::nbt::{AnonNbt, Compound, List, NamedTag, RawNbt, Tag, tag};
 use crate::types::BlockPos;
 
 /// A type that can produce random values.
@@ -262,6 +262,34 @@ impl Gen {
             tag: self.nbt_tag(tag::COMPOUND, 0),
         };
         RawNbt::from_named(&t).expect("generated NBT is encodable")
+    }
+
+    /// A random unnamed network NBT root (any tag type, TAG_End 10% of the time).
+    pub fn anon_nbt(&mut self) -> AnonNbt {
+        if self.chance(10) {
+            return AnonNbt::END;
+        }
+        let ty = if self.chance(50) {
+            tag::COMPOUND
+        } else {
+            1 + self.below(12) as u8
+        };
+        let t = self.nbt_tag(ty, 0);
+        AnonNbt::from_tag(&t).expect("generated NBT is encodable")
+    }
+
+    /// Optional unnamed NBT (`None` 30% of the time).
+    pub fn anon_opt_nbt(&mut self) -> Option<AnonNbt> {
+        if self.chance(30) {
+            return None;
+        }
+        let t = self.nbt_tag(tag::COMPOUND, 0);
+        Some(AnonNbt::from_tag(&t).expect("generated NBT is encodable"))
+    }
+
+    /// Exactly `n` random bytes.
+    pub fn fixed_bytes(&mut self, n: usize) -> Bytes {
+        Bytes::from((0..n).map(|_| self.u64() as u8).collect::<Vec<u8>>())
     }
 
     /// Optional NBT (`None` 30% of the time).

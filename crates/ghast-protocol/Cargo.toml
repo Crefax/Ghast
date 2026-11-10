@@ -55,5 +55,10 @@ name = "protocol"
 harness = false
 required-features = ["v1_8", "libdeflate"]
 
+[[bench]]
+name = "packets"
+harness = false
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
 [package.metadata.docs.rs]
 all-features = true

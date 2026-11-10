@@ -1,10 +1,12 @@
-//! Named Binary Tag (NBT) as used on the network by 1.8 – 1.20.1.
+//! Named Binary Tag (NBT) as used on the network.
 //!
-//! The protocol carries NBT as a *named root tag*: a tag-type byte, a `u16`-prefixed
-//! name and the payload. A single `0` byte (TAG_End) means "no compound" — vanilla's
-//! packet buffer reads both its plain and its optional NBT that way.
+//! Up to 1.20.1 the protocol carries NBT as a *named root tag*: a tag-type byte, a
+//! `u16`-prefixed name and the payload ([`RawNbt`]). A single `0` byte (TAG_End) means
+//! "no compound" — vanilla's packet buffer reads both its plain and its optional NBT that
+//! way. Since 1.20.2 the root has no name: a tag-type byte and the payload ([`AnonNbt`]);
+//! the root may be any tag type (text components are often a bare string tag).
 //!
-//! Packets keep NBT as [`RawNbt`]: the exact bytes of the root tag, found by *skipping*
+//! Packets keep NBT as [`RawNbt`] / [`AnonNbt`]: the exact bytes of the root tag, found by *skipping*
 //! over the structure without allocating. Turning it into a tree ([`RawNbt::parse`]) is
 //! opt-in, so a client that only needs item ids and counts from `window_items` never pays
 //! for building NBT trees (on busy servers that NBT is most of the inbound bytes).
@@ -134,6 +136,112 @@ impl Decode for RawNbt {
 }
 
 impl Encode for RawNbt {
+    #[inline]
+    fn encode(&self, w: &mut BytesMut) -> EncodeResult {
+        self.write(w);
+        Ok(())
+    }
+}
+
+/// The undecoded bytes of one unnamed network NBT root (1.20.2+): the tag-type byte and
+/// the payload, or a single `0` byte (TAG_End).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnonNbt(Bytes);
+
+impl AnonNbt {
+    /// The single TAG_End byte.
+    pub const END: AnonNbt = AnonNbt(Bytes::from_static(&[0]));
+
+    /// The raw bytes, exactly as they appear on the wire.
+    #[inline]
+    pub fn as_bytes(&self) -> &Bytes {
+        &self.0
+    }
+
+    /// Whether this is the single TAG_End byte.
+    #[inline]
+    pub fn is_end(&self) -> bool {
+        self.0.first() == Some(&tag::END)
+    }
+
+    /// Tag type of the root.
+    #[inline]
+    pub fn tag_type(&self) -> u8 {
+        self.0.first().copied().unwrap_or(tag::END)
+    }
+
+    /// Validates `bytes` as exactly one unnamed root and wraps them.
+    pub fn from_bytes(bytes: Bytes) -> DecodeResult<Self> {
+        let mut r = Reader::new(&bytes);
+        let v = Self::read(&mut r)?;
+        r.finish()?;
+        Ok(v)
+    }
+
+    /// Reads an unnamed root (or a single TAG_End byte) by skipping over its structure.
+    pub fn read(r: &mut Reader<'_>) -> DecodeResult<Self> {
+        let start = r.position();
+        let ty = r.read_u8()?;
+        if ty != tag::END {
+            skip_payload(r, ty, 0)?;
+        }
+        Ok(AnonNbt(r.bytes_since(start)))
+    }
+
+    /// Reads protodef `anonOptionalNbt`: a `0` byte is `None`, anything else a root.
+    pub fn read_optional(r: &mut Reader<'_>) -> DecodeResult<Option<Self>> {
+        if r.peek_u8()? == tag::END {
+            r.skip(1)?;
+            Ok(None)
+        } else {
+            Self::read(r).map(Some)
+        }
+    }
+
+    /// Writes the raw bytes.
+    #[inline]
+    pub fn write(&self, w: &mut BytesMut) {
+        w.put_slice(&self.0);
+    }
+
+    /// Writes protodef `anonOptionalNbt`.
+    #[inline]
+    pub fn write_optional(v: &Option<Self>, w: &mut BytesMut) {
+        match v {
+            Some(n) => n.write(w),
+            None => w.put_u8(tag::END),
+        }
+    }
+
+    /// Parses the tree. Returns `None` for TAG_End.
+    pub fn parse(&self) -> DecodeResult<Option<Tag>> {
+        let mut r = Reader::new(&self.0);
+        let ty = r.read_u8()?;
+        if ty == tag::END {
+            return Ok(None);
+        }
+        let tag = read_payload(&mut r, ty, 0)?;
+        r.finish()?;
+        Ok(Some(tag))
+    }
+
+    /// Serialises a tree as an unnamed root.
+    pub fn from_tag(t: &Tag) -> Result<Self, EncodeError> {
+        let mut w = BytesMut::new();
+        w.put_u8(t.type_id());
+        write_payload(&mut w, t, 0)?;
+        Ok(AnonNbt(w.freeze()))
+    }
+}
+
+impl Decode for AnonNbt {
+    #[inline]
+    fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
+        Self::read(r)
+    }
+}
+
+impl Encode for AnonNbt {
     #[inline]
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         self.write(w);

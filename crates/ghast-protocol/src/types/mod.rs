@@ -1,9 +1,14 @@
 //! Hand-written protocol types shared by the generated packet code.
 
+pub mod chunk;
+pub mod holder;
+pub mod lpvec3;
 pub mod position;
 pub mod slot;
 
 pub use bytestring::ByteString;
+pub use holder::{Holder, HolderSet};
+pub use lpvec3::LpVec3;
 pub use position::{BlockPos, PositionLayout};
 pub use uuid::Uuid;
 

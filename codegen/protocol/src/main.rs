@@ -5,12 +5,27 @@
 //! minecraft-data 3.119.0 is downloaded once from the npm registry into the git-ignored
 //! `.cache/minecraft-data/3.119.0/` (sha512-verified), then `dataPaths.json` is used to find
 //! each version's `protocol.json`. The output is formatted with `rustfmt` and committed.
+//!
+//! Output layout:
+//!
+//! - `defs/p<N>/…`: every definition (packet struct, nested type, named type) exactly once,
+//!   in the module of the FIRST protocol `N` that has it. A definition is shared by every
+//!   version whose emitted code for it is identical and whose referenced definitions are
+//!   shared too (see [`share`]). Packet structs carry the protocol number as a const
+//!   parameter (`KeepAlive<const V: i32>`), so one definition serves versions with
+//!   different packet ids. Each item is gated on the features of the versions using it.
+//! - `<version>/…`: the thin per-version layer: `id` constants, type aliases
+//!   (`pub type KeepAlive = defs::…::KeepAlive<340>;`), re-exports of nested types, the
+//!   `Packet` impls, the packet-set enums and the `Version` marker.
+//! - `versions_table.rs`: the protocol table behind `ghast_protocol::versions`.
 
 mod emit;
 mod ir;
 mod names;
+mod report;
+mod share;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,7 +33,7 @@ use std::process::Command;
 use serde_json::Value;
 use sha2::{Digest, Sha512};
 
-use emit::Emitter;
+use emit::{CFG, Emitter, Item};
 use ir::Resolver;
 use names::{pascal, screaming};
 
@@ -27,7 +42,7 @@ const MCDATA_URL: &str = "https://registry.npmjs.org/minecraft-data/-/minecraft-
 /// sha512 of the npm tarball (matches the registry's `dist.integrity`).
 const MCDATA_SHA512: &str = "444968d28d91a28133a5e40ef90107cd398755380e75b6e8986418066588694d69ba9126008b506fe2e92722f61035e6a4a89c394e2cc2d055cf021669ee65e6";
 
-struct VersionSpec {
+pub struct VersionSpec {
     module: &'static str,
     feature: &'static str,
     marker: &'static str,
@@ -36,7 +51,11 @@ struct VersionSpec {
     data_key: &'static str,
     protocol: i32,
     layout: &'static str,
-    slot: &'static str,
+    /// Concrete type of the native `slot` (versions whose `slot` is a protodef container
+    /// have none).
+    slot: Option<&'static str>,
+    /// Has the configuration state (1.20.2+).
+    configuration: bool,
     variant_names: &'static [(&'static str, &'static str)],
     /// `(switch path, condition with {d}, generator hints, doc)`: presence rules that
     /// replace minecraft-data's case keys where they disagree with vanilla.
@@ -48,6 +67,8 @@ struct VersionSpec {
     )],
 }
 
+/// Supported versions, ascending by protocol number (the first protocol that has a
+/// definition owns it, so the order matters).
 const VERSIONS: &[VersionSpec] = &[
     VersionSpec {
         module: "v1_8",
@@ -58,7 +79,8 @@ const VERSIONS: &[VersionSpec] = &[
         data_key: "1.8",
         protocol: 47,
         layout: "Xyz",
-        slot: "crate::types::slot::legacy::Slot",
+        slot: Some("crate::types::slot::legacy::Slot"),
+        configuration: false,
         variant_names: &[
             ("EntityMetadataValue.0", "Byte"),
             ("EntityMetadataValue.1", "Short"),
@@ -89,7 +111,8 @@ const VERSIONS: &[VersionSpec] = &[
         data_key: "1.12.2",
         protocol: 340,
         layout: "Xyz",
-        slot: "crate::types::slot::legacy::Slot",
+        slot: Some("crate::types::slot::legacy::Slot"),
+        configuration: false,
         variant_names: &[
             ("EntityMetadataValue.0", "Byte"),
             ("EntityMetadataValue.1", "VarInt"),
@@ -117,7 +140,8 @@ const VERSIONS: &[VersionSpec] = &[
         data_key: "1.16.5",
         protocol: 754,
         layout: "Xzy",
-        slot: "crate::types::slot::modern::Slot",
+        slot: Some("crate::types::slot::modern::Slot"),
+        configuration: false,
         variant_names: &[
             ("EntityMetadataValue.0", "Byte"),
             ("EntityMetadataValue.1", "VarInt"),
@@ -143,51 +167,83 @@ const VERSIONS: &[VersionSpec] = &[
     },
 ];
 
-const STATES: &[(&str, &str)] = &[
-    ("handshaking", "Handshaking"),
-    ("status", "Status"),
-    ("login", "Login"),
-    ("play", "Play"),
+/// `(protocol.json key, Rust module, State variant)`.
+const STATES: &[(&str, &str, &str)] = &[
+    ("handshaking", "handshaking", "Handshaking"),
+    ("status", "status", "Status"),
+    ("login", "login", "Login"),
+    ("configuration", "configuration", "Configuration"),
+    ("play", "play", "Play"),
 ];
 const DIRECTIONS: &[(&str, &str, &str)] = &[
     ("toClient", "clientbound", "Clientbound"),
     ("toServer", "serverbound", "Serverbound"),
 ];
 
+fn states_of(spec: &VersionSpec) -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
+    let conf = spec.configuration;
+    STATES.iter().filter(move |(k, _, _)| conf || *k != "configuration")
+}
+
 fn main() {
     let root = workspace_root();
     let data_dir = ensure_data(&root);
     let paths: Value = read_json(&data_dir.join("dataPaths.json"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("packets-report") {
+        let [_, data_key, report, out] = &args[..] else {
+            panic!("usage: packets-report <minecraft-data version> <packets.json> <out.tsv>");
+        };
+        let proto_dir = paths["pc"][data_key.as_str()]["protocol"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no protocol path for {data_key}"));
+        let proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
+        report::write_table(&proto, &read_json(Path::new(report)), Path::new(out));
+        return;
+    }
+    let proto_versions: Value = read_json(&data_dir.join("pc/common/protocolVersions.json"));
     let out_root = root.join("crates/ghast-protocol/src/generated");
+
+    let mut outs = Vec::new();
     for spec in VERSIONS {
         let proto_dir = paths["pc"][spec.data_key]["protocol"]
             .as_str()
             .unwrap_or_else(|| panic!("no protocol path for {}", spec.data_key));
-        let proto_file = data_dir.join(proto_dir).join("protocol.json");
-        let proto: Value = read_json(&proto_file);
+        let proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
         let rel = format!("data/{proto_dir}/protocol.json");
-        let files = generate_version(spec, &proto, &rel);
-        let dir = out_root.join(spec.module);
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).expect("clean output dir");
-        }
-        for (path, code) in &files {
-            let p = dir.join(path);
-            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(&p, code).unwrap();
-        }
-        let status = Command::new("rustfmt")
-            .args(["--edition", "2024"])
-            .arg(dir.join("mod.rs"))
-            .status()
-            .expect("run rustfmt");
-        assert!(status.success(), "rustfmt failed for {}", spec.module);
-        println!(
-            "generated {} ({} files) from {rel}",
-            spec.module,
-            files.len()
-        );
+        outs.push(emit_version(spec, &proto, rel));
     }
+    let shared = share::analyse(&outs);
+
+    // Clean output (generated directories only; NOTICE stays).
+    for dir in std::iter::once("defs").chain(VERSIONS.iter().map(|s| s.module)) {
+        let d = out_root.join(dir);
+        if d.exists() {
+            std::fs::remove_dir_all(&d).expect("clean output dir");
+        }
+    }
+    let mut files = write_defs(&outs, &shared);
+    for (vi, out) in outs.iter().enumerate() {
+        files.extend(write_version(vi, out, &shared));
+    }
+    files.push((
+        "versions_table.rs".into(),
+        versions_table(&proto_versions),
+    ));
+    for (path, code) in &files {
+        let p = out_root.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, code).unwrap();
+    }
+    let mut roots: Vec<PathBuf> = vec![out_root.join("defs/mod.rs"), out_root.join("versions_table.rs")];
+    roots.extend(VERSIONS.iter().map(|s| out_root.join(s.module).join("mod.rs")));
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2024"])
+        .args(&roots)
+        .status()
+        .expect("run rustfmt");
+    assert!(status.success(), "rustfmt failed");
+    share::report(&outs, &shared);
 }
 
 fn workspace_root() -> PathBuf {
@@ -244,12 +300,12 @@ fn ensure_data(root: &Path) -> PathBuf {
     data
 }
 
-fn header(spec: &VersionSpec, rel: &str) -> String {
+fn header(source: &str) -> String {
     format!(
         "// @generated by ghast-codegen-protocol from PrismarineJS minecraft-data {MCDATA_VERSION}\n\
-         // ({rel}, Minecraft {name}). Do not edit; run `cargo run -p ghast-codegen-protocol`.\n\
-         // minecraft-data is MIT licensed, Copyright (c) 2015 PrismarineJS; see ../NOTICE.\n\n",
-        name = spec.name
+         // ({source}). Do not edit; run `cargo run -p ghast-codegen-protocol`.\n\
+         // minecraft-data is MIT licensed, Copyright (c) 2015 PrismarineJS; see the NOTICE file\n\
+         // in crates/ghast-protocol/src/generated/.\n\n"
     )
 }
 
@@ -258,19 +314,62 @@ const ALLOWS: &str = "#![allow(\n    unused_imports,\n    unused_variables,\n   
 const IMPORTS: &str = "use bytes::{BufMut, Bytes, BytesMut};\n\
 use crate::codec::{Decode, DecodeResult, Encode, EncodeResult, McWrite, Reader, decode_exact};\n\
 use crate::error::{DecodeError, EncodeError};\n\
-use crate::nbt::RawNbt;\n\
+use crate::nbt::{AnonNbt, RawNbt};\n\
 use crate::packet::{Direction, PacketSet, RawPacket, State};\n\
-use crate::types::{BlockPos, ByteString, PositionLayout, Uuid};\n\
+use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};\n\
 #[cfg(feature = \"testgen\")]\n\
 use crate::testgen::{Gen, Generate};\n";
 
-struct PacketInfo {
-    id: i64,
-    name: String,
-    rust: String,
+/// What an item is, for the per-version layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    /// A packet: `(minecraft-data name, id)`.
+    Packet { name: String, id: i64 },
+    /// A standalone named type (`types` scope).
+    Named { name: String },
+    /// A nested struct/enum/bitfield/mapper.
+    Nested,
 }
 
-fn generate_version(spec: &VersionSpec, proto: &Value, rel: &str) -> Vec<(String, String)> {
+/// One emitted item of one version.
+#[derive(Debug, Clone)]
+pub struct VItem {
+    pub item: Item,
+    pub kind: Kind,
+}
+
+/// Packet set of one state and direction.
+pub struct SetInfo {
+    /// protocol.json state key.
+    pub state: &'static str,
+    pub state_mod: &'static str,
+    pub state_pascal: &'static str,
+    pub dir_mod: &'static str,
+    pub dir_pascal: &'static str,
+    /// `(minecraft-data name, Rust name, id)` ascending by id.
+    pub packets: Vec<(String, String, i64)>,
+}
+
+/// Everything emitted for one version.
+pub struct VersionOut {
+    pub spec: &'static VersionSpec,
+    pub source: String,
+    /// Items in emission order; keys `(scope, name)` are unique.
+    pub items: Vec<VItem>,
+    pub sets: Vec<SetInfo>,
+}
+
+impl VersionOut {
+    pub fn key_index(&self) -> BTreeMap<(String, String), usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(i, v)| ((v.item.scope.clone(), v.item.name.clone()), i))
+            .collect()
+    }
+}
+
+fn emit_version(spec: &'static VersionSpec, proto: &Value, source: String) -> VersionOut {
     let types = proto["types"].as_object().expect("types");
     let mut resolver = Resolver::new(types);
     resolver
@@ -302,198 +401,590 @@ fn generate_version(spec: &VersionSpec, proto: &Value, rel: &str) -> Vec<(String
     let mut named_roots = Vec::new();
     for (name, rust) in &named_list {
         let def = types[name].clone();
-        named_roots.push((
-            name.clone(),
-            resolver.resolve_root(rust, &format!("types.{name}"), &def, true),
-        ));
+        named_roots.push(resolver.resolve_root(rust, &format!("types.{name}"), &def, true));
     }
+    ir::box_cycles(&mut named_roots, true);
+    let named_roots: Vec<(String, ir::Container)> = named_list
+        .iter()
+        .map(|(n, _)| n.clone())
+        .zip(named_roots)
+        .collect();
 
     // Packets per state and direction.
     let mut sets = Vec::new();
-    for (state, state_pascal) in STATES {
-        for (dir_key, dir_mod, dir_pascal) in DIRECTIONS {
-            let ns = &proto[*state][*dir_key]["types"];
+    for &(state, state_mod, state_pascal) in states_of(spec) {
+        for &(dir_key, dir_mod, dir_pascal) in DIRECTIONS {
+            let ns = &proto[state][dir_key]["types"];
+            assert!(!ns.is_null(), "{}: no {state}.{dir_key}", spec.name);
+            // State-local types; the container ones become named types of this module.
+            let local_list = resolver.set_local(ns.as_object());
+            let mut local_roots: Vec<ir::Container> = local_list
+                .iter()
+                .map(|(name, rust)| {
+                    resolver.resolve_root(rust, &format!("{state}.{dir_mod}.{name}"), &ns[name], false)
+                })
+                .collect();
+            ir::box_cycles(&mut local_roots, false);
+            let local_roots: Vec<(String, ir::Container)> = local_list
+                .iter()
+                .map(|(n, _)| n.clone())
+                .zip(local_roots)
+                .collect();
             let packet = &ns["packet"];
             let mapper = &packet[1][0]["type"][1]["mappings"];
-            let mut infos = Vec::new();
-            let mut roots = Vec::new();
+            let mut rows = Vec::new();
             for (id, name) in mapper.as_object().expect("packet mappings") {
                 let name = name.as_str().unwrap().to_string();
                 let id = ir::parse_int(id).expect("packet id");
-                let def = &ns[format!("packet_{name}")];
-                assert!(!def.is_null(), "{state}.{dir_key}: missing packet_{name}");
+                // The packet switch names each packet's type: usually `packet_<name>` in
+                // this namespace, sometimes a shared global `packet_common_*` or `void`.
+                let tname = packet[1][1]["type"][1]["fields"][name.as_str()]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{state}.{dir_key}: no type for {name}"));
+                let empty = serde_json::json!(["container", []]);
+                let def = if tname == "void" {
+                    &empty
+                } else if !ns[tname].is_null() {
+                    &ns[tname]
+                } else {
+                    &proto["types"][tname]
+                };
+                assert!(!def.is_null(), "{state}.{dir_key}: missing {tname}");
                 let rust = pascal(&name);
                 let root =
                     resolver.resolve_root(&rust, &format!("{state}.{dir_mod}.{name}"), def, false);
-                infos.push(PacketInfo { id, name, rust });
-                roots.push(root);
+                rows.push((id, name, rust, root));
             }
-            let mut order: Vec<usize> = (0..infos.len()).collect();
-            order.sort_by_key(|&i| infos[i].id);
-            let infos: Vec<PacketInfo> = order
-                .iter()
-                .map(|&i| PacketInfo {
-                    id: infos[i].id,
-                    name: infos[i].name.clone(),
-                    rust: infos[i].rust.clone(),
-                })
-                .collect();
-            let roots: Vec<_> = order.iter().map(|&i| roots[i].clone()).collect();
-            sets.push((*state, *state_pascal, *dir_mod, *dir_pascal, infos, roots));
+            rows.sort_by_key(|r| r.0);
+            sets.push((state, state_mod, state_pascal, dir_mod, dir_pascal, rows, local_roots));
         }
     }
-
+    resolver.set_local(None);
     resolver.assert_presence_used();
 
-    let mut em = Emitter::new(spec.layout, variant_names);
-    for (_, c) in &named_roots {
-        em.named.insert(c.rust_name.clone(), c);
+    let mut em = Emitter::new(spec.layout, spec.slot, variant_names);
+    for (_, c) in named_roots.iter().chain(sets.iter().flat_map(|s| s.6.iter())) {
+        let prev = em.named.insert(c.rust_name.clone(), c);
+        assert!(
+            prev.is_none_or(|p| p.same_shape_root(c)),
+            "{}: two named types {}",
+            spec.name,
+            c.rust_name
+        );
     }
     for (_, c) in &named_roots {
         em.collect_hints(c);
     }
     for set in &sets {
-        for c in &set.5 {
+        for (_, c) in &set.6 {
             em.collect_hints(c);
+        }
+        for row in &set.5 {
+            em.collect_hints(&row.3);
         }
     }
 
-    let hdr = header(spec, rel);
-    let mut files = Vec::new();
-
-    // Packet modules.
-    for (state, state_pascal, dir_mod, dir_pascal, infos, roots) in &sets {
-        em.in_types = false;
-        em.local_defs.clear();
-        let mut body = String::new();
-        let enum_name = format!("{dir_pascal}{state_pascal}Packet");
-        // Ids.
-        body.push_str("/// Packet ids.\npub mod id {\n");
-        for p in infos {
-            let _ = writeln!(
-                body,
-                "    /// `{}`\n    pub const {}: i32 = {:#04x};",
-                p.name,
-                screaming(&p.name),
-                p.id
-            );
+    let mut items: Vec<VItem> = Vec::new();
+    let mut set_infos = Vec::new();
+    for (state, state_mod, state_pascal, dir_mod, dir_pascal, rows, locals) in &sets {
+        let scope = format!("{state_mod}/{dir_mod}");
+        em.begin_scope(&scope);
+        for (name, c) in locals {
+            let text = named_text(&mut em, name, c);
+            for it in em.items.drain(..) {
+                items.push(VItem {
+                    item: it,
+                    kind: Kind::Nested,
+                });
+            }
+            items.push(VItem {
+                item: Item {
+                    scope: scope.clone(),
+                    name: c.rust_name.clone(),
+                    text,
+                },
+                kind: Kind::Nested,
+            });
         }
-        body.push_str("}\n\n");
-        for (p, c) in infos.iter().zip(roots) {
-            let doc = format!("`{}` ({dir_mod} {state}, id {:#04x}).", p.name, p.id);
-            body.push_str(&em.root_struct(c, &doc));
+        for (id, name, rust, c) in rows {
+            let doc = format!("`{name}` ({dir_mod} {state}).");
+            let mut text = em.root_struct(c, &doc, "<const V: i32>");
             let dec = em.root_decode(c);
             let enc = em.root_encode(c);
             let gen_ = em.root_generate(c);
             let _ = write!(
-                body,
-                "impl crate::packet::Packet for {r} {{\n    const ID: i32 = id::{ids};\n    const NAME: &'static str = {n:?};\n    const STATE: State = State::{state_pascal};\n    const DIRECTION: Direction = Direction::{dir_pascal};\n}}\n\
-                 impl Decode for {r} {{\n    fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {{ Ok({dec}) }}\n}}\n\
-                 impl Encode for {r} {{\n    fn encode(&self, w: &mut BytesMut) -> EncodeResult {{ {enc} Ok(()) }}\n}}\n\
-                 #[cfg(feature = \"testgen\")]\nimpl Generate for {r} {{\n    fn generate(g: &mut Gen) -> Self {{ {gen_} }}\n}}\n\
-                 impl From<{r}> for {enum_name} {{\n    fn from(p: {r}) -> Self {{ Self::{r}(p) }}\n}}\n\n",
-                r = p.rust,
-                ids = screaming(&p.name),
-                n = p.name,
+                text,
+                "{CFG}impl<const V: i32> Decode for {rust}<V> {{\n    fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {{ Ok({dec}) }}\n}}\n\
+                 {CFG}impl<const V: i32> Encode for {rust}<V> {{\n    fn encode(&self, w: &mut BytesMut) -> EncodeResult {{ {enc} Ok(()) }}\n}}\n\
+                 {CFG}#[cfg(feature = \"testgen\")]\nimpl<const V: i32> Generate for {rust}<V> {{\n    fn generate(g: &mut Gen) -> Self {{ {gen_} }}\n}}\n"
             );
+            // Nested definitions registered while emitting this packet come first.
+            for it in em.items.drain(..) {
+                items.push(VItem {
+                    item: it,
+                    kind: Kind::Nested,
+                });
+            }
+            items.push(VItem {
+                item: Item {
+                    scope: scope.clone(),
+                    name: rust.clone(),
+                    text,
+                },
+                kind: Kind::Packet {
+                    name: name.clone(),
+                    id: *id,
+                },
+            });
         }
-        body.push_str(&packet_enum(&enum_name, state_pascal, dir_pascal, infos));
-        let mut file = hdr.clone();
-        let _ = writeln!(file, "//! {dir_pascal} packets of the {state} state.\n");
-        file.push_str(ALLOWS);
-        file.push_str(IMPORTS);
-        let _ = writeln!(file, "use crate::{}::types;\n", spec.module);
-        for d in &em.local_defs {
-            file.push_str(d);
-            file.push('\n');
-        }
-        file.push_str(&body);
-        files.push((format!("{state}/{dir_mod}.rs"), file));
-    }
-    for (state, _) in STATES {
-        let file =
-            format!("{hdr}//! The {state} state.\n\npub mod clientbound;\npub mod serverbound;\n");
-        files.push((format!("{state}/mod.rs"), file));
+        set_infos.push(SetInfo {
+            state,
+            state_mod,
+            state_pascal,
+            dir_mod,
+            dir_pascal,
+            packets: rows
+                .iter()
+                .map(|(id, name, rust, _)| (name.clone(), rust.clone(), *id))
+                .collect(),
+        });
     }
 
-    // Types module (after packets: packets may register shared nominal types).
-    em.in_types = true;
-    let mut tbody = String::new();
-    let _ = writeln!(
-        tbody,
-        "/// Item slot in this version's format.\npub type Slot = {};\n",
-        spec.slot
-    );
+    // Named types (after packets: packets may register shared nominal types).
+    em.begin_scope("types");
     for (name, c) in &named_roots {
-        let doc = format!("Named type `{name}`.");
-        tbody.push_str(&em.root_struct(c, &doc));
-        let dec = em.root_decode(c);
-        let enc = em.root_encode(c);
-        let gen_ = em.root_generate(c);
-        let _ = write!(
-            tbody,
-            "impl Decode for {r} {{\n    fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {{ Ok({dec}) }}\n}}\n\
-             impl Encode for {r} {{\n    fn encode(&self, w: &mut BytesMut) -> EncodeResult {{ {enc} Ok(()) }}\n}}\n\
-             #[cfg(feature = \"testgen\")]\nimpl Generate for {r} {{\n    fn generate(g: &mut Gen) -> Self {{ {gen_} }}\n}}\n\n",
-            r = c.rust_name
+        let text = named_text(&mut em, name, c);
+        let r = &c.rust_name;
+        for it in em.items.drain(..) {
+            items.push(VItem {
+                item: it,
+                kind: Kind::Nested,
+            });
+        }
+        items.push(VItem {
+            item: Item {
+                scope: "types".into(),
+                name: r.clone(),
+                text,
+            },
+            kind: Kind::Named { name: name.clone() },
+        });
+    }
+    assert!(em.items.is_empty());
+
+    // Keys must be unique per version.
+    let mut seen = BTreeSet::new();
+    for v in &items {
+        assert!(
+            seen.insert((v.item.scope.clone(), v.item.name.clone())),
+            "{}: duplicate definition {}::{}",
+            spec.name,
+            v.item.scope,
+            v.item.name
         );
     }
-    let mut tfile = hdr.clone();
-    tfile.push_str("//! Types shared by several packets of this version.\n\n");
-    tfile.push_str(ALLOWS);
-    tfile.push_str(IMPORTS);
-    let _ = writeln!(tfile, "use crate::{}::types;\n", spec.module);
-    for d in &em.shared_defs {
-        tfile.push_str(d);
-        tfile.push('\n');
+    VersionOut {
+        spec,
+        source,
+        items,
+        sets: set_infos,
     }
-    tfile.push_str(&tbody);
-    files.push(("types.rs".into(), tfile));
+}
+
+/// Struct and impls of a standalone named type.
+fn named_text<'t>(em: &mut Emitter<'t>, name: &str, c: &'t ir::Container) -> String {
+    let doc = format!("Named type `{name}`.");
+    let mut text = em.root_struct(c, &doc, "");
+    let dec = em.root_decode(c);
+    let enc = em.root_encode(c);
+    let gen_ = em.root_generate(c);
+    let r = &c.rust_name;
+    let _ = write!(
+        text,
+        "{CFG}impl Decode for {r} {{\n    fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {{ Ok({dec}) }}\n}}\n\
+         {CFG}impl Encode for {r} {{\n    fn encode(&self, w: &mut BytesMut) -> EncodeResult {{ {enc} Ok(()) }}\n}}\n\
+         {CFG}#[cfg(feature = \"testgen\")]\nimpl Generate for {r} {{\n    fn generate(g: &mut Gen) -> Self {{ {gen_} }}\n}}\n"
+    );
+    text
+}
+
+/// `"play/clientbound"` -> `"play::clientbound"`.
+fn scope_path(scope: &str) -> String {
+    scope.replace('/', "::")
+}
+
+/// `#[cfg(...)]` condition for a set of version indices.
+fn cfg_of(versions: &BTreeSet<usize>) -> String {
+    let feats: Vec<String> = versions
+        .iter()
+        .map(|&v| format!("feature = \"{}\"", VERSIONS[v].feature))
+        .collect();
+    if feats.len() == 1 {
+        feats[0].clone()
+    } else {
+        format!("any({})", feats.join(", "))
+    }
+}
+
+/// Replaces placeholder references of an item of version `vi` by full paths.
+fn resolve_refs(text: &str, vi: usize, shared: &share::Shared) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('\u{27ea}') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + '\u{27ea}'.len_utf8()..];
+        let end = after.find('\u{27eb}').expect("unterminated reference");
+        let inner = &after[..end];
+        let (scope, name) = inner.split_once('|').expect("reference");
+        let owner = shared.owner(vi, scope, name);
+        let _ = write!(
+            out,
+            "crate::defs::p{}::{}::{name}",
+            VERSIONS[owner].protocol,
+            scope_path(scope)
+        );
+        rest = &after[end + '\u{27eb}'.len_utf8()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The `defs` tree: every distinct definition once, in its owner's module.
+fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, String)> {
+    // owner version -> scope -> items (in the owner's emission order).
+    let mut by_owner: BTreeMap<usize, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+    let mut owner_cfg: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+    for (vi, out) in outs.iter().enumerate() {
+        for v in &out.items {
+            let users = shared.users(vi, &v.item.scope, &v.item.name);
+            if shared.owner(vi, &v.item.scope, &v.item.name) != vi {
+                continue;
+            }
+            let text = resolve_refs(&v.item.text, vi, shared);
+            let text = text.replace("\u{27e6}cfg\u{27e7}", &cfg_of(users));
+            by_owner
+                .entry(vi)
+                .or_default()
+                .entry(v.item.scope.clone())
+                .or_default()
+                .push(text);
+            owner_cfg.entry(vi).or_default().extend(users.iter().copied());
+        }
+    }
+    let mut files = Vec::new();
+    let mut root = header("protocol.json of every supported version");
+    root.push_str(
+        "//! Packet and type definitions, each exactly once.\n\
+         //!\n\
+         //! A definition lives in the module of the first protocol that has it (`p47`, `p340`,\n\
+         //! …) and is shared by every later version whose wire layout and Rust code for it\n\
+         //! are identical. Packet structs take the protocol number as a const parameter, so\n\
+         //! one definition serves versions with different packet ids. Use the version\n\
+         //! modules (`crate::v1_8`, …): they alias and re-export what they use from here.\n\n",
+    );
+    for (&vi, scopes) in &by_owner {
+        let spec = VERSIONS[vi].protocol;
+        let cfg = cfg_of(&owner_cfg[&vi]);
+        let _ = writeln!(
+            root,
+            "/// Definitions first used by protocol {spec} (Minecraft {}).\n#[cfg({cfg})]\npub mod p{spec};",
+            VERSIONS[vi].covers
+        );
+        let dir = format!("defs/p{spec}");
+        let hdr = header(&outs[vi].source);
+        // Module tree: types + states with directions.
+        let mut states: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for scope in scopes.keys() {
+            if let Some((st, d)) = scope.split_once('/') {
+                states.entry(st.to_string()).or_default().insert(d.to_string());
+            }
+        }
+        let mut m = hdr.clone();
+        let _ = writeln!(
+            m,
+            "//! Definitions first used by protocol {spec} (Minecraft {}).\n",
+            VERSIONS[vi].covers
+        );
+        for (scope, texts) in scopes {
+            let (path, doc) = match scope.split_once('/') {
+                None => (format!("{dir}/types.rs"), "Types shared by several packets.".to_string()),
+                Some((st, d)) => (
+                    format!("{dir}/{st}/{d}.rs"),
+                    format!("{} packets of the {st} state.", capitalize(d)),
+                ),
+            };
+            let mut f = hdr.clone();
+            let _ = writeln!(f, "//! {doc}\n");
+            f.push_str(ALLOWS);
+            f.push_str(IMPORTS);
+            f.push('\n');
+            for t in texts {
+                f.push_str(t);
+                f.push('\n');
+            }
+            files.push((path, f));
+        }
+        if scopes.contains_key("types") {
+            let users = scope_users(outs, shared, vi, |s| s == "types");
+            let _ = writeln!(m, "#[cfg({})]\npub mod types;", cfg_of(&users));
+        }
+        for (st, dirs) in &states {
+            let users = scope_users(outs, shared, vi, |s| s.split('/').next() == Some(st));
+            let _ = writeln!(m, "#[cfg({})]\npub mod {st};", cfg_of(&users));
+            let mut sm = hdr.clone();
+            let _ = writeln!(sm, "//! Definitions of the {st} state.\n");
+            for d in dirs {
+                let scope = format!("{st}/{d}");
+                let users = scope_users(outs, shared, vi, |s| s == scope);
+                let _ = writeln!(sm, "#[cfg({})]\npub mod {d};", cfg_of(&users));
+            }
+            files.push((format!("{dir}/{st}/mod.rs"), sm));
+        }
+        files.push((format!("{dir}/mod.rs"), m));
+    }
+    files.push(("defs/mod.rs".into(), root));
+    files
+}
+
+/// Versions using any item owned by `owner` in a scope matching `pred`.
+fn scope_users(
+    outs: &[VersionOut],
+    shared: &share::Shared,
+    owner: usize,
+    pred: impl Fn(&str) -> bool,
+) -> BTreeSet<usize> {
+    let mut set = BTreeSet::new();
+    for v in &outs[owner].items {
+        if pred(&v.item.scope) && shared.owner(owner, &v.item.scope, &v.item.name) == owner {
+            set.extend(shared.users(owner, &v.item.scope, &v.item.name).iter().copied());
+        }
+    }
+    set
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
+}
+
+/// Path of the definition an item of version `vi` uses.
+fn def_path(vi: usize, scope: &str, name: &str, shared: &share::Shared) -> String {
+    let owner = shared.owner(vi, scope, name);
+    format!(
+        "crate::defs::p{}::{}::{name}",
+        VERSIONS[owner].protocol,
+        scope_path(scope)
+    )
+}
+
+/// The thin per-version layer.
+fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(String, String)> {
+    let spec = out.spec;
+    let hdr = header(&format!("{}, Minecraft {}", out.source, spec.name));
+    let mut files = Vec::new();
+    let proto = spec.protocol;
+
+    for set in &out.sets {
+        let scope = format!("{}/{}", set.state_mod, set.dir_mod);
+        let enum_name = format!("{}{}Packet", set.dir_pascal, set.state_pascal);
+        let mut body = String::new();
+        body.push_str("/// Packet ids.\npub mod id {\n");
+        for (name, _, id) in &set.packets {
+            let _ = writeln!(
+                body,
+                "    /// `{name}`\n    pub const {}: i32 = {id:#04x};",
+                screaming(name)
+            );
+        }
+        body.push_str("}\n\n");
+        // Re-exports of nested types of this scope.
+        let nested: Vec<&VItem> = out
+            .items
+            .iter()
+            .filter(|v| v.item.scope == scope && v.kind == Kind::Nested)
+            .collect();
+        for v in &nested {
+            let _ = writeln!(
+                body,
+                "pub use {};",
+                def_path(vi, &scope, &v.item.name, shared)
+            );
+        }
+        body.push('\n');
+        for (name, rust, id) in &set.packets {
+            let path = def_path(vi, &scope, rust, shared);
+            let _ = write!(
+                body,
+                "/// `{name}` ({dir} {state}, id {id:#04x}).\npub type {rust} = {path}<{proto}>;\n\
+                 impl crate::packet::Packet for {rust} {{\n    const ID: i32 = id::{ids};\n    const NAME: &'static str = {name:?};\n    const STATE: State = State::{sp};\n    const DIRECTION: Direction = Direction::{dp};\n}}\n\
+                 impl From<{rust}> for {enum_name} {{\n    fn from(p: {rust}) -> Self {{ Self::{rust}(p) }}\n}}\n\n",
+                dir = set.dir_mod,
+                state = set.state,
+                ids = screaming(name),
+                sp = set.state_pascal,
+                dp = set.dir_pascal,
+            );
+        }
+        body.push_str(&packet_enum(
+            &enum_name,
+            set.state_pascal,
+            set.dir_pascal,
+            &set.packets,
+        ));
+        let mut file = hdr.clone();
+        let _ = writeln!(
+            file,
+            "//! {} packets of the {} state.\n",
+            set.dir_pascal, set.state
+        );
+        file.push_str(ALLOWS);
+        file.push_str(IMPORTS);
+        file.push('\n');
+        file.push_str(&body);
+        files.push((format!("{}/{}/{}.rs", spec.module, set.state_mod, set.dir_mod), file));
+    }
+    for &(state, state_mod, _) in states_of(spec) {
+        let file = format!(
+            "{hdr}//! The {state} state.\n\npub mod clientbound;\npub mod serverbound;\n"
+        );
+        files.push((format!("{}/{state_mod}/mod.rs", spec.module), file));
+    }
+
+    // Types module: the slot alias and re-exports of version-wide types.
+    let mut t = hdr.clone();
+    t.push_str("//! Types shared by several packets of this version.\n\n");
+    if let Some(slot) = spec.slot {
+        let _ = writeln!(t, "/// Item slot in this version's format.\npub type Slot = {slot};\n");
+    }
+    for v in out.items.iter().filter(|v| v.item.scope == "types") {
+        let _ = writeln!(t, "pub use {};", def_path(vi, "types", &v.item.name, shared));
+    }
+    files.push((format!("{}/types.rs", spec.module), t));
 
     // Version root.
     let mut m = hdr.clone();
+    let state_mods: Vec<&str> = states_of(spec).map(|s| s.1).collect();
+    let mut mods: Vec<&str> = state_mods.clone();
+    mods.push("types");
+    mods.sort();
     let _ = write!(
         m,
         "//! Protocol {proto} (Minecraft {covers}), generated from minecraft-data.\n\
          //!\n\
          //! One module per connection state, each with `clientbound` and `serverbound`\n\
-         //! packet structs, an enum of all packets and the packet `id` constants.\n\n\
-         pub mod handshaking;\npub mod login;\npub mod play;\npub mod status;\npub mod types;\n\n\
-         /// Marker type for protocol {proto} (Minecraft {covers}).\n\
+         //! packet types, an enum of all packets and the packet `id` constants. The packet\n\
+         //! types are aliases of definitions in [`crate::defs`] that may be shared with\n\
+         //! other versions.\n\n",
+        covers = spec.covers,
+    );
+    for md in &mods {
+        let _ = writeln!(m, "pub mod {md};");
+    }
+    let conf = |dir: &str| {
+        if spec.configuration {
+            format!("configuration::{dir}::{}ConfigurationPacket", capitalize(dir))
+        } else {
+            "crate::packet::NoPackets".to_string()
+        }
+    };
+    let _ = write!(
+        m,
+        "\n/// Marker type for protocol {proto} (Minecraft {covers}).\n\
          #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]\npub struct {marker};\n\n\
          impl crate::packet::Version for {marker} {{\n\
          \x20   const PROTOCOL: i32 = {proto};\n\
          \x20   const NAME: &'static str = {name:?};\n\
          \x20   const POSITION_LAYOUT: crate::types::PositionLayout = crate::types::PositionLayout::{layout};\n\
+         \x20   const INFO: &'static crate::versions::ProtocolVersion = &crate::versions::TABLE[{vi}];\n\
          \x20   type HandshakingServerbound = handshaking::serverbound::ServerboundHandshakingPacket;\n\
          \x20   type StatusClientbound = status::clientbound::ClientboundStatusPacket;\n\
          \x20   type StatusServerbound = status::serverbound::ServerboundStatusPacket;\n\
          \x20   type LoginClientbound = login::clientbound::ClientboundLoginPacket;\n\
          \x20   type LoginServerbound = login::serverbound::ServerboundLoginPacket;\n\
+         \x20   type ConfigurationClientbound = {cc};\n\
+         \x20   type ConfigurationServerbound = {cs};\n\
          \x20   type PlayClientbound = play::clientbound::ClientboundPlayPacket;\n\
          \x20   type PlayServerbound = play::serverbound::ServerboundPlayPacket;\n\
          }}\n",
-        proto = spec.protocol,
         covers = spec.covers,
         marker = spec.marker,
         name = spec.name,
         layout = spec.layout,
+        cc = conf("clientbound"),
+        cs = conf("serverbound"),
     );
-    let _ = spec.feature;
-    files.push(("mod.rs".into(), m));
+    files.push((format!("{}/mod.rs", spec.module), m));
     files
 }
 
-fn packet_enum(name: &str, state: &str, dir: &str, infos: &[PacketInfo]) -> String {
+/// Release game versions per protocol number, from minecraft-data's
+/// `protocolVersions.json` (newest first there; returned oldest first).
+fn game_versions(pv: &Value, protocol: i32) -> Vec<String> {
+    let mut out: Vec<String> = pv
+        .as_array()
+        .expect("protocolVersions")
+        .iter()
+        .filter(|e| e["version"].as_i64() == Some(i64::from(protocol)))
+        .filter(|e| match e["releaseType"].as_str() {
+            Some(t) => t == "release",
+            None => {
+                let n = e["minecraftVersion"].as_str().unwrap_or("");
+                !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')
+            }
+        })
+        .map(|e| e["minecraftVersion"].as_str().unwrap().to_string())
+        .collect();
+    out.dedup();
+    out.reverse();
+    assert!(!out.is_empty(), "no release names for protocol {protocol}");
+    out
+}
+
+fn versions_table(pv: &Value) -> String {
+    let mut s = header("pc/common/protocolVersions.json and the codegen's version list");
+    s.push_str(
+        "// Included by `crate::versions`.\n\n\
+         /// Every protocol this build knows, ascending by protocol number; rows of versions\n\
+         /// whose feature is off have `enabled == false`.\n\
+         pub const TABLE: &[ProtocolVersion] = &[\n",
+    );
+    for spec in VERSIONS {
+        let gv = game_versions(pv, spec.protocol);
+        let _ = writeln!(
+            s,
+            "    ProtocolVersion {{ protocol: {}, module: {:?}, feature: {:?}, name: {:?}, game_versions: &{:?}, position_layout: PositionLayout::{}, configuration: {}, enabled: cfg!(feature = {:?}) }},",
+            spec.protocol,
+            spec.module,
+            spec.feature,
+            spec.name,
+            gv,
+            spec.layout,
+            spec.configuration,
+            spec.feature
+        );
+    }
+    s.push_str("];\n");
+    s
+}
+
+fn packet_enum(name: &str, state: &str, dir: &str, packets: &[(String, String, i64)]) -> String {
     let mut s = String::new();
     let _ = writeln!(s, "/// Every {dir} packet of the {state} state.");
     s.push_str("#[derive(Debug, Clone, PartialEq)]\n");
     let _ = writeln!(s, "pub enum {name} {{");
-    for p in infos {
-        let _ = writeln!(s, "    /// `{}`\n    {}({}),", p.name, p.rust, p.rust);
+    for (n, rust, _) in packets {
+        let _ = writeln!(s, "    /// `{n}`\n    {rust}({rust}),");
     }
     s.push_str("}\n\n");
-    let arms = |f: &dyn Fn(&PacketInfo) -> String| infos.iter().map(f).collect::<String>();
+    let arms = |f: &dyn Fn(&str, &str) -> String| {
+        packets
+            .iter()
+            .map(|(n, r, _)| f(n, r))
+            .collect::<String>()
+    };
     let _ = write!(
         s,
         "impl PacketSet for {name} {{\n\
@@ -505,25 +996,15 @@ fn packet_enum(name: &str, state: &str, dir: &str, infos: &[PacketInfo]) -> Stri
          \x20   fn encode_body(&self, w: &mut BytesMut) -> EncodeResult {{\n        match *self {{\n{enc}        }}\n    }}\n\
          \x20   fn name_of(id: i32) -> Option<&'static str> {{\n        match id {{\n{name_of}            _ => None,\n        }}\n    }}\n\
          }}\n\n",
-        dec = arms(&|p| format!(
-            "            id::{} => decode_exact(&raw.body).map(Self::{}),\n",
-            screaming(&p.name),
-            p.rust
+        dec = arms(&|n, r| format!(
+            "            id::{} => decode_exact(&raw.body).map(Self::{r}),\n",
+            screaming(n)
         )),
-        ids = arms(&|p| format!(
-            "            Self::{}(_) => id::{},\n",
-            p.rust,
-            screaming(&p.name)
-        )),
-        names = arms(&|p| format!("            Self::{}(_) => {:?},\n", p.rust, p.name)),
-        enc = arms(&|p| format!("            Self::{}(ref p) => p.encode(w),\n", p.rust)),
-        name_of = arms(&|p| format!(
-            "            id::{} => Some({:?}),\n",
-            screaming(&p.name),
-            p.name
-        )),
+        ids = arms(&|n, r| format!("            Self::{r}(_) => id::{},\n", screaming(n))),
+        names = arms(&|n, r| format!("            Self::{r}(_) => {n:?},\n")),
+        enc = arms(&|_, r| format!("            Self::{r}(ref p) => p.encode(w),\n")),
+        name_of = arms(&|n, _| format!("            id::{} => Some({n:?}),\n", screaming(n))),
     );
-    // All ids, and random generation by id for the test suites.
     let _ = write!(
         s,
         "impl {name} {{\n\
@@ -533,16 +1014,14 @@ fn packet_enum(name: &str, state: &str, dir: &str, infos: &[PacketInfo]) -> Stri
          \x20   #[cfg(feature = \"testgen\")]\n\
          \x20   pub fn generate_by_id(id: i32, g: &mut Gen) -> Option<Self> {{\n        match id {{\n{gen_}            _ => None,\n        }}\n    }}\n\
          }}\n",
-        ids = infos
+        ids = packets
             .iter()
-            .map(|p| format!("id::{}", screaming(&p.name)))
+            .map(|(n, _, _)| format!("id::{}", screaming(n)))
             .collect::<Vec<_>>()
             .join(", "),
-        gen_ = arms(&|p| format!(
-            "            id::{} => Some(Self::{}(<{} as Generate>::generate(g))),\n",
-            screaming(&p.name),
-            p.rust,
-            p.rust
+        gen_ = arms(&|n, r| format!(
+            "            id::{} => Some(Self::{r}(<{r} as Generate>::generate(g))),\n",
+            screaming(n)
         )),
     );
     s

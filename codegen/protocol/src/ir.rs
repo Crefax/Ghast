@@ -20,6 +20,8 @@ pub enum Prim {
     I8,
     U16,
     I16,
+    U32,
+    U64,
     I32,
     I64,
     F32,
@@ -31,6 +33,12 @@ pub enum Prim {
     RestBuffer,
     Nbt,
     OptionalNbt,
+    /// Network NBT without a root name (1.20.2+), `TAG_End` allowed.
+    AnonNbt,
+    /// Network NBT without a root name; a `TAG_End` byte is `None`.
+    AnonOptionalNbt,
+    /// Low-precision velocity vector (1.21.9+ `LpVec3`).
+    LpVec3,
     Position,
     Slot,
 }
@@ -46,6 +54,8 @@ impl Prim {
                 | Prim::I8
                 | Prim::U16
                 | Prim::I16
+                | Prim::U32
+                | Prim::U64
                 | Prim::I32
                 | Prim::I64
         )
@@ -58,6 +68,8 @@ impl Prim {
             Prim::I8 => (i8::MIN as i128, i8::MAX as i128),
             Prim::U16 => (0, u16::MAX as i128),
             Prim::I16 => (i16::MIN as i128, i16::MAX as i128),
+            Prim::U32 => (0, u32::MAX as i128),
+            Prim::U64 => (0, u64::MAX as i128),
             Prim::VarInt | Prim::I32 => (i32::MIN as i128, i32::MAX as i128),
             Prim::VarLong | Prim::I64 => (i64::MIN as i128, i64::MAX as i128),
             _ => panic!("not an integer type: {self:?}"),
@@ -140,6 +152,15 @@ pub struct Bitfield {
     pub fields: Vec<BitField>,
 }
 
+/// Named bits of an unsigned integer (protodef `bitflags`): flag `i` is bit `i`.
+#[derive(Debug, Clone)]
+pub struct Bitflags {
+    pub rust_name: String,
+    pub shared: bool,
+    pub underlying: Prim,
+    pub flags: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Mapper {
     pub rust_name: String,
@@ -153,8 +174,10 @@ pub struct Mapper {
 pub enum Ty {
     Void,
     Prim(Prim),
-    /// A standalone named container type (`types::Name`) with its own impls.
-    Named(String),
+    /// A standalone named container type with its own impls: `(Rust name, shared)`;
+    /// shared ones live in the version's `types` scope, the others (state-local types)
+    /// in the packet module of their state and direction.
+    Named(String, bool),
     Container(Box<Container>),
     Switch(Box<Switch>),
     Array {
@@ -164,7 +187,18 @@ pub enum Ty {
     },
     Option(Box<Ty>),
     Bitfield(Box<Bitfield>),
+    Bitflags(Box<Bitflags>),
     Mapper(Box<Mapper>),
+    /// Registry id or inline value (`registryEntryHolder`): VarInt `0` = inline value
+    /// follows, else registry id + 1.
+    Holder(Box<Ty>),
+    /// Tag name or inline id list (`registryEntryHolderSet`): VarInt `0` = tag name
+    /// follows, else `n - 1` registry ids.
+    HolderSet,
+    /// Exactly `n` bytes.
+    FixedBytes(usize),
+    /// Heap indirection for recursive named types.
+    Boxed(Box<Ty>),
     /// Entries until a byte equal to `end` (entity metadata).
     MetaLoop {
         end: u8,
@@ -178,13 +212,20 @@ pub enum Ty {
     },
 }
 
+impl Container {
+    /// Structural equality of two roots.
+    pub fn same_shape_root(&self, other: &Container) -> bool {
+        Ty::Container(Box::new(self.clone())).same_shape(&Ty::Container(Box::new(other.clone())))
+    }
+}
+
 impl Ty {
     /// Structural equality, ignoring generated names.
     pub fn same_shape(&self, other: &Ty) -> bool {
         match (self, other) {
             (Ty::Void, Ty::Void) => true,
             (Ty::Prim(a), Ty::Prim(b)) => a == b,
-            (Ty::Named(a), Ty::Named(b)) => a == b,
+            (Ty::Named(a, x), Ty::Named(b, y)) => a == b && x == y,
             (Ty::Container(a), Ty::Container(b)) => {
                 a.fields.len() == b.fields.len()
                     && a.fields.iter().zip(&b.fields).all(|(x, y)| {
@@ -214,6 +255,12 @@ impl Ty {
             (Ty::Mapper(a), Ty::Mapper(b)) => {
                 a.underlying == b.underlying && a.mappings == b.mappings
             }
+            (Ty::Bitflags(a), Ty::Bitflags(b)) => {
+                a.underlying == b.underlying && a.flags == b.flags
+            }
+            (Ty::Holder(a), Ty::Holder(b)) | (Ty::Boxed(a), Ty::Boxed(b)) => a.same_shape(b),
+            (Ty::HolderSet, Ty::HolderSet) => true,
+            (Ty::FixedBytes(a), Ty::FixedBytes(b)) => a == b,
             (Ty::Switch(a), Ty::Switch(b)) => {
                 a.compare_to == b.compare_to
                     && a.presence == b.presence
@@ -357,6 +404,11 @@ pub fn variant_name(key: &str) -> String {
 pub struct Resolver<'a> {
     /// The global `types` section.
     pub types: &'a serde_json::Map<String, Value>,
+    /// Types local to the state and direction being resolved (`play.toClient.types`
+    /// minus the packets).
+    pub local: Option<&'a serde_json::Map<String, Value>>,
+    /// Local container types that get standalone Rust types in the packet module.
+    pub local_named: BTreeMap<String, String>,
     /// Named container types that get standalone Rust types (protodef name -> Rust name).
     pub named: BTreeMap<String, String>,
     /// Overrides of Rust names for named (inlined) types.
@@ -393,6 +445,7 @@ impl<'a> Resolver<'a> {
                 .and_then(Value::as_str)
                 == Some("container")
                 && !matches!(name.as_str(), "slot" | "position")
+                && !name.starts_with("packet_")
                 && !contains_compare_to_param(def)
             {
                 named.insert(name.clone(), pascal(name));
@@ -400,6 +453,8 @@ impl<'a> Resolver<'a> {
         }
         Resolver {
             types,
+            local: None,
+            local_named: BTreeMap::new(),
             named,
             renames: BTreeMap::new(),
             variant_names: BTreeMap::new(),
@@ -407,6 +462,36 @@ impl<'a> Resolver<'a> {
             presence_used: BTreeSet::new(),
             next_id: 1,
         }
+    }
+
+    /// Sets the state-local types of the next packets; container types among them become
+    /// standalone named types. Returns `(protodef name, Rust name)` of those.
+    pub fn set_local(
+        &mut self,
+        local: Option<&'a serde_json::Map<String, Value>>,
+    ) -> Vec<(String, String)> {
+        self.local = local;
+        self.local_named.clear();
+        if let Some(l) = local {
+            for (name, def) in l {
+                if name.starts_with("packet") {
+                    continue;
+                }
+                if def
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(Value::as_str)
+                    == Some("container")
+                    && !contains_compare_to_param(def)
+                {
+                    self.local_named.insert(name.clone(), pascal(name));
+                }
+            }
+        }
+        self.local_named
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Panics if a presence override matched no switch (minecraft-data changed or the
@@ -475,6 +560,8 @@ impl<'a> Resolver<'a> {
             "i8" => Some(Prim::I8),
             "u16" => Some(Prim::U16),
             "i16" => Some(Prim::I16),
+            "u32" => Some(Prim::U32),
+            "u64" => Some(Prim::U64),
             "i32" => Some(Prim::I32),
             "i64" => Some(Prim::I64),
             "f32" => Some(Prim::F32),
@@ -486,6 +573,9 @@ impl<'a> Resolver<'a> {
             "restBuffer" => Some(Prim::RestBuffer),
             "nbt" => Some(Prim::Nbt),
             "optionalNbt" => Some(Prim::OptionalNbt),
+            "anonymousNbt" => Some(Prim::AnonNbt),
+            "anonOptionalNbt" => Some(Prim::AnonOptionalNbt),
+            "lpVec3" => Some(Prim::LpVec3),
             "position" => Some(Prim::Position),
             "slot" => Some(Prim::Slot),
             _ => None,
@@ -496,12 +586,23 @@ impl<'a> Resolver<'a> {
         if name == "void" {
             return Ty::Void;
         }
-        if let Some(rust) = self.named.get(name) {
-            return Ty::Named(rust.clone());
+        // A state-local type shadows a global one.
+        let local = self
+            .local
+            .and_then(|l| l.get(name))
+            .filter(|_| !name.starts_with("packet"));
+        if local.is_some()
+            && let Some(rust) = self.local_named.get(name)
+        {
+            return Ty::Named(rust.clone(), false);
         }
-        let def = self
-            .types
-            .get(name)
+        if local.is_none()
+            && let Some(rust) = self.named.get(name)
+        {
+            return Ty::Named(rust.clone(), true);
+        }
+        let def = local
+            .or_else(|| self.types.get(name))
             .unwrap_or_else(|| panic!("{}: unknown type {name}", ctx.path))
             .clone();
         if def.as_str() == Some("native") {
@@ -522,7 +623,8 @@ impl<'a> Resolver<'a> {
             prefix: rust,
             path: ctx.path.clone(),
             compare_to: compare_to.or_else(|| ctx.compare_to.clone()),
-            shared: true,
+            // Nominal types of a state-local type live in that packet module.
+            shared: local.is_none(),
         };
         self.resolve(&def, &inner)
     }
@@ -726,10 +828,49 @@ impl<'a> Resolver<'a> {
                     path: ctx.path.clone(),
                 }
             }
-            "buffer" => match arg.get("countType").and_then(Value::as_str) {
-                Some("varint") => Ty::Prim(Prim::ByteArray),
+            "buffer" => match (
+                arg.get("countType").and_then(Value::as_str),
+                arg.get("count").and_then(Value::as_u64),
+            ) {
+                (Some("varint"), None) => Ty::Prim(Prim::ByteArray),
+                (None, Some(n)) => Ty::FixedBytes(n as usize),
                 _ => panic!("{}: unsupported buffer {arg}", ctx.path),
             },
+            "bitflags" => {
+                let underlying = match self.resolve(&arg["type"], ctx) {
+                    Ty::Prim(p) if p.is_int() => p,
+                    other => panic!("{}: bad bitflags type {other:?}", ctx.path),
+                };
+                assert!(arg.get("shift").is_none(), "{}: bitflags shift", ctx.path);
+                let flags = arg["flags"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{}: bitflags flags must be a list", ctx.path))
+                    .iter()
+                    .map(|f| f.as_str().expect("flag name").to_string())
+                    .collect();
+                Ty::Bitflags(Box::new(Bitflags {
+                    rust_name: ctx.prefix.clone(),
+                    shared: ctx.shared,
+                    underlying,
+                    flags,
+                }))
+            }
+            "registryEntryHolder" => {
+                let other = &arg["otherwise"];
+                let inner = self.resolve(&other["type"], ctx);
+                Ty::Holder(Box::new(inner))
+            }
+            "registryEntryHolderSet" => {
+                // Only the one shape the protocol uses: tag name string, varint ids.
+                let base = self.resolve(&arg["base"]["type"], ctx);
+                let ids = self.resolve(&arg["otherwise"]["type"], ctx);
+                assert!(
+                    matches!(base, Ty::Prim(Prim::String)) && matches!(ids, Ty::Prim(Prim::VarInt)),
+                    "{}: unsupported registryEntryHolderSet {arg}",
+                    ctx.path
+                );
+                Ty::HolderSet
+            }
             "pstring" => match arg.get("countType").and_then(Value::as_str) {
                 Some("varint") => Ty::Prim(Prim::String),
                 _ => panic!("{}: unsupported pstring {arg}", ctx.path),
@@ -761,5 +902,72 @@ pub fn parse_int(s: &str) -> Option<i64> {
         i64::from_str_radix(h, 16).ok()
     } else {
         s.parse().ok()
+    }
+}
+
+/// Wraps references between recursive named types in [`Ty::Boxed`]: a reference from root
+/// `R` to named type `N` is boxed when `N` (directly, not through an array) reaches `R`.
+pub fn box_cycles(roots: &mut [Container], shared: bool) {
+    let names: Vec<String> = roots.iter().map(|c| c.rust_name.clone()).collect();
+    let idx = |n: &str| names.iter().position(|x| x == n);
+    let mut edges: Vec<Vec<usize>> = Vec::new();
+    for c in roots.iter() {
+        let mut out = Vec::new();
+        for f in &c.fields {
+            direct_refs(&f.ty, shared, &mut |n| {
+                if let Some(i) = idx(n) {
+                    out.push(i);
+                }
+            });
+        }
+        edges.push(out);
+    }
+    let reaches = |from: usize, to: usize| {
+        let mut seen = vec![false; names.len()];
+        let mut stack = vec![from];
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if std::mem::replace(&mut seen[n], true) {
+                continue;
+            }
+            stack.extend(edges[n].iter().copied());
+        }
+        false
+    };
+    for (ri, c) in roots.iter_mut().enumerate() {
+        for f in &mut c.fields {
+            box_refs(&mut f.ty, shared, &mut |n| idx(n).is_some_and(|ni| reaches(ni, ri)));
+        }
+    }
+}
+
+fn direct_refs(t: &Ty, shared: bool, f: &mut dyn FnMut(&str)) {
+    match t {
+        Ty::Named(n, s) if *s == shared => f(n),
+        Ty::Container(c) => c.fields.iter().for_each(|x| direct_refs(&x.ty, shared, f)),
+        Ty::Switch(s) => {
+            s.cases.iter().for_each(|(_, x)| direct_refs(x, shared, f));
+            direct_refs(&s.default, shared, f);
+        }
+        Ty::Option(e) | Ty::Holder(e) => direct_refs(e, shared, f),
+        _ => {}
+    }
+}
+
+fn box_refs(t: &mut Ty, shared: bool, cyclic: &mut dyn FnMut(&str) -> bool) {
+    match t {
+        Ty::Named(n, s) if *s == shared && cyclic(n) => {
+            let inner = std::mem::replace(t, Ty::Void);
+            *t = Ty::Boxed(Box::new(inner));
+        }
+        Ty::Container(c) => c.fields.iter_mut().for_each(|x| box_refs(&mut x.ty, shared, cyclic)),
+        Ty::Switch(s) => {
+            s.cases.iter_mut().for_each(|(_, x)| box_refs(x, shared, cyclic));
+            box_refs(&mut s.default, shared, cyclic);
+        }
+        Ty::Option(e) | Ty::Holder(e) => box_refs(e, shared, cyclic),
+        _ => {}
     }
 }

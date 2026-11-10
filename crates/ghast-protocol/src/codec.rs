@@ -201,6 +201,12 @@ impl<'a> Reader<'a> {
         Ok(i64::from_be_bytes(self.take_array()?))
     }
 
+    /// Reads a big-endian `u32`.
+    #[inline]
+    pub fn read_u32(&mut self) -> DecodeResult<u32> {
+        Ok(u32::from_be_bytes(self.take_array()?))
+    }
+
     /// Reads a big-endian `u64`.
     #[inline]
     pub fn read_u64(&mut self) -> DecodeResult<u64> {

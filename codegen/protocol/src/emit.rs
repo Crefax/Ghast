@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use crate::ir::{
-    BitField, Bitfield, Container, Count, Mapper, Prim, Switch, SwitchKind, Ty, Variant, parse_int,
+    BitField, Bitfield, Bitflags, Container, Count, Mapper, Prim, Switch, SwitchKind, Ty, Variant,
+    parse_int,
 };
 use crate::names::screaming;
 
@@ -31,6 +32,7 @@ enum Kind<'t> {
     Str,
     Mapper(&'t Mapper),
     BitStruct(&'t Bitfield),
+    Flags(&'t Bitflags),
     Other,
 }
 
@@ -56,20 +58,36 @@ enum Mode {
     Generate,
 }
 
+/// Marker written before every top-level item; replaced by the item's
+/// `#[cfg(any(feature = ...))]` once it is known which versions share the item.
+pub const CFG: &str = "#[cfg(⟦cfg⟧)]\n";
+
+/// One emitted definition (nested struct/enum/bitfield/mapper or a root), before
+/// placeholder references (`⟪scope|Name⟫`) are resolved to paths.
+#[derive(Debug, Clone)]
+pub struct Item {
+    /// `"types"` (version-wide) or `"<state>/<direction>"`.
+    pub scope: String,
+    /// Rust name.
+    pub name: String,
+    /// Code with placeholder references and [`CFG`] markers.
+    pub text: String,
+}
+
 pub struct Emitter<'t> {
-    /// Path of the version's types module, e.g. `crate::v1_8::types`.
+    /// Bit layout of positions (`Xyz` / `Xzy`).
     pub layout: &'static str,
+    /// Concrete path of the version's slot type, if it has a native `slot`.
+    pub slot: Option<&'static str>,
+    /// Scope of the packet module being emitted (`"play/clientbound"`).
+    pub scope: String,
     /// Variant name overrides (`Enum.key` -> name).
     pub variant_names: BTreeMap<String, String>,
     /// Named container roots by Rust name (for minimum sizes).
     pub named: HashMap<String, &'t Container>,
-    /// Whether code is being emitted into the `types` module.
-    pub in_types: bool,
-    /// Definitions for the `types` module.
-    pub shared_defs: Vec<String>,
+    /// Nested definitions in emission order.
+    pub items: Vec<Item>,
     shared_names: HashMap<String, &'t Ty>,
-    /// Definitions for the current packet module.
-    pub local_defs: Vec<String>,
     local_names: HashMap<String, &'t Ty>,
     hints: HashMap<(usize, String), Hint>,
     tmp: usize,
@@ -97,15 +115,19 @@ fn bits_range(size: u32, signed: bool) -> (i128, i128) {
 }
 
 impl<'t> Emitter<'t> {
-    pub fn new(layout: &'static str, variant_names: BTreeMap<String, String>) -> Self {
+    pub fn new(
+        layout: &'static str,
+        slot: Option<&'static str>,
+        variant_names: BTreeMap<String, String>,
+    ) -> Self {
         Emitter {
             layout,
+            slot,
+            scope: String::new(),
             variant_names,
             named: HashMap::new(),
-            in_types: false,
-            shared_defs: Vec::new(),
+            items: Vec::new(),
             shared_names: HashMap::new(),
-            local_defs: Vec::new(),
             local_names: HashMap::new(),
             hints: HashMap::new(),
             tmp: 0,
@@ -117,13 +139,21 @@ impl<'t> Emitter<'t> {
         format!("v{}", self.tmp)
     }
 
-    /// Reference to a nominal type from the current module.
+    /// Starts a new packet module scope (`"play/clientbound"`).
+    pub fn begin_scope(&mut self, scope: &str) {
+        self.scope = scope.to_string();
+        self.local_names.clear();
+    }
+
+    /// Placeholder reference to a nominal type, resolved to a path later.
     fn tref(&self, name: &str, shared: bool) -> String {
-        if shared && !self.in_types {
-            format!("types::{name}")
-        } else {
-            name.to_string()
-        }
+        let scope = if shared { "types" } else { self.scope.as_str() };
+        format!("⟪{scope}|{name}⟫")
+    }
+
+    fn slot_path(&self) -> &'static str {
+        self.slot
+            .unwrap_or_else(|| panic!("native `slot` used by a version without a slot type"))
     }
 
     // ------------------------------------------------------------------ hints
@@ -188,7 +218,7 @@ impl<'t> Emitter<'t> {
                 }
                 self.hint_ty(elem, stack);
             }
-            Ty::Option(e) => self.hint_ty(e, stack),
+            Ty::Option(e) | Ty::Holder(e) | Ty::Boxed(e) => self.hint_ty(e, stack),
             Ty::MetaLoop { elem, .. } | Ty::TopBitArray { elem, .. } => self.hint_ty(elem, stack),
             _ => {}
         }
@@ -203,13 +233,24 @@ impl<'t> Emitter<'t> {
             Ty::Prim(p) => match p {
                 Prim::VarInt | Prim::VarLong | Prim::U8 | Prim::I8 | Prim::Bool => 1,
                 Prim::U16 | Prim::I16 => 2,
-                Prim::I32 | Prim::F32 => 4,
-                Prim::I64 | Prim::F64 | Prim::Position => 8,
+                Prim::I32 | Prim::U32 | Prim::F32 => 4,
+                Prim::I64 | Prim::U64 | Prim::F64 | Prim::Position => 8,
                 Prim::Uuid => 16,
-                Prim::String | Prim::ByteArray | Prim::Nbt | Prim::OptionalNbt | Prim::Slot => 1,
+                Prim::String
+                | Prim::ByteArray
+                | Prim::Nbt
+                | Prim::OptionalNbt
+                | Prim::AnonNbt
+                | Prim::AnonOptionalNbt
+                | Prim::LpVec3
+                | Prim::Slot => 1,
                 Prim::RestBuffer => 0,
             },
-            Ty::Named(n) => self.named.get(n).map_or(0, |c| self.fields_min(&c.fields)),
+            Ty::Named(n, _) => self.named.get(n).map_or(0, |c| self.fields_min(&c.fields)),
+            Ty::Bitflags(b) => self.min_size(&Ty::Prim(b.underlying)),
+            Ty::Holder(_) | Ty::HolderSet => 1,
+            Ty::FixedBytes(n) => *n,
+            Ty::Boxed(e) => self.min_size(e),
             Ty::Container(c) => self.fields_min(&c.fields),
             Ty::Switch(s) => s
                 .cases
@@ -242,6 +283,8 @@ impl<'t> Emitter<'t> {
             Prim::I8 => "i8",
             Prim::U16 => "u16",
             Prim::I16 => "i16",
+            Prim::U32 => "u32",
+            Prim::U64 => "u64",
             Prim::F32 => "f32",
             Prim::F64 => "f64",
             Prim::Bool => "bool",
@@ -250,8 +293,11 @@ impl<'t> Emitter<'t> {
             Prim::ByteArray | Prim::RestBuffer => "Bytes",
             Prim::Nbt => "RawNbt",
             Prim::OptionalNbt => "Option<RawNbt>",
+            Prim::AnonNbt => "AnonNbt",
+            Prim::AnonOptionalNbt => "Option<AnonNbt>",
+            Prim::LpVec3 => "LpVec3",
             Prim::Position => "BlockPos",
-            Prim::Slot => return self.tref("Slot", true),
+            Prim::Slot => self.slot_path(),
         }
         .to_string()
     }
@@ -261,7 +307,15 @@ impl<'t> Emitter<'t> {
         match t {
             Ty::Void => "()".into(),
             Ty::Prim(p) => self.prim_type(*p),
-            Ty::Named(n) => self.tref(n, true),
+            Ty::Named(n, shared) => self.tref(n, *shared),
+            Ty::Bitflags(b) => {
+                self.define_bitflags(t, b);
+                self.tref(&b.rust_name, b.shared)
+            }
+            Ty::Holder(e) => format!("Holder<{}>", self.rtype(e)),
+            Ty::HolderSet => "HolderSet".into(),
+            Ty::FixedBytes(_) => "Bytes".into(),
+            Ty::Boxed(e) => format!("Box<{}>", self.rtype(e)),
             Ty::Container(c) => {
                 self.define_container(t, c);
                 self.tref(&c.rust_name, c.shared)
@@ -305,12 +359,17 @@ impl<'t> Emitter<'t> {
         true
     }
 
-    fn push_def(&mut self, shared: bool, code: String) {
-        if shared {
-            self.shared_defs.push(code);
+    fn push_def(&mut self, shared: bool, name: &str, code: String) {
+        let scope = if shared {
+            "types".to_string()
         } else {
-            self.local_defs.push(code);
-        }
+            self.scope.clone()
+        };
+        self.items.push(Item {
+            scope,
+            name: name.to_string(),
+            text: code,
+        });
     }
 
     /// Struct fields of a container: `(rust name, type, doc)`, with anonymous containers
@@ -351,17 +410,15 @@ impl<'t> Emitter<'t> {
         if !self.claim(&c.rust_name, c.shared, t) {
             return;
         }
-        let saved = self.in_types;
-        self.in_types = c.shared;
         let mut fields = Vec::new();
         self.struct_fields(c, &mut fields);
-        self.in_types = saved;
         let code = struct_def(&c.rust_name, "Nested container.", &fields);
-        self.push_def(c.shared, code);
+        self.push_def(c.shared, &c.rust_name, code);
     }
 
     /// Registers a root container struct (packet or named type) and returns its definition.
-    pub fn root_struct(&mut self, c: &'t Container, doc: &str) -> String {
+    /// `generics` is appended to the struct name (`"<const V: i32>"` for packets).
+    pub fn root_struct(&mut self, c: &'t Container, doc: &str, generics: &str) -> String {
         let mut fields = Vec::new();
         self.struct_fields(c, &mut fields);
         let mut seen = HashSet::new();
@@ -372,16 +429,14 @@ impl<'t> Emitter<'t> {
                 c.rust_name
             );
         }
-        struct_def(&c.rust_name, doc, &fields)
+        struct_def(&format!("{}{generics}", c.rust_name), doc, &fields)
     }
 
     fn define_enum(&mut self, t: &'t Ty, s: &'t Switch, vs: &[Variant<'t>]) {
         if !self.claim(&s.rust_name, s.shared, t) {
             return;
         }
-        let saved = self.in_types;
-        self.in_types = s.shared;
-        let mut code = String::new();
+        let mut code = String::from(CFG);
         let _ = writeln!(code, "/// Switch on `{}`.", s.compare_to);
         code.push_str("#[derive(Debug, Clone, PartialEq)]\npub enum ");
         code.push_str(&s.rust_name);
@@ -405,8 +460,7 @@ impl<'t> Emitter<'t> {
             }
         }
         code.push_str("}\n");
-        self.in_types = saved;
-        self.push_def(s.shared, code);
+        self.push_def(s.shared, &s.rust_name, code);
     }
 
     fn define_bitfield(&mut self, t: &'t Ty, b: &'t Bitfield) {
@@ -429,7 +483,7 @@ impl<'t> Emitter<'t> {
             "#[derive(Debug, Clone, PartialEq)]",
             "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]",
         );
-        self.push_def(b.shared, code);
+        self.push_def(b.shared, &b.rust_name, code);
     }
 
     fn define_mapper(&mut self, t: &'t Ty, m: &'t Mapper) {
@@ -438,13 +492,14 @@ impl<'t> Emitter<'t> {
         }
         let ut = self.prim_type(m.underlying);
         let name = &m.rust_name;
-        let mut code = String::new();
+        let mut code = String::from(CFG);
         let _ = writeln!(
             code,
             "/// Mapped `{ut}` value; unknown values are kept as-is."
         );
         code.push_str("#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]\n");
         let _ = writeln!(code, "pub struct {name}(pub {ut});");
+        code.push_str(CFG);
         let _ = writeln!(code, "impl {name} {{");
         for (v, n) in &m.mappings {
             let _ = writeln!(
@@ -462,11 +517,44 @@ impl<'t> Emitter<'t> {
             let _ = writeln!(code, "            {v} => Some(\"{n}\"),");
         }
         code.push_str("            _ => None,\n        }\n    }\n}\n");
+        code.push_str(CFG);
         let _ = writeln!(
             code,
             "impl std::fmt::Debug for {name} {{\n    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        match self.name() {{\n            Some(n) => write!(f, \"{name}::{{n}}\"),\n            None => write!(f, \"{name}({{}})\", self.0),\n        }}\n    }}\n}}"
         );
-        self.push_def(m.shared, code);
+        self.push_def(m.shared, &m.rust_name, code);
+    }
+
+    fn define_bitflags(&mut self, t: &'t Ty, b: &'t Bitflags) {
+        if !self.claim(&b.rust_name, b.shared, t) {
+            return;
+        }
+        let ut = self.prim_type(b.underlying);
+        let name = &b.rust_name;
+        let mut code = String::from(CFG);
+        let _ = writeln!(
+            code,
+            "/// Bit flags in a `{ut}`; unknown bits are kept as-is."
+        );
+        code.push_str(
+            "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]\n",
+        );
+        let _ = writeln!(code, "pub struct {name}(pub {ut});");
+        code.push_str(CFG);
+        let _ = writeln!(code, "impl {name} {{");
+        for (i, f) in b.flags.iter().enumerate() {
+            let _ = writeln!(
+                code,
+                "    /// `{f}`\n    pub const {}: Self = Self(1 << {i});",
+                screaming(f)
+            );
+        }
+        let _ = writeln!(
+            code,
+            "    /// Whether every bit of `f` is set.\n    #[inline]\n    pub const fn contains(self, f: Self) -> bool {{ self.0 & f.0 == f.0 }}\n\
+             \x20   /// The union of both sets of bits.\n    #[inline]\n    #[must_use]\n    pub const fn with(self, f: Self) -> Self {{ Self(self.0 | f.0) }}\n}}"
+        );
+        self.push_def(b.shared, name, code);
     }
 
     // ------------------------------------------------------------------ scope
@@ -494,6 +582,18 @@ impl<'t> Emitter<'t> {
         match segs.get(1) {
             None => e,
             Some(sub) => {
+                if let Kind::Flags(b) = e.kind {
+                    let i = b
+                        .flags
+                        .iter()
+                        .position(|f| f == sub)
+                        .unwrap_or_else(|| panic!("`{path}`: no such flag"));
+                    return Entry {
+                        name: path.to_string(),
+                        expr: format!("(({}.0 >> {i}) & 1 != 0)", e.expr),
+                        kind: Kind::Bool,
+                    };
+                }
                 let Kind::BitStruct(b) = e.kind else {
                     panic!("`{path}`: not a bit field")
                 };
@@ -521,6 +621,7 @@ impl<'t> Emitter<'t> {
             Ty::Prim(p) if p.is_int() => Kind::Int(*p),
             Ty::Mapper(m) => Kind::Mapper(m),
             Ty::Bitfield(b) => Kind::BitStruct(b),
+            Ty::Bitflags(b) => Kind::Flags(b),
             _ => Kind::Other,
         }
     }
@@ -555,7 +656,9 @@ impl<'t> Emitter<'t> {
                     None => "false".into(),
                 }
             }
-            Kind::BitStruct(_) | Kind::Other => panic!("cannot compare `{path}` with {key:?}"),
+            Kind::BitStruct(_) | Kind::Flags(_) | Kind::Other => {
+                panic!("cannot compare `{path}` with {key:?}")
+            }
         }
     }
 
@@ -615,11 +718,11 @@ impl<'t> Emitter<'t> {
                 if gen_ {
                     self.gen_prim(*p, hint)
                 } else {
-                    dec_prim(*p, self.layout)
+                    self.dec_prim(*p)
                 }
             }
-            Ty::Named(n) => {
-                let tr = self.tref(n, true);
+            Ty::Named(n, shared) => {
+                let tr = self.tref(n, *shared);
                 if gen_ {
                     format!("<{tr} as Generate>::generate(g)")
                 } else {
@@ -631,6 +734,50 @@ impl<'t> Emitter<'t> {
                 self.container_value(tr, c, sc, mode, None)
             }
             Ty::Switch(s) => self.switch_value(t, s, sc, mode),
+            Ty::Bitflags(b) => {
+                let tr = self.rtype(t);
+                if gen_ {
+                    match b.underlying {
+                        Prim::U64 => format!("{tr}(g.u64())"),
+                        p => {
+                            let (lo, hi) = p.int_range();
+                            format!("{tr}(g.int_in({lo}, {hi}, &[]) as {})", self.prim_type(p))
+                        }
+                    }
+                } else {
+                    format!("{tr}({})", self.dec_prim(b.underlying))
+                }
+            }
+            Ty::Holder(e) => {
+                let inner = self.value(e, sc, mode, None, name);
+                if gen_ {
+                    format!(
+                        "if g.bool() {{ Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {{ -1 => 0, v => v }}) }} else {{ Holder::Inline({inner}) }}"
+                    )
+                } else {
+                    format!(
+                        "{{ let id = r.read_varint()?; if id == 0 {{ Holder::Inline({inner}) }} else {{ Holder::Id(id.wrapping_sub(1)) }} }}"
+                    )
+                }
+            }
+            Ty::HolderSet => {
+                if gen_ {
+                    "<HolderSet as Generate>::generate(g)".into()
+                } else {
+                    "<HolderSet as Decode>::decode(r)?".into()
+                }
+            }
+            Ty::FixedBytes(n) => {
+                if gen_ {
+                    format!("g.fixed_bytes({n})")
+                } else {
+                    format!("r.read_bytes({n})?")
+                }
+            }
+            Ty::Boxed(e) => {
+                let inner = self.value(e, sc, mode, hint, name);
+                format!("Box::new({inner})")
+            }
             Ty::Array { count, elem, .. } => {
                 let n = self.var();
                 let v = self.var();
@@ -642,7 +789,7 @@ impl<'t> Emitter<'t> {
                             let min = self.min_size(elem);
                             format!(
                                 "{{ let c = {}; r.check_count(i64::from(c), {min})? }}",
-                                dec_prim(*p, self.layout)
+                                self.dec_prim(*p)
                             )
                         }
                     }
@@ -701,7 +848,7 @@ impl<'t> Emitter<'t> {
                         self.prim_type(m.underlying)
                     )
                 } else {
-                    format!("{tr}({})", dec_prim(m.underlying, self.layout))
+                    format!("{tr}({})", self.dec_prim(m.underlying))
                 }
             }
             Ty::MetaLoop { end, elem, .. } => {
@@ -771,6 +918,7 @@ impl<'t> Emitter<'t> {
             return match p {
                 Prim::VarLong => "g.varlong()".into(),
                 Prim::I64 => "g.i64()".into(),
+                Prim::U64 => "g.u64()".into(),
                 _ => format!("(g.int_in({lo}, {hi}, &[]) as {ty})"),
             };
         }
@@ -786,8 +934,11 @@ impl<'t> Emitter<'t> {
             Prim::ByteArray | Prim::RestBuffer => "g.bytes()".into(),
             Prim::Nbt => "g.nbt()".into(),
             Prim::OptionalNbt => "g.opt_nbt()".into(),
+            Prim::AnonNbt => "g.anon_nbt()".into(),
+            Prim::AnonOptionalNbt => "g.anon_opt_nbt()".into(),
+            Prim::LpVec3 => "<LpVec3 as Generate>::generate(g)".into(),
             Prim::Position => "g.position()".into(),
-            Prim::Slot => format!("<{} as Generate>::generate(g)", self.tref("Slot", true)),
+            Prim::Slot => format!("<{} as Generate>::generate(g)", self.slot_path()),
             _ => unreachable!(),
         }
     }
@@ -931,7 +1082,20 @@ impl<'t> Emitter<'t> {
         match t {
             Ty::Void => String::new(),
             Ty::Prim(pr) => enc_prim(*pr, p, self.layout),
-            Ty::Named(_) => format!("{p}.encode(w)?;"),
+            Ty::Named(..) | Ty::HolderSet => format!("{p}.encode(w)?;"),
+            Ty::Bitflags(b) => enc_prim(b.underlying, &format!("{p}.0"), self.layout),
+            Ty::FixedBytes(n) => format!(
+                "if {p}.len() != {n} {{ return Err(EncodeError::CountMismatch {{ field: \"fixed buffer\", expected: {n}, actual: {p}.len() }}); }} w.put_slice(&{p});"
+            ),
+            Ty::Boxed(e) => self.encode(e, &format!("(*{p})"), sc),
+            Ty::Holder(e) => {
+                let x = self.var();
+                let id = self.var();
+                let inner = self.encode(e, &format!("(*{x})"), sc);
+                format!(
+                    "match &{p} {{ Holder::Id({id}) => {{ if *{id} == -1 {{ return Err(EncodeError::OutOfRange(\"holder id\")); }} w.put_varint({id}.wrapping_add(1)); }} Holder::Inline({x}) => {{ w.put_varint(0); {inner} }} }}"
+                )
+            }
             Ty::Container(c) => {
                 sc.push(Level {
                     id: c.id,
@@ -1089,20 +1253,23 @@ impl<'t> Emitter<'t> {
 
     // ------------------------------------------------------------------ roots
 
-    /// `Decode` body expression for a root container.
+    /// `Decode` body expression for a root container (constructs `Self`).
     pub fn root_decode(&mut self, c: &'t Container) -> String {
+        self.tmp = 0;
         let mut sc = Vec::new();
-        self.container_value(c.rust_name.clone(), c, &mut sc, Mode::Decode, None)
+        self.container_value("Self".into(), c, &mut sc, Mode::Decode, None)
     }
 
-    /// `Generate` body expression for a root container.
+    /// `Generate` body expression for a root container (constructs `Self`).
     pub fn root_generate(&mut self, c: &'t Container) -> String {
+        self.tmp = 0;
         let mut sc = Vec::new();
-        self.container_value(c.rust_name.clone(), c, &mut sc, Mode::Generate, None)
+        self.container_value("Self".into(), c, &mut sc, Mode::Generate, None)
     }
 
     /// `Encode` body statements for a root container (value is `self`).
     pub fn root_encode(&mut self, c: &'t Container) -> String {
+        self.tmp = 0;
         let mut sc = vec![Level {
             id: c.id,
             entries: Vec::new(),
@@ -1134,7 +1301,7 @@ fn quote_keys(keys: &[&str]) -> String {
 }
 
 fn struct_def(name: &str, doc: &str, fields: &[(String, String, String)]) -> String {
-    let mut code = String::new();
+    let mut code = String::from(CFG);
     for line in doc.lines() {
         let _ = writeln!(code, "/// {line}");
     }
@@ -1147,7 +1314,13 @@ fn struct_def(name: &str, doc: &str, fields: &[(String, String, String)]) -> Str
     code
 }
 
-fn dec_prim(p: Prim, layout: &str) -> String {
+impl Emitter<'_> {
+    fn dec_prim(&self, p: Prim) -> String {
+        dec_prim(p, self.layout, self.slot)
+    }
+}
+
+fn dec_prim(p: Prim, layout: &str, slot: Option<&str>) -> String {
     match p {
         Prim::VarInt => "r.read_varint()?".into(),
         Prim::VarLong => "r.read_varlong()?".into(),
@@ -1155,6 +1328,8 @@ fn dec_prim(p: Prim, layout: &str) -> String {
         Prim::I8 => "r.read_i8()?".into(),
         Prim::U16 => "r.read_u16()?".into(),
         Prim::I16 => "r.read_i16()?".into(),
+        Prim::U32 => "r.read_u32()?".into(),
+        Prim::U64 => "r.read_u64()?".into(),
         Prim::I32 => "r.read_i32()?".into(),
         Prim::I64 => "r.read_i64()?".into(),
         Prim::F32 => "r.read_f32()?".into(),
@@ -1166,8 +1341,11 @@ fn dec_prim(p: Prim, layout: &str) -> String {
         Prim::RestBuffer => "r.read_rest()".into(),
         Prim::Nbt => "RawNbt::read(r)?".into(),
         Prim::OptionalNbt => "RawNbt::read_optional(r)?".into(),
+        Prim::AnonNbt => "AnonNbt::read(r)?".into(),
+        Prim::AnonOptionalNbt => "AnonNbt::read_optional(r)?".into(),
+        Prim::LpVec3 => "LpVec3::read(r)?".into(),
         Prim::Position => format!("BlockPos::read(r, PositionLayout::{layout})?"),
-        Prim::Slot => "<types::Slot as Decode>::decode(r)?".into(),
+        Prim::Slot => format!("<{} as Decode>::decode(r)?", slot.expect("slot type")),
     }
 }
 
@@ -1179,6 +1357,8 @@ fn enc_prim(p: Prim, v: &str, layout: &str) -> String {
         Prim::I8 => format!("w.put_i8({v});"),
         Prim::U16 => format!("w.put_u16({v});"),
         Prim::I16 => format!("w.put_i16({v});"),
+        Prim::U32 => format!("w.put_u32({v});"),
+        Prim::U64 => format!("w.put_u64({v});"),
         Prim::I32 => format!("w.put_i32({v});"),
         Prim::I64 => format!("w.put_i64({v});"),
         Prim::F32 => format!("w.put_f32({v});"),
@@ -1190,6 +1370,9 @@ fn enc_prim(p: Prim, v: &str, layout: &str) -> String {
         Prim::RestBuffer => format!("w.put_slice(&{v});"),
         Prim::Nbt => format!("{v}.write(w);"),
         Prim::OptionalNbt => format!("RawNbt::write_optional(&{v}, w);"),
+        Prim::AnonNbt => format!("{v}.write(w);"),
+        Prim::AnonOptionalNbt => format!("AnonNbt::write_optional(&{v}, w);"),
+        Prim::LpVec3 => format!("{v}.write(w);"),
         Prim::Position => format!("{v}.write(w, PositionLayout::{layout})?;"),
         Prim::Slot => format!("{v}.encode(w)?;"),
     }
