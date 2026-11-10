@@ -97,6 +97,7 @@ impl WorldView for Sim16 {
             "water" | "lava" | "fire" | "nether_portal" | "end_portal"
         );
         Some(BlockQuery {
+            modern: None,
             air,
             water: info.name == "water",
             block: s.block().id(),

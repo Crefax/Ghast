@@ -176,6 +176,10 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn status_effects(&mut self, effects: &std::collections::BTreeMap<i8, i8>);
     /// Boots enchantments that change movement.
     fn boots(&mut self, depth_strider: u8, soul_speed: u8);
+    /// The item id in the feet slot (1.17+ powder snow: leather boots).
+    fn feet_item(&mut self, id: Option<i32>) {
+        let _ = id;
+    }
     /// Spectator game mode (no collision).
     fn spectator(&mut self, on: bool);
     /// One movement step: physics, then the sprint / sneak / abilities packets and exactly one
@@ -421,6 +425,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         #[cfg(feature = "v1_8")]
         DataSet::V1_8 => {
             HeldItem {
+                modern_item: None,
                 id,
                 count,
                 efficiency,
@@ -434,6 +439,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         }
         #[cfg(feature = "v1_12_2")]
         DataSet::V1_12 => HeldItem {
+            modern_item: None,
             id,
             count,
             efficiency,
@@ -446,6 +452,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         },
         #[cfg(feature = "v1_16_5")]
         DataSet::V1_16_5 => HeldItem {
+            modern_item: None,
             id,
             count,
             efficiency,
@@ -473,9 +480,40 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
             }),
             tool_speed: Some(ghast_data::v1_16_5::tool_multiplier),
         },
+        #[cfg(feature = "v26_1")]
+        DataSet::V26_1 => {
+            let item = ghast_data::v26_1::Item::from_id(id);
+            let name = item.map_or("", ghast_data::v26_1::Item::name);
+            let food = item.and_then(ghast_data::v26_1::Item::food);
+            HeldItem {
+                id,
+                count,
+                efficiency,
+                places_block: item.is_some_and(|i| i.block().is_some()),
+                usable: food.is_some()
+                    || matches!(
+                        name,
+                        "potion"
+                            | "milk_bucket"
+                            | "honey_bottle"
+                            | "bow"
+                            | "crossbow"
+                            | "shield"
+                            | "trident"
+                            | "spyglass"
+                            | "goat_horn"
+                    ),
+                food: food.is_some(),
+                always_edible: food.is_some_and(|f| f.can_always_eat),
+                // The modern destroy progress reads the item itself.
+                tool_speed: None,
+                modern_item: item.map(|_| id),
+            }
+        }
         // A data set this build does not include: an item without known facts.
         #[allow(unreachable_patterns)]
         _ => HeldItem {
+            modern_item: None,
             id,
             count,
             efficiency,
@@ -865,6 +903,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn boots(&mut self, depth_strider: u8, soul_speed: u8) {
         (**self).boots(depth_strider, soul_speed);
+    }
+    fn feet_item(&mut self, id: Option<i32>) {
+        (**self).feet_item(id);
     }
     fn spectator(&mut self, on: bool) {
         (**self).spectator(on);

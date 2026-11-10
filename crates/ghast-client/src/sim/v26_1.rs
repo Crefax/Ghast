@@ -9,11 +9,6 @@ use super::*;
 use crate::common::{Abilities, AttributeUpdate, Controls, Outbound, Pose, Teleport, Vec3};
 use crate::hands::{BlockQuery, HeldItem};
 
-/// "Needs a tool we cannot name": ghast-data has no 26.1 harvest-tool table yet, so every block
-/// with a hardness is dug as if the held item could not harvest it (slower than vanilla for
-/// blocks that need no tool, never faster).
-const UNKNOWN_TOOL: &[u16] = &[u16::MAX];
-
 /// 26.1: the chunk store and the vanilla-exact modern physics.
 pub(crate) struct Sim26 {
     world: ghast_world::v26_1::World,
@@ -21,6 +16,19 @@ pub(crate) struct Sim26 {
     packets: ghast_physics::Packets,
     /// Block changes since the last drain (position, state id), when collected.
     updates: BlockUpdates,
+    /// `mining_efficiency`, `block_break_speed`, `submerged_mining_speed` (digging).
+    mining: [modern::Attribute; 3],
+    /// Conduit power amplifier (digging).
+    conduit_power: Option<i32>,
+}
+
+/// The mining attributes with vanilla's defaults and ranges.
+fn mining_attributes() -> [modern::Attribute; 3] {
+    [
+        modern::Attribute::new(0.0, 0.0, 1024.0),
+        modern::Attribute::new(1.0, 0.0, 1024.0),
+        modern::Attribute::new(0.2, 0.0, 20.0),
+    ]
 }
 
 impl std::fmt::Debug for Sim26 {
@@ -39,6 +47,8 @@ impl Sim26 {
             player: modern::PlayerState::new([0.0; 3], 0.0, 0.0),
             packets: ghast_physics::Packets::new(),
             updates: BlockUpdates::default(),
+            mining: mining_attributes(),
+            conduit_power: None,
         }
     }
 
@@ -132,12 +142,20 @@ impl WorldView for Sim26 {
             -1.0
         };
         Some(BlockQuery {
+            modern: Some(crate::hands::ModernDig {
+                state: s.id(),
+                mining_efficiency: self.mining[0].value(),
+                block_break_speed: self.mining[1].value(),
+                submerged_mining_speed: self.mining[2].value(),
+                conduit_power: self.conduit_power,
+            }),
             air: s.is_air(),
             water: d.name == "water",
             block: s.block().default_state().id(),
             hardness,
+            // The modern destroy progress replaces tool groups and harvest lists.
             dig_material: None,
-            harvest_tools: if hardness > 0.0 { UNKNOWN_TOOL } else { &[] },
+            harvest_tools: &[],
             selection: outline_box(s),
             stairs: None,
             activates: activates_1_16(d.name),
@@ -237,6 +255,7 @@ impl Sim for Sim26 {
         self.player.abilities = abilities;
         self.player.food_level = food;
         self.player.level = level;
+        self.mining = mining_attributes();
         self.sync_level();
     }
 
@@ -244,9 +263,11 @@ impl Sim for Sim26 {
         // ClientPacketListener.handleRespawn: KEEP_ATTRIBUTE_MODIFIERS (1) keeps the attributes,
         // KEEP_ENTITY_DATA (2) the last sent input and sprinting.
         let old = self.player;
+        let old_mining = self.mining;
         self.reset_player();
         if keep & 1 != 0 {
             self.player.attributes = old.attributes;
+            self.mining = old_mining;
         }
         if keep & 2 != 0 {
             self.player.sent.input = old.sent.input;
@@ -292,15 +313,22 @@ impl Sim for Sim26 {
 
     fn attributes(&mut self, attributes: &[AttributeUpdate]) {
         for a in attributes {
-            let Some(kind) = AttributeKind::from_name(a.name) else {
-                continue;
-            };
             let mods: Vec<(ModifierId, f64, u8)> = a
                 .modifiers
                 .iter()
                 .map(|(id, amount, op)| (ModifierId::new(id), *amount, *op as u8))
                 .collect();
-            self.player.apply_attribute(kind, a.base, &mods);
+            let mining = match a.name {
+                "mining_efficiency" => Some(0),
+                "block_break_speed" => Some(1),
+                "submerged_mining_speed" => Some(2),
+                _ => None,
+            };
+            if let Some(i) = mining {
+                self.mining[i].apply_packet(a.base, &mods);
+            } else if let Some(kind) = AttributeKind::from_name(a.name) {
+                self.player.apply_attribute(kind, a.base, &mods);
+            }
         }
     }
 
@@ -313,11 +341,20 @@ impl Sim for Sim26 {
         e.slow_falling = effects.contains_key(&28);
         e.dolphins_grace = effects.contains_key(&30);
         e.weaving = effects.contains_key(&37);
+        self.conduit_power = effects.get(&29).map(|a| i32::from(*a));
     }
 
     fn boots(&mut self, depth_strider: u8, soul_speed: u8) {
         // 26.1 sends depth strider and soul speed as attributes.
         let _ = (depth_strider, soul_speed);
+    }
+
+    fn feet_item(&mut self, id: Option<i32>) {
+        let leather = ghast_data::v26_1::Item::from_name("leather_boots");
+        self.player.leather_boots = id
+            .and_then(|i| u16::try_from(i).ok())
+            .and_then(ghast_data::v26_1::Item::from_id)
+            == leather;
     }
 
     fn spectator(&mut self, on: bool) {

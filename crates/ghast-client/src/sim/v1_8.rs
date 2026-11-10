@@ -134,6 +134,7 @@ impl WorldView for Sim18 {
         let info = b.info();
         let ray = ray_1_8(&self.world, x, y, z);
         Some(BlockQuery {
+            modern: None,
             air: s.is_air(),
             water: matches!(b.id(), 8 | 9),
             block: u16::from(b.id()),

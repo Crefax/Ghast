@@ -44,6 +44,24 @@ pub struct BlockQuery {
     pub stairs: Option<[Option<[f64; 6]>; 8]>,
     /// Right-clicking the block activates it (containers, doors, levers, …).
     pub activates: bool,
+    /// 1.20.5+: the block state and the player's mining attributes for the exact destroy
+    /// progress (`ghast_data::v26_1::dig`).
+    pub(crate) modern: Option<ModernDig>,
+}
+
+/// The facts of the 26.1 destroy-progress formula (attributes replace enchantment levels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ModernDig {
+    /// Block state id.
+    pub(crate) state: u16,
+    /// `minecraft:mining_efficiency`.
+    pub(crate) mining_efficiency: f64,
+    /// `minecraft:block_break_speed`.
+    pub(crate) block_break_speed: f64,
+    /// `minecraft:submerged_mining_speed`.
+    pub(crate) submerged_mining_speed: f64,
+    /// Conduit power amplifier.
+    pub(crate) conduit_power: Option<i32>,
 }
 
 /// The held stack as far as digging and using need it.
@@ -66,6 +84,8 @@ pub struct HeldItem {
     pub always_edible: bool,
     /// Tool speed multiplier per dig group, filled by the version (`tool_multiplier`).
     pub tool_speed: Option<fn(DigMaterial, u16) -> f32>,
+    /// 1.20.5+: the item id for the exact destroy progress (`ghast_data::v26_1`).
+    pub(crate) modern_item: Option<u16>,
 }
 
 impl BlockQuery {
@@ -74,6 +94,7 @@ impl BlockQuery {
     #[must_use]
     pub const fn new(block: u16) -> Self {
         BlockQuery {
+            modern: None,
             air: false,
             water: false,
             block,
@@ -151,6 +172,7 @@ impl HeldItem {
     #[must_use]
     pub const fn new(id: u16) -> Self {
         HeldItem {
+            modern_item: None,
             id,
             count: 1,
             efficiency: 0,
@@ -259,9 +281,34 @@ pub struct DigFactors {
     pub fatigue: u8,
 }
 
+/// 26.1 `BlockBehaviour.getDestroyProgress` (oracle-verified in `ghast_data::v26_1::dig`).
+#[cfg(feature = "v26_1")]
+fn modern_progress(m: &ModernDig, held: Option<&HeldItem>, f: DigFactors) -> f32 {
+    use ghast_data::v26_1::{BlockState, Item, dig};
+    let Some(state) = BlockState::from_id(m.state) else {
+        return 0.0;
+    };
+    let item = held.and_then(|h| h.modern_item).and_then(Item::from_id);
+    let c = dig::DigConditions {
+        mining_efficiency: m.mining_efficiency,
+        block_break_speed: m.block_break_speed,
+        submerged_mining_speed: m.submerged_mining_speed,
+        haste: (f.haste > 0).then(|| i32::from(f.haste) - 1),
+        conduit_power: m.conduit_power,
+        mining_fatigue: (f.fatigue > 0).then(|| i32::from(f.fatigue) - 1),
+        eye_in_water: f.in_water,
+        on_ground: f.on_ground,
+    };
+    dig::destroy_progress_with(state, item, &c)
+}
+
 /// `Block.calcBlockBreakingData` (float maths): break progress per tick.
 #[must_use]
 pub fn relative_hardness(b: &BlockQuery, held: Option<&HeldItem>, f: DigFactors) -> f32 {
+    #[cfg(feature = "v26_1")]
+    if let Some(m) = b.modern {
+        return modern_progress(&m, held, f);
+    }
     let h = b.hardness;
     if h < 0.0 {
         return 0.0;
@@ -1156,6 +1203,7 @@ mod tests {
 
     fn stone() -> BlockQuery {
         BlockQuery {
+            modern: None,
             air: false,
             water: false,
             block: 1,

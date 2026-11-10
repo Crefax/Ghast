@@ -406,6 +406,7 @@ where
         play.engine.sim.registry_data(raw);
     }
     drop(registries);
+    V::configure_inventory(play.engine.inventory_mut(), &play.wire);
     let result = play.run(behavior, shutdown).await;
     let reason = match &result {
         Ok(SessionEnd::Kicked { reason, .. }) => format!("kicked: {reason}"),
@@ -866,6 +867,7 @@ where
         for raw in &registries {
             self.engine.sim.registry_data(raw);
         }
+        V::configure_inventory(self.engine.inventory_mut(), &self.wire);
         self.dec.set_filter(play_filter);
         self.engine.note_inbound(Instant::now().into_std());
         Ok(())

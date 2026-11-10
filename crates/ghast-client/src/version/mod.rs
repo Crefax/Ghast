@@ -250,6 +250,10 @@ pub trait ClientVersion: Version + sealed::Sealed {
     ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError>;
     /// The inventory version.
     const INVENTORY: ghast_inventory::Version;
+    /// Hands the wire layer's registry facts to the inventory (1.20.5+ hashed stacks).
+    fn configure_inventory(inv: &mut ghast_inventory::Inventory, wire: &Self::Wire) {
+        let _ = (inv, wire);
+    }
     /// Queues a play-state packet.
     fn write_play(
         enc: &mut FrameEncoder,

@@ -46,6 +46,8 @@ pub struct Wire26_1 {
     cookies: HashMap<ByteString, Bytes>,
     /// Salt generator state.
     salt: u64,
+    /// Registry names the inventory needs for hashed click stacks.
+    hash_registries: ghast_inventory::v26_1::HashRegistries,
 }
 
 /// `LastSeenMessagesTracker`: a ring of the last 20 signed messages seen.
@@ -191,14 +193,17 @@ fn render_chat(pattern: &str, sender: &str, content: &str, target: &str) -> Stri
 /// the 26.1.2 registries report).
 fn attribute_name(id: i32) -> Option<&'static str> {
     Some(match id {
+        5 => "block_break_speed",
         14 => "gravity",
         15 => "jump_strength",
+        20 => "mining_efficiency",
         21 => "movement_efficiency",
         22 => "movement_speed",
         24 => "safe_fall_distance",
         25 => "scale",
         26 => "sneaking_speed",
         28 => "step_height",
+        29 => "submerged_mining_speed",
         32 => "water_movement_efficiency",
         _ => return None,
     })
@@ -409,8 +414,15 @@ impl ClientVersion for V26_1 {
         let Ok(p) = raw.decode_as::<configuration::clientbound::RegistryData>() else {
             return;
         };
-        if &*p.id == "minecraft:chat_type" {
-            wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
+        match &*p.id {
+            "minecraft:chat_type" => {
+                wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
+            }
+            "minecraft:enchantment" => {
+                wire.hash_registries.enchantments =
+                    p.entries.iter().map(|e| e.key.to_string()).collect();
+            }
+            _ => {}
         }
     }
 
@@ -727,15 +739,24 @@ impl ClientVersion for V26_1 {
         }))
     }
 
-    const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V1_16_5;
+    const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V26_1;
 
     fn inventory_packet(
         inv: &mut ghast_inventory::Inventory,
         raw: &RawPacket,
     ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError> {
-        // 26.1 windows arrive with ghast-inventory's 26.1 support.
-        let _ = (inv, raw);
+        // Slots keep their components as bytes (structural skip); no confirms since 1.17.
+        if raw.id == cb::id::LOGIN
+            || raw.id == cb::id::RESPAWN
+            || ghast_inventory::PACKET_IDS_26_1.contains(&raw.id)
+        {
+            inv.apply_raw_v26_1(raw)?;
+        }
         Ok(None)
+    }
+
+    fn configure_inventory(inv: &mut ghast_inventory::Inventory, wire: &Wire26_1) {
+        inv.set_registries_26_1(wire.hash_registries.clone());
     }
 
     fn write_play(
@@ -976,8 +997,12 @@ impl ClientVersion for V26_1 {
                 key: key.clone(),
                 value: value.clone().or_else(|| wire.cookies.get(key).cloned()),
             }),
-            // Window clicks wait for ghast-inventory's 26.1 support; no transactions since 1.17.
-            Outbound::Inventory(_) | Outbound::Transaction { .. } => Ok(()),
+            Outbound::Inventory(o) => match o.to_v26_1(&wire.hash_registries) {
+                Some(p) => enc.write_set(&p),
+                None => Ok(()),
+            },
+            // No transactions since 1.17.
+            Outbound::Transaction { .. } => Ok(()),
         }
     }
 

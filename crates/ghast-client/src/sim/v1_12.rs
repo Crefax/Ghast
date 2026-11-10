@@ -140,6 +140,7 @@ impl WorldView for Sim12 {
         let b = s.block();
         let info = b.info();
         Some(BlockQuery {
+            modern: None,
             air: b.material().kind == ghast_data::v1_12::MaterialKind::Air,
             water: matches!(b.id(), 8 | 9),
             block: u16::from(b.id()),

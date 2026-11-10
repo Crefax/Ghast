@@ -18,10 +18,10 @@ default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate"]
 # Game versions (each one alone builds; drop the ones you do not connect with to cut compile
 # time and binary size). A `GameVersion` whose feature is off still exists, but running it
 # returns `ClientError::VersionNotEnabled`.
-v1_8 = ["ghast-protocol/v1_8", "ghast-world/v1_8", "ghast-data/v1_8", "ghast-physics/v1_8"]
-v1_12_2 = ["ghast-protocol/v1_12_2", "ghast-world/v1_12", "ghast-data/v1_12", "ghast-physics/v1_12"]
-v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-world/v1_16_5", "ghast-data/v1_16_5", "ghast-physics/v1_16_5"]
-v26_1 = ["ghast-protocol/v26_1", "ghast-world/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1"]
+v1_8 = ["ghast-protocol/v1_8", "ghast-world/v1_8", "ghast-data/v1_8", "ghast-physics/v1_8", "ghast-inventory/v1_8"]
+v1_12_2 = ["ghast-protocol/v1_12_2", "ghast-world/v1_12", "ghast-data/v1_12", "ghast-physics/v1_12", "ghast-inventory/v1_12"]
+v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-world/v1_16_5", "ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-inventory/v1_16_5"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-world/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1", "ghast-inventory/v26_1"]
 # Inflate / deflate packets with libdeflate (C, faster); off = pure Rust (flate2 + zlib-rs).
 libdeflate = ["ghast-protocol/libdeflate"]
 # Online-mode servers: Microsoft account sessions and the session-server join call.
@@ -32,6 +32,7 @@ ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-featur
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
 ghast-world = { path = "../ghast-world", version = "0.3.0", default-features = false, features = ["physics"] }
 ghast-physics = { path = "../ghast-physics", version = "0.3.0", default-features = false }
+# Default features (every version) until ghast-inventory builds with a single version feature.
 ghast-inventory = { path = "../ghast-inventory", version = "0.3.0" }
 ghast-entity = { path = "../ghast-entity", version = "0.3.0" }
 ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }

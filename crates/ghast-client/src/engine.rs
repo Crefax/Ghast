@@ -1033,6 +1033,7 @@ impl<S: Sim> Engine<S> {
                 let soul = ench(3, -1, "minecraft:soul_speed");
                 c.aqua_affinity = ench(0, 6, "minecraft:aqua_affinity") > 0;
                 self.sim.boots(depth, soul);
+                self.sim.feet_item(c.inv.armor(3).map(|s| s.id));
             }
             let started = self.state.started;
             self.state.started = true;
