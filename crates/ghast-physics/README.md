@@ -125,13 +125,30 @@ Verification: `tests/golden_26_1.rs` replays the committed 26.1 goldens (scenari
 ticks: plain, item use, edges, extras; commands in `oracle/README.md`, "26.1 fuzz"), 0 diffs.
 26.1.1 and 26.1.2 give identical oracle records, so `V26_1` covers 26.1 – 26.1.2.
 
-Cost per tick (`modern_tick`, 2026-11-11, machine shared with other builds): walk 3.3 µs hash-map
-world / 2.4 µs dense world, busy collision 3.9 / 2.7 µs, swim 2.4 / 1.8 µs (1.16.5 on the same
-scenarios: 5.4 / 3.2, 6.2 / 4.1, 3.3 / 2.2 µs).
+Cost per tick, instructions retired (hardware counter, fixed iterations; reliable on a shared
+machine) on a world shaped like `ghast-world`'s (`column_world` in `benches/tick.rs`):
 
-Not modelled: elytra, riptide, vehicles, entity collision and push, pistons, block entities
-(shulker box lids collide as closed boxes), a moving world border, the nether's `fast_lava` is
-supported only as a flag (no oracle vector yet).
+| scenario | modern | 1.16.5 | 1.8.9 |
+|---|---|---|---|
+| walk on flat stone | 34.2 k | 55.8 k | 8.7 k |
+| busy collision | 39.3 k | 68.5 k | 9.5 k |
+| swim | 24.6 k | 35.4 k | — |
+
+Wall clock (`modern_tick`, 2026-11-11, machine shared with other builds, ±15 %): walk 3.3 µs
+hash-map world / 2.4 µs dense world, busy 3.9 / 2.7 µs, swim 2.4 / 1.8 µs (1.16.5: 5.4 / 3.2,
+6.2 / 4.1, 3.3 / 2.2 µs). The `ghast-world`-shaped world costs the same instructions as a dense
+array, so the world accessor is not the hot spot; about half the tick is the ~250 block lookups
+vanilla's queries make.
+
+Unloaded chunks: the caller must not tick the player before its level is loaded (26.1's
+`player_loaded` gate); "never treat unloaded chunks as air" is enforced in the client, one layer up.
+
+Not modelled: elytra, riptide, vehicles, entity collision and push, pistons, block entities, a
+moving world border; the nether's `fast_lava` is supported only as a flag (no oracle vector yet).
+**Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
+block entity); the tables hold the closed box. The client push-out probe also relies on every
+suffocating large shape staying inside its cube — pinned by the `ghast-data` test
+`suffocating_large_shapes_stay_in_their_cube`, which fails if the data ever changes that.
 
 ## Design decisions
 

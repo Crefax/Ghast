@@ -9,8 +9,18 @@
 //! |---|---|---|
 //! | [`V26_1`] | 26.1 (protocol 775) | bit-exact against the vanilla oracle |
 //!
+//! Unloaded chunks are handled exactly as the 26.1 client does: gravity stays normal (the client
+//! reports every chunk as present), collision skips unloaded chunks, and the fluid sweep sees no
+//! fluid when a chunk around the box is unloaded. The caller is responsible for not ticking the
+//! player before its level is loaded (26.1's `player_loaded` gate: the client freezes the player
+//! until the chunks around it have arrived); the project rule "never treat unloaded chunks as air"
+//! is enforced there, one layer up.
+//!
 //! Not modelled (see the crate README): elytra, riptide, vehicles, entity push, pistons, block
-//! entities (shulker box lids).
+//! entities. Known gap: an opening shulker box's collision reaches past its cube (its lid moves
+//! with the block entity); the tables have the closed box, and the client push-out probe relies on
+//! every suffocating large shape staying inside its cube (pinned by the `ghast-data` test
+//! `suffocating_large_shapes_stay_in_their_cube`).
 
 mod attr;
 mod collide;

@@ -156,6 +156,146 @@ fn run<W: BlockView<State = BlockState>>(
     });
 }
 
+/// A world shaped like `ghast-world`'s: columns in a hash map with a cheap integer hasher,
+/// 16-high sections that are uniform or palette-indexed (one byte per block), states decoded from
+/// raw ids. Built from another world's region; every other column is unloaded.
+mod column_world {
+    use ghast_physics::BlockView;
+    use std::collections::HashMap;
+    use std::hash::{BuildHasherDefault, Hasher};
+
+    #[derive(Default)]
+    pub struct ChunkHasher(u64);
+
+    impl Hasher for ChunkHasher {
+        #[inline]
+        fn finish(&self) -> u64 {
+            let h = (self.0 ^ (self.0 >> 29)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            h ^ (h >> 32)
+        }
+
+        #[inline]
+        fn write(&mut self, bytes: &[u8]) {
+            for &b in bytes {
+                self.0 = (self.0 << 8) | u64::from(b);
+            }
+        }
+
+        #[inline]
+        fn write_u64(&mut self, v: u64) {
+            self.0 = v;
+        }
+    }
+
+    enum Section {
+        Uniform(u16),
+        Indexed {
+            palette: Vec<u16>,
+            idx: Box<[u8; 4096]>,
+        },
+    }
+
+    impl Section {
+        #[inline]
+        fn get(&self, i: usize) -> u16 {
+            match self {
+                Section::Uniform(s) => *s,
+                Section::Indexed { palette, idx } => palette[usize::from(idx[i & 4095])],
+            }
+        }
+    }
+
+    pub struct ColumnWorld<S> {
+        map: HashMap<u64, Box<[Option<Section>]>, BuildHasherDefault<ChunkHasher>>,
+        min_y: i32,
+        sections: usize,
+        decode: fn(u16) -> S,
+    }
+
+    #[inline]
+    fn key(x: i32, z: i32) -> u64 {
+        u64::from(x as u32) | (u64::from(z as u32) << 32)
+    }
+
+    impl<S: Copy> ColumnWorld<S> {
+        /// Copies the chunk rectangle `[cx0, cz0] ..= [cx1, cz1]` of `w` (states encoded with `raw`).
+        pub fn of<W: BlockView<State = S>>(
+            w: &W,
+            c0: [i32; 2],
+            c1: [i32; 2],
+            min_y: i32,
+            sections: usize,
+            raw: fn(S) -> u16,
+            decode: fn(u16) -> S,
+        ) -> Self {
+            let mut map: HashMap<u64, Box<[Option<Section>]>, BuildHasherDefault<ChunkHasher>> =
+                HashMap::default();
+            for cx in c0[0]..=c1[0] {
+                for cz in c0[1]..=c1[1] {
+                    let mut col = Vec::with_capacity(sections);
+                    for sy in 0..sections {
+                        let mut ids = [0u16; 4096];
+                        for (i, id) in ids.iter_mut().enumerate() {
+                            let (x, z, y) = (i & 15, (i >> 4) & 15, i >> 8);
+                            *id = raw(w.block(
+                                cx * 16 + x as i32,
+                                min_y + (sy * 16 + y) as i32,
+                                cz * 16 + z as i32,
+                            ));
+                        }
+                        let mut palette: Vec<u16> = ids.to_vec();
+                        palette.sort_unstable();
+                        palette.dedup();
+                        col.push(if palette == [0] {
+                            None
+                        } else if palette.len() == 1 {
+                            Some(Section::Uniform(palette[0]))
+                        } else {
+                            let mut idx = Box::new([0u8; 4096]);
+                            for (i, id) in ids.iter().enumerate() {
+                                idx[i] = palette.binary_search(id).unwrap() as u8;
+                            }
+                            Some(Section::Indexed { palette, idx })
+                        });
+                    }
+                    map.insert(key(cx, cz), col.into_boxed_slice());
+                }
+            }
+            ColumnWorld {
+                map,
+                min_y,
+                sections,
+                decode,
+            }
+        }
+    }
+
+    impl<S: Copy> BlockView for ColumnWorld<S> {
+        type State = S;
+
+        #[inline]
+        fn block(&self, x: i32, y: i32, z: i32) -> S {
+            let Some(col) = self.map.get(&key(x >> 4, z >> 4)) else {
+                return (self.decode)(0);
+            };
+            let sy = (y - self.min_y) >> 4;
+            if sy < 0 || sy as usize >= self.sections {
+                return (self.decode)(0);
+            }
+            let raw = match &col[sy as usize] {
+                Some(s) => s.get((((y & 15) << 8) | ((z & 15) << 4) | (x & 15)) as usize),
+                None => 0,
+            };
+            (self.decode)(raw)
+        }
+
+        #[inline]
+        fn is_chunk_loaded(&self, cx: i32, cz: i32) -> bool {
+            self.map.contains_key(&key(cx, cz))
+        }
+    }
+}
+
 mod modern {
     //! 1.16.5: the same two shapes of work, plus a swimming case (fluid pushing, pose changes).
     use super::{Criterion, TICKS, Throughput, black_box};
@@ -351,6 +491,29 @@ mod modern {
                     for input in &inputs {
                         out.clear();
                         v1_16_5::tick(&mut p, input, black_box(&w), &mut out);
+                    }
+                    black_box((p, out.len()))
+                });
+            });
+            let cw = super::column_world::ColumnWorld::of(
+                &w,
+                [-4, -4],
+                [3, 3],
+                0,
+                16,
+                |s: ghast_data::v1_16_5::BlockState| s.id(),
+                |r| {
+                    ghast_data::v1_16_5::BlockState::from_id(r)
+                        .unwrap_or(ghast_data::v1_16_5::BlockState::AIR)
+                },
+            );
+            g.bench_function(format!("{name}/column_world"), |b| {
+                let mut out = Packets::new();
+                b.iter(|| {
+                    let mut p = start;
+                    for input in &inputs {
+                        out.clear();
+                        v1_16_5::tick(&mut p, input, black_box(&cw), &mut out);
                     }
                     black_box((p, out.len()))
                 });
@@ -571,6 +734,18 @@ mod modern26 {
         ] {
             g.bench_function(format!("{name}/memory_world"), |b| {
                 run(b, &w, start, &inputs)
+            });
+            let cw = super::column_world::ColumnWorld::of(
+                &w,
+                [-4, -4],
+                [3, 3],
+                -64,
+                24,
+                |s: BlockState| s.id(),
+                |r| BlockState::from_id(r).unwrap_or(BlockState::AIR),
+            );
+            g.bench_function(format!("{name}/column_world"), |b| {
+                run(b, &cw, start, &inputs)
             });
             let dense = Dense::of(&w, [-32, 0, -32], [64, 128, 64]);
             g.bench_function(format!("{name}/dense_array"), |b| {
