@@ -48,6 +48,8 @@
 mod client;
 pub mod common;
 mod engine;
+#[cfg(test)]
+mod engine_bench;
 mod error;
 pub mod hands;
 mod interest;
