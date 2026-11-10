@@ -870,6 +870,20 @@ MC=26.1 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 
 
 (`physics_s11` of the first 26.1 run holds 1600 cases, `physics_use_s21` 400.)
 
+### 26.1.1 and 26.1.2 (same protocol 775): one physics row
+
+`versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.
+Replaying the committed 26.1 goldens (scenarios, `fuzz_seed1`, `fuzz_edges_seed1`,
+`fuzz_extras_seed1`) and the cached `physics_s11` + `physics_use_s21` (200k ticks) on 26.1.2, and the
+goldens on 26.1.1, gave tick records identical to 26.1's, byte for byte (state and packets):
+
+```sh
+MC=26.1.2 oracle/run.sh replay --in "$PWD/tests/golden/26.1/fuzz_extras_seed1.jsonl.gz" --out /tmp/x.jsonl.gz
+```
+
+26.2 (protocol 776) and 26.3 (777) need harness changes first (the harness does not compile
+against their jars: renderer / level extractor, entity size and authlib API changes).
+
 ### 26.1 quirks (observed in the vectors)
 
 - Position packets are sent when the squared move exceeds `(2.0E-4)^2` (1.16.5: 9.0E-4) or every 20

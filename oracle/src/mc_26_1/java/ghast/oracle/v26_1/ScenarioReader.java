@@ -88,6 +88,7 @@ final class ScenarioReader {
         // running jar numbers states differently, e.g. a later 26.x, they are mapped by the header's names).
         java.util.Map<Integer, Integer> remap = new java.util.HashMap<>();
         if (o.has("states")) {
+            Harness.init();
             for (var e : o.getAsJsonObject("states").entrySet()) {
                 remap.put(Integer.parseInt(e.getKey()), States.id(e.getValue().getAsString().replace("minecraft:", "")));
             }
