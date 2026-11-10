@@ -50,3 +50,33 @@ fn fuzz_edges_seed1_26_1() {
 fn fuzz_extras_seed1_26_1() {
     check("fuzz_extras_seed1.jsonl.gz");
 }
+
+/// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
+#[test]
+fn player_pose_dimensions_26_1() {
+    use ghast_physics::modern::Pose;
+    let path = repo_root().join("tests/golden/26.1/entity_sizes.jsonl.gz");
+    if !path.exists() {
+        eprintln!("skipped: {} not found", path.display());
+        return;
+    }
+    let line = common::open_lines(&path)
+        .find(|l| l.contains("\"minecraft:player (client player)\""))
+        .expect("client player line");
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let f = |x: &serde_json::Value| common::f32_of(x);
+    for (name, pose) in [
+        ("standing", Pose::Standing),
+        ("crouching", Pose::Crouching),
+        ("swimming", Pose::Swimming),
+        ("fall_flying", Pose::FallFlying),
+        ("spin_attack", Pose::SpinAttack),
+        ("sleeping", Pose::Sleeping),
+        ("dying", Pose::Dying),
+    ] {
+        let d = &v["poses"][name];
+        assert!(!d.is_null(), "pose {name} missing from the dump");
+        let (w, h, e) = pose.dimensions();
+        assert_eq!((f(&d[0]), f(&d[1]), f(&d[2])), (w, h, e), "pose {name}");
+    }
+}

@@ -2,6 +2,9 @@
 //! shape, `collideWithShapes`, step-up by candidate heights, `noCollision`, the suffocation probe
 //! and the supporting-block search.
 
+// Vanilla's negated float comparisons are kept as written: they decide the NaN cases.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use ghast_data::v26_1::{BlockKind, StatePhys, VoxelClass, VoxelShapeRef, state_flags as sf};
 
 use super::math::{V3, bx, expand_towards, floor, hi, intersects, java_max, java_min, lo, mv};
@@ -160,6 +163,181 @@ fn cube_collide(axis: usize, b: &Aabb, d: f64, o: [f64; 3]) -> f64 {
     }
 }
 
+/// One axis of a placed table shape: point `i` is `base(i) [+ model offset] + block position`,
+/// the double additions vanilla's `OffsetDoubleList`s make.
+#[derive(Clone, Copy)]
+struct ShapeAxis {
+    pts: &'static [f64],
+    n: usize,
+    simple: bool,
+    shift: Option<f64>,
+    o: f64,
+}
+
+impl ShapeAxis {
+    #[inline]
+    fn new(
+        r: &'static VoxelShapeRef,
+        axis: usize,
+        shift: Option<[f64; 3]>,
+        o: [f64; 3],
+    ) -> ShapeAxis {
+        let (pts, n) = match axis {
+            0 => (r.xs, usize::from(r.sizes[0])),
+            1 => (r.ys, usize::from(r.sizes[1])),
+            _ => (r.zs, usize::from(r.sizes[2])),
+        };
+        ShapeAxis {
+            pts,
+            n,
+            simple: r.class == VoxelClass::Simple && shift.is_none(),
+            shift: shift.map(|s| s[axis]),
+            o: o[axis],
+        }
+    }
+
+    #[inline]
+    fn point(&self, i: usize) -> f64 {
+        let base = if self.simple {
+            i as f64 / self.n as f64
+        } else {
+            self.pts[i]
+        };
+        match self.shift {
+            Some(s) => (base + s) + self.o,
+            None => base + self.o,
+        }
+    }
+
+    /// `findIndex` of a moved shape: the binary search of `Mth.binarySearch(0, n + 1, ...)`.
+    #[inline]
+    fn find_index(&self, coord: f64) -> isize {
+        let (mut from, mut len) = (0usize, self.n + 1);
+        while len > 0 {
+            let half = len / 2;
+            let mid = from + half;
+            if coord < self.point(mid) {
+                len = half;
+            } else {
+                from = mid + 1;
+                len -= half + 1;
+            }
+        }
+        from as isize - 1
+    }
+}
+
+#[inline]
+fn filled_axes(r: &VoxelShapeRef, axis: usize, a: usize, b: usize, c: usize) -> bool {
+    // (a, b, c) are the moving axis and the next two in cycle order.
+    let mut x = [0usize; 3];
+    x[axis] = a;
+    x[(axis + 1) % 3] = b;
+    x[(axis + 2) % 3] = c;
+    r.filled(x[0], x[1], x[2])
+}
+
+/// `VoxelShape.collide(axis, box, distance)` of a moved table shape (vanilla `collideX`).
+fn shape_collide(
+    r: &'static VoxelShapeRef,
+    shift: Option<[f64; 3]>,
+    o: [f64; 3],
+    axis: usize,
+    b: &Aabb,
+    d: f64,
+) -> f64 {
+    if r.empty {
+        return d;
+    }
+    if d.abs() < EPSILON {
+        return 0.0;
+    }
+    let (ax2, ax3) = ((axis + 1) % 3, (axis + 2) % 3);
+    let pa = ShapeAxis::new(r, axis, shift, o);
+    let pb = ShapeAxis::new(r, ax2, shift, o);
+    let pc = ShapeAxis::new(r, ax3, shift, o);
+    let (max_a, min_a) = (hi(b, axis), lo(b, axis));
+    let a_min = pa.find_index(min_a + EPSILON);
+    let a_max = pa.find_index(max_a - EPSILON);
+    let b_min = pb.find_index(lo(b, ax2) + EPSILON).max(0);
+    let b_max = (pb.find_index(hi(b, ax2) - EPSILON) + 1).min(pb.n as isize);
+    let c_min = pc.find_index(lo(b, ax3) + EPSILON).max(0);
+    let c_max = (pc.find_index(hi(b, ax3) - EPSILON) + 1).min(pc.n as isize);
+    let layer = |a: isize| {
+        (b_min..b_max).any(|bb| {
+            (c_min..c_max).any(|cc| filled_axes(r, axis, a as usize, bb as usize, cc as usize))
+        })
+    };
+    if d > 0.0 {
+        for a in a_max + 1..pa.n as isize {
+            if layer(a) {
+                let gap = pa.point(a as usize) - max_a;
+                return if gap >= -EPSILON { java_min(d, gap) } else { d };
+            }
+        }
+    } else if d < 0.0 {
+        for a in (0..a_min).rev() {
+            if layer(a) {
+                let gap = pa.point(a as usize + 1) - min_a;
+                return if gap <= EPSILON { java_max(d, gap) } else { d };
+            }
+        }
+    }
+    d
+}
+
+/// `Shapes.joinIsNotEmpty(moved shape, Shapes.create(box), AND)`. When every shape point is
+/// more than `2e-7` from the box bounds (nearly always) no point of the merge collapses and the
+/// answer is a plain cell overlap test; otherwise vanilla's merge runs.
+fn shape_intersects(
+    r: &'static VoxelShapeRef,
+    shift: Option<[f64; 3]>,
+    o: [f64; 3],
+    q: &Aabb,
+) -> bool {
+    if r.empty {
+        return false;
+    }
+    let sep = 2.0 * EPSILON;
+    let mut range = [(0isize, 0isize); 3];
+    for (axis, rg) in range.iter_mut().enumerate() {
+        let ax = ShapeAxis::new(r, axis, shift, o);
+        let (b0, b1) = (lo(q, axis), hi(q, axis));
+        if !(b1 - b0 > sep) {
+            return voxel(r, shift).intersects(q, Some(o));
+        }
+        let (mut first, mut last) = (isize::MAX, -1isize);
+        for i in 0..=ax.n {
+            let p = ax.point(i);
+            if !((p - b0).abs() > sep && (p - b1).abs() > sep) {
+                return voxel(r, shift).intersects(q, Some(o));
+            }
+            // Cell i (between points i and i + 1) overlaps (b0, b1).
+            if i < ax.n {
+                let next = ax.point(i + 1);
+                if p < b1 && next > b0 {
+                    first = first.min(i as isize);
+                    last = i as isize;
+                }
+            }
+        }
+        if last < 0 {
+            return false;
+        }
+        *rg = (first, last);
+    }
+    for x in range[0].0..=range[0].1 {
+        for y in range[1].0..=range[1].1 {
+            for z in range[2].0..=range[2].1 {
+                if r.filled(x as usize, y as usize, z as usize) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 impl Placed {
     /// The shape's world boxes (`toAabbs()` of the moved shape), in vanilla's order.
     pub(crate) fn for_boxes(&self, mut f: impl FnMut(Aabb) -> bool) {
@@ -235,7 +413,7 @@ impl Placed {
     pub(crate) fn collide(&self, border: &Border, axis: usize, b: &Aabb, d: f64) -> f64 {
         match self {
             Placed::Cube(o) => cube_collide(axis, b, d, *o),
-            Placed::Shape(r, sh, o) => voxel(r, *sh).max_distance(axis, b, d, Some(*o)),
+            Placed::Shape(r, sh, o) => shape_collide(r, *sh, *o, axis, b, d),
             Placed::Border => border.shape().max_distance(axis, b, d, None),
         }
     }
@@ -464,9 +642,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                         Placed::Cube(o) => {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
-                        Placed::Shape(r, sh, o) => {
-                            !r.empty && voxel(r, sh).intersects(query, Some(o))
-                        }
+                        Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
                         Placed::Border => false,
                     };
                     if hit && !f(x, y, z, shape) {
@@ -508,9 +684,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                         Placed::Cube(o) => {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
-                        Placed::Shape(r, sh, o) => {
-                            !r.empty && voxel(r, sh).intersects(query, Some(o))
-                        }
+                        Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
                         Placed::Border => false,
                     };
                     if hit {

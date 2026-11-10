@@ -1,5 +1,5 @@
-//! Cost of one player tick (`cargo bench -p ghast-physics`): 1.8.9 (`v1_8_tick`) and 1.16.5
-//! (`v1_16_5_tick`).
+//! Cost of one player tick (`cargo bench -p ghast-physics`): 1.8.9 (`v1_8_tick`), 1.16.5
+//! (`v1_16_5_tick`) and the modern core with 26.1 (`modern_tick`).
 //!
 //! Each iteration replays a fixed 20-tick input sequence from the same start state, so the
 //! numbers are per 20 ticks (criterion reports the per-element time with `Throughput`).
@@ -298,6 +298,44 @@ mod modern {
         (w, p, vec![input; TICKS])
     }
 
+    /// A dense copy of the region x, z in -32..32, y in 0..128 (every chunk loaded).
+    struct Dense16 {
+        blocks: Vec<ghast_data::v1_16_5::BlockState>,
+    }
+
+    impl Dense16 {
+        fn of(w: &MemoryWorld) -> Dense16 {
+            use ghast_physics::BlockView;
+            let mut blocks = Vec::with_capacity(64 * 128 * 64);
+            for y in 0..128 {
+                for z in -32..32 {
+                    for x in -32..32 {
+                        blocks.push(w.block(x, y, z));
+                    }
+                }
+            }
+            Dense16 { blocks }
+        }
+    }
+
+    impl ghast_physics::BlockView for Dense16 {
+        type State = ghast_data::v1_16_5::BlockState;
+
+        #[inline]
+        fn block(&self, x: i32, y: i32, z: i32) -> Self::State {
+            let (lx, lz) = (x + 32, z + 32);
+            if !(0..64).contains(&lx) || !(0..64).contains(&lz) || !(0..128).contains(&y) {
+                return ghast_data::v1_16_5::BlockState::AIR;
+            }
+            self.blocks[((y * 64 + lz) * 64 + lx) as usize]
+        }
+
+        #[inline]
+        fn is_chunk_loaded(&self, _: i32, _: i32) -> bool {
+            true
+        }
+    }
+
     pub fn bench(c: &mut Criterion) {
         let mut g = c.benchmark_group("v1_16_5_tick");
         g.throughput(Throughput::Elements(TICKS as u64));
@@ -317,10 +355,231 @@ mod modern {
                     black_box((p, out.len()))
                 });
             });
+            let dense = Dense16::of(&w);
+            g.bench_function(format!("{name}/dense_array"), |b| {
+                let mut out = Packets::new();
+                b.iter(|| {
+                    let mut p = start;
+                    for input in &inputs {
+                        out.clear();
+                        v1_16_5::tick(&mut p, input, black_box(&dense), &mut out);
+                    }
+                    black_box((p, out.len()))
+                });
+            });
         }
         g.finish();
     }
 }
 
-criterion_group!(benches, bench, modern::bench);
+mod modern26 {
+    //! The modern core (26.1 rules): the same three shapes of work as `v1_16_5_tick`, in the same
+    //! kind of hash-map world, plus a dense-array world that isolates the physics from the world.
+    use super::{Criterion, TICKS, Throughput, black_box};
+    use ghast_data::v26_1::BlockState;
+    use ghast_physics::modern::{self, MemoryWorld26, PlayerState, V26_1};
+    use ghast_physics::{BlockView, Keys, Packets, TickInput};
+
+    fn st(spec: &str) -> u16 {
+        BlockState::parse(spec)
+            .unwrap_or_else(|| panic!("{spec}"))
+            .id()
+    }
+
+    fn warm(w: &MemoryWorld26, mut p: PlayerState, input: &TickInput, n: usize) -> PlayerState {
+        let mut out = Packets::new();
+        for _ in 0..n {
+            out.clear();
+            modern::tick::<V26_1, _>(&mut p, input, w, &mut out);
+        }
+        p
+    }
+
+    fn forward(yaw: f32) -> TickInput {
+        TickInput {
+            keys: Keys {
+                forward: true,
+                ..Keys::NONE
+            },
+            yaw,
+            pitch: 0.0,
+            using_item: false,
+        }
+    }
+
+    fn flat() -> (MemoryWorld26, PlayerState, Vec<TickInput>) {
+        let mut w = modern::memory_world_26_1();
+        w.load_chunks(-4, -4, 4, 4);
+        w.fill_raw([-64, 63, -64], [63, 63, 63], st("stone"));
+        let input = forward(-45.0);
+        let p = warm(
+            &w,
+            PlayerState::new([0.5, 64.0, 0.5], -45.0, 0.0),
+            &input,
+            10,
+        );
+        (w, p, vec![input; TICKS])
+    }
+
+    fn busy() -> (MemoryWorld26, PlayerState, Vec<TickInput>) {
+        let mut w = modern::memory_world_26_1();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-8, 62, -8], [8, 63, 8], st("stone"));
+        w.fill_raw([-8, 63, -8], [-1, 63, 8], 0);
+        w.fill_raw(
+            [3, 64, -3],
+            [3, 64, 3],
+            st("oak_fence[north=true,south=true]"),
+        );
+        w.fill_raw(
+            [3, 65, -3],
+            [3, 65, 3],
+            st("iron_bars[north=true,south=true]"),
+        );
+        w.fill_raw(
+            [0, 64, 3],
+            [2, 64, 3],
+            st("cobblestone_wall[east=low,west=low]"),
+        );
+        w.set_raw(2, 64, 2, st("oak_stairs[facing=south,shape=outer_left]"));
+        w.set_raw(1, 64, 2, st("oak_stairs[facing=east]"));
+        w.set_raw(2, 64, 1, st("smooth_stone_slab"));
+        w.set_raw(0, 64, 1, st("glass_pane[north=true,south=true]"));
+        w.fill_raw([-2, 67, -2], [4, 67, 4], st("smooth_stone_slab[type=top]"));
+        let mut inputs = Vec::with_capacity(TICKS);
+        for t in 0..TICKS {
+            inputs.push(TickInput {
+                keys: Keys {
+                    forward: true,
+                    left: t % 3 == 0,
+                    sneak: t % 7 != 6,
+                    jump: t % 5 == 4,
+                    ..Keys::NONE
+                },
+                yaw: -60.0 + (t as f32) * 1.5,
+                pitch: 10.0,
+                using_item: false,
+            });
+        }
+        let p = warm(
+            &w,
+            PlayerState::new([1.5, 64.0, 1.5], -60.0, 10.0),
+            &inputs[0],
+            5,
+        );
+        (w, p, inputs)
+    }
+
+    fn swim() -> (MemoryWorld26, PlayerState, Vec<TickInput>) {
+        let mut w = modern::memory_world_26_1();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-16, 55, -16], [15, 55, 15], st("stone"));
+        w.fill_raw([-16, 56, -16], [15, 63, 15], st("water"));
+        w.fill_raw([-3, 56, -3], [3, 58, 3], st("kelp"));
+        let input = TickInput {
+            keys: Keys {
+                forward: true,
+                sprint: true,
+                ..Keys::NONE
+            },
+            yaw: 30.0,
+            pitch: 20.0,
+            using_item: false,
+        };
+        let p = warm(
+            &w,
+            PlayerState::new([0.5, 60.0, 0.5], 30.0, 20.0),
+            &input,
+            10,
+        );
+        (w, p, vec![input; TICKS])
+    }
+
+    /// A dense copy of a world region (cheapest lookup), every chunk loaded.
+    struct Dense {
+        origin: [i32; 3],
+        side: [i32; 3],
+        blocks: Vec<BlockState>,
+    }
+
+    impl Dense {
+        fn of(w: &MemoryWorld26, origin: [i32; 3], side: [i32; 3]) -> Dense {
+            let mut blocks = Vec::with_capacity((side[0] * side[1] * side[2]) as usize);
+            for y in 0..side[1] {
+                for z in 0..side[2] {
+                    for x in 0..side[0] {
+                        blocks.push(w.block(origin[0] + x, origin[1] + y, origin[2] + z));
+                    }
+                }
+            }
+            Dense {
+                origin,
+                side,
+                blocks,
+            }
+        }
+    }
+
+    impl BlockView for Dense {
+        type State = BlockState;
+
+        #[inline]
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            let (lx, ly, lz) = (x - self.origin[0], y - self.origin[1], z - self.origin[2]);
+            if lx < 0
+                || ly < 0
+                || lz < 0
+                || lx >= self.side[0]
+                || ly >= self.side[1]
+                || lz >= self.side[2]
+            {
+                return BlockState::AIR;
+            }
+            self.blocks[((ly * self.side[2] + lz) * self.side[0] + lx) as usize]
+        }
+
+        #[inline]
+        fn is_chunk_loaded(&self, _: i32, _: i32) -> bool {
+            true
+        }
+    }
+
+    fn run<W: BlockView<State = BlockState>>(
+        b: &mut criterion::Bencher<'_>,
+        w: &W,
+        start: PlayerState,
+        inputs: &[TickInput],
+    ) {
+        let mut out = Packets::new();
+        b.iter(|| {
+            let mut p = start;
+            for input in inputs {
+                out.clear();
+                modern::tick::<V26_1, _>(&mut p, input, black_box(w), &mut out);
+            }
+            black_box((p.pos, out.len()))
+        });
+    }
+
+    pub fn bench(c: &mut Criterion) {
+        let mut g = c.benchmark_group("modern_tick");
+        g.throughput(Throughput::Elements(TICKS as u64));
+        for (name, (w, start, inputs)) in [
+            ("walk_flat", flat()),
+            ("busy_collision", busy()),
+            ("swim", swim()),
+        ] {
+            g.bench_function(format!("{name}/memory_world"), |b| {
+                run(b, &w, start, &inputs)
+            });
+            let dense = Dense::of(&w, [-32, 0, -32], [64, 128, 64]);
+            g.bench_function(format!("{name}/dense_array"), |b| {
+                run(b, &dense, start, &inputs)
+            });
+        }
+        g.finish();
+    }
+}
+
+criterion_group!(benches, bench, modern::bench, modern26::bench);
 criterion_main!(benches);

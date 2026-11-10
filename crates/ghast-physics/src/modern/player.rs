@@ -696,9 +696,6 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     t.tick(&input.keys, out);
 }
 
-/// A block with an inside effect met by the sweep: position, state, "precise".
-type Inside<S> = ([i32; 3], S, bool);
-
 struct Ctx<'a, 'b, R: Rules, W> {
     p: &'a mut PlayerState,
     w: &'a World<'b, R, W>,
@@ -776,7 +773,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         let p = &mut *self.p;
         if p.abilities.flying {
             p.swimming = false;
-        } else if p.is_swimming_flag() {
+        } else if p.is_swimming() {
             p.swimming = p.sprinting && p.touching_water;
         } else {
             let fluid_here = kind(
@@ -935,7 +932,8 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
                 }
             }
         }
-        let _ = just_toggled; // START_FALL_FLYING needs an elytra (not modelled).
+        // (jump && !just_toggled && !onClimbable && tryToStartFallFlying: needs an elytra, not modelled.)
+        let _ = just_toggled;
         let p = &mut *self.p;
         if p.touching_water && p.input.keys.sneak && !p.abilities.flying {
             p.vel[1] += f64::from(-0.04f32);
@@ -1841,57 +1839,43 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         );
         let far = from.dist_sqr(to) > 0.999_990_000_000_252_6 * 0.999_990_000_000_252_6;
         let mut last_iter = 0;
-        let w = self.w;
-        let mut effects: [Option<Inside<R::State>>; 24] = [None; 24];
-        let mut n_eff = 0usize;
         for_each_block_between(from, to, &at_target, |pos, it| {
             if it >= max {
                 return false;
             }
             last_iter = it;
-            let s = w.state(pos[0], pos[1], pos[2]);
+            let s = self.w.state(pos[0], pos[1], pos[2]);
             let ph = R::phys(s);
             if ph.flags() & sf::AIR != 0 {
                 return true;
             }
+            // Only blocks with a movement effect are acted on (their "inside" test: the full block
+            // for all but powder snow, whose shape is swept); every other block just counts.
             let k = ph.kind();
             let effect_kind = k == BlockKind::Cobweb as u8
                 || k == BlockKind::SweetBerryBush as u8
                 || k == BlockKind::PowderSnow as u8
                 || k == BlockKind::HoneyBlock as u8
                 || k == BlockKind::BubbleColumn as u8;
-            if !effect_kind {
+            if !effect_kind
+                || (k == BlockKind::PowderSnow as u8 && !self.inside_powder_snow(pos, s, from, to))
+                || !visited.add(pos)
+            {
                 return true;
             }
-            if n_eff < effects.len() {
-                let precise = far
-                    || intersects(
-                        &at_target,
-                        f64::from(pos[0]),
-                        f64::from(pos[1]),
-                        f64::from(pos[2]),
-                        f64::from(pos[0]) + 1.0,
-                        f64::from(pos[1]) + 1.0,
-                        f64::from(pos[2]) + 1.0,
-                    );
-                effects[n_eff] = Some((pos, s, precise));
-                n_eff += 1;
-            }
+            let precise = far
+                || intersects(
+                    &at_target,
+                    f64::from(pos[0]),
+                    f64::from(pos[1]),
+                    f64::from(pos[2]),
+                    f64::from(pos[0]) + 1.0,
+                    f64::from(pos[1]) + 1.0,
+                    f64::from(pos[2]) + 1.0,
+                );
+            self.entity_inside(pos, s, precise);
             true
         });
-        // Effects run in visit order; powder snow's "inside" needs its shape tested against the
-        // swept box first.
-        for (pos, s, precise) in effects[..n_eff].iter().flatten().copied() {
-            if R::phys(s).kind() == BlockKind::PowderSnow as u8
-                && !self.inside_powder_snow(pos, s, from, to)
-            {
-                continue;
-            }
-            if !visited.add(pos) {
-                continue;
-            }
-            self.entity_inside(pos, s, precise);
-        }
         last_iter + 1
     }
 
@@ -2172,9 +2156,6 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
 
     /// `Player.updatePlayerPose`.
     fn update_pose(&mut self) {
-        if !self.fits(Pose::Swimming) {
-            return;
-        }
         let p = &self.p;
         let desired = if p.is_swimming() {
             Pose::Swimming
@@ -2183,7 +2164,14 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         } else {
             Pose::Standing
         };
-        let actual = if p.spectator || self.fits(desired) {
+        // Vanilla asks "does the swimming box fit", then the desired pose, then crouching. At one
+        // scale the boxes are nested (same feet and width, heights 0.6 < 1.5 < 1.8), so a fitting
+        // standing box answers all of them: the common case costs one query instead of two.
+        let actual = if self.fits(Pose::Standing) {
+            desired
+        } else if !self.fits(Pose::Swimming) {
+            return;
+        } else if self.p.spectator || desired == Pose::Swimming || self.fits(desired) {
             desired
         } else if self.fits(Pose::Crouching) {
             Pose::Crouching
@@ -2237,12 +2225,6 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         p.sent.on_ground = og;
         p.sent.horizontal_collision = hc;
         p.auto_jump_enabled = p.options.auto_jump;
-    }
-}
-
-impl PlayerState {
-    fn is_swimming_flag(&self) -> bool {
-        self.is_swimming()
     }
 }
 

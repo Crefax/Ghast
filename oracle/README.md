@@ -700,7 +700,8 @@ Output: `tests/golden/26.1/` — `scenarios.jsonl.gz` (73 cases: the 61 of 1.16.
 mechanics), `fuzz_seed1.jsonl.gz` (100 × 60), `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
 `voxel_shapes.jsonl.gz`, `entity_sizes.jsonl.gz`. Commands: `golden`, `scenarios`, `fuzz` (plain and
 `--use-item true`), `replay`, `boxes`, `boxes-far`, `voxels`, `entity-sizes`, `list`, `selftest`, `compare`
-(no click vectors and no edge / extras generators yet).
+(no click vectors yet). `fuzz` takes `--palette edges` and `--extras true` (see "26.1 fuzz" below); the
+golden set adds `fuzz_edges_seed1.jsonl.gz` and `fuzz_extras_seed1.jsonl.gz` (100 × 60 each).
 
 Setup: **26.1 ships unobfuscated** — its version json has no `client_mappings` download and the classes
 carry their real names (`net.minecraft.client.player.LocalPlayer`, …). There is nothing to remap:
@@ -825,15 +826,49 @@ client sends references to the client's own copy of the same data pack, which gi
 - `entity_sizes.jsonl.gz`: as 1.16.5; `entity_type` lines add `eye_height`; instances are created with
   `EntityType.create(level, EntitySpawnReason.LOAD)` (what the add-entity handler does).
 
-Fuzz: the 1.16.5 generator (same palette and random stream; `grass_path` is `dirt_path` and `chain` is
-`iron_chain` in 26.1) with 26.1 effect ids. Same-named block states of both versions have identical
-collision geometry (only the box decomposition of 938 states — stairs, beds, anvils, … — differs) and
-identical slipperiness / speed / jump factors. Big runs (git-ignored):
+### 26.1 fuzz
+
+- plain (`Fuzz.one`): the 1.16.5 generator (same palette and random stream; `grass_path` is
+  `dirt_path` and `chain` is `iron_chain` in 26.1) with 26.1 effect ids. Same-named block states of
+  both versions have identical collision geometry (only the box decomposition of 938 states —
+  stairs, beds, anvils, … — differs) and identical slipperiness / speed / jump factors.
+- `--palette edges` (`Fuzz.edge`, cases `edge_s<seed>_<i>`): the 1.16.5 strips of partial-height
+  blocks with the palette extended by 26.x blocks (powder snow, mud, pointed dripstone, big
+  dripleaf, sculk sensors / shrieker, decorated pot, copper grate / chain / lantern / trapdoor,
+  moss carpets, mangrove roots, amethyst, candles, lightning rod, heavy core, vault, trial spawner,
+  azalea, dried ghast, shelves, creaking heart, cave vines, sniffer egg, copper golem statue, …);
+  sometimes leather boots, a step height (0 – 2), a scale (0.25 – 2), a jump strength, auto-jump,
+  soul speed, jump boost, a low ceiling (stone, slabs, scaffolding, powder snow).
+- `--extras true` (`Fuzz.withExtras`, the plain case plus a separate stream, cases `…_x`): speed
+  modifiers of every operation and another speed base; bases and modifiers of all three operations
+  for step height, gravity, jump strength, sneaking speed, movement / water movement efficiency,
+  scale (0.0625 – 16) and safe fall distance; depth strider / soul speed up to V; leather boots; with
+  `--use-item true` an item with its own `use_effects` (can sprint, speed multiplier 0 – 1); the
+  sprint window option (0 – 10); food 5 – 7; fly speeds; the client-read effects (jump boost,
+  blindness, levitation, slow falling, dolphin's grace, weaving); spectator or adventure mode; 26.x
+  partial blocks and powder snow around the spawn; a bubble-column pool; the case moved next to
+  the world border; and inbound packets during the case: movement-speed attributes (sometimes
+  echoing the sprint modifier), other attribute packets (also scale: the box is rebuilt at the end
+  of that tick), effect changes, abilities, motion packets up to 3 blocks per tick (the
+  fall-distance raycast of `Entity.move`), teleports with all nine relative flags (position,
+  rotation, delta, rotate-delta).
+- Header additions (only when set): `leather_boots`, `use_effects` `{can_sprint, speed_multiplier}`,
+  `sprint_window`; event `{"type":"attribute", "attribute", "base", "modifiers": [[id, amount, op],
+  …]}` (an attributes packet entry for any attribute).
+- `replay` maps fill state ids through the header's `states` names, so a file written by 26.1 replays
+  on a jar that numbers states differently (used for the family check, below).
+
+Big runs (git-ignored `oracle/cache/26.1/`, replayed by the Rust large-fuzz test):
 
 ```sh
-MC=26.1 oracle/run.sh fuzz --seed 11 --count 1600 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz/physics_s11.jsonl.gz"
-MC=26.1 oracle/run.sh fuzz --seed 21 --count 400 --ticks 100 --use-item true --out "$PWD/oracle/cache/26.1/fuzz/physics_use_s21.jsonl.gz"
+for s in 11 12 13 14 15 16 17 18; do MC=26.1 oracle/run.sh fuzz --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz/physics_s$s.jsonl.gz"; done
+MC=26.1 oracle/run.sh fuzz --seed 22 --count 2000 --ticks 100 --use-item true --out "$PWD/oracle/cache/26.1/fuzz/physics_use_s22.jsonl.gz"
+for s in 31 32 33 34 35; do MC=26.1 oracle/run.sh fuzz --palette edges --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz-edges/edges_s$s.jsonl.gz"; done
+for s in 41 42 43 44 45; do MC=26.1 oracle/run.sh fuzz --extras true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz-extras/extras_s$s.jsonl.gz"; done
+MC=26.1 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 --ticks 100 --out "$PWD/oracle/cache/26.1/fuzz-extras/extras_use_s46.jsonl.gz"
 ```
+
+(`physics_s11` of the first 26.1 run holds 1600 cases, `physics_use_s21` 400.)
 
 ### 26.1 quirks (observed in the vectors)
 
@@ -846,6 +881,18 @@ MC=26.1 oracle/run.sh fuzz --seed 21 --count 400 --ticks 100 --use-item true --o
   moved by the offset; differs from 1.16.5 in the last bit.
 - Soul sand slows a player with soul speed boots unless the server sends `movement_efficiency`
   (`soul_speed_boots` vs `attr_movement_efficiency`).
+- Unloaded columns: `ClientLevel.hasChunk` is always true, so gravity is normal everywhere
+  (`travelInAir` never takes its `-0.1` branch on the client); block collision skips unloaded
+  chunks (`getChunkForCollisions` is null there); and the fluid sweep (`EntityFluidInteraction`) sees
+  **no fluid at all** when any chunk of the box's columns widened by one block is unloaded.
+- Flying players are never on a climbable (`Player.onClimbable`) and are never stuck in cobwebs,
+  berry bushes or powder snow (`Player.makeStuckInBlock`).
+- Attribute modifiers of one operation are summed in the iteration order of a fastutil
+  `Object2ObjectOpenHashMap` with its default 32 slots (`HashCommon.mix(Identifier.hashCode())`,
+  linear probing, iterated from the last slot down); the order decides the last bit with several
+  modifiers.
+- A scale change rebuilds the box at the end of the tick that applied the attributes packet
+  (`refreshDirtyAttributes` in `LivingEntity.tick`), from the position.
 
 ## Notes for implementers
 

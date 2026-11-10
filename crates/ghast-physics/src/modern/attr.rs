@@ -293,7 +293,8 @@ impl Attribute {
         let t = self.table(operation);
         (0..SLOTS)
             .rev()
-            .filter_map(move |s| (t[s] != 0).then(|| self.entries[usize::from(t[s] - 1)].m))
+            .filter(move |&s| t[s] != 0)
+            .map(move |s| self.entries[usize::from(t[s] - 1)].m)
     }
 }
 
@@ -317,7 +318,9 @@ mod tests {
     #[test]
     fn shift_delete_keeps_chain() {
         let mut a = Attribute::new(0.0, -1.0e9, 1.0e9);
-        let ids: Vec<ModifierId> = (0..10).map(|i| ModifierId::new(&format!("t:m{i}"))).collect();
+        let ids: Vec<ModifierId> = (0..10)
+            .map(|i| ModifierId::new(&format!("t:m{i}")))
+            .collect();
         for (i, &id) in ids.iter().enumerate() {
             a.add(id, i as f64, 0);
         }

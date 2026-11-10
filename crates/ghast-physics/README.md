@@ -10,6 +10,7 @@ vanilla's constant 65536-entry sine table, built once).
 | `v1_8` | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle (see below) |
 | `v1_12` | 1.12.2 (protocol 340; the rules hold for every 1.12 release) | bit-exact against the vanilla oracle (see below) |
 | `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
+| `modern` with `V26_1` (feature `v26_1`, default) | 26.1 (protocol 775) | bit-exact against the vanilla oracle (see "Modern core") |
 
 ## Use
 
@@ -72,6 +73,56 @@ no collision; the only other effect of an unloaded column is the gravity rule be
 pitch_counts, multiplier)` reproduce the 1.8 renderer + entity angle update in whole mouse counts
 (the "GCD" anti-cheats check), `wrap_degrees`. How many counts to move per tick (aim speed,
 budgets) is client policy and stays out of this crate.
+
+## Modern core (`modern`, 26.1)
+
+One core for the modern versions, generic over a `modern::Rules` row (the version's block tables and
+constants as associated items, monomorphised: no run-time version branch). `V26_1` is the first row.
+The older modules stay as they are.
+
+```rust
+use ghast_physics::modern::{self, PlayerState, V26_1};
+use ghast_physics::{Keys, Packets, TickInput};
+
+let mut world = modern::memory_world_26_1();          // any BlockView<State = v26_1::BlockState>
+world.load_chunks(-1, -1, 0, 0);
+let stone = ghast_data::v26_1::BlockState::parse("stone").unwrap().id();
+world.fill_raw([-16, 63, -16], [15, 63, 15], stone);
+let mut p = PlayerState::new([0.5, 64.0, 0.5], 0.0, 0.0);
+let mut out = Packets::new();
+let input = TickInput { keys: Keys { forward: true, ..Keys::NONE }, yaw: 0.0, pitch: 0.0, using_item: false };
+modern::tick::<V26_1, _>(&mut p, &input, &world, &mut out);
+// out: sprint entity actions / abilities, then `Packet::PlayerInput` when the keys changed, then
+// at most one `Packet::Move` (position and / or rotation, on-ground, horizontal collision).
+// `tick_end` is sent by the client after every tick and is not in `out`.
+```
+
+What the client feeds in (26.x moved much of movement to server data):
+
+- **Attributes**: every `update_attributes` entry for the nine movement attributes
+  (`AttributeKind::from_name`) goes to `PlayerState::apply_attribute(kind, base, &modifiers)` in
+  packet order (modifier ids via `ModifierId::new("namespace:path")`; the summation order of
+  several modifiers follows vanilla's hash table, so the ids matter). Soul speed, depth strider,
+  swift sneak, powder-snow frost and potion speed changes all arrive this way; the client never
+  computes them. The client's own sprint modifier is handled by `set_sprinting`.
+- **Motion**: `apply_velocity(v)` with the vector decoded from the packet's `LpVec3`.
+- **Teleport**: `apply_teleport(pos, delta, yaw, pitch, relative_bits)` (all nine `Relative` bits);
+  send the returned packet after `teleport_confirm`. It does not update `sent`, like vanilla.
+- **Abilities**, **effects** (`Effects`: jump boost, blindness, levitation, slow falling,
+  dolphin's grace, weaving), **food level**, **game mode** (`spectator`), **leather boots** in
+  the feet slot (powder snow), the **item in use** (`TickInput::using_item` plus its
+  `use_effects` component in `PlayerState::use_effects`), the client **options**
+  (`auto_jump`, `sprint_window`) and the **level** (`LevelInfo`: build height, `fast_lava`).
+
+World contract (`BlockView`): positions are only asked for inside the build height of
+`LevelInfo`; horizontal coordinates can reach about ±30,000,100. Return air for unloaded columns
+and answer `is_chunk_loaded` truthfully: collision skips unloaded chunks, and the fluid sweep sees
+no fluid when any chunk around the player's box is unloaded (vanilla 26.1 client). Gravity is
+normal over unloaded columns (the 26.1 client always reports chunks as present).
+
+Not modelled: elytra, riptide, vehicles, entity collision and push, pistons, block entities
+(shulker box lids collide as closed boxes), a moving world border, the nether's `fast_lava` is
+supported only as a flag (no oracle vector yet).
 
 ## Design decisions
 

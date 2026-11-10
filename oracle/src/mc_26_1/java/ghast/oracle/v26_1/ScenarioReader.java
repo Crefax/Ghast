@@ -84,11 +84,19 @@ final class ScenarioReader {
                 }
             }
         }
+        // fills: [x0, y0, z0, x1, y1, z1, state] (state ids of the version that wrote the file; when the
+        // running jar numbers states differently, e.g. a later 26.x, they are mapped by the header's names).
+        java.util.Map<Integer, Integer> remap = new java.util.HashMap<>();
+        if (o.has("states")) {
+            for (var e : o.getAsJsonObject("states").entrySet()) {
+                remap.put(Integer.parseInt(e.getKey()), States.id(e.getValue().getAsString().replace("minecraft:", "")));
+            }
+        }
         for (JsonElement e : o.getAsJsonArray("fills")) {
             JsonArray f = e.getAsJsonArray();
-            // fills: [x0, y0, z0, x1, y1, z1, state] (26.1 state ids)
+            int id = f.get(6).getAsInt();
             sc.fill(f.get(0).getAsInt(), f.get(1).getAsInt(), f.get(2).getAsInt(), f.get(3).getAsInt(),
-                    f.get(4).getAsInt(), f.get(5).getAsInt(), f.get(6).getAsInt(), 0);
+                    f.get(4).getAsInt(), f.get(5).getAsInt(), remap.getOrDefault(id, id), 0);
         }
         JsonObject s = o.getAsJsonObject("setup");
         sc.gameMode = Scenario.GameMode.valueOf(s.get("game_mode").getAsString().toUpperCase());

@@ -21,8 +21,8 @@ mod player;
 mod rules;
 
 pub use attr::{
-    Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash, java_string_hash,
-    sprinting_id,
+    Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash,
+    java_string_hash, sprinting_id,
 };
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, Dimensions, Effects, LevelInfo,

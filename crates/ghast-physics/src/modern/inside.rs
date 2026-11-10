@@ -92,8 +92,19 @@ pub(crate) fn for_each_block_between(
         }
         return true;
     }
-    let mut visited = Visited::default();
     let start = super::math::mv(at_target, -travel.x, -travel.y, -travel.z);
+    let mut visited = BoxSet::new(
+        [
+            floor(start.min_x.min(at_target.min_x)) - 1,
+            floor(start.min_y.min(at_target.min_y)) - 1,
+            floor(start.min_z.min(at_target.min_z)) - 1,
+        ],
+        [
+            floor(start.max_x.max(at_target.max_x)) + 1,
+            floor(start.max_y.max(at_target.max_y)) + 1,
+            floor(start.max_z.max(at_target.max_z)) + 1,
+        ],
+    );
     let corners = |b: &Aabb| {
         (
             [floor(b.min_x), floor(b.min_y), floor(b.min_z)],
@@ -128,7 +139,7 @@ pub(crate) fn for_each_block_between(
 
 /// `BlockGetter.addCollisionsAlongTravel`; `None` when the visitor stopped.
 fn along_travel(
-    visited: &mut Visited,
+    visited: &mut BoxSet,
     d: V3,
     at_target: &Aabb,
     visit: &mut impl FnMut([i32; 3], i32) -> bool,
@@ -235,23 +246,97 @@ fn furthest_corner(d: V3) -> [i32; 3] {
     }
 }
 
-/// A small set of block positions (a tick visits a few dozen at most; larger sweeps spill).
-#[derive(Default)]
+/// A small set of block positions: inline for the few dozen a tick visits, spilling to the heap
+/// only for very long sweeps.
 pub(crate) struct Visited {
-    buf: Vec<[i32; 3]>,
+    buf: [[i32; 3]; VISITED_INLINE],
+    len: usize,
+    spill: std::collections::HashSet<[i32; 3]>,
+}
+
+const VISITED_INLINE: usize = 64;
+
+impl Default for Visited {
+    fn default() -> Self {
+        Visited {
+            buf: [[0; 3]; VISITED_INLINE],
+            len: 0,
+            spill: std::collections::HashSet::new(),
+        }
+    }
 }
 
 impl Visited {
     /// Adds a position; `true` when it was new.
     pub(crate) fn add(&mut self, p: [i32; 3]) -> bool {
-        if self.buf.contains(&p) {
+        if self.buf[..self.len].contains(&p) {
             return false;
         }
-        self.buf.push(p);
-        true
+        if self.len < VISITED_INLINE {
+            self.buf[self.len] = p;
+            self.len += 1;
+            true
+        } else {
+            self.spill.insert(p)
+        }
     }
 
     pub(crate) fn clear(&mut self) {
-        self.buf.clear();
+        self.len = 0;
+        self.spill.clear();
+    }
+}
+
+/// A set of block positions inside known bounds: a bit per cell when the bounds are small (the
+/// usual sweep), a hash set otherwise.
+pub(crate) struct BoxSet {
+    lo: [i32; 3],
+    dims: [i32; 3],
+    bits: [u64; BOX_WORDS],
+    big: Option<std::collections::HashSet<[i32; 3]>>,
+}
+
+const BOX_WORDS: usize = 16;
+
+impl BoxSet {
+    pub(crate) fn new(lo: [i32; 3], hi: [i32; 3]) -> BoxSet {
+        let dims =
+            [0, 1, 2].map(|a| (i64::from(hi[a]) - i64::from(lo[a]) + 1).clamp(0, 1 << 20) as i32);
+        let cells = i64::from(dims[0]) * i64::from(dims[1]) * i64::from(dims[2]);
+        BoxSet {
+            lo,
+            dims,
+            bits: [0; BOX_WORDS],
+            big: (cells > (BOX_WORDS * 64) as i64).then(std::collections::HashSet::new),
+        }
+    }
+
+    /// Adds a position; `true` when it was new.
+    pub(crate) fn add(&mut self, p: [i32; 3]) -> bool {
+        if let Some(h) = &mut self.big {
+            return h.insert(p);
+        }
+        let d = [0, 1, 2].map(|a| p[a].wrapping_sub(self.lo[a]));
+        if (0..3).any(|a| d[a] < 0 || d[a] >= self.dims[a]) {
+            // Outside the expected bounds (cannot happen for vanilla's sweep): fall back.
+            let mut h = std::collections::HashSet::new();
+            for i in 0..(self.dims[0] * self.dims[1] * self.dims[2]) as usize {
+                if self.bits[i / 64] >> (i % 64) & 1 != 0 {
+                    let i = i as i32;
+                    let x = i % self.dims[0];
+                    let y = i / self.dims[0] % self.dims[1];
+                    let z = i / self.dims[0] / self.dims[1];
+                    h.insert([self.lo[0] + x, self.lo[1] + y, self.lo[2] + z]);
+                }
+            }
+            let new = h.insert(p);
+            self.big = Some(h);
+            return new;
+        }
+        let i = ((d[2] * self.dims[1] + d[1]) * self.dims[0] + d[0]) as usize;
+        let (w, b) = (i / 64, 1u64 << (i % 64));
+        let new = self.bits[w] & b == 0;
+        self.bits[w] |= b;
+        new
     }
 }
