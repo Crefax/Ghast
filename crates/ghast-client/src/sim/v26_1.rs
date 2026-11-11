@@ -164,6 +164,10 @@ impl WorldView for Sim26 {
         self.world.columns().len()
     }
 
+    fn build_height(&self) -> Option<(i32, i32)> {
+        self.world.dimension().map(|d| (d.kind.min_y, d.kind.height))
+    }
+
     fn block_query(&self, x: i32, y: i32, z: i32) -> Option<BlockQuery> {
         let s = self.state(x, y, z)?;
         let d = s.block().data();

@@ -104,6 +104,13 @@ pub trait WorldView {
     /// Number of loaded columns.
     fn loaded_columns(&self) -> usize;
 
+    /// The build height `(min_y, height)` of the current dimension when the version has
+    /// dimension-dependent heights (26.1: the overworld is `(-64, 384)`); `None` for the
+    /// fixed `0..256` worlds of 1.8.9 – 1.16.5.
+    fn build_height(&self) -> Option<(i32, i32)> {
+        None
+    }
+
     /// The tracked entities (`None` unless the behaviour asked for [`crate::Interests::ENTITIES`]).
     fn entities(&self) -> Option<&ghast_entity::Entities>;
 
