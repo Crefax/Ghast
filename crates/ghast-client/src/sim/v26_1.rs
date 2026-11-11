@@ -88,16 +88,22 @@ impl std::fmt::Debug for Sim26 {
     }
 }
 
-/// `LivingEntity.canGlideUsing` for some slot: an elytra-like item (`minecraft:glider`) in the
-/// slot its `equippable` component names whose next point of damage will not break it.
-/// PLACEHOLDER until ghast-inventory exposes the components: the item `elytra` in the chest.
+/// `Player.canGlide` equipment part: some equipment slot holds a stack that can glide using that
+/// slot (`LivingEntity.canGlideUsing`: the `glider` component, `equippable` naming that slot,
+/// the next point of damage will not break it).
 fn glider_equipped(inv: &ghast_inventory::Inventory) -> bool {
-    use ghast_inventory::Version;
-    inv.armor(1).is_some_and(|s| {
-        s.item_name(Version::V26_1) == Some("elytra")
-            && s.max_damage(Version::V26_1)
-                .is_none_or(|max| s.damage_value(Version::V26_1) < max - 1)
-    })
+    use ghast_inventory::v26_1::{Equip, can_glide_using};
+    let slots = [
+        (inv.held(), Equip::MainHand),
+        (inv.offhand(), Equip::Offhand),
+        (inv.armor(0), Equip::Head),
+        (inv.armor(1), Equip::Chest),
+        (inv.armor(2), Equip::Legs),
+        (inv.armor(3), Equip::Feet),
+    ];
+    slots
+        .into_iter()
+        .any(|(s, slot)| s.is_some_and(|s| can_glide_using(s, slot)))
 }
 
 impl Sim26 {

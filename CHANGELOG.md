@@ -121,6 +121,19 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 
+- **26.1 elytra in the client**: `TickContext::is_gliding` / `start_gliding`; the client glides
+  with the oracle-proven `modern::PlayerExt` (glide start on a jump press in the air with a glider
+  equipped, `START_FALL_FLYING`), applies its own shared flags from the server's entity data and
+  the boost of firework rockets attached to it (decoded without entity tracking, only for our own
+  id and rockets), and swings when a rocket is used while gliding. `EntityAction::StartFallFlying`.
+  13 oracle elytra cases replay through the engine packet for packet; `lab/elytra.sh`.
+
+### Fixed
+
+- 26.1: `use_item` carried the previous tick's look instead of the rotation of the tick's
+  movement packet (what the real client sends); Grim flags it as BadPacketsJ when an item is used
+  while turning. 1.8.9 / 1.12.2 / 1.16.5 use packets carry no rotation.
+
 ### Changed (behaviour)
 
 - 26.1 `start_configuration` now follows `handleConfigurationStart`: a pending chat
