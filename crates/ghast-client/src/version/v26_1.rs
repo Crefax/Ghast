@@ -194,6 +194,8 @@ fn render_chat(pattern: &str, sender: &str, content: &str, target: &str) -> Stri
 fn attribute_name(id: i32) -> Option<&'static str> {
     Some(match id {
         5 => "block_break_speed",
+        6 => "block_interaction_range",
+        10 => "entity_interaction_range",
         14 => "gravity",
         15 => "jump_strength",
         20 => "mining_efficiency",

@@ -1093,7 +1093,8 @@ impl<S: Sim> Engine<S> {
             let sim = &self.sim;
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
-            let target = sim.crosshair(eyes, (c.pose.yaw, c.pose.pitch), look, hands::REACH);
+            let held_id = c.inv.held().and_then(|s| u16::try_from(s.id).ok());
+            let target = sim.crosshair_now(eyes, (c.pose.yaw, c.pose.pitch), look, held_id);
             let entity = entity_pick(sim, c.opts.caps, eyes, look, target.map(|t| t.distance));
             let in_water = blocks(
                 eyes.x.floor() as i32,

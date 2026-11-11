@@ -117,9 +117,51 @@ impl WorldView for Sim16 {
             activates: activates_1_16(info.name),
         })
     }
+
+    fn crosshair(
+        &self,
+        eyes: Vec3,
+        (yaw, pitch): (f32, f32),
+        _look: Vec3,
+        reach: f64,
+    ) -> Option<crate::BlockHit> {
+        // The oracle-verified 1.16.5 pick (outline shapes, model offsets, interaction shapes).
+        use ghast_physics::pick::v1_16_5 as pick;
+        let eye = [eyes.x, eyes.y, eyes.z];
+        let hit = pick::pick(
+            &self.world,
+            eye,
+            pick::rotation_vector(yaw, pitch),
+            reach,
+            None,
+        );
+        block_hit(&hit, eye)
+    }
 }
 
 impl Sim for Sim16 {
+    fn crosshair_now(
+        &self,
+        eyes: Vec3,
+        (yaw, pitch): (f32, f32),
+        _look: Vec3,
+        held: Option<u16>,
+    ) -> Option<crate::BlockHit> {
+        use ghast_physics::pick::v1_16_5 as pick;
+        let held_block = held
+            .and_then(ghast_data::v1_16_5::Item::from_id)
+            .and_then(|i| ghast_data::v1_16_5::Block::from_name(i.info().name));
+        let eye = [eyes.x, eyes.y, eyes.z];
+        let hit = pick::pick(
+            &self.world,
+            eye,
+            pick::rotation_vector(yaw, pitch),
+            crate::hands::REACH,
+            held_block,
+        );
+        block_hit(&hit, eye)
+    }
+
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         {
             use ghast_protocol::v1_16_5::play::clientbound::id;

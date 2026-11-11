@@ -217,6 +217,19 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn predict_air(&mut self, x: i32, y: i32, z: i32);
     /// A held item's version facts (tool speeds, block item, usable) from its id.
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem;
+    /// The crosshair target as vanilla picks it at the start of this tick (before the key
+    /// handling) with the player's own eye and ranges; `eyes` / `look` are the generic
+    /// approximation (feet + eye height, `hands::look_vector`). `held` is the main-hand item id.
+    fn crosshair_now(
+        &self,
+        eyes: Vec3,
+        rotation: (f32, f32),
+        look: Vec3,
+        held: Option<u16>,
+    ) -> Option<crate::BlockHit> {
+        let _ = held;
+        self.crosshair(eyes, rotation, look, crate::hands::REACH)
+    }
     /// 1.20.5+ movement attributes of our entity, in packet order.
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         let _ = attributes;
@@ -385,6 +398,34 @@ pub(super) fn activates_1_16(name: &str) -> bool {
         || (name.ends_with("_door") && name != "iron_door")
         || (name.ends_with("_trapdoor") && name != "iron_trapdoor")
         || name.starts_with("potted_")
+}
+
+/// A pick result as the hands take it (`None` for a miss).
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+pub(super) fn block_hit(
+    hit: &ghast_physics::pick::BlockHit,
+    eye: [f64; 3],
+) -> Option<crate::BlockHit> {
+    use ghast_physics::pick::Direction;
+    if !hit.is_block() {
+        return None;
+    }
+    let face = match hit.face {
+        Direction::Down => crate::Face::Down,
+        Direction::Up => crate::Face::Up,
+        Direction::North => crate::Face::North,
+        Direction::South => crate::Face::South,
+        Direction::West => crate::Face::West,
+        Direction::East => crate::Face::East,
+    };
+    let [lx, ly, lz] = hit.location;
+    let distance = ((lx - eye[0]).powi(2) + (ly - eye[1]).powi(2) + (lz - eye[2]).powi(2)).sqrt();
+    Some(crate::BlockHit {
+        pos: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
+        face,
+        hit: Vec3::new(lx, ly, lz),
+        distance,
+    })
 }
 
 /// Union of the collision boxes as a ray box (`None` when there is none).
@@ -912,6 +953,15 @@ impl Sim for Box<dyn Sim> {
     }
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         (**self).held_item(id, count, efficiency)
+    }
+    fn crosshair_now(
+        &self,
+        eyes: Vec3,
+        rotation: (f32, f32),
+        look: Vec3,
+        held: Option<u16>,
+    ) -> Option<crate::BlockHit> {
+        (**self).crosshair_now(eyes, rotation, look, held)
     }
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         (**self).attributes(attributes);

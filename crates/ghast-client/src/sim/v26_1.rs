@@ -20,6 +20,19 @@ pub(crate) struct Sim26 {
     mining: [modern::Attribute; 3],
     /// Conduit power amplifier (digging).
     conduit_power: Option<i32>,
+    /// `block_interaction_range`, `entity_interaction_range` (the crosshair).
+    ranges: [modern::Attribute; 2],
+    /// `Entity.xo/yo/zo`: the position at the start of the last tick (the pick's eye lerps
+    /// from it).
+    old_pos: [f64; 3],
+}
+
+/// The interaction ranges with vanilla's defaults and ranges.
+fn range_attributes() -> [modern::Attribute; 2] {
+    [
+        modern::Attribute::new(4.5, 0.0, 64.0),
+        modern::Attribute::new(3.0, 0.0, 64.0),
+    ]
 }
 
 /// The mining attributes with vanilla's defaults and ranges.
@@ -49,6 +62,8 @@ impl Sim26 {
             updates: BlockUpdates::default(),
             mining: mining_attributes(),
             conduit_power: None,
+            ranges: range_attributes(),
+            old_pos: [0.0; 3],
         }
     }
 
@@ -169,36 +184,42 @@ impl WorldView for Sim26 {
         _look: Vec3,
         reach: f64,
     ) -> Option<crate::BlockHit> {
-        use ghast_physics::pick::{self, Direction};
+        use ghast_physics::pick;
         // 26.1's own look vector (`calculateViewVector`, double-index sine table).
         let view = pick::v26_1::view_vector(yaw, pitch);
         let eye = [eyes.x, eyes.y, eyes.z];
         // Survival reach on both rays: the entity range (3) is shorter, the block range wins.
         let hit = pick::v26_1::pick(&self.world, eye, view, reach, 3.0, None);
-        if !hit.is_block() {
-            return None;
-        }
-        let face = match hit.face {
-            Direction::Down => crate::Face::Down,
-            Direction::Up => crate::Face::Up,
-            Direction::North => crate::Face::North,
-            Direction::South => crate::Face::South,
-            Direction::West => crate::Face::West,
-            Direction::East => crate::Face::East,
-        };
-        let [lx, ly, lz] = hit.location;
-        let distance =
-            ((lx - eye[0]).powi(2) + (ly - eye[1]).powi(2) + (lz - eye[2]).powi(2)).sqrt();
-        Some(crate::BlockHit {
-            pos: BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]),
-            face,
-            hit: Vec3::new(lx, ly, lz),
-            distance,
-        })
+        block_hit(&hit, eye)
     }
 }
 
 impl Sim for Sim26 {
+    fn crosshair_now(
+        &self,
+        _eyes: Vec3,
+        (yaw, pitch): (f32, f32),
+        _look: Vec3,
+        held: Option<u16>,
+    ) -> Option<crate::BlockHit> {
+        use ghast_physics::pick::v26_1 as pick;
+        let p = &self.player;
+        // Minecraft.pick at partial tick 1: the eye lerps from the old position.
+        let eye = pick::eye_position(p.pos, self.old_pos, p.dims.eye_height);
+        let held_block = held
+            .and_then(ghast_data::v26_1::Item::from_id)
+            .and_then(ghast_data::v26_1::Item::block);
+        let hit = pick::pick(
+            &self.world,
+            eye,
+            pick::view_vector(yaw, pitch),
+            self.ranges[0].value(),
+            self.ranges[1].value(),
+            held_block,
+        );
+        block_hit(&hit, eye)
+    }
+
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         use ghast_protocol::v26_1::play::clientbound as cb;
         match raw.id {
@@ -256,6 +277,8 @@ impl Sim for Sim26 {
         self.player.food_level = food;
         self.player.level = level;
         self.mining = mining_attributes();
+        self.ranges = range_attributes();
+        self.old_pos = [0.0; 3];
         self.sync_level();
     }
 
@@ -264,10 +287,12 @@ impl Sim for Sim26 {
         // KEEP_ENTITY_DATA (2) the last sent input and sprinting.
         let old = self.player;
         let old_mining = self.mining;
+        let old_ranges = self.ranges;
         self.reset_player();
         if keep & 1 != 0 {
             self.player.attributes = old.attributes;
             self.mining = old_mining;
+            self.ranges = old_ranges;
         }
         if keep & 2 != 0 {
             self.player.sent.input = old.sent.input;
@@ -279,6 +304,9 @@ impl Sim for Sim26 {
         // The engine keeps the look (its rotation may have moved it since the last tick).
         self.player.yaw = pose.yaw;
         self.player.pitch = pose.pitch;
+        // handleMovePlayer: the old position follows the teleport (relative axes keep their
+        // offset from it).
+        let before = self.player.pos;
         let _reply = self.player.apply_teleport(
             [t.x, t.y, t.z],
             [t.delta.x, t.delta.y, t.delta.z],
@@ -286,6 +314,14 @@ impl Sim for Sim26 {
             t.pitch,
             t.relative,
         );
+        let now = self.player.pos;
+        for (i, old) in self.old_pos.iter_mut().enumerate() {
+            *old = if t.relative & (1 << i) != 0 {
+                *old + (now[i] - before[i])
+            } else {
+                now[i]
+            };
+        }
         sync_pose_26(pose, &self.player);
     }
 
@@ -324,8 +360,15 @@ impl Sim for Sim26 {
                 "submerged_mining_speed" => Some(2),
                 _ => None,
             };
+            let range = match a.name {
+                "block_interaction_range" => Some(0),
+                "entity_interaction_range" => Some(1),
+                _ => None,
+            };
             if let Some(i) = mining {
                 self.mining[i].apply_packet(a.base, &mods);
+            } else if let Some(i) = range {
+                self.ranges[i].apply_packet(a.base, &mods);
             } else if let Some(kind) = AttributeKind::from_name(a.name) {
                 self.player.apply_attribute(kind, a.base, &mods);
             }
@@ -434,6 +477,8 @@ impl Sim for Sim26 {
             using_item,
         };
         self.packets.clear();
+        // Entity.setOldPosAndRot at the start of the entity tick.
+        self.old_pos = self.player.pos;
         let p = &mut self.player;
         let view = self
             .world
