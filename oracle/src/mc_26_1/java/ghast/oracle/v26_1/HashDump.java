@@ -85,9 +85,11 @@ final class HashDump {
         c("custom_name", "\"Name\"", "{\"text\":\"Bold\",\"bold\":true,\"color\":\"red\"}", "[\"a\",{\"text\":\"b\",\"italic\":false}]");
         c("item_name", "\"Item\"", "{\"translate\":\"item.minecraft.diamond\"}");
         c("lore", "[\"one\",\"two\"]", "[{\"text\":\"x\",\"color\":\"#123456\"}]");
-        c("enchantments", "{\"minecraft:sharpness\":5}", "{\"minecraft:efficiency\":3,\"minecraft:unbreaking\":2}",
-                "{\"minecraft:protection\":255}");
-        c("stored_enchantments", "{\"minecraft:mending\":1}", "{\"minecraft:fortune\":3,\"minecraft:looting\":2}");
+        // Enchantment maps and debug-stick maps are keyed by holders and written in identity-hash order,
+        // which differs between JVM runs: single entries only, so the vectors are reproducible.
+        c("enchantments", "{\"minecraft:sharpness\":5}", "{\"minecraft:efficiency\":3}", "{\"minecraft:protection\":255}",
+                "{\"minecraft:unbreaking\":2}");
+        c("stored_enchantments", "{\"minecraft:mending\":1}", "{\"minecraft:fortune\":3}");
         c("can_place_on", "{\"blocks\":\"minecraft:stone\"}", "[{\"blocks\":[\"minecraft:dirt\",\"minecraft:grass_block\"]}]");
         c("can_break", "{\"blocks\":\"#minecraft:logs\"}", "[{\"blocks\":\"minecraft:stone\",\"state\":{}}]");
         c("attribute_modifiers", "[{\"type\":\"minecraft:attack_damage\",\"id\":\"oracle:a\",\"amount\":2.5,\"operation\":\"add_value\",\"slot\":\"mainhand\"}]",
@@ -182,12 +184,12 @@ final class HashDump {
                 });
 
         List<String> registryNames = new ArrayList<>();
-        access.registries().forEach(e -> {
+        access.registries().sorted((a, b) -> a.key().identifier().toString().compareTo(b.key().identifier().toString())).forEach(e -> {
             if (e.value().size() <= 300) {
-                for (Object v : e.value()) {
-                    @SuppressWarnings("unchecked")
-                    Registry<Object> reg = (Registry<Object>) e.value();
-                    registryNames.add("\"" + reg.getKey(v) + "\"");
+                @SuppressWarnings("unchecked")
+                Registry<Object> reg = (Registry<Object>) e.value();
+                for (int i = 0; i < reg.size(); i++) {
+                    registryNames.add("\"" + reg.getKey(reg.byId(i)) + "\"");
                 }
             }
         });
@@ -198,7 +200,7 @@ final class HashDump {
         Map<DataComponentType<?>, int[]> sources = new LinkedHashMap<>();
         for (DataComponentType<?> t : BuiltInRegistries.DATA_COMPONENT_TYPE) {
             types.add(t);
-            pools.put(t, new LinkedHashMap<>());
+            pools.put(t, new TreeMap<>());
             sources.put(t, new int[3]);
         }
         for (Item item : BuiltInRegistries.ITEM) {
@@ -268,6 +270,8 @@ final class HashDump {
             }
             List<TypedDataComponent<?>> defaults = new ArrayList<>();
             item.components().forEach(defaults::add);
+            // DataComponentMap iteration order is identity-hash based: sort for a deterministic pick.
+            defaults.sort(java.util.Comparator.comparingInt(tc -> BuiltInRegistries.DATA_COMPONENT_TYPE.getId(tc.type())));
             int removals = rng.chance(0.6) ? 0 : rng.range(1, 3);
             for (int i = 0; i < removals && !defaults.isEmpty(); i++) {
                 b.remove(defaults.get(rng.nextInt(defaults.size())).type());
@@ -288,7 +292,19 @@ final class HashDump {
                     continue;
                 }
                 HashedStack hashed = HashedStack.create(decoded, hasher);
-                byte[] hashedWire = encode(access, buf -> HashedStack.STREAM_CODEC.encode(buf, hashed));
+                // Vanilla writes the added map / removed set in IdentityHashMap / HashSet order (arbitrary;
+                // the server compares contents). The vector uses type id order.
+                HashedStack.ActualItem actual = (HashedStack.ActualItem) hashed;
+                Map<DataComponentType<?>, Integer> sortedAdded = new LinkedHashMap<>();
+                actual.components().addedComponents().entrySet().stream()
+                        .sorted(java.util.Comparator.comparingInt(e -> BuiltInRegistries.DATA_COMPONENT_TYPE.getId(e.getKey())))
+                        .forEach(e -> sortedAdded.put(e.getKey(), e.getValue()));
+                java.util.Set<DataComponentType<?>> sortedRemoved = new java.util.LinkedHashSet<>();
+                actual.components().removedComponents().stream()
+                        .sorted(java.util.Comparator.comparingInt(t -> BuiltInRegistries.DATA_COMPONENT_TYPE.getId(t)))
+                        .forEach(sortedRemoved::add);
+                HashedStack canonical = new HashedStack.ActualItem(actual.item(), actual.count(), new HashedPatchMap(sortedAdded, sortedRemoved));
+                byte[] hashedWire = encode(access, buf -> HashedStack.STREAM_CODEC.encode(buf, canonical));
                 DataComponentPatch patch = decoded.getComponentsPatch();
                 Json j = new Json().beginObject().field("type", "stack").field("k", written);
                 j.field("item", BuiltInRegistries.ITEM.getKey(item).toString()).field("item_id", BuiltInRegistries.ITEM.getId(item));
@@ -303,6 +319,9 @@ final class HashDump {
                     if (e.getValue().isPresent()) {
                         Integer hash = map.addedComponents().get(t);
                         String json = jsonOf((DataComponentType) t, e.getValue().get(), jsonOps);
+                        if (json != null) {
+                            json = canonical(JsonParser.parseString(json)).toString();
+                        }
                         added.put(name, new Object[] {BuiltInRegistries.DATA_COMPONENT_TYPE.getId(t), hash, json});
                         coverage.get(t)[0]++;
                     } else {
@@ -392,6 +411,9 @@ final class HashDump {
             }
             hasher.apply(new TypedDataComponent<>(t, back));
             String key = jsonOf(t, back, ops);
+            if (key != null) {
+                key = canonical(JsonParser.parseString(key)).toString();
+            }
             if (key == null) {
                 key = String.valueOf(back);
             }
@@ -403,6 +425,21 @@ final class HashDump {
         } catch (RuntimeException e) {
             return false;
         }
+    }
+
+    /** JSON with object keys sorted (map-valued components encode in their map's order). */
+    private static JsonElement canonical(JsonElement e) {
+        if (e.isJsonObject()) {
+            com.google.gson.JsonObject out = new com.google.gson.JsonObject();
+            new TreeMap<>(e.getAsJsonObject().asMap()).forEach((k, v) -> out.add(k, canonical(v)));
+            return out;
+        }
+        if (e.isJsonArray()) {
+            com.google.gson.JsonArray out = new com.google.gson.JsonArray();
+            e.getAsJsonArray().forEach(v -> out.add(canonical(v)));
+            return out;
+        }
+        return e;
     }
 
     @SuppressWarnings("unused")

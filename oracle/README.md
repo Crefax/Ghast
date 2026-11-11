@@ -1046,10 +1046,18 @@ removed component types. Lines:
   (`from_defaults` = some item's default value, `from_generic` = a generic JSON value or a registry
   entry name the codec accepts, `from_curated`), `cases_added`, `cases_removed`.
 
-Every non-transient type is added in at least 45 cases. Removals only exist for types some item has
-by default: a patch that removes a type the prototype lacks is normalised away when the stack is
-built (as on a real server), so 65 types never appear as removed. Values are validated by a
-network round trip and a hash before use; patches the codecs reject are skipped.
+Coverage: the registry has 110 data component types; the 3 transient ones never appear in a
+patch; each of the other 107 is added in at least 57 cases. 45 of them also appear as removed:
+removals only exist for types some item has by default, because a patch that removes a type the
+prototype lacks is normalised away when the stack is built (as on a real server), so the other 62
+cannot be removed. Values are validated by a network round trip and a hash before use; patches the
+codecs reject are skipped.
+
+Reproducibility: vanilla writes holder-keyed maps (enchantments, stored enchantments, debug stick
+state) and the `HashedPatchMap` in identity-hash order, which changes between JVM runs. The dump
+therefore uses single-entry holder maps, writes `hashed_wire` with added / removed entries in
+component type id order (vanilla's order is arbitrary; the server compares contents), and keys
+`json` with sorted object keys. Two separate runs produce identical files.
 
 ## Notes for implementers
 
