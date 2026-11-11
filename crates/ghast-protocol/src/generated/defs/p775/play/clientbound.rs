@@ -6083,10 +6083,10 @@ impl PlayerInfoAction {
     pub const UPDATE_LATENCY: Self = Self(1 << 4);
     /// `update_display_name`
     pub const UPDATE_DISPLAY_NAME: Self = Self(1 << 5);
-    /// `update_hat`
-    pub const UPDATE_HAT: Self = Self(1 << 6);
     /// `update_list_order`
-    pub const UPDATE_LIST_ORDER: Self = Self(1 << 7);
+    pub const UPDATE_LIST_ORDER: Self = Self(1 << 6);
+    /// `update_hat`
+    pub const UPDATE_HAT: Self = Self(1 << 7);
     /// Whether every bit of `f` is set.
     #[inline]
     pub const fn contains(self, f: Self) -> bool {
@@ -6113,7 +6113,7 @@ pub struct PlayerInfoData {
     /// `gamemode`
     pub gamemode: Option<i32>,
     /// `listed`
-    pub listed: Option<i32>,
+    pub listed: Option<bool>,
     /// `latency`
     pub latency: Option<i32>,
     /// `displayName`
@@ -6187,7 +6187,7 @@ impl<const V: i32> Decode for PlayerInfo<V> {
                             None
                         };
                         let v14 = if ((v1.0 >> 3) & 1 != 0) {
-                            Some(r.read_varint()?)
+                            Some(r.read_bool()?)
                         } else {
                             None
                         };
@@ -6205,12 +6205,12 @@ impl<const V: i32> Decode for PlayerInfo<V> {
                         } else {
                             None
                         };
-                        let v17 = if ((v1.0 >> 7) & 1 != 0) {
+                        let v17 = if ((v1.0 >> 6) & 1 != 0) {
                             Some(r.read_varint()?)
                         } else {
                             None
                         };
-                        let v18 = if ((v1.0 >> 6) & 1 != 0) {
+                        let v18 = if ((v1.0 >> 7) & 1 != 0) {
                             Some(r.read_bool()?)
                         } else {
                             None
@@ -6286,7 +6286,7 @@ impl<const V: i32> Encode for PlayerInfo<V> {
             }
             match (&(*v1).listed, (((*self).action.0 >> 3) & 1 != 0)) {
                 (Some(v6), true) => {
-                    w.put_varint((*v6));
+                    w.put_bool((*v6));
                 }
                 (None, false) => {}
                 _ => {
@@ -6321,7 +6321,7 @@ impl<const V: i32> Encode for PlayerInfo<V> {
                     ));
                 }
             }
-            match (&(*v1).list_priority, (((*self).action.0 >> 7) & 1 != 0)) {
+            match (&(*v1).list_priority, (((*self).action.0 >> 6) & 1 != 0)) {
                 (Some(v10), true) => {
                     w.put_varint((*v10));
                 }
@@ -6332,7 +6332,7 @@ impl<const V: i32> Encode for PlayerInfo<V> {
                     ));
                 }
             }
-            match (&(*v1).show_hat, (((*self).action.0 >> 6) & 1 != 0)) {
+            match (&(*v1).show_hat, (((*self).action.0 >> 7) & 1 != 0)) {
                 (Some(v11), true) => {
                     w.put_bool((*v11));
                 }
@@ -6358,7 +6358,7 @@ impl<const V: i32> Generate for PlayerInfo<V> {
                 let v3 = g.count();
                 let mut v4 = Vec::with_capacity(v3.min(crate::codec::PREALLOC_LIMIT));
                 for _ in 0..v3 {
-                    v4.push({ let v5 = g.uuid();let v6 = if ((v1.0 >> 0) & 1 != 0) { Some(<crate::defs::p775::types::GameProfileNameProp as Generate>::generate(g)) } else { None };let v7 = if ((v1.0 >> 1) & 1 != 0) { Some(if g.bool() { Some({ let v8 = g.uuid();let v9 = { let v10 = g.i64();let v11 = g.bytes();let v12 = g.bytes(); crate::defs::p775::types::ChatSessionPublicKey { expire_time: v10, key_bytes: v11, key_signature: v12 } }; crate::defs::p775::types::ChatSession { uuid: v8, public_key: v9 } }) } else { None }) } else { None };let v13 = if ((v1.0 >> 2) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v14 = if ((v1.0 >> 3) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v15 = if ((v1.0 >> 4) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v16 = if ((v1.0 >> 5) & 1 != 0) { Some(if g.bool() { Some(g.anon_nbt()) } else { None }) } else { None };let v17 = if ((v1.0 >> 7) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v18 = if ((v1.0 >> 6) & 1 != 0) { Some(g.bool()) } else { None }; crate::defs::p775::play::clientbound::PlayerInfoData { uuid: v5, player: v6, chat_session: v7, gamemode: v13, listed: v14, latency: v15, display_name: v16, list_priority: v17, show_hat: v18 } });
+                    v4.push({ let v5 = g.uuid();let v6 = if ((v1.0 >> 0) & 1 != 0) { Some(<crate::defs::p775::types::GameProfileNameProp as Generate>::generate(g)) } else { None };let v7 = if ((v1.0 >> 1) & 1 != 0) { Some(if g.bool() { Some({ let v8 = g.uuid();let v9 = { let v10 = g.i64();let v11 = g.bytes();let v12 = g.bytes(); crate::defs::p775::types::ChatSessionPublicKey { expire_time: v10, key_bytes: v11, key_signature: v12 } }; crate::defs::p775::types::ChatSession { uuid: v8, public_key: v9 } }) } else { None }) } else { None };let v13 = if ((v1.0 >> 2) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v14 = if ((v1.0 >> 3) & 1 != 0) { Some(g.bool()) } else { None };let v15 = if ((v1.0 >> 4) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v16 = if ((v1.0 >> 5) & 1 != 0) { Some(if g.bool() { Some(g.anon_nbt()) } else { None }) } else { None };let v17 = if ((v1.0 >> 6) & 1 != 0) { Some((g.int_in(-2147483648, 2147483647, &[]) as i32)) } else { None };let v18 = if ((v1.0 >> 7) & 1 != 0) { Some(g.bool()) } else { None }; crate::defs::p775::play::clientbound::PlayerInfoData { uuid: v5, player: v6, chat_session: v7, gamemode: v13, listed: v14, latency: v15, display_name: v16, list_priority: v17, show_hat: v18 } });
                 }
                 v4
             };

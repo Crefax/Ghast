@@ -314,6 +314,20 @@ pub const PATCHES: &[Patch] = &[
         replace: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "entityType", "type": "varint"}, {"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
         why: "BeehiveBlockEntity.Occupant.STREAM_CODEC starts with TypedEntityData.streamCodec(EntityType.STREAM_CODEC): the entity type id, then the compound (found by the oracle HashedStack vectors)",
     },
+    Patch {
+        data_key: "26.1",
+        pointer: "/play/toClient/types/packet_player_info/1/0/type/1/flags",
+        expect: r#"["add_player", "initialize_chat", "update_game_mode", "update_listed", "update_latency", "update_display_name", "update_hat", "update_list_order"]"#,
+        replace: r#"["add_player", "initialize_chat", "update_game_mode", "update_listed", "update_latency", "update_display_name", "update_list_order", "update_hat"]"#,
+        why: "ClientboundPlayerInfoUpdatePacket.Action: UPDATE_LIST_ORDER is ordinal 6 and UPDATE_HAT ordinal 7 (readEnumSet maps bits by ordinal and the entries are read in ordinal order); minecraft-data swaps the two bits (found by the oracle entity tracker)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/play/toClient/types/packet_player_info/1/1/type/1/type/1/4/type/1/fields/true",
+        expect: r#""varint""#,
+        replace: r#""bool""#,
+        why: "ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED reads readBoolean, not a VarInt",
+    },
 ];
 
 /// Applies the [`PATCHES`] of one minecraft-data version.
