@@ -33,7 +33,34 @@ pub(crate) struct Sim26 {
     gate: modern::LoadGate,
     /// `use_effects` of the item in use (see [`Sim26::use_effects`]).
     use_effects: Option<(bool, f32)>,
+    /// Movement state beyond `player`: gliding, attached rockets (and later mechanics).
+    ext: modern::PlayerExt,
+    /// What the client knows about entities that drive `ext` (own id, rockets).
+    own: OwnEntity,
 }
+
+/// The entity packets the modern movement reads without entity tracking: the player's own
+/// shared flags and main arm, and firework rockets attached to it. Only those are decoded: a
+/// packet is decoded past its entity id only when the id is ours or a rocket's.
+#[derive(Debug, Default)]
+struct OwnEntity {
+    /// Our entity id (from the login packet).
+    id: i32,
+    /// The main arm per our own entity data (`DATA_PLAYER_MAIN_HAND`), else the client option.
+    main_arm_left: bool,
+    /// Firework rockets spawned but not (yet) known as attached to us: id, spawn position.
+    rockets: Vec<(i32, [f64; 3])>,
+}
+
+/// Entity data indices (26.1, read from the real classes): `Entity.DATA_SHARED_FLAGS_ID`,
+/// `FireworkRocketEntity.DATA_ATTACHED_TO_TARGET`, `Avatar.DATA_PLAYER_MAIN_HAND`.
+const DATA_SHARED_FLAGS: u8 = 0;
+const DATA_ATTACHED_TO_TARGET: u8 = 9;
+const DATA_PLAYER_MAIN_HAND: u8 = 15;
+/// `minecraft:firework_rocket` in the 26.1 entity type registry.
+const FIREWORK_ROCKET: i32 = 53;
+/// Rockets spawned near us that may still get attached (a bound against a flood of rockets).
+const MAX_PENDING_ROCKETS: usize = 32;
 
 /// The interaction ranges with vanilla's defaults and ranges.
 fn range_attributes() -> [modern::Attribute; 2] {
@@ -61,7 +88,81 @@ impl std::fmt::Debug for Sim26 {
     }
 }
 
+/// `LivingEntity.canGlideUsing` for some slot: an elytra-like item (`minecraft:glider`) in the
+/// slot its `equippable` component names whose next point of damage will not break it.
+/// PLACEHOLDER until ghast-inventory exposes the components: the item `elytra` in the chest.
+fn glider_equipped(inv: &ghast_inventory::Inventory) -> bool {
+    use ghast_inventory::Version;
+    inv.armor(1).is_some_and(|s| {
+        s.item_name(Version::V26_1) == Some("elytra")
+            && s.max_damage(Version::V26_1)
+                .is_none_or(|max| s.damage_value(Version::V26_1) < max - 1)
+    })
+}
+
 impl Sim26 {
+    /// `set_entity_data`, `add_entity`, `remove_entities` for our own entity and attached
+    /// rockets (everything else is read only up to the entity id, or the entity type).
+    fn own_entity_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        use ghast_protocol::v26_1::types::EntityMetadataEntryValue as V;
+        let mut r = ghast_protocol::Reader::new(&raw.body);
+        match raw.id {
+            cb::id::ENTITY_METADATA => {
+                let id = r.read_varint()?;
+                let rocket = self.own.rockets.iter().position(|&(rid, _)| rid == id);
+                if id != self.own.id && rocket.is_none() {
+                    return Ok(());
+                }
+                let p: cb::EntityMetadata = raw.decode_as()?;
+                for e in &p.metadata {
+                    match (&e.value, e.key) {
+                        (V::Byte(b), DATA_SHARED_FLAGS) if id == self.own.id => {
+                            self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                        }
+                        (V::HumanoidArm(a), DATA_PLAYER_MAIN_HAND) if id == self.own.id => {
+                            // HumanoidArm: LEFT 0, RIGHT 1.
+                            self.own.main_arm_left = a.0 == 0;
+                        }
+                        (V::OptionalUnsignedInt(v), DATA_ATTACHED_TO_TARGET) => {
+                            if let Some(k) = rocket
+                                && *v - 1 == self.own.id
+                            {
+                                let (rid, pos) = self.own.rockets.swap_remove(k);
+                                self.ext.attach_rocket(rid, pos);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            cb::id::SPAWN_ENTITY => {
+                let id = r.read_varint()?;
+                r.skip(16)?; // uuid
+                if r.read_varint()? != FIREWORK_ROCKET {
+                    return Ok(());
+                }
+                let p: cb::SpawnEntity = raw.decode_as()?;
+                if self.own.rockets.len() >= MAX_PENDING_ROCKETS {
+                    self.own.rockets.remove(0);
+                }
+                self.own.rockets.push((id, [p.x, p.y, p.z]));
+            }
+            cb::id::ENTITY_DESTROY => {
+                if self.own.rockets.is_empty() && self.ext.rocket_count() == 0 {
+                    return Ok(());
+                }
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                for id in p.entity_ids {
+                    self.own.rockets.retain(|&(rid, _)| rid != id);
+                    self.ext.remove_rocket(id);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// The `use_effects` of the stack in use (`LivingEntity.getUseItem`), set by the engine
     /// each tick from `ghast_inventory::v26_1::item_use`; the component default without one.
     fn use_effects(&self) -> modern::UseEffects {
@@ -74,9 +175,32 @@ impl Sim26 {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
     pub(crate) fn use_effects_now(&self) -> Option<(bool, f32)> {
         self.use_effects
+    }
+
+    /// The inventory-derived inputs of `ext` (see [`Sim::pre_tick`]): kept out of line, they
+    /// matter only on jump presses and while rockets are attached.
+    #[cold]
+    #[inline(never)]
+    fn ext_inputs(&mut self, inv: &ghast_inventory::Inventory, controls: Controls) {
+        // The glider is read only when a glide starts (a jump press in the air).
+        if controls.jump {
+            self.ext.glider = glider_equipped(inv);
+        }
+        // Entity.getHandHoldingItemAngle(FIREWORK_ROCKET): the main arm, or the other one when
+        // only the off hand holds a rocket. Read only while rockets are attached.
+        if self.ext.rocket_count() > 0 {
+            let rocket = |s: Option<&ghast_inventory::Stack>| {
+                s.is_some_and(|s| {
+                    ghast_inventory::v26_1::defaults(s.id())
+                        .is_some_and(|d| d.name == "firework_rocket")
+                })
+            };
+            let off_only = rocket(inv.offhand()) && !rocket(inv.held());
+            self.ext.rocket_arm_left = self.own.main_arm_left != off_only;
+        }
     }
 
     pub(crate) fn new() -> Self {
@@ -91,6 +215,8 @@ impl Sim26 {
             old_pos: [0.0; 3],
             entities: None,
             use_effects: None,
+            ext: modern::PlayerExt::default(),
+            own: OwnEntity::default(),
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -256,6 +382,16 @@ impl Sim for Sim26 {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         use ghast_protocol::v26_1::play::clientbound as cb;
         self.session.note(raw, cb::id::LOGIN, cb::id::RESPAWN);
+        match raw.id {
+            cb::id::ENTITY_METADATA | cb::id::SPAWN_ENTITY | cb::id::ENTITY_DESTROY => {
+                self.own_entity_packet(raw)?;
+            }
+            cb::id::LOGIN => {
+                self.own.id = raw.decode_as::<cb::Login>()?.entity_id;
+                self.own.rockets.clear();
+            }
+            _ => {}
+        }
         // The tracker also reads map_chunk / unload_chunk (which columns tick): the world gets
         // the same packets below.
         if let Some(t) = &mut self.entities
@@ -347,10 +483,23 @@ impl Sim for Sim26 {
             held.food = u.food.is_some();
             held.always_edible = u.food.is_some_and(|f| f.can_always_eat);
         }
+        // FireworkRocketItem.use: SUCCESS (the server spawns the boosting rocket) only while
+        // gliding; otherwise PASS.
+        held.swing_on_use = self.ext.fall_flying
+            && ghast_inventory::v26_1::defaults(stack.id())
+                .is_some_and(|d| d.name == "firework_rocket");
         held
     }
 
-    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
+    fn pre_tick(
+        &mut self,
+        inv: &ghast_inventory::Inventory,
+        using: Option<(bool, u16)>,
+        controls: Controls,
+    ) -> bool {
+        if controls.jump || self.ext.rocket_count() > 0 {
+            self.ext_inputs(inv, controls);
+        }
         self.use_effects = None;
         let Some((off, id)) = using else {
             return true;
@@ -363,6 +512,34 @@ impl Sim for Sim26 {
         self.use_effects =
             ghast_inventory::v26_1::item_use(s).map(|u| (u.can_sprint, u.speed_multiplier));
         true
+    }
+
+    fn gliding(&self) -> bool {
+        self.ext.fall_flying
+    }
+
+    #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_modern(&mut self, p: modern::PlayerState, x: modern::PlayerExt) {
+        let level = self.player.level;
+        self.player = p;
+        self.player.level = level;
+        self.ext = x;
+        self.old_pos = p.pos;
+        self.gate = modern::LoadGate::loaded();
+    }
+
+    #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_shared_flags(&self) -> u8 {
+        self.ext.shared_flags(&self.player)
+    }
+
+    #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        self.own.id = id;
+    }
+
+    fn set_main_arm_left(&mut self, left: bool) {
+        self.own.main_arm_left = left;
     }
 
     fn drop_level(&mut self) {
@@ -385,6 +562,8 @@ impl Sim for Sim26 {
         let food = self.player.food_level;
         let level = self.player.level;
         self.player = modern::PlayerState::new([0.0; 3], 0.0, 0.0);
+        // A new LocalPlayer: not gliding, no rockets attached.
+        self.ext = modern::PlayerExt::default();
         self.player.abilities = abilities;
         self.player.food_level = food;
         self.player.level = level;
@@ -549,7 +728,14 @@ impl Sim for Sim26 {
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
-        self.world.packet_ids().collect()
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        // Our own entity data and attached rockets (gliding), decoded only when they concern us.
+        let own = [
+            cb::id::ENTITY_METADATA,
+            cb::id::SPAWN_ENTITY,
+            cb::id::ENTITY_DESTROY,
+        ];
+        self.world.packet_ids().chain(own).collect()
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {
@@ -711,7 +897,13 @@ impl Sim for Sim26 {
         let view = self
             .world
             .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
-        modern::tick::<V26_1, _>(p, &input, &view, &mut self.packets);
+        if self.ext.fall_flying || self.ext.glider || self.ext.rocket_count() > 0 {
+            modern::tick_ext::<V26_1, _>(p, &mut self.ext, &input, &view, &mut self.packets);
+        } else {
+            // Nothing of the extension state can act (no glide, no glider to start one, no
+            // rocket): the plain tick, which is tick_ext with a default state, folded.
+            modern::tick::<V26_1, _>(p, &input, &view, &mut self.packets);
+        }
         push_packets(&self.packets, entity_id, out);
         sync_pose_26(pose, &self.player);
         self.world.tick();

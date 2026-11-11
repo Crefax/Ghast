@@ -622,6 +622,8 @@ pub enum EntityAction {
     StartSprinting,
     /// Stop sprinting.
     StopSprinting,
+    /// Start gliding with an elytra (1.9+ `START_FALL_FLYING`; ghast sends it on 26.1).
+    StartFallFlying,
 }
 
 /// The one movement packet of a tick.

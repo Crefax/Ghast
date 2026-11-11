@@ -464,6 +464,7 @@ fn engine_text(o: &Outbound) -> Option<String> {
                 A::StopSneaking => "STOP_SNEAKING",
                 A::StartSprinting => "START_SPRINTING",
                 A::StopSprinting => "STOP_SPRINTING",
+                A::StartFallFlying => "START_FALL_FLYING",
             };
             format!("C0B {a}")
         }

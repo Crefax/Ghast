@@ -46,6 +46,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![cfg_attr(test, recursion_limit = "256")]
 #![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
 // Without a version feature the client compiles (every connect fails with
 // `ClientError::VersionNotEnabled`) but the per-version machinery is unused.
@@ -74,6 +75,19 @@ mod error;
 pub mod hands;
 mod interest;
 pub mod movement;
+/// ghast-physics' oracle golden readers (26.1 player state from a golden record), shared by the
+/// engine replays of physics goldens.
+#[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+#[path = "../../ghast-physics/tests/common/mod.rs"]
+#[allow(
+    clippy::all,
+    dead_code,
+    unused_imports,
+    unexpected_cfgs,
+    unreachable_pub,
+    missing_docs
+)]
+mod phys_golden;
 #[cfg(any(feature = "v1_8", feature = "v1_16_5"))]
 mod record;
 pub mod rotation;

@@ -799,6 +799,8 @@ impl<S: Sim> Engine<S> {
             Inbound::KeepAlive(id) => c.out.push(Outbound::KeepAlive(id)),
             Inbound::JoinGame(j) => {
                 c.entity_id = j.entity_id;
+                // LocalPlayer's main arm comes from the client option.
+                sim.set_main_arm_left(c.opts.settings.main_hand == 0);
                 c.game_mode = j.game_mode;
                 c.respawn_screen = j.respawn_screen;
                 // A join always creates a new client world (the world itself was cleared by
@@ -1370,8 +1372,9 @@ impl<S: Sim> Engine<S> {
             c.aimed = false;
         }
         let first = c.out.len();
-        // 26.1 updatingUsingItem (the other versions' sims do nothing here).
-        if !self.sim.update_use(&c.inv, c.hands.use_item()) {
+        // 26.1 per-tick inputs: updatingUsingItem, the glider (the other versions' sims do
+        // nothing here).
+        if !self.sim.pre_tick(&c.inv, c.hands.use_item(), c.controls) {
             c.hands.stop_using();
         }
         let using = c.hands.using_item();
@@ -2065,6 +2068,23 @@ impl TickContext<'_> {
         self.core.hands.using_item()
     }
 
+    /// Gliding with an elytra (26.1; shared flag 7: set by the client when a glide starts,
+    /// cleared by the server on landing, in water or when the elytra breaks).
+    #[must_use]
+    pub fn is_gliding(&self) -> bool {
+        self.world.gliding()
+    }
+
+    /// Starts gliding the way a player does (26.1): presses jump for this tick (the controls'
+    /// `jump`, as [`TickContext::set_controls`] would; release it on the next tick). The client
+    /// starts a glide on a fresh jump press in the air with an elytra equipped (not on the
+    /// ground, not flying, not in water, not on a climbable): jump must have been released on the
+    /// tick before (a held key is not a press). Nothing happens when those conditions do not
+    /// hold.
+    pub fn start_gliding(&mut self) {
+        self.core.controls.jump = true;
+    }
+
     /// The version facts of an item stack (tool speeds, block item, food, usable), as the
     /// hands use them for the held stack. `None` for ids outside the item id range.
     ///
@@ -2609,6 +2629,401 @@ mod tests {
         assert_eq!(look(&mut e), (None, None));
     }
 
+    /// The oracle's elytra cases (`tests/golden/26.1/elytra.jsonl.gz`) through the whole engine:
+    /// the inbound events as the packets a server sends (own shared flags and firework rockets as
+    /// `set_entity_data` / `add_entity` / `remove_entities`, the chest slot as a window 0 slot),
+    /// the keys from the behaviour, the oracle's mouse; every movement, `entity_action` and
+    /// `player_input` packet must equal the real client's.
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn elytra_matches_the_oracle_26_1() {
+        use crate::phys_golden::v261::{ext_of, player_of};
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        use ghast_protocol::v26_1::types::{
+            EntityMetadataEntry, EntityMetadataEntryType as T, EntityMetadataEntryValue as V,
+        };
+        use serde_json::Value;
+        use std::io::BufRead;
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/golden/26.1/elytra.jsonl.gz"
+        );
+        let f = std::fs::File::open(path).unwrap();
+        let lines: Vec<Value> = std::io::BufReader::new(flate2::read::GzDecoder::new(f))
+            .lines()
+            .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+            .collect();
+        let f64v =
+            |v: &Value| f64::from_bits(u64::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        let f32v =
+            |v: &Value| f32::from_bits(u32::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        // Packet body as the generated encoder writes it.
+        fn body<P: ghast_protocol::Packet + ghast_protocol::Encode>(p: &P) -> bytes::Bytes {
+            let mut enc = ghast_protocol::FrameEncoder::new();
+            enc.write_packet(p).unwrap();
+            let out = enc.out_mut().split().freeze();
+            let mut r = &out[..];
+            let skip_varint = |r: &mut &[u8]| {
+                while r[0] & 0x80 != 0 {
+                    *r = &r[1..];
+                }
+                *r = &r[1..];
+            };
+            skip_varint(&mut r); // length
+            skip_varint(&mut r); // id
+            bytes::Bytes::copy_from_slice(r)
+        }
+        let metadata = |id: i32, key: u8, ty: T, value: V| RawPacket {
+            id: cb::id::ENTITY_METADATA,
+            body: body(&cb::EntityMetadata {
+                entity_id: id,
+                metadata: vec![EntityMetadataEntry {
+                    key,
+                    r#type: ty,
+                    value,
+                }],
+            }),
+        };
+        let key_name = |o: &Outbound| -> Option<Value> {
+            Some(match *o {
+                Outbound::Move(MovePacket::Position {
+                    pos,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "position",
+                        [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()],
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::PositionLook {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "position_look",
+                        [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()],
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Look {
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "look",
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Flying {
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!(["flying", on_ground, horizontal_collision])
+                }
+                Outbound::EntityAction { action, .. } => serde_json::json!([
+                    "entity_action",
+                    match action {
+                        EntityAction::StartSprinting => "start_sprinting",
+                        EntityAction::StopSprinting => "stop_sprinting",
+                        EntityAction::StartFallFlying => "start_fall_flying",
+                        _ => "other",
+                    }
+                ]),
+                Outbound::UseItem { off_hand, .. } => {
+                    serde_json::json!(["use_item", i32::from(off_hand)])
+                }
+                Outbound::Swing => serde_json::json!(["arm_animation", 0]),
+                Outbound::SwingOffHand => serde_json::json!(["arm_animation", 1]),
+                Outbound::PlayerInput(c) => serde_json::json!([
+                    "player_input",
+                    [
+                        c.forward, c.back, c.left, c.right, c.jump, c.sneak, c.sprint
+                    ]
+                ]),
+                _ => return None,
+            })
+        };
+        let golden = |p: &Value| -> Option<Value> {
+            let v3 = |v: &Value| {
+                [
+                    f64v(&v[0]).to_bits(),
+                    f64v(&v[1]).to_bits(),
+                    f64v(&v[2]).to_bits(),
+                ]
+            };
+            let (og, hc) = (&p["on_ground"], &p["horizontal_collision"]);
+            Some(match p["name"].as_str().unwrap() {
+                "position" => serde_json::json!(["position", v3(&p["pos"]), og, hc]),
+                "position_look" => serde_json::json!([
+                    "position_look",
+                    v3(&p["pos"]),
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "look" => serde_json::json!([
+                    "look",
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "flying" => serde_json::json!(["flying", og, hc]),
+                "entity_action" => serde_json::json!(["entity_action", p["action_name"]]),
+                "use_item" => serde_json::json!(["use_item", p["hand"]]),
+                "arm_animation" => serde_json::json!(["arm_animation", p["hand"]]),
+                "player_input" => {
+                    let i = &p["input"];
+                    serde_json::json!([
+                        "player_input",
+                        [
+                            i["forward"],
+                            i["backward"],
+                            i["left"],
+                            i["right"],
+                            i["jump"],
+                            i["shift"],
+                            i["sprint"]
+                        ]
+                    ])
+                }
+                _ => return None,
+            })
+        };
+        /// Holds the golden keys for the tick.
+        struct Keys(Controls, bool);
+        impl Behavior for Keys {
+            fn name(&self) -> &str {
+                "elytra-replay"
+            }
+            fn tick(&mut self, ctx: &mut TickContext<'_>) {
+                ctx.set_controls(self.0);
+                ctx.set_buttons(crate::Buttons {
+                    left: false,
+                    right: self.1,
+                });
+            }
+        }
+        let elytra = ghast_inventory::v26_1::item_id("elytra").unwrap();
+        // Hand-written cases with the events and setup this replay drives.
+        let wanted = [
+            "elytra_start_glide",
+            "elytra_jump_from_ground",
+            "elytra_no_chest",
+            "elytra_landing",
+            "elytra_steep",
+            "elytra_fireworks",
+            "elytra_firework_not_gliding",
+            "elytra_server_flags",
+            "elytra_setup_gliding",
+            "elytra_unequip",
+            "elytra_rocket_chunk_edge",
+            "elytra_rocket_chunk_edge_left",
+            "elytra_firework_use",
+        ];
+        let (mut cases, mut ticks_done, mut packets) = (0, 0, 0);
+        let mut i = 0;
+        while i < lines.len() {
+            let sc = &lines[i];
+            let name = sc["name"].as_str().unwrap().to_owned();
+            let mut ticks = Vec::new();
+            i += 1;
+            while i < lines.len() && lines[i]["type"] == "tick" {
+                ticks.push(&lines[i]);
+                i += 1;
+            }
+            if !wanted.contains(&name.as_str()) {
+                continue;
+            }
+            cases += 1;
+            let setup = &sc["setup"];
+            let mut o = opts(GameVersion::V26_1);
+            o.inventory = ghast_inventory::Version::V26_1;
+            let ext = setup.get("ext");
+            if ext
+                .and_then(|x| x.get("left_handed"))
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                o.settings.main_hand = 0;
+            }
+            let mut e: Engine<Box<dyn Sim>> =
+                Engine::new(o, Box::new(crate::sim::Sim26::test_overworld()));
+            e.handle(Inbound::JoinGame(JoinGame {
+                entity_id: 7,
+                game_mode: GameMode::Survival,
+                dimension: "0".into(),
+                hardcore: false,
+                dimension_nbt: None,
+                respawn_screen: true,
+            }));
+            // Our entity id for the own-entity packets (the login packet's).
+            e.sim.test_set_own_id(7);
+            for r in sc["loaded_chunks"].as_array().unwrap() {
+                let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
+                for x in r[0]..=r[2] {
+                    for z in r[1]..=r[3] {
+                        load(&mut e, x, z);
+                    }
+                }
+            }
+            for fill in sc["fills"].as_array().unwrap() {
+                assert_eq!(
+                    sc["states"][fill[6].as_i64().unwrap().to_string()],
+                    "minecraft:stone",
+                    "{name}"
+                );
+                assert_eq!(
+                    (fill[1].as_i64(), fill[4].as_i64()),
+                    (Some(63), Some(63)),
+                    "{name}"
+                );
+            }
+            if let Some(h) = ext.and_then(|x| x.get("hand")).and_then(Value::as_str) {
+                let id = ghast_inventory::v26_1::item_id(h).unwrap();
+                e.inventory_mut()
+                    .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(id, 16, 0)));
+            }
+            if ext.and_then(|x| x.get("chest")).and_then(Value::as_str) == Some("elytra") {
+                assert!(ext.unwrap().get("chest_damage").is_none(), "{name}");
+                e.inventory_mut().on_set_slot(
+                    0,
+                    6,
+                    Some(ghast_inventory::Stack::new(elytra, 1, 0)),
+                );
+            }
+            e.handle(Inbound::Teleport(Teleport {
+                x: f64v(&setup["pos"][0]),
+                y: f64v(&setup["pos"][1]),
+                z: f64v(&setup["pos"][2]),
+                yaw: f32v(&setup["yaw"]),
+                pitch: f32v(&setup["pitch"]),
+                teleport_id: None,
+                ..Default::default()
+            }));
+            let p = player_of(sc, ticks[0]);
+            e.sim.test_set_modern(p, ext_of(sc, ticks[0]));
+            e.core.pose.pos = Vec3::new(p.pos[0], p.pos[1], p.pos[2]);
+            e.core.pose.yaw = p.yaw;
+            e.core.pose.pitch = p.pitch;
+            e.core.level_load_started = true;
+            e.core.client_loaded = true;
+            e.core.ready = true;
+            e.outbound().clear();
+            let t0 = Instant::now();
+            for (k, rec) in ticks.iter().enumerate().skip(1) {
+                let input = &rec["input"];
+                for ev in input["events"].as_array().into_iter().flatten() {
+                    match ev["type"].as_str().unwrap() {
+                        "shared_flags" => {
+                            let cur = e.sim.test_shared_flags();
+                            let set = ev["set"].as_u64().unwrap() as u8;
+                            let clear = ev["clear"].as_u64().unwrap() as u8;
+                            let next = (cur & !clear) | set;
+                            e.sim
+                                .world_packet(&metadata(7, 0, T::BYTE, V::Byte(next as i8)))
+                                .unwrap();
+                        }
+                        "firework" => {
+                            let id = ev["id"].as_i64().unwrap() as i32;
+                            let pos = e.core.pose.pos;
+                            let spawn = RawPacket {
+                                id: cb::id::SPAWN_ENTITY,
+                                body: body(&cb::SpawnEntity {
+                                    entity_id: id,
+                                    object_uuid: uuid::Uuid::from_u64_pair(0x6669_7265, id as u64),
+                                    r#type: 53,
+                                    x: pos.x,
+                                    y: pos.y,
+                                    z: pos.z,
+                                    velocity: ghast_protocol::types::LpVec3::ZERO,
+                                    pitch: 0,
+                                    yaw: 0,
+                                    head_pitch: 0,
+                                    object_data: 0,
+                                }),
+                            };
+                            e.sim.world_packet(&spawn).unwrap();
+                            e.sim
+                                .world_packet(&metadata(
+                                    id,
+                                    9,
+                                    T::OPTIONAL_UNSIGNED_INT,
+                                    V::OptionalUnsignedInt(8),
+                                ))
+                                .unwrap();
+                        }
+                        "remove_entity" => {
+                            let raw = RawPacket {
+                                id: cb::id::ENTITY_DESTROY,
+                                body: body(&cb::EntityDestroy {
+                                    entity_ids: vec![ev["id"].as_i64().unwrap() as i32],
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "equipment" => {
+                            assert_eq!(ev["slot"], "chest");
+                            let item = (ev["item"] == "elytra")
+                                .then(|| ghast_inventory::Stack::new(elytra, 1, 0));
+                            e.inventory_mut().on_set_slot(0, 6, item);
+                        }
+                        other => panic!("{name}: event {other}"),
+                    }
+                }
+                let keys = input["keys"].as_str().unwrap();
+                let has = |k: &str| keys.split(',').any(|n| n == k);
+                let mut b = Keys(
+                    Controls {
+                        forward: has("forward"),
+                        back: has("back"),
+                        left: has("left"),
+                        right: has("right"),
+                        jump: has("jump"),
+                        sneak: has("sneak"),
+                        sprint: has("sprint"),
+                    },
+                    has("use"),
+                );
+                e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
+                e.note_inbound(t0);
+                e.tick(&mut b, t0);
+                let got: Vec<Value> = std::mem::take(e.outbound())
+                    .iter()
+                    .filter_map(&key_name)
+                    .collect();
+                let want: Vec<Value> = rec["packets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(&golden)
+                    .collect();
+                assert_eq!(got, want, "{name} tick {k}");
+                packets += want.len();
+                ticks_done += 1;
+            }
+        }
+        eprintln!(
+            "elytra through the engine: {cases} cases, {ticks_done} ticks, {packets} packets identical"
+        );
+        assert_eq!(cases, wanted.len());
+    }
+
     /// 26.1 item use from the stack's components (`item_use`): which items have a use state,
     /// the effects fed to the movement while using, the stop when the item changes.
     #[test]
@@ -2630,14 +3045,14 @@ mod tests {
         let shield = u16::try_from(id("shield")).unwrap();
         assert!(facts(&inv, &sim).usable && !facts(&inv, &sim).food);
         // While using: the stack's use_effects (vanilla default: no sprint, x0.2) ...
-        assert!(sim.update_use(&inv, Some((false, shield))));
+        assert!(sim.pre_tick(&inv, Some((false, shield)), Controls::NONE));
         assert_eq!(sim.use_effects_now(), Some((false, 0.2)));
-        assert!(sim.update_use(&inv, None));
+        assert!(sim.pre_tick(&inv, None, Controls::NONE));
         assert_eq!(sim.use_effects_now(), None);
         // ... and the use stops when the hand no longer holds that item.
         inv.on_set_slot(0, 36, Some(Stack::new(id("stick"), 1, 0)));
-        assert!(!sim.update_use(&inv, Some((false, shield))));
-        assert!(!sim.update_use(&inv, Some((true, shield))));
+        assert!(!sim.pre_tick(&inv, Some((false, shield)), Controls::NONE));
+        assert!(!sim.pre_tick(&inv, Some((true, shield)), Controls::NONE));
     }
 
     /// 26.1: the same through the 26.1 tracker and `pick::v26_1::pick_target` (entity range 3,

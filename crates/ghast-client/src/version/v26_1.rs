@@ -1108,6 +1108,7 @@ impl ClientVersion for V26_1 {
                 let action_id = match action {
                     EntityAction::StartSprinting => sb::EntityActionActionId::START_SPRINTING,
                     EntityAction::StopSprinting => sb::EntityActionActionId::STOP_SPRINTING,
+                    EntityAction::StartFallFlying => sb::EntityActionActionId::START_FALL_FLYING,
                     // Sneaking is part of `player_input` since 1.21.2.
                     _ => return Ok(()),
                 };

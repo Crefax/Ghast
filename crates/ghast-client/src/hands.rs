@@ -105,6 +105,9 @@ pub struct HeldItem {
     /// 1.20.5+: the item id for the exact destroy progress (`ghast_data::v26_1`).
     #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
     pub(crate) modern_item: Option<u16>,
+    /// Using the item succeeds on the client and swings the arm (26.1: a firework rocket while
+    /// gliding, `FireworkRocketItem.use`).
+    pub(crate) swing_on_use: bool,
 }
 
 impl BlockQuery {
@@ -192,6 +195,7 @@ impl HeldItem {
     pub const fn new(id: u16) -> Self {
         HeldItem {
             modern_item: None,
+            swing_on_use: false,
             id,
             count: 1,
             efficiency: 0,
@@ -1164,6 +1168,11 @@ impl Hands {
                     held: stack,
                     off_hand,
                 });
+                if h.swing_on_use {
+                    // InteractionResult.SUCCESS with a client swing: the use ends here.
+                    io.out.push(swing);
+                    return;
+                }
                 if h.usable && (!h.food || h.always_edible || io.food < 20) {
                     self.start_using(off_hand, h.id);
                     return;

@@ -216,13 +216,49 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = stack;
         held
     }
-    /// Once per tick before the movement (26.1 `updatingUsingItem`): `using` is the use in
-    /// progress (off hand, item id); the sim takes the used stack's `use_effects` for the
-    /// movement. Returns `false` when that hand no longer holds the item (the use stops).
+    /// Once per tick before the movement: the inputs of the modern movement that come from the
+    /// inventory and the keys (26.1: the used stack's `use_effects`, the equipped glider when
+    /// jump is pressed, the hand that holds rockets). `using` is the use in progress (off hand,
+    /// item id). Returns `false` when that hand no longer holds the item (`updatingUsingItem`:
+    /// the use stops). New mechanics read their per-tick inputs here too.
     #[inline(always)]
-    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
-        let _ = (inv, using);
+    fn pre_tick(
+        &mut self,
+        inv: &ghast_inventory::Inventory,
+        using: Option<(bool, u16)>,
+        controls: Controls,
+    ) -> bool {
+        let _ = (inv, using, controls);
         true
+    }
+    /// Test hook: puts the 26.1 player (and its extension state) in place, level loaded.
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_modern(
+        &mut self,
+        p: ghast_physics::modern::PlayerState,
+        x: ghast_physics::modern::PlayerExt,
+    ) {
+        let _ = (p, x);
+    }
+    /// Test hook: the 26.1 player's shared flags byte.
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_shared_flags(&self) -> u8 {
+        0
+    }
+    /// Test hook: our entity id for the own-entity packets.
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        let _ = id;
+    }
+    /// The player glides (26.1 elytra, shared flag 7).
+    #[inline(always)]
+    fn gliding(&self) -> bool {
+        false
+    }
+    /// The client's main arm setting (left: `true`) for the parts of movement that read it.
+    #[inline(always)]
+    fn set_main_arm_left(&mut self, left: bool) {
+        let _ = left;
     }
     /// Play → configuration (`start_configuration`): vanilla's `clearClientLevel` drops the
     /// level (chunks, entities) and the player until the next join.
@@ -608,6 +644,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         DataSet::V1_8 => {
             HeldItem {
                 modern_item: None,
+                swing_on_use: false,
                 id,
                 count,
                 efficiency,
@@ -622,6 +659,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         #[cfg(feature = "v1_12_2")]
         DataSet::V1_12 => HeldItem {
             modern_item: None,
+            swing_on_use: false,
             id,
             count,
             efficiency,
@@ -635,6 +673,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         #[cfg(feature = "v1_16_5")]
         DataSet::V1_16_5 => HeldItem {
             modern_item: None,
+            swing_on_use: false,
             id,
             count,
             efficiency,
@@ -690,12 +729,14 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
                 // The modern destroy progress reads the item itself.
                 tool_speed: None,
                 modern_item: item.map(|_| id),
+                swing_on_use: false,
             }
         }
         // A data set this build does not include: an item without known facts.
         #[allow(unreachable_patterns)]
         _ => HeldItem {
             modern_item: None,
+            swing_on_use: false,
             id,
             count,
             efficiency,
@@ -747,6 +788,7 @@ pub(super) fn push_packets(
             P::StopSneaking => action(EntityAction::StopSneaking),
             P::StartSprinting => action(EntityAction::StartSprinting),
             P::StopSprinting => action(EntityAction::StopSprinting),
+            P::StartFallFlying => action(EntityAction::StartFallFlying),
             P::Abilities(a) => Outbound::Abilities {
                 flags: abilities_flags(&a),
                 flying_speed: a.fly_speed,
@@ -1099,8 +1141,35 @@ impl Sim for Box<dyn Sim> {
     fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
         (**self).item_use_facts(stack, held)
     }
-    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
-        (**self).update_use(inv, using)
+    fn pre_tick(
+        &mut self,
+        inv: &ghast_inventory::Inventory,
+        using: Option<(bool, u16)>,
+        controls: Controls,
+    ) -> bool {
+        (**self).pre_tick(inv, using, controls)
+    }
+    fn gliding(&self) -> bool {
+        (**self).gliding()
+    }
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_modern(
+        &mut self,
+        p: ghast_physics::modern::PlayerState,
+        x: ghast_physics::modern::PlayerExt,
+    ) {
+        (**self).test_set_modern(p, x);
+    }
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_shared_flags(&self) -> u8 {
+        (**self).test_shared_flags()
+    }
+    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        (**self).test_set_own_id(id);
+    }
+    fn set_main_arm_left(&mut self, left: bool) {
+        (**self).set_main_arm_left(left);
     }
     fn crosshair_now(
         &self,

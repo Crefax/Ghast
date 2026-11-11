@@ -363,6 +363,8 @@ impl ClientVersion for V1_16_5 {
                     EntityAction::StopSneaking => sb::EntityActionActionId::STOP_SNEAKING,
                     EntityAction::StartSprinting => sb::EntityActionActionId::START_SPRINTING,
                     EntityAction::StopSprinting => sb::EntityActionActionId::STOP_SPRINTING,
+                    // Only the 26.1 elytra start sends it.
+                    EntityAction::StartFallFlying => return Ok(()),
                 };
                 enc.write_packet(&sb::EntityAction {
                     entity_id: *entity_id,
