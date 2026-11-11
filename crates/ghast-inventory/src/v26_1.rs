@@ -138,6 +138,8 @@ pub struct ItemDefaults {
     pub(crate) dye: u8,
     /// `equippable.allowed_entities` (`#tag` or entity type names; empty when absent).
     pub(crate) allowed: &'static str,
+    /// `glider` present (the elytra).
+    pub(crate) glider: bool,
 }
 
 /// Default components of item `id`.
@@ -290,6 +292,58 @@ pub(crate) fn equip(s: &Stack) -> Result<Equip, ()> {
     }
 }
 
+/// The equipment slot a stack's `equippable` component names (the item default or the patched
+/// value; `allowed_entities` is not looked at), `None` without the component.
+fn equippable_slot(s: &Stack) -> Option<Equip> {
+    match patched(s, component::EQUIPPABLE) {
+        Some(Some(b)) => equip_of_slot(Reader::new(&b).read_varint().ok()?),
+        Some(None) => None,
+        None => defaults(s.id)
+            .map(|d| d.equip)
+            .filter(|e| *e != Equip::None),
+    }
+}
+
+fn equip_of_slot(slot: i32) -> Option<Equip> {
+    Some(match slot {
+        0 => Equip::MainHand,
+        1 => Equip::Feet,
+        2 => Equip::Legs,
+        3 => Equip::Chest,
+        4 => Equip::Head,
+        5 => Equip::Offhand,
+        6 => Equip::Body,
+        7 => Equip::Saddle,
+        _ => return None,
+    })
+}
+
+/// The slot a glider works from: `Some(slot)` when the stack has the `glider` component (the
+/// item default or patched in, not patched out) and an `equippable` component naming `slot`;
+/// `None` otherwise. Durability is not looked at: see [`can_glide_using`].
+#[must_use]
+pub fn glider(s: &Stack) -> Option<Equip> {
+    let d = defaults(s.id);
+    if !has_component(s, component::GLIDER, d.is_some_and(|d| d.glider)) {
+        return None;
+    }
+    equippable_slot(s)
+}
+
+/// `ItemStack.nextDamageWillBreak()`: damageable (`max_damage` and `damage` present, not
+/// `unbreakable`) and `damage >= max_damage - 1`.
+#[must_use]
+pub fn next_damage_will_break(s: &Stack) -> bool {
+    is_damageable(s) && damage_value(s) >= max_damage(s).unwrap_or(0) - 1
+}
+
+/// `LivingEntity.canGlideUsing(stack, slot)`: the stack is a glider equipped in `slot` (see
+/// [`glider`]) and its next damage will not break it.
+#[must_use]
+pub fn can_glide_using(s: &Stack, slot: Equip) -> bool {
+    glider(s) == Some(slot) && !next_damage_will_break(s)
+}
+
 /// The slot of a patched `equippable` (`Equippable.STREAM_CODEC`: slot, equip sound, asset id,
 /// camera overlay, allowed entities, ...); `None` when `allowed_entities` is set or the bytes
 /// do not read.
@@ -312,17 +366,7 @@ fn patched_equip(b: &Bytes) -> Option<Equip> {
     if r.read_bool().ok()? {
         return None;
     }
-    Some(match slot {
-        0 => Equip::MainHand,
-        1 => Equip::Feet,
-        2 => Equip::Legs,
-        3 => Equip::Chest,
-        4 => Equip::Head,
-        5 => Equip::Offhand,
-        6 => Equip::Body,
-        7 => Equip::Saddle,
-        _ => return None,
-    })
+    equip_of_slot(slot)
 }
 
 /// Whether the stack has the `bundle_contents` component (a bundle: some clicks with it run
@@ -971,6 +1015,48 @@ mod tests {
         assert_eq!(window_kind(2), Some(WindowKind::Chest { rows: 3 }));
         assert_eq!(window_kind(7), Some(WindowKind::Crafter));
         assert_eq!(window_kind(20), Some(WindowKind::ShulkerBox));
+    }
+
+    #[test]
+    fn gliders() {
+        let with = |name: &str, added: &[(i32, &[u8])], removed: &[i32]| {
+            let mut st = Stack::new(item_id(name).unwrap(), 1, 0);
+            if !added.is_empty() || !removed.is_empty() {
+                let p = ComponentPatch::from_parts(added, removed);
+                st.data = ItemData::Components(Box::new(p));
+            }
+            st
+        };
+        let elytra = with("elytra", &[], &[]);
+        assert_eq!(glider(&elytra), Some(Equip::Chest));
+        assert!(can_glide_using(&elytra, Equip::Chest));
+        assert!(!can_glide_using(&elytra, Equip::Head));
+        // 432 durability: damage 430 still glides, 431 (next damage breaks it) does not
+        let worn = with("elytra", &[(component::DAMAGE, &[0xae, 0x03])], &[]);
+        assert_eq!(damage_value(&worn), 430);
+        assert!(can_glide_using(&worn, Equip::Chest));
+        let broken = with("elytra", &[(component::DAMAGE, &[0xaf, 0x03])], &[]);
+        assert!(next_damage_will_break(&broken));
+        assert!(!can_glide_using(&broken, Equip::Chest));
+        let unbreakable = with(
+            "elytra",
+            &[
+                (component::DAMAGE, &[0xaf, 0x03]),
+                (component::UNBREAKABLE, &[]),
+            ],
+            &[],
+        );
+        assert!(can_glide_using(&unbreakable, Equip::Chest));
+        // glider patched out / in; no equippable, no glider slot
+        assert_eq!(glider(&with("elytra", &[], &[component::GLIDER])), None);
+        assert_eq!(glider(&with("elytra", &[], &[component::EQUIPPABLE])), None);
+        let chestplate = with("diamond_chestplate", &[(component::GLIDER, &[])], &[]);
+        assert_eq!(glider(&chestplate), Some(Equip::Chest));
+        assert_eq!(glider(&with("diamond_chestplate", &[], &[])), None);
+        assert_eq!(
+            glider(&with("stone", &[(component::GLIDER, &[])], &[])),
+            None
+        );
     }
 
     #[test]

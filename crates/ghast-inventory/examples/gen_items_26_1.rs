@@ -126,6 +126,7 @@ fn main() {
         let max_damage = c["minecraft:max_damage"].as_u64().unwrap_or(0);
         let damage = c.get("minecraft:damage").is_some();
         let unbreakable = c.get("minecraft:unbreakable").is_some();
+        let glider = c.get("minecraft:glider").is_some();
         let equip = match c["minecraft:equippable"]
             .get("slot")
             .and_then(Value::as_str)
@@ -228,7 +229,7 @@ fn main() {
         let kinetic = c.get("minecraft:kinetic_weapon").is_some();
         let _ = writeln!(
             out,
-            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable: {repairable:?}, patterns: {patterns:?}, dye: {dye}, allowed: {allowed:?} }},",
+            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable: {repairable:?}, patterns: {patterns:?}, dye: {dye}, allowed: {allowed:?}, glider: {glider} }},",
             use_speed.to_bits()
         );
     }

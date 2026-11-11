@@ -65,6 +65,9 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - `v26_1::item_use(&Stack) -> Option<ItemUse>`: use animation and duration, `use_effects`
   (speed multiplier, can sprint), `consumable`, `food` of a 26.1 stack (checked against the
   real client's components in `hashed_stacks.jsonl.gz`).
+- `v26_1::{glider, can_glide_using, next_damage_will_break}`: the slot a glider (the `glider`
+  component, the elytra by default) works from and `LivingEntity.canGlideUsing` (not when the
+  next damage breaks it).
 - **26.1 creative inventory screen**: window 0 opened in creative mode sends what the real
   screen sends (`Outgoing::Creative(Vec<CreativePacket>)`: `set_creative_mode_slot` for the
   slots that differ from the last broadcast, drops as slot -1 with the arm swing; echoes of
