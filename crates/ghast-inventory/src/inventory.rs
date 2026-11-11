@@ -1034,6 +1034,18 @@ impl Inventory {
         &self.reg26
     }
 
+    /// 26.1: the name of enchantment registry id `id` as the server's `registry_data` keyed it
+    /// (`minecraft:sharpness`), from the registries set with
+    /// [`Inventory::set_registries_26_1`]; `None` for an unknown id.
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn enchantment_name_26_1(&self, id: i32) -> Option<&str> {
+        self.reg26
+            .enchantments()
+            .get(usize::try_from(id).ok()?)
+            .map(String::as_str)
+    }
+
     /// 26.1: the state id the next click of the current screen carries.
     #[must_use]
     pub fn state_id(&self) -> i32 {

@@ -745,3 +745,21 @@ fn creative_drops_are_throttled() {
     };
     assert_eq!(p.len(), 3, "{p:?}"); // swing, drop, the slot
 }
+
+#[test]
+fn enchantment_names_from_the_registries() {
+    let mut inv = Inventory::new(Version::V26_1).unwrap();
+    assert_eq!(inv.enchantment_name_26_1(0), None);
+    let mut reg = HashRegistries::default();
+    reg.add(
+        "minecraft:enchantment",
+        ["minecraft:aqua_affinity", "minecraft:bane_of_arthropods"],
+    );
+    inv.set_registries_26_1(reg);
+    assert_eq!(
+        inv.enchantment_name_26_1(1),
+        Some("minecraft:bane_of_arthropods")
+    );
+    assert_eq!(inv.enchantment_name_26_1(2), None);
+    assert_eq!(inv.enchantment_name_26_1(-1), None);
+}
