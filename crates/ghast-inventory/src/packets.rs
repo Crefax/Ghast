@@ -59,14 +59,12 @@ impl ClickPacket {
 }
 
 impl Outgoing {
-    /// The 1.8 serverbound packet.
-    ///
-    /// # Panics
-    /// For [`Outgoing::ContainerClick`], which only a 26.1 inventory produces.
+    /// The 1.8 serverbound packet (`None` for [`Outgoing::ContainerClick`], which only a 26.1
+    /// inventory produces).
     #[cfg(feature = "v1_8")]
     #[must_use]
-    pub fn to_v1_8(&self) -> sb8::ServerboundPlayPacket {
-        match self {
+    pub fn to_v1_8(&self) -> Option<sb8::ServerboundPlayPacket> {
+        Some(match self {
             Outgoing::Click(c) => sb8::ServerboundPlayPacket::WindowClick(c.to_v1_8()),
             Outgoing::Confirm { window_id, action } => {
                 sb8::ServerboundPlayPacket::Transaction(sb8::Transaction {
@@ -83,8 +81,8 @@ impl Outgoing {
                     payload: sb8::ClientCommandPayload(2),
                 })
             }
-            Outgoing::ContainerClick(_) => unreachable!("a 26.1 click on a 1.8 connection"),
-        }
+            Outgoing::ContainerClick(_) => return None,
+        })
     }
 
     /// The 1.12.2 serverbound packet (`None` for [`Outgoing::OpenInventory`], which 1.12 does

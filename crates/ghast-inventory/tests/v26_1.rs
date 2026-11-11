@@ -72,7 +72,7 @@ fn click_of(c: &sb::WindowClick) -> Click {
 /// Replays a live session: inbound packets in, the same clicks out; returns (clicks,
 /// unpredicted, outcomes).
 fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) {
-    let mut inv = Inventory::new(Version::V26_1);
+    let mut inv = Inventory::new(Version::V26_1).unwrap();
     // the sessions waited 400 - 700 ms after each click: one tick of silence settles it here
     inv.set_click_settle_ticks(1);
     let mut reg = HashRegistries::default();
@@ -166,8 +166,8 @@ fn component_hashes_session_replays() {
 
 #[test]
 fn lazy_and_generated_paths_agree_on_captured_items() {
-    let mut lazy = Inventory::new(Version::V26_1);
-    let mut typed = Inventory::new(Version::V26_1);
+    let mut lazy = Inventory::new(Version::V26_1).unwrap();
+    let mut typed = Inventory::new(Version::V26_1).unwrap();
     let mut seen_components = std::collections::BTreeSet::new();
     for (state, dir, raw) in records(CAPTURE) {
         if state != 4 || dir != 0 || !ghast_inventory::PACKET_IDS_26_1.contains(&raw.id) {
@@ -255,9 +255,15 @@ fn hashed_stacks_match_the_real_client() {
     use std::collections::BTreeMap;
     const VECTORS: &[u8] = include_bytes!("../../../tests/golden/26.1/hashed_stacks.jsonl.gz");
     let mut text = String::new();
-    flate2::read::GzDecoder::new(VECTORS).read_to_string(&mut text).unwrap();
+    flate2::read::GzDecoder::new(VECTORS)
+        .read_to_string(&mut text)
+        .unwrap();
     let unhex = |s: &str| -> Bytes {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect::<Vec<u8>>().into()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect::<Vec<u8>>()
+            .into()
     };
     let mut reg = HashRegistries::default();
     // per type: (exact, wrong, not hashed)
@@ -269,7 +275,12 @@ fn hashed_stacks_match_the_real_client() {
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
         match v["type"].as_str().unwrap() {
             "registry" => {
-                let names: Vec<&str> = v["entries"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+                let names: Vec<&str> = v["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.as_str().unwrap())
+                    .collect();
                 reg.add(v["name"].as_str().unwrap(), names);
             }
             "stack" => {
@@ -286,7 +297,9 @@ fn hashed_stacks_match_the_real_client() {
                         let mut bad = String::from("?");
                         for _ in 0..v["added"].as_array().unwrap().len() {
                             let ty = r.clone().read_varint().unwrap();
-                            if ghast_protocol::defs::p775::types::SlotComponent::skip(&mut r).is_err() {
+                            if ghast_protocol::defs::p775::types::SlotComponent::skip(&mut r)
+                                .is_err()
+                            {
                                 bad = COMPONENT_NAMES[ty as usize].to_string();
                                 break;
                             }
@@ -296,12 +309,23 @@ fn hashed_stacks_match_the_real_client() {
                     }
                 };
                 assert_eq!(s.id, v["item_id"].as_i64().unwrap() as i32);
-                let mut want_types: Vec<i32> = v["added"].as_array().unwrap().iter().map(|a| a["id"].as_i64().unwrap() as i32).collect();
+                let mut want_types: Vec<i32> = v["added"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|a| a["id"].as_i64().unwrap() as i32)
+                    .collect();
                 let mut got_types: Vec<i32> = s.components.iter().map(|(t, _)| t).collect();
                 want_types.sort();
                 got_types.sort();
-                if want_types != got_types || s.components.removed().count() != v["removed"].as_array().unwrap().len() {
-                    let wire_order: Vec<&str> = s.components.iter().map(|(t, _)| COMPONENT_NAMES.get(t as usize).copied().unwrap_or("?")).collect();
+                if want_types != got_types
+                    || s.components.removed().count() != v["removed"].as_array().unwrap().len()
+                {
+                    let wire_order: Vec<&str> = s
+                        .components
+                        .iter()
+                        .map(|(t, _)| COMPONENT_NAMES.get(t as usize).copied().unwrap_or("?"))
+                        .collect();
                     undecodable.push(format!("types differ: wire order read {wire_order:?}"));
                     continue;
                 }
@@ -348,12 +372,36 @@ fn hashed_stacks_match_the_real_client() {
     assert_eq!(stacks, 4000);
     undecodable.sort();
     undecodable.dedup();
-    assert!(undecodable.is_empty(), "stacks ghast cannot read: {undecodable:?}");
+    assert!(
+        undecodable.is_empty(),
+        "stacks ghast cannot read: {undecodable:?}"
+    );
     let name = |t: i32| COMPONENT_NAMES[t as usize];
-    let exact: Vec<&str> = per.iter().filter(|(_, c)| c[0] > 0 && c[1] == 0 && c[2] == 0).map(|(t, _)| name(*t)).collect();
-    let partial: Vec<String> = per.iter().filter(|(_, c)| c[0] > 0 && (c[1] > 0 || c[2] > 0)).map(|(t, c)| format!("{}:{c:?}", name(*t))).collect();
-    let wrong: Vec<String> = per.iter().filter(|(_, c)| c[1] > 0).map(|(t, c)| format!("{}:{c:?}", name(*t))).collect();
-    let none: Vec<&str> = per.iter().filter(|(_, c)| c[0] == 0 && c[1] == 0).map(|(t, _)| name(*t)).collect();
-    eprintln!("exact ({}): {exact:?}\npartial ({}): {partial:?}\nnot hashed ({}): {none:?}\nwhole stacks exact: {whole_exact}", exact.len(), partial.len(), none.len());
+    let exact: Vec<&str> = per
+        .iter()
+        .filter(|(_, c)| c[0] > 0 && c[1] == 0 && c[2] == 0)
+        .map(|(t, _)| name(*t))
+        .collect();
+    let partial: Vec<String> = per
+        .iter()
+        .filter(|(_, c)| c[0] > 0 && (c[1] > 0 || c[2] > 0))
+        .map(|(t, c)| format!("{}:{c:?}", name(*t)))
+        .collect();
+    let wrong: Vec<String> = per
+        .iter()
+        .filter(|(_, c)| c[1] > 0)
+        .map(|(t, c)| format!("{}:{c:?}", name(*t)))
+        .collect();
+    let none: Vec<&str> = per
+        .iter()
+        .filter(|(_, c)| c[0] == 0 && c[1] == 0)
+        .map(|(t, _)| name(*t))
+        .collect();
+    eprintln!(
+        "exact ({}): {exact:?}\npartial ({}): {partial:?}\nnot hashed ({}): {none:?}\nwhole stacks exact: {whole_exact}",
+        exact.len(),
+        partial.len(),
+        none.len()
+    );
     assert!(wrong.is_empty(), "wrong hashes: {wrong:?}");
 }

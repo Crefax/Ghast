@@ -157,7 +157,7 @@ fn bench(c: &mut Criterion) {
             g.bench_function(format!("{label} decode"), |b| {
                 b.iter(|| black_box(P8::decode_raw(black_box(&raw)).unwrap()))
             });
-            let mut inv = Inventory::new(Version::V1_8);
+            let mut inv = Inventory::new(Version::V1_8).unwrap();
             if label.starts_with("shop") {
                 inv.on_open_window(
                     1,
@@ -194,7 +194,7 @@ fn bench(c: &mut Criterion) {
             let window = ghast_protocol::Reader::new(&raw.body)
                 .read_varint()
                 .unwrap();
-            let mut inv = Inventory::new(v);
+            let mut inv = Inventory::new(v).unwrap();
             if window != 0 {
                 inv.on_open_window(
                     window,

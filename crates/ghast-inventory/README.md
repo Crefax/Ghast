@@ -9,7 +9,7 @@ sync: packets in, packets out; no I/O, no clock.
 ```rust
 use ghast_inventory::{Click, Inventory, Outgoing, Version};
 
-let mut inv = Inventory::new(Version::V1_8);
+let mut inv = Inventory::new(Version::V1_8)?; // Err when the `v1_8` feature is off
 // inbound, on arrival: Some(..) is a confirm answer to write at once
 // if let Some(out) = inv.apply_v1_8(&packet) { writer.queue(&out.to_v1_8())?; }
 inv.tick();                                  // once per client tick

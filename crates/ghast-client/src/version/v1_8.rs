@@ -372,7 +372,7 @@ impl ClientVersion for V1_8 {
                 walking_speed: *walking_speed,
             }),
             // Only the window packets' encoders (write_set would link every packet's).
-            Outbound::Inventory(o) => match Some(o.to_v1_8()) {
+            Outbound::Inventory(o) => match o.to_v1_8() {
                 Some(sb::ServerboundPlayPacket::WindowClick(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::Transaction(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),

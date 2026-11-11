@@ -37,7 +37,7 @@ fn s16(name: &str, count: i32) -> Stack {
 
 /// Window 0 with the given slots and the player GUI open.
 fn player_inv(v: Version, slots: &[(usize, Stack)]) -> Inventory {
-    let mut inv = Inventory::new(v);
+    let mut inv = Inventory::new(v).unwrap();
     let n = if v == Version::V1_8 { 45 } else { 46 };
     let mut items = vec![None; n];
     for (i, st) in slots {
@@ -1033,13 +1033,13 @@ fn binding_curse_keeps_armor_on() {
 
 #[test]
 fn v1_16_empty_stacks_are_dropped() {
-    let mut inv = Inventory::new(Version::V1_16_5);
+    let mut inv = Inventory::new(Version::V1_16_5).unwrap();
     inv.on_set_slot(0, 36, Some(s16("stone", 0)));
     assert_eq!(inv.hotbar(0), None);
     inv.on_set_slot(-2, 40, Some(s16("stone", 2)));
     assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
     // 1.8 keeps zero-count stacks
-    let mut inv = Inventory::new(Version::V1_8);
+    let mut inv = Inventory::new(Version::V1_8).unwrap();
     inv.on_set_slot(0, 36, Some(s(STONE, 0)));
     assert_eq!(inv.hotbar(0).map(|s| s.count()), Some(0));
 }
@@ -1299,7 +1299,7 @@ fn click_timeout() {
 
 #[test]
 fn screens_and_packet_order() {
-    let mut inv = Inventory::new(Version::V1_8);
+    let mut inv = Inventory::new(Version::V1_8).unwrap();
     inv.tick();
     assert_eq!(
         inv.click(Click::Pickup {
@@ -1321,7 +1321,7 @@ fn screens_and_packet_order() {
     assert_eq!(inv.close(), Ok(Outgoing::CloseWindow(0)));
     assert_eq!(inv.open_inventory(), Err(ClickError::SameTick));
     // 1.16 sends nothing when opening the inventory
-    let mut inv = Inventory::new(Version::V1_16_5);
+    let mut inv = Inventory::new(Version::V1_16_5).unwrap();
     assert_eq!(inv.open_inventory(), Ok(None));
     // the server opens a chest over it, then closes it
     inv.on_open_window(
@@ -1387,7 +1387,7 @@ fn wire_packets() {
             right: false,
         })
         .unwrap();
-    match out.to_v1_8() {
+    match out.to_v1_8().unwrap() {
         ghast_protocol::v1_8::play::serverbound::ServerboundPlayPacket::WindowClick(w) => {
             assert_eq!(
                 (w.window_id, w.slot, w.mouse_button, w.mode, w.action),
@@ -1566,7 +1566,7 @@ fn v1_12_crafting_result_from_server_only() {
 #[test]
 fn v1_12_set_slot_player_inventory_and_window_types() {
     let v = Version::V1_12;
-    let mut inv = Inventory::new(v);
+    let mut inv = Inventory::new(v).unwrap();
     inv.on_set_slot(-2, 40, Some(s(STONE, 2)));
     assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
     inv.on_set_slot(-2, 3, Some(sd(WOOL, 1, 5)));

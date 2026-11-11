@@ -172,7 +172,7 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
 fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
     let name = c["case"].as_str().unwrap().to_owned();
     let sync = c["sync"].as_i64().unwrap() as i32;
-    let mut inv = Inventory::new(v);
+    let mut inv = Inventory::new(v).unwrap();
     inv.on_declare_recipes(book.clone());
     inv.on_held_slot(c["selected"].as_i64().unwrap() as i8);
     let kind = kind(v, c);

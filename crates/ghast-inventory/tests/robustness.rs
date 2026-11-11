@@ -151,7 +151,7 @@ fn click_of(mode: u8, slot: i16, b: u8) -> Click {
 }
 
 fn run(v: Version, ops: Vec<Op>, wild: bool) {
-    let mut inv = Inventory::new(v);
+    let mut inv = Inventory::new(v).unwrap();
     let mut last: Option<(i8, i16)> = None;
     for op in ops {
         match op {

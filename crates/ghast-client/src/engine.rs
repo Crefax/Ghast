@@ -382,7 +382,9 @@ pub(crate) struct Engine<S> {
 impl Core {
     fn new(opts: CoreOptions) -> Self {
         let rotation = Rotation::new(opts.sensitivity);
-        let inv = ghast_inventory::Inventory::new(opts.inventory);
+        // a version module exists only with its feature, which enables its inventory
+        let inv = ghast_inventory::Inventory::new(opts.inventory)
+            .expect("the version's feature enables its ghast-inventory feature");
         Core {
             opts,
             tick: 0,

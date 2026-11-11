@@ -35,7 +35,7 @@
 //! ```
 //! use ghast_inventory::{Click, Inventory, Outgoing, Stack, Version};
 //!
-//! let mut inv = Inventory::new(Version::V1_8);
+//! let mut inv = Inventory::new(Version::V1_8).unwrap();
 //! // The server sends window 0 (45 slots): 64 stone in hotbar slot 0 (window slot 36).
 //! let mut items = vec![None; 45];
 //! items[36] = Some(Stack::new(1, 64, 0));
@@ -75,7 +75,7 @@ pub use inventory::{
 pub use item::{Enchantment, EnchantmentId, ItemText};
 #[cfg(feature = "v26_1")]
 pub use packets::PACKET_IDS_26_1;
-pub use rules::Version;
+pub use rules::{Version, VersionNotEnabled};
 pub use sim::OUTSIDE;
 pub use stack::{
     ItemData, Stack, from_legacy_slot, from_modern_slot, nbt_eq, stacks_equal, to_legacy_slot,

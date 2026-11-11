@@ -117,7 +117,7 @@ enum Action {
 impl Driver {
     fn new(v: Version, script: Vec<Step>) -> Driver {
         Driver {
-            inv: Inventory::new(v),
+            inv: Inventory::new(v).unwrap(),
             mover: Mover {
                 increment_first: v != Version::V1_8,
                 ..Mover::default()
@@ -582,7 +582,7 @@ session!(v18, v1_8, 47, {
         inv.apply_v1_8(p)
     }
     fn to_packet(o: &Outgoing) -> Option<S> {
-        Some(o.to_v1_8())
+        o.to_v1_8()
     }
     fn teleport(t: &cb::Position, w: &mut Wr, d: &mut Driver) -> Res<()> {
         // 1.8: relative flags, then C06 echo with on_ground false; lastReported untouched

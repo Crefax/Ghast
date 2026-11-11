@@ -23,6 +23,23 @@ pub enum Version {
     V26_1,
 }
 
+/// [`crate::Inventory::new`] for a [`Version`] whose crate feature (`v1_8`, `v1_12`, `v1_16_5`,
+/// `v26_1`) is off in this build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VersionNotEnabled(pub Version);
+
+impl std::fmt::Display for VersionNotEnabled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ghast-inventory was built without the feature of {:?}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for VersionNotEnabled {}
+
 /// 1.8.9 items with damage variants (Legacy Yarn `Item.isUnbreakable()` is true; the damage value selects a variant, so merging
 /// compares it). Sorted.
 const SUBTYPES_1_8: &[i32] = &[

@@ -5,7 +5,7 @@
 use bytestring::ByteString;
 
 use crate::crafting::RecipeBook;
-use crate::rules::Version;
+use crate::rules::{Version, VersionNotEnabled};
 use crate::sim::{Layout, Loc, Model, OUTSIDE, Screen, Sim};
 use crate::stack::Stack;
 
@@ -329,14 +329,18 @@ pub struct Inventory {
 impl Inventory {
     /// An empty inventory (a fresh player entity).
     ///
-    /// # Panics
-    /// When the version's crate feature is disabled ([`Version::is_enabled`]).
-    #[must_use]
-    pub fn new(version: Version) -> Inventory {
-        assert!(
-            version.is_enabled(),
-            "ghast-inventory was built without the feature of {version:?}"
-        );
+    /// # Errors
+    /// [`VersionNotEnabled`] when this build of the crate lacks the version's feature
+    /// ([`Version::is_enabled`]).
+    pub fn new(version: Version) -> Result<Inventory, VersionNotEnabled> {
+        if version.is_enabled() {
+            Ok(Inventory::empty(version))
+        } else {
+            Err(VersionNotEnabled(version))
+        }
+    }
+
+    fn empty(version: Version) -> Inventory {
         Inventory {
             version,
             m: Model::default(),
@@ -392,7 +396,7 @@ impl Inventory {
             book: std::mem::take(&mut self.book),
             #[cfg(feature = "v26_1")]
             reg26,
-            ..Inventory::new(self.version)
+            ..Inventory::empty(self.version)
         };
         self.events.player_changed = true;
     }
