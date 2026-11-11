@@ -2836,7 +2836,7 @@ mod tests {
             "elytra_rocket_chunk_edge_left",
             "elytra_firework_use",
         ];
-        let (mut cases, mut ticks_done, mut packets) = (0, 0, 0);
+        let (mut cases, mut ticks_done, mut packets, mut uses) = (0, 0, 0, 0);
         let mut i = 0;
         while i < lines.len() {
             let sc = &lines[i];
@@ -3003,10 +3003,35 @@ mod tests {
                 e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
                 e.note_inbound(t0);
                 e.tick(&mut b, t0);
-                let got: Vec<Value> = std::mem::take(e.outbound())
+                let out = std::mem::take(e.outbound());
+                // use_item carries the rotation of the tick's movement packet (the wire layer's
+                // prepare_play), the rotation the real client sends.
+                if let Some(u) = rec["packets"]
+                    .as_array()
+                    .unwrap()
                     .iter()
-                    .filter_map(&key_name)
-                    .collect();
+                    .find(|p| p["name"] == "use_item")
+                {
+                    use crate::version::{ClientVersion, V26_1, Wire26_1};
+                    let mut wire = Wire26_1::default();
+                    V26_1::prepare_play(&out, &mut wire);
+                    let mut enc = ghast_protocol::FrameEncoder::new();
+                    for o in out.iter().filter(|o| matches!(o, Outbound::UseItem { .. })) {
+                        V26_1::write_play(&mut enc, o, &mut wire).unwrap();
+                    }
+                    let frame = enc.out_mut().split().freeze();
+                    // ... then yaw and pitch (f32 big-endian) end the packet.
+                    let n = frame.len();
+                    let yaw = f32::from_be_bytes(frame[n - 8..n - 4].try_into().unwrap());
+                    let pitch = f32::from_be_bytes(frame[n - 4..].try_into().unwrap());
+                    assert_eq!(
+                        (yaw.to_bits(), pitch.to_bits()),
+                        (f32v(&u["yaw"]).to_bits(), f32v(&u["pitch"]).to_bits()),
+                        "{name} tick {k}: use_item rotation"
+                    );
+                    uses += 1;
+                }
+                let got: Vec<Value> = out.iter().filter_map(&key_name).collect();
                 let want: Vec<Value> = rec["packets"]
                     .as_array()
                     .unwrap()
@@ -3019,9 +3044,10 @@ mod tests {
             }
         }
         eprintln!(
-            "elytra through the engine: {cases} cases, {ticks_done} ticks, {packets} packets identical"
+            "elytra through the engine: {cases} cases, {ticks_done} ticks, {packets} packets identical ({uses} use_item rotations)"
         );
         assert_eq!(cases, wanted.len());
+        assert!(uses >= 2, "{uses}");
     }
 
     /// 26.1 item use from the stack's components (`item_use`): which items have a use state,

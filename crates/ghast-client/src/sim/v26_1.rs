@@ -129,7 +129,8 @@ impl Sim26 {
                                 && *v - 1 == self.own.id
                             {
                                 let (rid, pos) = self.own.rockets.swap_remove(k);
-                                self.ext.attach_rocket(rid, pos);
+                                let ok = self.ext.attach_rocket(rid, pos);
+                                log::debug!("firework rocket {rid} attached to us ({ok})");
                             }
                         }
                         _ => {}

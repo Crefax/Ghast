@@ -263,6 +263,12 @@ pub trait ClientVersion: Version + sealed::Sealed {
         let _ = enc;
         Ok(())
     }
+    /// Sees a batch of outbound packets before they are written (26.1: the rotation of this
+    /// tick's movement packet, which `use_item` carries).
+    #[inline(always)]
+    fn prepare_play(out: &[crate::common::Outbound], wire: &mut Self::Wire) {
+        let _ = (out, wire);
+    }
     /// Starts a chat session with these profile keys (1.19.3+ `setKeyPair`: a new random
     /// session id, a new signature chain); `false` when the version has no signed chat. The
     /// core then announces it ([`crate::common::Outbound::ChatSessionUpdate`]).

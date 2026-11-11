@@ -81,6 +81,9 @@ name = "inventory_probe"
 name = "server_switch"
 
 [[example]]
+name = "elytra_flight"
+
+[[example]]
 name = "creative_probe"
 required-features = ["v26_1"]
 

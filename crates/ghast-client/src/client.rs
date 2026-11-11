@@ -1031,6 +1031,7 @@ where
     fn encode_outbound(&mut self) -> Result<(), ClientError> {
         let tick = self.engine.tick_count();
         let out = self.engine.outbound();
+        V::prepare_play(out, &mut self.wire);
         let mut res = Ok(());
         for p in out.drain(..) {
             log::trace!(target: "ghast::packets", "t{tick} -> {p:?}");

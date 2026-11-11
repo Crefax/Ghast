@@ -34,6 +34,10 @@ pub struct Wire26_1 {
     sequence: i32,
     /// The look of the last movement packet (`use_item` carries the player's rotation).
     last_look: (f32, f32),
+    /// The rotation the current batch's movement packet sends, if it sends one: the player's
+    /// rotation at key-handling time (vanilla turns the mouse before the tick), which `use_item`
+    /// carries; Grim checks it against the tick's rotation.
+    tick_look: Option<(f32, f32)>,
     /// The current dimension (a respawn into another one starts a new level).
     dimension: String,
     /// Received signed messages not yet acknowledged.
@@ -459,6 +463,14 @@ impl ClientVersion for V26_1 {
             }
             _ => return Ok(None),
         }))
+    }
+
+    fn prepare_play(out: &[Outbound], wire: &mut Wire26_1) {
+        wire.tick_look = out.iter().find_map(|o| match *o {
+            Outbound::Move(MovePacket::Look { yaw, pitch, .. })
+            | Outbound::Move(MovePacket::PositionLook { yaw, pitch, .. }) => Some((yaw, pitch)),
+            _ => None,
+        });
     }
 
     fn write_transfer_handshake(
@@ -1203,7 +1215,7 @@ impl ClientVersion for V26_1 {
             }
             Outbound::UseItem { off_hand, .. } => {
                 let sequence = wire.next_sequence();
-                let (yaw, pitch) = wire.last_look;
+                let (yaw, pitch) = wire.tick_look.unwrap_or(wire.last_look);
                 enc.write_packet(&sb::UseItem {
                     hand: sb::UseItemHand(i32::from(*off_hand)),
                     sequence,
