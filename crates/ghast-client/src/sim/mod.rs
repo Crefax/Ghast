@@ -289,6 +289,10 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn tick_entities(&mut self) {}
     /// 1.21.4+ level-load gate: the server's `game_event` 13 (`LEVEL_CHUNKS_LOAD_START`).
     fn level_load_start(&mut self) {}
+    /// 1.21.4+ level-load gate: the player is alive (`set_health` above 0).
+    fn player_alive(&mut self, alive: bool) {
+        let _ = alive;
+    }
     /// 1.21.4+ level-load gate, once per tick before the key handling: `true` on the tick the
     /// client sends `player_loaded`. `section_compiled`: the engine's readiness signal;
     /// `timed_out`: the client's 30 s wait is over.
@@ -1080,6 +1084,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn level_load_start(&mut self) {
         (**self).level_load_start();
+    }
+    fn player_alive(&mut self, alive: bool) {
+        (**self).player_alive(alive);
     }
     fn load_gate_tick(&mut self, section_compiled: bool, timed_out: bool) -> bool {
         (**self).load_gate_tick(section_compiled, timed_out)

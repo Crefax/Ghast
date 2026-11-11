@@ -523,6 +523,10 @@ impl Sim for Sim26 {
         self.gate.level_chunks_load_start();
     }
 
+    fn player_alive(&mut self, alive: bool) {
+        self.gate.player_alive(alive);
+    }
+
     fn load_gate_tick(&mut self, section_compiled: bool, timed_out: bool) -> bool {
         if timed_out {
             self.gate.time_out();

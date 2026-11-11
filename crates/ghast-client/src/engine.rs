@@ -897,6 +897,8 @@ impl<S: Sim> Engine<S> {
                 let was_dead = c.dead;
                 c.health = h;
                 sim.food(h.food);
+                // isAlive(): a dead player does not wait for its section (26.1 load gate).
+                sim.player_alive(h.health > 0.0);
                 c.pending.health_changed = true;
                 if h.health <= 0.0 && !was_dead {
                     c.dead = true;
@@ -1120,13 +1122,10 @@ impl<S: Sim> Engine<S> {
             } else {
                 0
             };
-            // The oracle-proven gate (ghast_physics::modern::LoadGate) decides; "section
-            // compiled" is ours: the nine columns on two consecutive ticks (or dead: vanilla
-            // lets a dead player in at once).
-            let (compiled, timed_out) = (
-                (c.ready && c.near_loaded >= 2) || c.dead,
-                c.load_wait >= 600,
-            );
+            // The oracle-proven gate (ghast_physics::modern::LoadGate) decides (dead players,
+            // spectators and feet outside the build height included); "section compiled" is
+            // ours: the nine columns on two consecutive ticks.
+            let (compiled, timed_out) = (c.ready && c.near_loaded >= 2, c.load_wait >= 600);
             #[cfg(test)]
             let (compiled, timed_out) = c.test_gate.unwrap_or((compiled, timed_out));
             if self.sim.load_gate_tick(compiled, timed_out) {
@@ -2807,6 +2806,7 @@ mod tests {
             cases += 1;
             let setup = &sc["setup"];
             assert_eq!(setup["game_mode"], "survival", "{name}");
+            let health = setup.get("health").map_or(20.0, f32v);
             let mut e = engine(GameVersion::V26_1);
             e.handle(Inbound::JoinGame(JoinGame {
                 entity_id: 7,
@@ -2857,6 +2857,11 @@ mod tests {
                     }
                 }
             }
+            e.handle(Inbound::Health(Health {
+                health,
+                food: 20,
+                saturation: 5.0,
+            }));
             e.outbound().clear();
             let mut compiled = false;
             let mut timed_out = false;
@@ -2935,7 +2940,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(cases, 25);
+        assert_eq!(cases, 27);
     }
 
     #[test]
