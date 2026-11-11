@@ -27,7 +27,8 @@ GHAST_DIFF_N=1000 cargo test -p ghast-protocol --test differential   # more pack
 ```
 
 Without `node` or `node_modules` the tests print `SKIPPED` and pass, so plain `cargo test`
-works everywhere.
+works everywhere. CI installs the harness (`actions/setup-node` + `npm ci`) and sets
+`GHAST_REQUIRE_NODE=1`, which turns a missing harness into a test failure instead of a skip.
 
 ## Deliberate differences
 

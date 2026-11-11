@@ -40,6 +40,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.rust }}
+      # node-minecraft-protocol for the protocol differential tests (versions pinned by the
+      # lockfile; GHAST_REQUIRE_NODE makes a missing harness fail instead of skip).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/ghast-protocol/tests/node/package-lock.json
+      - name: npm ci (differential harness)
+        working-directory: crates/ghast-protocol/tests/node
+        run: npm ci --no-audit --no-fund
       # Lints and formatting are checked once, on stable (new lints appear with new toolchains).
       - name: fmt
         if: matrix.rust == 'stable'
@@ -49,6 +59,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+        env:
+          GHAST_REQUIRE_NODE: "1"
       - name: doc
         if: matrix.rust == 'stable'
         run: cargo doc --workspace --no-deps

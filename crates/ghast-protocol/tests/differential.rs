@@ -7,7 +7,8 @@
 //!   JavaScript and serialized by node are decoded by ghast (strictly: no trailing bytes,
 //!   right packet type) and re-encoded to the identical bytes.
 //!
-//! Skipped (with a message) when `node` or `tests/node/node_modules` is missing; see
+//! Skipped (with a message) when `node` or `tests/node/node_modules` is missing, unless
+//! `GHAST_REQUIRE_NODE=1` is set (CI), which makes that a failure; see
 //! `tests/node/README.md`. Packets per id: `GHAST_DIFF_N` (default 100).
 
 use std::fmt::Write as _;
@@ -31,6 +32,12 @@ fn node_available() -> bool {
             .output()
             .is_ok_and(|o| o.status.success());
     if !ok {
+        // CI sets GHAST_REQUIRE_NODE=1: there a missing harness is a failure, not a skip.
+        assert!(
+            std::env::var_os("GHAST_REQUIRE_NODE").is_none_or(|v| v.is_empty() || v == "0"),
+            "GHAST_REQUIRE_NODE is set but node or tests/node/node_modules is missing \
+             (run `npm ci` in crates/ghast-protocol/tests/node)"
+        );
         eprintln!("SKIPPED: node or tests/node/node_modules missing (run `npm ci` in tests/node)");
     }
     ok
