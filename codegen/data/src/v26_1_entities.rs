@@ -40,9 +40,24 @@ const NO_BOX: &[&str] = &[
 
 /// `Pose` names by id.
 const POSES: [&str; 18] = [
-    "standing", "fall_flying", "sleeping", "swimming", "spin_attack", "crouching", "long_jumping",
-    "dying", "croaking", "using_tongue", "sitting", "roaring", "sniffing", "emerging", "digging",
-    "sliding", "shooting", "inhaling",
+    "standing",
+    "fall_flying",
+    "sleeping",
+    "swimming",
+    "spin_attack",
+    "crouching",
+    "long_jumping",
+    "dying",
+    "croaking",
+    "using_tongue",
+    "sitting",
+    "roaring",
+    "sniffing",
+    "emerging",
+    "digging",
+    "sliding",
+    "shooting",
+    "inhaling",
 ];
 
 fn hex(v: &Value) -> R<u32> {
@@ -54,7 +69,11 @@ fn hex(v: &Value) -> R<u32> {
 }
 
 fn dims(v: &Value) -> R<[u32; 3]> {
-    Ok([hex(&v["width"])?, hex(&v["height"])?, hex(&v["eye_height"])?])
+    Ok([
+        hex(&v["width"])?,
+        hex(&v["height"])?,
+        hex(&v["eye_height"])?,
+    ])
 }
 
 fn dims_lit(d: &[u32; 3]) -> String {
@@ -120,7 +139,9 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
                 by_name.insert(name, id);
             }
             Some("entity_size") => {
-                let t = types.get_mut(&id).ok_or_else(|| format!("{name}: size before type"))?;
+                let t = types
+                    .get_mut(&id)
+                    .ok_or_else(|| format!("{name}: size before type"))?;
                 if v.get("error").is_some() {
                     return Err(format!("{name}: variant error {}", v["error"]));
                 }
@@ -139,7 +160,8 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
                     }
                 } else {
                     for m in v["meta"].as_array().ok_or("meta")? {
-                        let (idx, ser) = (m[0].as_u64().ok_or("index")?, m[1].as_u64().ok_or("ser")?);
+                        let (idx, ser) =
+                            (m[0].as_u64().ok_or("index")?, m[1].as_u64().ok_or("ser")?);
                         let slot = match (variant.as_str(), ser) {
                             ("baby", 8) => &mut t.baby,
                             (s, 1) if s.starts_with("size_") => &mut t.size,
@@ -235,7 +257,9 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
         &mut out,
         "pub(crate) static ENTITY_NAMES",
         "u16",
-        md.iter().map(|e| (e.name.clone(), u32::from(e.id))).collect(),
+        md.iter()
+            .map(|e| (e.name.clone(), u32::from(e.id)))
+            .collect(),
     );
 
     // Sizes, sorted by name.
@@ -306,15 +330,19 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
         if t.default_body {
             flags.push("type_flags::DEFAULT_BODY");
         }
-        let flags = if flags.is_empty() { "0".to_owned() } else { flags.join(" | ") };
+        let flags = if flags.is_empty() {
+            "0".to_owned()
+        } else {
+            flags.join(" | ")
+        };
         let interp = if t.interpolation < 0 {
             "None".to_owned()
         } else {
             format!("Some({})", t.interpolation)
         };
-        let size = size_index
-            .get(id)
-            .map_or("None".to_owned(), |i| format!("Some(&VANILLA_ENTITY_SIZES[{i}])"));
+        let size = size_index.get(id).map_or("None".to_owned(), |i| {
+            format!("Some(&VANILLA_ENTITY_SIZES[{i}])")
+        });
         let _ = writeln!(
             out,
             "    EntityTypeData {{ id: {id}, name: {}, flags: {flags}, interpolation: {interp}, max_head_y_rot: {}, fixed_poses: {:#x}, baby_meta: {}, size_meta: {}, flags_meta: {}, size: {size} }},",

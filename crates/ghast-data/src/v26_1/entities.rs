@@ -103,7 +103,12 @@ impl EntityTypeData {
     /// (see [`EntityTypeData::scaled`]). `None` for [`type_flags::NO_BOX`] types and types
     /// without a client instance.
     #[must_use]
-    pub fn dimensions(&self, variant: &str, slime_size: Option<i32>, pose: i32) -> Option<EntityDimensions> {
+    pub fn dimensions(
+        &self,
+        variant: &str,
+        slime_size: Option<i32>,
+        pose: i32,
+    ) -> Option<EntityDimensions> {
         if self.flags & type_flags::NO_BOX != 0 {
             return None;
         }
@@ -128,7 +133,9 @@ impl EntityTypeData {
         if let Some(d) = k.and_then(|k| s.pose(k)) {
             return Some(d);
         }
-        s.variant(variant).map(|v| v.dimensions).or_else(|| s.default_dimensions())
+        s.variant(variant)
+            .map(|v| v.dimensions)
+            .or_else(|| s.default_dimensions())
     }
 
     /// `EntityDimensions.scale(f)` of a living entity's dimensions by its scale attribute

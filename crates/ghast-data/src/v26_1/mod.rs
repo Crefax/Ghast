@@ -21,8 +21,8 @@ pub mod entities;
 pub mod items;
 
 pub use entities::{
-    EntityTypeData, entities, entity, entity_by_name, entity_type, entity_types, vanilla_entity_size,
-    vanilla_entity_sizes,
+    EntityTypeData, entities, entity, entity_by_name, entity_type, entity_types,
+    vanilla_entity_size, vanilla_entity_sizes,
 };
 pub use items::{BlockSet, Food, Item, ItemData, Tool, ToolRule, food};
 

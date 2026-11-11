@@ -38,7 +38,11 @@ fn hex64(v: &Value) -> u64 {
 }
 
 fn bits(d: EntityDimensions) -> [u32; 3] {
-    [d.width.to_bits(), d.height.to_bits(), d.eye_height.to_bits()]
+    [
+        d.width.to_bits(),
+        d.height.to_bits(),
+        d.eye_height.to_bits(),
+    ]
 }
 
 /// Types whose client box is offset from the feet-centred dimensions box (custom `makeBoundingBox`).
@@ -63,11 +67,21 @@ fn v26_1_entity_tables_match_oracle() {
             "entity_type" => {
                 types += 1;
                 assert_eq!(info.width.unwrap().to_bits(), hex32(&v["width"]), "{name}");
-                assert_eq!(info.height.unwrap().to_bits(), hex32(&v["height"]), "{name}");
-                assert_eq!(t.flags & type_flags::FIXED != 0, v["fixed"].as_bool().unwrap());
+                assert_eq!(
+                    info.height.unwrap().to_bits(),
+                    hex32(&v["height"]),
+                    "{name}"
+                );
+                assert_eq!(
+                    t.flags & type_flags::FIXED != 0,
+                    v["fixed"].as_bool().unwrap()
+                );
                 if let Some(s) = t.size {
                     let (w, h) = s.registered.unwrap();
-                    assert_eq!((w.to_bits(), h.to_bits()), (hex32(&v["width"]), hex32(&v["height"])));
+                    assert_eq!(
+                        (w.to_bits(), h.to_bits()),
+                        (hex32(&v["width"]), hex32(&v["height"]))
+                    );
                 }
             }
             "entity_size" => {
@@ -82,7 +96,10 @@ fn v26_1_entity_tables_match_oracle() {
                     let mob = v["mob"].as_bool().unwrap_or(false);
                     assert_eq!(t.flags & type_flags::MOB != 0, mob, "{name}");
                     if mob {
-                        assert_eq!(u64::from(t.max_head_y_rot), v["max_head_y_rot"].as_u64().unwrap());
+                        assert_eq!(
+                            u64::from(t.max_head_y_rot),
+                            v["max_head_y_rot"].as_u64().unwrap()
+                        );
                         let default = v["body_control"] == "BodyRotationControl";
                         assert_eq!(t.flags & type_flags::DEFAULT_BODY != 0, default, "{name}");
                     }
@@ -114,7 +131,11 @@ fn v26_1_entity_tables_match_oracle() {
                 let d = t.dimensions(var, slime, 0).unwrap();
                 assert_eq!(
                     bits(d),
-                    [hex32(&v["width"]), hex32(&v["height"]), hex32(&v["eye_height"])],
+                    [
+                        hex32(&v["width"]),
+                        hex32(&v["height"]),
+                        hex32(&v["eye_height"])
+                    ],
                     "{name} {variant}"
                 );
                 let b = d.bounding_box(0.5, 64.0, 0.5);
@@ -131,7 +152,10 @@ fn v26_1_entity_tables_match_oracle() {
             other => panic!("unknown line {other}"),
         }
     }
-    assert_eq!(bad_boxes, OFFSET_BOXES, "types whose box is not the centred dimensions box");
+    assert_eq!(
+        bad_boxes, OFFSET_BOXES,
+        "types whose box is not the centred dimensions box"
+    );
     assert_eq!(types, ghast_data::v26_1::entities().len());
     assert!(checked > 3000, "{checked}");
     // Slime sizes beyond the dump follow the same formula.
