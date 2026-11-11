@@ -342,6 +342,8 @@ fn main() {
     );
     let mut inv = Inventory::new(Version::V26_1);
     inv.set_registries_26_1(reg.clone());
+    // each step waits 700 ms for corrections: one quiet tick settles a click
+    inv.set_click_settle_ticks(1);
     let mut lab = Lab {
         c,
         inv,

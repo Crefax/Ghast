@@ -70,7 +70,7 @@ mod window;
 pub use crafting::RecipeBook;
 pub use inventory::{
     Click, ClickError, ClickOutcome, ClickPacket, ClickResult, ContainerClick,
-    DEFAULT_CLICK_TIMEOUT_TICKS, Events, Inventory, Outgoing, Window,
+    DEFAULT_CLICK_SETTLE_TICKS, DEFAULT_CLICK_TIMEOUT_TICKS, Events, Inventory, Outgoing, Window,
 };
 pub use item::{Enchantment, EnchantmentId, ItemText};
 #[cfg(feature = "v26_1")]

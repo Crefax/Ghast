@@ -32,6 +32,10 @@ fn same_slot(a: &Option<Stack>, b: &Option<Stack>) -> bool {
     }
 }
 
+/// 26.1: ticks without a correcting container packet after which a click counts as accepted
+/// (see [`Inventory::set_click_settle_ticks`]).
+pub const DEFAULT_CLICK_SETTLE_TICKS: u32 = 4;
+
 /// Ticks a click may wait for its confirm before it is given up ([`ClickOutcome::TimedOut`]).
 pub const DEFAULT_CLICK_TIMEOUT_TICKS: u32 = 40;
 
@@ -199,6 +203,9 @@ pub struct ContainerClick {
     /// `false` when ghast could not predict this click (see [`Inventory::click`]): nothing
     /// changed locally, `changed` is empty, and the server's corrections bring the result.
     pub predicted: bool,
+    /// ghast's own number for the click (per screen, like the legacy action number, but never
+    /// sent): the [`ClickResult::action`] that resolves it.
+    pub action: i16,
 }
 
 /// What became of a click.
@@ -308,6 +315,7 @@ pub struct Inventory {
     resync: Option<(i32, u32)>,
     flags: TickFlags,
     timeout: u32,
+    settle: u32,
     events: Events,
     book: RecipeBook,
     /// 26.1 state ids: window 0 (`inventoryMenu`) and the open container.
@@ -338,6 +346,7 @@ impl Inventory {
             resync: None,
             flags: TickFlags::default(),
             timeout: DEFAULT_CLICK_TIMEOUT_TICKS,
+            settle: DEFAULT_CLICK_SETTLE_TICKS,
             events: Events::default(),
             book: RecipeBook::default(),
             state_player: 0,
@@ -350,6 +359,18 @@ impl Inventory {
     /// Sets how many ticks a click may wait for its confirm.
     pub fn set_click_timeout(&mut self, ticks: u32) {
         self.timeout = ticks.max(1);
+    }
+
+    /// 26.1: how many ticks after a click without a correcting container packet make it
+    /// [`ClickOutcome::Accepted`]. 26.1 has no confirm: the server applies the click when it
+    /// receives it and answers in the same moment, with `container_set_slot` /
+    /// `container_set_content` / `set_cursor_item` only for slots its result disagrees with, and
+    /// with nothing when the client predicted right. So silence is the acceptance; set this to
+    /// cover the round trip (`ceil(rtt / 50 ms) + 1`; default
+    /// [`DEFAULT_CLICK_SETTLE_TICKS`]). A correction before that makes the click
+    /// [`ClickOutcome::Rejected`] (already applied: no resync wait).
+    pub fn set_click_settle_ticks(&mut self, ticks: u32) {
+        self.settle = ticks.max(1);
     }
 
     /// The protocol version.
@@ -367,6 +388,7 @@ impl Inventory {
         let reg26 = std::mem::take(&mut self.reg26);
         *self = Inventory {
             timeout: self.timeout,
+            settle: self.settle,
             book: std::mem::take(&mut self.book),
             #[cfg(feature = "v26_1")]
             reg26,
@@ -381,7 +403,14 @@ impl Inventory {
         self.flags = TickFlags::default();
         if let Some(p) = &mut self.pending {
             p.age += 1;
-            if p.age >= self.timeout {
+            if self.version == Version::V26_1 && p.age >= self.settle {
+                self.events.clicks.push(ClickResult {
+                    window_id: p.window_id,
+                    action: p.action,
+                    outcome: ClickOutcome::Accepted,
+                });
+                self.pending = None;
+            } else if p.age >= self.timeout {
                 self.events.clicks.push(ClickResult {
                     window_id: p.window_id,
                     action: p.action,
@@ -742,12 +771,24 @@ impl Inventory {
             }
             self.commit(m, lay);
         }
-        let window_id = match &self.screen {
-            ScreenState::Window(w) => w.id,
-            _ => 0,
+        let (window_id, action) = match &mut self.screen {
+            ScreenState::Window(w) => {
+                w.action = w.action.wrapping_add(1);
+                (w.id, w.action)
+            }
+            _ => {
+                self.player_action = self.player_action.wrapping_add(1);
+                (0, self.player_action)
+            }
         };
+        self.pending = Some(PendingClick {
+            window_id,
+            action,
+            age: 0,
+        });
         self.flags.clicked = true;
         Outgoing::ContainerClick(ContainerClick {
+            action,
             window_id,
             state_id: self.state_id(),
             slot,
@@ -1080,6 +1121,20 @@ impl Inventory {
         }
     }
 
+    /// 26.1: a container packet arrived while a click waits to settle: the server disagreed.
+    fn correction_26_1(&mut self, window_id: Option<i32>) {
+        if let Some(p) = self.pending
+            && window_id.is_none_or(|w| w == p.window_id || w == 0)
+        {
+            self.pending = None;
+            self.events.clicks.push(ClickResult {
+                window_id: p.window_id,
+                action: p.action,
+                outcome: ClickOutcome::Rejected,
+            });
+        }
+    }
+
     /// 26.1 `container_set_content` (vanilla `initializeContents`): window 0 or the open
     /// container's slots, its carried stack and its state id. Window 0's carried stack only
     /// shows while no container is open (the client keeps one per menu).
@@ -1094,6 +1149,7 @@ impl Inventory {
         if window_id != 0 && !current {
             return;
         }
+        self.correction_26_1(Some(window_id));
         self.on_window_items(window_id, items);
         if window_id == 0 {
             self.state_player = state_id;
@@ -1127,6 +1183,7 @@ impl Inventory {
         } else {
             self.state_window = state_id;
         }
+        self.correction_26_1(Some(window_id));
         let Some(l) = usize::try_from(slot).ok().and_then(|i| lay.loc(i)) else {
             return;
         };
@@ -1153,6 +1210,9 @@ impl Inventory {
 
     /// 26.1 `set_cursor_item`: the open menu's carried stack.
     pub fn on_set_cursor(&mut self, item: Option<Stack>) {
+        if self.version == Version::V26_1 {
+            self.correction_26_1(None);
+        }
         let item = self.normalize(item);
         if self.m.cursor != item {
             self.m.cursor = item;
@@ -1163,6 +1223,7 @@ impl Inventory {
     /// 26.1 `set_player_inventory`: a `PlayerInventory` index (0..=40; the body armor and saddle
     /// slots 41 and 42 are not kept).
     pub fn on_set_player_inventory(&mut self, slot: i32, item: Option<Stack>) {
+        self.correction_26_1(None);
         let item = self.normalize(item);
         let Some(k) = usize::try_from(slot).ok().filter(|&k| k < 41) else {
             return;

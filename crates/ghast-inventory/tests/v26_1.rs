@@ -71,8 +71,11 @@ fn click_of(c: &sb::WindowClick) -> Click {
 #[test]
 fn replayed_session_sends_the_same_click_bytes() {
     let mut inv = Inventory::new(Version::V26_1);
+    // the session waited 700 ms after each click: one tick of silence settles it here
+    inv.set_click_settle_ticks(1);
     let mut clicks = 0;
     let mut unpredicted = 0;
+    let mut outcomes = Vec::new();
     for (state, dir, raw) in records(CLICKS) {
         match (state, dir) {
             (3, 0) => {
@@ -89,6 +92,7 @@ fn replayed_session_sends_the_same_click_bytes() {
             (4, 1) => {
                 let p = ServerboundPlayPacket::decode_raw(&raw).unwrap();
                 inv.tick();
+                outcomes.extend(inv.drain_events().clicks.iter().map(|c| c.outcome));
                 let out = match &p {
                     ServerboundPlayPacket::WindowClick(c) => {
                         if !inv.gui_open() {
@@ -117,8 +121,18 @@ fn replayed_session_sends_the_same_click_bytes() {
             _ => panic!(),
         }
     }
+    inv.tick();
+    outcomes.extend(inv.drain_events().clicks.iter().map(|c| c.outcome));
     assert_eq!(clicks, 36);
     assert_eq!(unpredicted, 1);
+    // every click resolves once: the 2 corrected bundle clicks as rejected, the rest accepted
+    use ghast_inventory::ClickOutcome as O;
+    assert_eq!(outcomes.len(), 36, "{outcomes:?}");
+    assert_eq!(
+        outcomes.iter().filter(|o| **o == O::Rejected).count(),
+        2,
+        "{outcomes:?}"
+    );
 }
 
 #[test]
