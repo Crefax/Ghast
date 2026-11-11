@@ -25,11 +25,12 @@ import javax.crypto.spec.SecretKeySpec;
  * ({@code new BigInteger(Crypt.digestData(serverId, publicKey, secretKey)).toString(16)}), the
  * AES/CFB8 stream ciphers of both directions ({@code Crypt.getCipher}), the {@code ClientboundHelloPacket}
  * wire form (with {@code shouldAuthenticate}) and a {@code ServerboundKeyPacket} built by the real
- * constructor (RSA PKCS#1 v1.5 with random padding: the vector carries the server's private key so the
- * reader can decrypt it). Schema: oracle/README.md, "net_crypto.jsonl.gz (26.1)".
+ * constructor (checked to decrypt to the secret and challenge; the vector's key packet uses the same RSA
+ * cipher with seeded padding, through the packet codec, and carries the server's private key so the reader
+ * can decrypt it). Schema: oracle/README.md, "net_crypto.jsonl.gz (26.1)".
  *
- * <p>Deterministic: server keys come from a seeded {@code SHA1PRNG}, everything else from {@link Rng};
- * only the RSA padding inside the key packet is random (it is checked by decryption, not by bytes).
+ * <p>Deterministic: server keys and the key packet's padding come from seeded {@code SHA1PRNG}s,
+ * everything else from {@link Rng}.
  */
 final class NetCryptoDump {
     static final int CASES = 12;
@@ -72,8 +73,24 @@ final class NetCryptoDump {
                 ClientboundHelloPacket.STREAM_CODEC.encode(hello,
                         new ClientboundHelloPacket(serverId, server.getPublic().getEncoded(), challenge, authenticate));
 
+                // The real constructor (Crypt.encryptUsingKey: RSA PKCS#1 v1.5, random padding) must
+                // decrypt to the secret and the challenge ...
+                ServerboundKeyPacket real = new ServerboundKeyPacket(secret, server.getPublic(), challenge);
+                if (!java.util.Arrays.equals(real.getSecretKey(server.getPrivate()).getEncoded(), secretBytes)
+                        || !real.isChallengeValid(challenge, server.getPrivate())) {
+                    throw new IllegalStateException("key packet does not decrypt");
+                }
+                // ... and the vector carries a deterministic one: the same cipher with seeded padding,
+                // through the packet's own codec.
+                SecureRandom pad = SecureRandom.getInstance("SHA1PRNG");
+                pad.setSeed(5000L + i);
+                Cipher rsa = Cipher.getInstance("RSA");
+                rsa.init(Cipher.ENCRYPT_MODE, server.getPublic(), pad);
+                FriendlyByteBuf raw = new FriendlyByteBuf(Unpooled.buffer());
+                raw.writeByteArray(rsa.doFinal(secretBytes));
+                raw.writeByteArray(rsa.doFinal(challenge));
                 FriendlyByteBuf key = new FriendlyByteBuf(Unpooled.buffer());
-                ServerboundKeyPacket.STREAM_CODEC.encode(key, new ServerboundKeyPacket(secret, server.getPublic(), challenge));
+                ServerboundKeyPacket.STREAM_CODEC.encode(key, ServerboundKeyPacket.STREAM_CODEC.decode(raw));
 
                 // Stream ciphers: a few chunks per direction, one cipher object each (the stream continues).
                 Cipher encrypt = Crypt.getCipher(Cipher.ENCRYPT_MODE, secret);

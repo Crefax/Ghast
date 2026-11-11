@@ -923,10 +923,11 @@ One line per case (`type: "case"`): `server_id`, `should_authenticate`, the serv
 (`server_public_der`, `server_private_pkcs8`, base64; 1024 bits like the vanilla server, every
 sixth case 2048), `shared_secret` and `challenge` (hex), `server_hash`
 (`new BigInteger(Crypt.digestData(…)).toString(16)`), `hello_body` (`ClientboundHelloPacket`
-bytes), `key_body` (a `ServerboundKeyPacket` built by its constructor: RSA PKCS#1 v1.5 with random
-padding, so it is checked by decrypting with the private key, not by bytes), and `encrypt` /
-`decrypt`: `[input hex, output hex]` chunks through one `Crypt.getCipher` stream per direction
-(AES/CFB8). Deterministic (seeded `SHA1PRNG` keys, `Rng` for the rest) except the RSA padding.
+bytes), `key_body` (a `ServerboundKeyPacket` through its codec, encrypted with the same RSA PKCS#1
+v1.5 cipher as `Crypt.encryptUsingKey` but with seeded padding; the dump also checks that the real
+constructor's packet decrypts to the secret and the challenge; the reader decrypts with the private
+key), and `encrypt` / `decrypt`: `[input hex, output hex]` chunks through one `Crypt.getCipher`
+stream per direction (AES/CFB8). Deterministic (seeded `SHA1PRNG`s, `Rng` for the rest).
 Read by `crates/ghast-client/src/version/v26_1_chat_golden.rs`.
 
 ### chat_signing.jsonl.gz (26.1)
