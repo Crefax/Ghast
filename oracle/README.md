@@ -71,6 +71,8 @@ tests/golden/1.8.9/
   entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
   entity_tracking.jsonl.gz   (26.1) random entity packets through the real client, entity state per tick
   joins.jsonl.gz             (26.1) joins through the level-load gate (delayed load)
+  net_crypto.jsonl.gz        (26.1) login encryption: session hash, hello / key packets, AES/CFB8
+  chat_signing.jsonl.gz      (26.1) signed chat: session update, chat / command packets, acks
 ```
 
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
@@ -912,6 +914,43 @@ position packet in the same tick; rotate delta while falling) and 100 cases of
 random bits (biased towards the delta bits) and deltas up to ±20, and entity-motion packets in the
 same tick (either order) or the neighbouring ticks. Replayed by `golden_26_1.rs`
 (`teleports_26_1`); cached `fuzz-teleports` seeds 51 and 52 (204k ticks) also at 0 diffs.
+
+### net_crypto.jsonl.gz (26.1)
+
+`MC=26.1 oracle/run.sh net-crypto` (`NetCryptoDump`): login encryption as
+`ClientHandshakePacketListenerImpl.handleHello` does it, with the real `Crypt` and packet codecs.
+One line per case (`type: "case"`): `server_id`, `should_authenticate`, the server's RSA key
+(`server_public_der`, `server_private_pkcs8`, base64; 1024 bits like the vanilla server, every
+sixth case 2048), `shared_secret` and `challenge` (hex), `server_hash`
+(`new BigInteger(Crypt.digestData(…)).toString(16)`), `hello_body` (`ClientboundHelloPacket`
+bytes), `key_body` (a `ServerboundKeyPacket` built by its constructor: RSA PKCS#1 v1.5 with random
+padding, so it is checked by decrypting with the private key, not by bytes), and `encrypt` /
+`decrypt`: `[input hex, output hex]` chunks through one `Crypt.getCipher` stream per direction
+(AES/CFB8). Deterministic (seeded `SHA1PRNG` keys, `Rng` for the rest) except the RSA padding.
+Read by `crates/ghast-client/src/version/v26_1_chat_golden.rs`.
+
+### chat_signing.jsonl.gz (26.1)
+
+`MC=26.1 oracle/run.sh chat-signing` (`ChatSigningDump`): signed chat with the real client
+classes, mirroring `ClientPacketListener.setKeyPair` / `sendChat` / `sendCommand` /
+`markMessageAsProcessed`; only `Instant.now()` and the salt are chosen by the dump. Lines:
+
+- `type: "session"`: `profile_id`, `session_id`, the profile key pair (`private_pkcs8`,
+  `public_spki`, base64; 2048 bits), `expires_at_ms`, `key_signature` (signed by a dump-made
+  "services" key, `services_public_spki`), `session_update_body` (`ServerboundChatSessionUpdatePacket`).
+- `type: "commands"`: `body`, the `ClientboundCommandsPacket` an operator gets from
+  `Commands(DEDICATED)` (`fillUsableCommands` at level 4); the client dispatcher is built from it
+  by `handleCommands`' node builder.
+- `type: "chain"` (14): `index`, `signed` (the session's encoder or `Encoder.UNSIGNED`),
+  `op_level` (entity event `24 + level` before the chain: selectors need 2), and `events`, each one
+  of: `recv` (a 256-byte signature, base64) + `shown` → `addPending`, with `ack_body` when the
+  `ServerboundChatAckPacket` follows (offset > 64); `chat` + `timestamp_ms` + `salt` + `body`
+  (`ServerboundChatPacket` after `generateAndApplyUpdate` and the encoder); `command` +
+  `signable` (`[name, value]` of `SignableCommand.of(dispatcher.parse(…))`) + `packet`
+  (`chat_command` or `chat_command_signed`) + `body` (+ `timestamp_ms`, `salt` when signed).
+
+Deterministic. Read by `crates/ghast-client/src/version/v26_1_chat_golden.rs` (every body
+byte-identical).
 
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 

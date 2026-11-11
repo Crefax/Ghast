@@ -6,6 +6,46 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.1 — unreleased
+
+### Added
+
+- **Signed chat on 26.1** (online mode): `ghast_auth::chat` (`ProfileKeys`,
+  `SignedMessageChain`: SHA256withRSA over the 26.1 signed body),
+  `MicrosoftAuth::profile_keys` (`player/certificates`; `with_certificates_url`,
+  `certificates_url`, `Stage::ProfileKeys`), `Client::signed_chat` (default on) and
+  `Client::profile_keys`, re-exported `ghast::ProfileKeys`. On encrypted connections each join
+  starts a chat session (`chat_session_update` from the connection tick), chat messages and the
+  `minecraft:message` arguments of commands are signed; the key pair is cached per `Client` and
+  refreshed when due. Which commands are signable comes from the server's command tree
+  (`declare_commands`, kept raw and parsed only when a command is sent). Proven byte-identical
+  (signatures included) against the real client: `tests/golden/26.1/chat_signing.jsonl.gz`.
+- **Server transfers** (1.20.5+ `transfer`, configuration and play state):
+  `SessionEnd::Transferred { host, port }`, `Client::follow_transfers` (opt-in: log in to the
+  target with the transfer intent and the stored cookies, at most 8 in a row),
+  `Inbound::Transfer`.
+- `LoginInbound::EncryptionRequestUnauthenticated`: 26.1 encryption requests with
+  `shouldAuthenticate = false` are answered without the session-server join (any account).
+- `Outbound::ChatSessionUpdate`.
+- Oracle dumps `net-crypto` and `chat-signing` (26.1): `tests/golden/26.1/net_crypto.jsonl.gz`
+  (session hash, `hello`, key packet, AES/CFB8) and `chat_signing.jsonl.gz`.
+- Lab: `proxy-switch.sh` (Velocity + two 26.1 backends with different overworld heights,
+  repeated `/server` switches), `online-26.1.sh` + `fake-session-server.py` (online mode and
+  `enforce-secure-profile` against a local account stand-in), `transfer.sh`; examples
+  `server_switch`, `online_chat` (feature `microsoft`), option `--follow-transfers`.
+- CI runs the protocol differential tests against node-minecraft-protocol (`setup-node`,
+  `npm ci`); `GHAST_REQUIRE_NODE=1` makes a missing harness fail instead of skip.
+
+### Changed (behaviour)
+
+- 26.1 `start_configuration` now follows `handleConfigurationStart`: a pending chat
+  acknowledgement is sent before `configuration_acknowledged`, and the level (world columns,
+  tracked entities) is dropped right away instead of at the next join.
+- 26.1 commands whose parse reaches a `minecraft:message` argument (`/msg`, `/say`, `/me`,
+  `/teammsg` …) are sent as `chat_command_signed` like vanilla (without signatures when there is
+  no chat session, e.g. offline mode); other commands stay `chat_command`.
+- A server transfer ends the session (`SessionEnd::Transferred`) instead of being ignored.
+
 ## 0.4.0 — 2026-11-11
 
 Minecraft 26.1 (protocol 775) is the fourth supported version, built on a shared

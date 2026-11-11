@@ -35,7 +35,28 @@ read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to
 ./pathfinder-course.sh 1.8|1.12 build|tp NAME|follow|clear   # parkour corridor + maze for the pathfinder (see the script)
 ./airborne-join.sh 26.1 [5]  # regression: log in 1 block above the ground N times, PASS = 0 Grim flags (any lab)
 LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build instead of the pinned one (cross-checks)
+./transfer.sh                # 26.1: /transfer the bot back to the lab twice (--follow-transfers), PASS = both followed, 0 flags
+./proxy-switch.sh [10]       # 26.1 reconfiguration: Velocity + two backends, N /server switches (own server set, see below)
+./online-26.1.sh             # 26.1 online mode + signed chat against a local account stand-in (own server, see below)
 ```
+
+Server sets with their own directories (each counts as the one lab set that may run; the scripts
+refuse to start while another lab JVM runs and stop their servers by PID at the end):
+
+- `proxy-switch.sh` — `servers/proxy-26.1/`: Velocity 3.5.1 build 615 (sha256-pinned) on
+  `127.0.0.1:25629`, modern forwarding, backends `a` (`:25631`, vanilla overworld y -64..319) and
+  `b` (`:25632`, a data pack overworld y -128..383, so the registries differ between them), both
+  Paper 26.1.2 + Grim 2.3.74, `SWITCH_HEAP` (default 512M) each. The `server_switch` example walks,
+  sends `/server a|b`, logs each backend's floor and its resident memory. PASS = every switch done,
+  0 Grim flags on both backends, memory not growing by more than 15 % from the 2nd join to the last.
+- `online-26.1.sh` — `servers/online-26.1/` on `127.0.0.1:25627`: Paper 26.1.2 + Grim with
+  `online-mode=true` and `enforce-secure-profile=true`; its account services are
+  `fake-session-server.py` on `127.0.0.1:25700` (authlib's `-Dminecraft.api.session.host`,
+  `services.host`, `profiles.host`; needs the Python `cryptography` module). The stand-in accepts
+  the access token `fake:<profile id>`, records `join`, answers `hasJoined`, serves its own signing
+  key at `/publickeys` and issues profile key pairs at `/player/certificates`. The `online_chat`
+  example (feature `microsoft`) logs in through it, chats and runs `/say`, `/me`, `/msg`; a second
+  run with `--unsigned` is the control (the server must refuse its chat). No real account is used.
 
 Test pad (`reset-field.sh`): `x -16..47, z -16..47` cleared to grass; floor strips at y=3, `z 8..23`:
 x 0..7 ice, 8..15 packed ice, 16..23 soul sand, 24..31 slime, 32..39 water (2 deep); x 40..47 step-up course

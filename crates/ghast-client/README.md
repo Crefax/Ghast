@@ -108,8 +108,30 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   chat types and enchantment names for the wire layer), answers cookie requests (stored cookies
   or none), accepts the code of conduct, reports optional resource packs declined and required
   ones accepted + loaded (`Client::accept_required_resource_packs`, nothing is downloaded), and
-  enters play on `finish_configuration`. `start_configuration` in play acknowledges, runs the
-  configuration state again (no ticks meanwhile: vanilla has no level then) and resumes.
+  enters play on `finish_configuration`.
+- **Reconfiguration** (`start_configuration` in play, e.g. a proxy switching backends):
+  like `handleConfigurationStart`, the pending chat acknowledgement goes out first, then
+  `configuration_acknowledged`; the level is dropped (world columns, tracked entities, the
+  player; cookies stay), the configuration state runs again with the new server's registries
+  (a different dimension height takes effect with the next join), no ticks meanwhile.
+- **Transfers** (`transfer`, configuration or play state): the session ends with
+  `SessionEnd::Transferred { host, port }`; with `Client::follow_transfers(true)` the client
+  logs in to the target with the transfer intent and the stored cookies inside the same
+  `run` (the behaviour stops and starts again; at most 8 in a row).
+- **Online mode**: encryption (also `shouldAuthenticate = false`: no session join, any
+  account) and the session-server `join` with `Account::Microsoft`; the services' URLs are
+  `ghast_auth::microsoft::Endpoints` (a local stand-in for tests: `Endpoints::with_base_url`).
+- **Signed chat** (encrypted connections, `Client::signed_chat`, default on): the profile key
+  pair is fetched once per `Client` (`player/certificates`, refreshed when due; or given with
+  `Client::profile_keys`), each join starts a chat session (random id) announced with
+  `chat_session_update` from the connection tick, and chat messages and the `minecraft:message`
+  arguments of commands are signed (SHA256withRSA over the 26.1 signed body: link, salt,
+  timestamp, content, last-seen signatures). Which commands are signed comes from a
+  Brigadier-style parse over the server's `declare_commands` tree (kept raw, parsed only when a
+  command is sent): selectors need permission level 2, arguments behind a redirect to the root
+  (`execute … run say`) are not signed; such commands go out as `chat_command_signed` (without
+  signatures when there is no chat session), the rest as `chat_command`. Offline connections do
+  no signing work.
 - **Tick order** (one client tick): held slot sync → `player_loaded` (once per level, from the
   connection tick inside `gameMode.tick`) → key handling: dig / place / use / attack, written
   immediately → `LocalPlayer.tick`: abilities (flight toggle), `player_input` when the keys
@@ -131,9 +153,10 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   respawn packet's kept data: attributes, last input and sprint state).
 - **Wire layer** (`Wire26_1`, per connection): block action sequence numbers (start and finish
   digging, `use_item_on`, `use_item` take a new one; abort and release send 0; reset per level),
-  `use_item` with the current look, unsigned chat with the last-seen acknowledgement state
-  (offset, 20-bit set, checksum; `message_acknowledgement` after 64 pending signed messages),
-  commands as `chat_command`, chunk batch answers with vanilla's chunks-per-tick estimate.
+  `use_item` with the current look, chat with the last-seen acknowledgement state (offset,
+  20-bit set, checksum; `message_acknowledgement` after 64 pending signed messages), the chat
+  session and command tree above, the permission level (entity events 24–28), cookies, chunk
+  batch answers with vanilla's chunks-per-tick estimate.
 - **Physics** is `ghast_physics::modern` (`V26_1`), fed every movement attribute in packet order,
   effects (weaving too), abilities, teleports with all nine relative bits and their delta,
   `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
@@ -146,10 +169,17 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   `target_entity()` and `attack()` work as on the older versions.
 - **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
   pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
-- **Not yet on 26.1**: online mode (encryption compiles, untested), signed chat / commands with
-  signable arguments (sent unsigned as `chat_command`: offline-mode servers accept them),
-  movement recording, the Grim step compatibility, `WorldView::column` (the 26.1 column type
-  differs).
+- **Proven against the real 26.1 client** (oracle vectors, `cargo test`):
+  `tests/golden/26.1/chat_signing.jsonl.gz` — `chat_session_update`, signed and unsigned
+  `chat_message`, `chat_command` / `chat_command_signed` (which arguments are signed, the
+  signatures, the bytes) and acknowledgements, byte-identical; `net_crypto.jsonl.gz` — session
+  hash, the `hello` packet, the key packet both ways, AES/CFB8 both directions.
+- **Not yet on 26.1**: incoming signed messages are not verified (a message vanilla would
+  reject as invalid still enters the last-seen list), item `use_effects` other than the
+  default (seam in `Sim26::use_effects`), movement recording, the Grim step compatibility,
+  `WorldView::column` (the 26.1 column type differs). Not verifiable without a real account:
+  the real services' responses (`player/certificates` format and key sizes as documented,
+  `join` errors) — the lab uses a local stand-in that follows authlib's parsing.
 
 ## Packet filter
 
@@ -384,6 +414,9 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `inventory_probe` | PASS: chest opened, 30 clicks of every mode accepted, the server's resent contents equal the prediction (0 differing slots), 0 flags |
 | `attack` 1 min next to an armor stand (entity tracking on), `attack --burst` on a breakable one | 83 attacks + 28 interacts, 0 flags; the burst run breaks the stand (2 hits, removed + item dropped) |
 | `lab/airborne-join.sh 26.1 5` (log in 1 block above the ground, 5 times) | 0 flags (Grim 2.3.74 and 2.3.75-e457d55) |
+| `lab/proxy-switch.sh 10`: Velocity 3.5.1 + two backends (overworld y -64.. and a datapack overworld y -128..), `/server` ten times while walking | 10/10 switches, the bot sees each backend's floor (-64 / -128), 0 flags on both backends, resident memory flat (6.0 → 4.6 MB over the switches) |
+| `lab/online-26.1.sh`: online mode + `enforce-secure-profile` against a local account stand-in | encryption + session join, signed chat, `/say`, `/me`, `/msg` accepted as secure, 0 flags; control run with `--unsigned`: chat refused ("missing profile public key") |
+| `lab/transfer.sh`: `/transfer` back to the same server twice (`--follow-transfers`) | both followed (3 logins), 0 flags |
 
 AFK cost, `lab/bench-afk.sh` (30 s warm-up, 300 s), x86-64 WSL, one bot:
 
