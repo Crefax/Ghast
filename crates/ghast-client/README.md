@@ -137,8 +137,7 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
 - **Not yet on 26.1**: online mode (encryption compiles, untested), signed chat / commands with
   signable arguments (sent unsigned as `chat_command`: offline-mode servers accept them),
   entity tracking (and with it entity picks and attacks), movement recording, the Grim step
-  compatibility, `WorldView::column` (the 26.1 column type differs), click results from the
-  inventory (26.1 has no window confirms).
+  compatibility, `WorldView::column` (the 26.1 column type differs).
 
 ## Packet filter
 
@@ -370,7 +369,7 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `movement_course` 3 min (walk, sprint, sprint-jump, jump, sneak incl. an edge, slab, block, wall, fence, ice, packed ice, soul sand, slime, water) | 0 flags, 0 setbacks |
 | `chat`: a chat line, `/msg`, `/say` | delivered (`[Not Secure]` = unsigned), whisper and `/say` rendered, no kick |
 | `dig_place` 2 min (grass by hand, dirt placed back) | 94 broken, 94 placed, 0 flags |
-| `inventory_probe` | the chest opens and the first click is sent; the probe then waits for a click result that 26.1's inventory does not report yet |
+| `inventory_probe` | PASS: chest opened, 30 clicks of every mode accepted, the server's resent contents equal the prediction (0 differing slots), 0 flags |
 
 AFK cost, `lab/bench-afk.sh` (30 s warm-up, 300 s), x86-64 WSL, one bot:
 

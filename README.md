@@ -104,8 +104,9 @@ protocol are served by the same code.
 | keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (unsigned chat and commands; signed chat not yet) |
 | chunks and block changes | yes | yes | yes | yes |
 | player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block) |
-| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | yes (ray boxes approximated) | oracle-verified rays and dig progress |
-| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows and hashed clicks; click results not reported yet |
+| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | oracle-verified rays | oracle-verified rays |
+| block breaking time (per tick progress, finish tick) | oracle-verified | oracle-verified | oracle-verified | oracle-verified |
+| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows, hashed clicks and their results (lab probe: 30 clicks accepted, 0 differences) |
 | entities: tracking, crosshair, attack / interact | yes | yes | yes | not yet |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
 | path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested | not yet |
