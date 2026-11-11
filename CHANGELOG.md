@@ -131,8 +131,12 @@ dig + place, chest clicks).
   ticks / corrections (26.1 has no confirm); item accessors over Mojang's item defaults.
 - **ghast-client**: 26.1 sessions end to end (configuration, chunk batch acks, player input,
   tick end, block sequences), the oracle-verified pick with vanilla's eye lerp and interaction
-  range attributes.
-- Not yet on 26.1: entities, path finding, the viewer, signed chat, online mode (untested).
+  range attributes, entity tracking with entity picks and attacks. The level-load gate
+  (`player_loaded`) is `ghast_physics::modern::LoadGate`, replayed against the oracle's 25 joins;
+  it opens once the player's column and the eight around it have been loaded for two ticks
+  (vanilla's first section compile needs them). Opening it on the player's own column, as an
+  earlier build did, drew Grim flags when logging in above the ground.
+- Not yet on 26.1: path finding, the viewer, signed chat, online mode (untested).
 
 ### Shared infrastructure
 

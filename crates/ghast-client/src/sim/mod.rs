@@ -287,6 +287,18 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// One client tick of the tracked entities (`ClientLevel.tickEntities`), after the tick's
     /// crosshair pick. Versions whose tracker has no client-side motion do nothing.
     fn tick_entities(&mut self) {}
+    /// 1.21.4+ level-load gate: the server's `game_event` 13 (`LEVEL_CHUNKS_LOAD_START`).
+    fn level_load_start(&mut self) {}
+    /// 1.21.4+ level-load gate, once per tick before the key handling: `true` on the tick the
+    /// client sends `player_loaded`. `section_compiled`: the engine's readiness signal;
+    /// `timed_out`: the client's 30 s wait is over.
+    fn load_gate_tick(&mut self, section_compiled: bool, timed_out: bool) -> bool {
+        let _ = (section_compiled, timed_out);
+        false
+    }
+    /// 1.21.4+: a tick behind the level-load gate (the player does not tick; only its entity
+    /// tick counter runs).
+    fn tick_unloaded(&mut self) {}
     /// The whole crosshair target (vanilla `GameRenderer.updateTargetedEntity`): the block
     /// pick unless one of `q.entities` is hit nearer. Versions without an entity pick yet
     /// pick blocks only.
@@ -1065,6 +1077,15 @@ impl Sim for Box<dyn Sim> {
     }
     fn tick_entities(&mut self) {
         (**self).tick_entities();
+    }
+    fn level_load_start(&mut self) {
+        (**self).level_load_start();
+    }
+    fn load_gate_tick(&mut self, section_compiled: bool, timed_out: bool) -> bool {
+        (**self).load_gate_tick(section_compiled, timed_out)
+    }
+    fn tick_unloaded(&mut self) {
+        (**self).tick_unloaded();
     }
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         (**self).attributes(attributes);

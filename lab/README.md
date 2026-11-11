@@ -33,6 +33,8 @@ read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to
 ./alerts.sh 1.8              # follow Grim flags/setbacks/kicks; --all = all such lines in latest.log; --count = flags per player+check
 ./reset-field.sh 1.8 [--tp] [--fly]   # rules (time 6000, clear weather, no ticks) + rebuild the test pad
 ./pathfinder-course.sh 1.8|1.12 build|tp NAME|follow|clear   # parkour corridor + maze for the pathfinder (see the script)
+./airborne-join.sh 26.1 [5]  # regression: log in 1 block above the ground N times, PASS = 0 Grim flags (any lab)
+LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build instead of the pinned one (cross-checks)
 ```
 
 Test pad (`reset-field.sh`): `x -16..47, z -16..47` cleared to grass; floor strips at y=3, `z 8..23`:

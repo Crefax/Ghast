@@ -355,6 +355,11 @@ pub(crate) struct Core {
     level_load_started: bool,
     /// 1.21.4+: `player_loaded` was sent for the current level.
     client_loaded: bool,
+    /// 1.21.4+: this tick sent `player_loaded` (no mouse turn on it).
+    gate_tick: bool,
+    /// Test hook: the level-load gate's "section compiled" / "timed out" inputs.
+    #[cfg(test)]
+    test_gate: Option<(bool, bool)>,
     /// Ticks spent waiting for the level (vanilla lets the player in after 30 s).
     load_wait: u32,
     /// Consecutive ticks the 3x3 columns around the player have been loaded (vanilla compiles
@@ -431,6 +436,9 @@ impl Core {
             swings: 0,
             level_load_started: false,
             client_loaded: false,
+            gate_tick: false,
+            #[cfg(test)]
+            test_gate: None,
             load_wait: 0,
             near_loaded: 0,
             origin: Instant::now(),
@@ -930,7 +938,10 @@ impl<S: Sim> Engine<S> {
                 // 1.15+: "immediate respawn" gamerule (1 = no respawn screen).
                 11 if c.opts.caps.immediate_respawn_rule => c.respawn_screen = value == 0.0,
                 // 1.21.4+ LEVEL_CHUNKS_LOAD_START: the level's chunks are on their way.
-                13 if c.opts.caps.player_loaded_gate => c.level_load_started = true,
+                13 if c.opts.caps.player_loaded_gate => {
+                    c.level_load_started = true;
+                    sim.level_load_start();
+                }
                 _ => {}
             },
             // Window confirms are answered by the inventory (exactly once).
@@ -1109,12 +1120,18 @@ impl<S: Sim> Engine<S> {
             } else {
                 0
             };
-            let ready = c.level_load_started
-                && ((c.ready && c.near_loaded >= 2)
-                    || c.game_mode == GameMode::Spectator
-                    || c.dead);
-            if ready || c.load_wait >= 600 {
+            // The oracle-proven gate (ghast_physics::modern::LoadGate) decides; "section
+            // compiled" is ours: the nine columns on two consecutive ticks (or dead: vanilla
+            // lets a dead player in at once).
+            let (compiled, timed_out) = (
+                (c.ready && c.near_loaded >= 2) || c.dead,
+                c.load_wait >= 600,
+            );
+            #[cfg(test)]
+            let (compiled, timed_out) = c.test_gate.unwrap_or((compiled, timed_out));
+            if self.sim.load_gate_tick(compiled, timed_out) {
                 c.client_loaded = true;
+                c.gate_tick = true;
                 c.out.push(Outbound::PlayerLoaded);
                 log::debug!("[{}] t{} player loaded", c.opts.name, c.tick);
             }
@@ -1124,6 +1141,10 @@ impl<S: Sim> Engine<S> {
             // the bot waits for its column as well) nor before its level loaded (1.21.4+).
             if c.opts.caps.sends_tick_end && c.joined {
                 c.out.push(Outbound::TickEnd);
+            }
+            // Behind the level-load gate only the player's entity tick counter runs.
+            if c.opts.caps.player_loaded_gate && c.joined && !c.client_loaded {
+                self.sim.tick_unloaded();
             }
             self.sim.tick_entities();
             return;
@@ -1311,7 +1332,10 @@ impl<S: Sim> Engine<S> {
             c.pose.pitch = pitch;
             c.aimed = false;
         }
-        if c.aimed {
+        // The gate tick keeps the look (the loading screen held the mouse); an aim set on it
+        // turns from the next tick.
+        let gate_tick = std::mem::take(&mut c.gate_tick);
+        if c.aimed && !gate_tick {
             let (yaw, pitch) = c.rotation.step(c.pose.yaw, c.pose.pitch);
             if c.opts.hold_turn_on_action && !post_look_ok(c, yaw, pitch) {
                 // Grim RotationPlace re-checks a dig / place with the look of the movement
@@ -2659,6 +2683,259 @@ mod tests {
         }
         // All nine from tick 5 on: loaded on tick 6.
         assert_eq!(loaded_at, Some(6));
+    }
+
+    /// The engine through the oracle's 26.1 joins (`tests/golden/26.1/joins.jsonl.gz`, the real
+    /// LevelLoadTracker): every packet of every tick identical (frozen before the gate, position
+    /// packets answered while loading, gate tick player_loaded → position_look on-ground false →
+    /// tick_end, the on-ground status packet after it, water, timeout, compiled before the load
+    /// start, never loaded). The gate's "section compiled" and "timed out" inputs come from the
+    /// golden (the engine's own signal: the nine columns on two consecutive ticks, tested in
+    /// `player_loaded_waits_for_the_neighbourhood`).
+    #[test]
+    fn joins_match_the_oracle_26_1() {
+        use serde_json::Value;
+        use std::io::BufRead;
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/golden/26.1/joins.jsonl.gz"
+        );
+        let f = std::fs::File::open(path).unwrap();
+        let lines: Vec<Value> = std::io::BufReader::new(flate2::read::GzDecoder::new(f))
+            .lines()
+            .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+            .collect();
+        let f64v =
+            |v: &Value| f64::from_bits(u64::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        let f32v =
+            |v: &Value| f32::from_bits(u32::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        let v3 = |v: &Value| Vec3::new(f64v(&v[0]), f64v(&v[1]), f64v(&v[2]));
+        // Engine packets as the golden names them (others are not in the golden).
+        let wire = |o: &Outbound| -> Option<Value> {
+            let bits = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+            Some(match *o {
+                Outbound::TeleportConfirm(id) => serde_json::json!(["teleport_confirm", id]),
+                Outbound::PlayerLoaded => serde_json::json!(["player_loaded"]),
+                Outbound::TickEnd => serde_json::json!(["tick_end"]),
+                Outbound::Move(MovePacket::PositionLook {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "position_look",
+                        bits(pos),
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Position {
+                    pos,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!(["position", bits(pos), on_ground, horizontal_collision])
+                }
+                Outbound::Move(MovePacket::Look {
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "look",
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Flying {
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!(["flying", on_ground, horizontal_collision])
+                }
+                _ => return None,
+            })
+        };
+        let golden = |p: &Value| -> Value {
+            let b = |v: Vec3| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()];
+            let og = &p["on_ground"];
+            let hc = &p["horizontal_collision"];
+            match p["name"].as_str().unwrap() {
+                "teleport_confirm" => serde_json::json!(["teleport_confirm", p["teleport_id"]]),
+                "position_look" => serde_json::json!([
+                    "position_look",
+                    b(v3(&p["pos"])),
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "position" => serde_json::json!(["position", b(v3(&p["pos"])), og, hc]),
+                "look" => serde_json::json!([
+                    "look",
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "flying" => serde_json::json!(["flying", og, hc]),
+                n => serde_json::json!([n]),
+            }
+        };
+        let water = ghast_data::v26_1::BlockState::parse("water[level=0]")
+            .unwrap()
+            .id();
+        let mut cases = 0;
+        let mut i = 0;
+        while i < lines.len() {
+            let sc = &lines[i];
+            assert_eq!(sc["type"], "scenario");
+            let name = sc["name"].as_str().unwrap().to_owned();
+            let mut ticks = Vec::new();
+            i += 1;
+            while i < lines.len() && lines[i]["type"] == "tick" {
+                ticks.push(&lines[i]);
+                i += 1;
+            }
+            cases += 1;
+            let setup = &sc["setup"];
+            assert_eq!(setup["game_mode"], "survival", "{name}");
+            let mut e = engine(GameVersion::V26_1);
+            e.handle(Inbound::JoinGame(JoinGame {
+                entity_id: 7,
+                game_mode: GameMode::Survival,
+                dimension: "0".into(),
+                hardcore: false,
+                dimension_nbt: None,
+                respawn_screen: true,
+            }));
+            let r = &sc["loaded_chunks"][0];
+            let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
+            for x in r[0]..=r[2] {
+                for z in r[1]..=r[3] {
+                    load(&mut e, x, z);
+                }
+            }
+            // The stone layer y 63 is the test chunks' own; other fills as block changes.
+            for fill in sc["fills"].as_array().unwrap() {
+                let v: Vec<i64> = (0..7).map(|k| fill[k].as_i64().unwrap()).collect();
+                let state = sc["states"][v[6].to_string()].as_str().unwrap();
+                if state == "minecraft:stone" {
+                    assert_eq!((v[1], v[4]), (63, 63), "{name}");
+                    continue;
+                }
+                assert_eq!(state, "minecraft:water[level=0]", "{name}");
+                for x in v[0]..=v[3] {
+                    for y in v[1]..=v[4] {
+                        for z in v[2]..=v[5] {
+                            let pos =
+                                ((x & 0x3FF_FFFF) << 38) | ((z & 0x3FF_FFFF) << 12) | (y & 0xFFF);
+                            let mut b = pos.to_be_bytes().to_vec();
+                            let mut st = u32::from(water);
+                            loop {
+                                let byte = (st & 0x7f) as u8;
+                                st >>= 7;
+                                if st == 0 {
+                                    b.push(byte);
+                                    break;
+                                }
+                                b.push(byte | 0x80);
+                            }
+                            let raw = RawPacket {
+                                id: ghast_protocol::v26_1::play::clientbound::id::BLOCK_CHANGE,
+                                body: bytes::Bytes::from(b),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                    }
+                }
+            }
+            e.outbound().clear();
+            let mut compiled = false;
+            let mut timed_out = false;
+            let t0 = Instant::now();
+            let mut b = Idle;
+            let mut teleport_id = 0;
+            for (k, rec) in ticks.iter().enumerate() {
+                let want: Vec<Value> = rec["packets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(&golden)
+                    .collect();
+                let confirm = rec["packets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == "teleport_confirm")
+                    .map(|p| p["teleport_id"].as_i64().unwrap() as i32);
+                if k == 0 {
+                    e.handle(Inbound::Teleport(Teleport {
+                        x: f64v(&setup["pos"][0]),
+                        y: f64v(&setup["pos"][1]),
+                        z: f64v(&setup["pos"][2]),
+                        yaw: f32v(&setup["yaw"]),
+                        pitch: f32v(&setup["pitch"]),
+                        flags: 0,
+                        teleport_id: Some(confirm.unwrap_or(teleport_id)),
+                        ..Default::default()
+                    }));
+                } else {
+                    let input = &rec["input"];
+                    assert_eq!(input["keys"], "", "{name}");
+                    for ev in input["events"].as_array().into_iter().flatten() {
+                        match ev["type"].as_str().unwrap() {
+                            "level_chunks_load_start" => e.handle(Inbound::GameState {
+                                reason: 13,
+                                value: 0.0,
+                            }),
+                            "section_compiled" => compiled = ev["compiled"].as_bool().unwrap(),
+                            "load_timeout" => timed_out = true,
+                            "teleport" => {
+                                teleport_id += 1;
+                                let p = v3(&ev["pos"]);
+                                e.handle(Inbound::Teleport(Teleport {
+                                    x: p.x,
+                                    y: p.y,
+                                    z: p.z,
+                                    yaw: f32v(&ev["yaw"]),
+                                    pitch: f32v(&ev["pitch"]),
+                                    flags: 0,
+                                    teleport_id: Some(confirm.unwrap_or(teleport_id)),
+                                    ..Default::default()
+                                }));
+                            }
+                            other => panic!("{name}: event {other}"),
+                        }
+                    }
+                    e.core.test_gate = Some((compiled, timed_out));
+                    // The oracle's mouse: the input look, from the tick after the gate on.
+                    if e.core.client_loaded {
+                        e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
+                    }
+                    e.note_inbound(t0);
+                    e.tick(&mut b, t0);
+                }
+                let got: Vec<Value> = std::mem::take(e.outbound())
+                    .iter()
+                    .filter_map(&wire)
+                    .collect();
+                assert_eq!(got, want, "{name} tick {k}");
+                assert_eq!(
+                    e.core.client_loaded,
+                    rec["client_loaded"].as_bool().unwrap(),
+                    "{name} tick {k}"
+                );
+            }
+        }
+        assert_eq!(cases, 25);
     }
 
     #[test]

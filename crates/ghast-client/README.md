@@ -116,11 +116,19 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   changed, sprint `player_command`, the movement packet (`on_ground` and
   `horizontal_collision` flags; squared threshold 2e-4, a position at least every 20 ticks) →
   `tick_end`. So the server still judges a tick's actions with the previous tick's sent pose.
-- **Level loading.** The player does not tick until the level is loaded: after the server's
-  `LEVEL_CHUNKS_LOAD_START` game event, once the player's chunk is there (vanilla waits for the
-  section mesh; spectators and dead players at once; after 30 s anyway). Until then each tick
-  sends only `tick_end`. A respawn starts over (with the respawn packet's kept data: attributes,
-  last input and sprint state).
+- **Level loading** (`ghast_physics::modern::LoadGate`, proven on the oracle's
+  `tests/golden/26.1/joins.jsonl.gz`, which the engine replays packet for packet). The player
+  does not tick until the level is loaded: after the server's `LEVEL_CHUNKS_LOAD_START` game
+  event, once the player's section is "compiled" (spectators, dead players and feet outside the
+  build height at once; after 30 s anyway). Until then each tick sends only `tick_end` (position
+  packets are still answered; only the entity tick counter runs). Vanilla compiles the player's
+  section once its column and the eight around it are loaded (`RenderSection.hasAllNeighbors`),
+  in a frame after that tick, so the engine's "compiled" signal is **the nine columns loaded on
+  two consecutive ticks**. The gate tick sends `player_loaded`, the first movement packet
+  (position/look, on-ground false, no mouse turn on that tick) and `tick_end`. Opening the gate
+  earlier (on the player's own column) drew Grim Simulation + GroundSpoof flags when the saved
+  position floated above the ground (`lab/airborne-join.sh`). A respawn starts over (with the
+  respawn packet's kept data: attributes, last input and sprint state).
 - **Wire layer** (`Wire26_1`, per connection): block action sequence numbers (start and finish
   digging, `use_item_on`, `use_item` take a new one; abort and release send 0; reset per level),
   `use_item` with the current look, unsigned chat with the last-seen acknowledgement state
@@ -131,13 +139,17 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
   **Digging** uses `ghast_data::v26_1::dig` (oracle-verified) with the server's
   `mining_efficiency`, `block_break_speed` and `submerged_mining_speed` attributes. The
-  crosshair is the oracle-verified 26.1 block pick.
+  crosshair is the oracle-verified 26.1 pick (blocks and the tracked entities).
+- **Entities** (opt-in, `Interests::ENTITIES`): `ghast_entity::v26_1::Tracker` gets every packet
+  it wants (also the `map_chunk` / `unload_chunk` the world reads) and ticks once per client tick
+  after the pick (interpolation, with the block / border collision test); `entities()`,
+  `target_entity()` and `attack()` work as on the older versions.
 - **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
   pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
 - **Not yet on 26.1**: online mode (encryption compiles, untested), signed chat / commands with
   signable arguments (sent unsigned as `chat_command`: offline-mode servers accept them),
-  entity tracking (and with it entity picks and attacks), movement recording, the Grim step
-  compatibility, `WorldView::column` (the 26.1 column type differs).
+  movement recording, the Grim step compatibility, `WorldView::column` (the 26.1 column type
+  differs).
 
 ## Packet filter
 
@@ -370,6 +382,8 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `chat`: a chat line, `/msg`, `/say` | delivered (`[Not Secure]` = unsigned), whisper and `/say` rendered, no kick |
 | `dig_place` 2 min (grass by hand, dirt placed back) | 94 broken, 94 placed, 0 flags |
 | `inventory_probe` | PASS: chest opened, 30 clicks of every mode accepted, the server's resent contents equal the prediction (0 differing slots), 0 flags |
+| `attack` 1 min next to an armor stand (entity tracking on), `attack --burst` on a breakable one | 83 attacks + 28 interacts, 0 flags; the burst run breaks the stand (2 hits, removed + item dropped) |
+| `lab/airborne-join.sh 26.1 5` (log in 1 block above the ground, 5 times) | 0 flags (Grim 2.3.74 and 2.3.75-e457d55) |
 
 AFK cost, `lab/bench-afk.sh` (30 s warm-up, 300 s), x86-64 WSL, one bot:
 

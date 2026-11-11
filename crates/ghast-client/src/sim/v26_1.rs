@@ -29,6 +29,8 @@ pub(crate) struct Sim26 {
     entities: Option<ghast_entity::v26_1::Tracker>,
     /// Join / respawn packets, replayed into a tracker started mid-session.
     session: SessionPackets,
+    /// The level-load gate (`player_loaded`), oracle-proven on `joins.jsonl.gz`.
+    gate: modern::LoadGate,
 }
 
 /// The interaction ranges with vanilla's defaults and ranges.
@@ -70,6 +72,7 @@ impl Sim26 {
             old_pos: [0.0; 3],
             entities: None,
             session: SessionPackets::default(),
+            gate: modern::LoadGate::waiting(),
         }
     }
 
@@ -324,6 +327,8 @@ impl Sim for Sim26 {
         self.mining = mining_attributes();
         self.ranges = range_attributes();
         self.old_pos = [0.0; 3];
+        // handleLogin / handleRespawn: wait for the level again.
+        self.gate = modern::LoadGate::waiting();
         self.sync_level();
     }
 
@@ -512,6 +517,22 @@ impl Sim for Sim26 {
     fn pick_margin(&self, e: &ghast_entity::Entity) -> Option<f32> {
         let t = self.entities.as_ref()?;
         t.pickable(e).then(|| ghast_entity::v26_1::pick_radius(e))
+    }
+
+    fn level_load_start(&mut self) {
+        self.gate.level_chunks_load_start();
+    }
+
+    fn load_gate_tick(&mut self, section_compiled: bool, timed_out: bool) -> bool {
+        if timed_out {
+            self.gate.time_out();
+        }
+        self.gate.tick(&self.player, section_compiled)
+    }
+
+    fn tick_unloaded(&mut self) {
+        // LoadGate::step before the gate: only the entity tick counter.
+        self.player.age += 1;
     }
 
     fn tick_entities(&mut self) {
