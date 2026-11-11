@@ -115,17 +115,17 @@ fn max_count(v: Version, id: i32) -> i32 {
 /// vanilla only loses items when a stack is bigger than its item allows, e.g. a number-key swap
 /// that splits an over-stacked tool into the inventory and drops the rest).
 fn mk(v: Version, t: (i32, i32, i16, Option<u8>), valid: bool) -> Stack {
-    Stack {
-        id: t.0,
-        count: if valid {
+    Stack::new(
+        t.0,
+        if valid {
             t.1.min(max_count(v, t.0))
         } else {
             t.1
         },
         // 1.16.5 slots carry no damage field
-        damage: if v == Version::V1_16_5 { 0 } else { t.2 },
-        data: ghast_inventory::ItemData::from_nbt(t.3.map(nbt)),
-    }
+        if v == Version::V1_16_5 { 0 } else { t.2 },
+    )
+    .with_nbt(t.3.map(nbt))
 }
 
 fn click_of(mode: u8, slot: i16, b: u8) -> Click {
@@ -221,9 +221,9 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
                             before.into_iter().collect();
                         if grid(&inv) != grid_before {
                             let r = result_before.expect("a take needs a result");
-                            *want.entry(r.id).or_default() += i64::from(r.count);
+                            *want.entry(r.id()).or_default() += i64::from(r.count());
                             for g in grid_before.iter().flatten() {
-                                *want.entry(g.id).or_default() -= 1;
+                                *want.entry(g.id()).or_default() -= 1;
                             }
                         }
                         want.retain(|_, n| *n != 0);
@@ -247,13 +247,13 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
             for i in 0..inv.slot_count() {
                 if let Some(s) = inv.slot(i) {
                     assert!(
-                        s.count > 0 && s.id != 0,
+                        s.count() > 0 && s.id() != 0,
                         "1.12 / 1.16 store no empty stacks: {s:?}"
                     );
                 }
             }
             if let Some(c) = inv.cursor() {
-                assert!(c.count > 0 && c.id != 0);
+                assert!(c.count() > 0 && c.id() != 0);
             }
         }
     }
@@ -272,7 +272,7 @@ fn grid(inv: &Inventory) -> Vec<Option<Stack>> {
 /// of items without subtypes, like vanilla); `skip_result`: without slot 0.
 fn total(inv: &Inventory, skip_result: bool) -> Vec<(i32, i64)> {
     let mut m = std::collections::BTreeMap::new();
-    let mut add = |s: &Stack| *m.entry(s.id).or_insert(0i64) += i64::from(s.count);
+    let mut add = |s: &Stack| *m.entry(s.id()).or_insert(0i64) += i64::from(s.count());
     for i in usize::from(skip_result)..inv.slot_count() {
         if let Some(s) = inv.slot(i) {
             add(s);

@@ -45,9 +45,9 @@
 //! assert_eq!(inv.open_inventory(), Ok(Some(Outgoing::OpenInventory))); // 1.8: C16
 //! inv.tick();
 //! let Ok(Outgoing::Click(c)) = inv.click(Click::Pickup { slot: 36, right: true }) else { panic!() };
-//! assert_eq!((c.action, c.item.as_ref().unwrap().count), (1, 64)); // carries the slot before the click
-//! assert_eq!(inv.cursor().unwrap().count, 32);
-//! assert_eq!(inv.window0_slot(36).unwrap().count, 32);
+//! assert_eq!((c.action, c.item.as_ref().unwrap().count()), (1, 64)); // carries the slot before the click
+//! assert_eq!(inv.cursor().unwrap().count(), 32);
+//! assert_eq!(inv.window0_slot(36).unwrap().count(), 32);
 //! assert!(inv.pending());
 //! assert_eq!(inv.on_transaction(0, 1, true), None); // accepted: nothing to answer
 //! assert!(!inv.pending());

@@ -88,15 +88,15 @@ fn click(inv: &mut Inventory, c: Click) -> ClickPacket {
 }
 
 fn count(inv: &Inventory, slot: usize) -> Option<(i32, i32)> {
-    inv.slot(slot).map(|s| (s.id, s.count))
+    inv.slot(slot).map(|s| (s.id(), s.count()))
 }
 
 fn cursor(inv: &Inventory) -> Option<(i32, i32)> {
-    inv.cursor().map(|s| (s.id, s.count))
+    inv.cursor().map(|s| (s.id(), s.count()))
 }
 
 fn item(p: &ClickPacket) -> Option<(i32, i32)> {
-    p.item.as_ref().map(|s| (s.id, s.count))
+    p.item.as_ref().map(|s| (s.id(), s.count()))
 }
 
 const ALL: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
@@ -251,11 +251,11 @@ fn v1_8_damage_matters_when_merging() {
         },
     );
     assert_eq!(
-        inv.cursor().map(|s| (s.damage, s.count)),
+        inv.cursor().map(|s| (s.damage(), s.count())),
         Some((1, 10)),
         "swapped"
     );
-    assert_eq!(inv.slot(10).map(|s| (s.damage, s.count)), Some((0, 10)));
+    assert_eq!(inv.slot(10).map(|s| (s.damage(), s.count())), Some((0, 10)));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn armor_slots() {
         (cursor(&inv), count(&inv, 5)),
         (Some((PUMPKIN, 1)), Some((PUMPKIN, 1)))
     );
-    assert_eq!(inv.armor(0).map(|s| s.id), Some(PUMPKIN));
+    assert_eq!(inv.armor(0).map(|s| s.id()), Some(PUMPKIN));
     // the chestplate slot refuses the pumpkin
     click(
         &mut inv,
@@ -518,9 +518,9 @@ fn shift_click_armor() {
             right: false,
         },
     );
-    assert_eq!(inv.armor(0).map(|s| s.id), Some(id16("carved_pumpkin")));
-    assert_eq!(inv.armor(1).map(|s| s.id), Some(id16("elytra")));
-    assert_eq!(inv.offhand().map(|s| s.id), Some(id16("shield")));
+    assert_eq!(inv.armor(0).map(|s| s.id()), Some(id16("carved_pumpkin")));
+    assert_eq!(inv.armor(1).map(|s| s.id()), Some(id16("elytra")));
+    assert_eq!(inv.offhand().map(|s| s.id()), Some(id16("shield")));
 }
 
 #[test]
@@ -553,7 +553,7 @@ fn shift_click_chest() {
         );
         assert_eq!((count(&inv, 62), count(&inv, 0)), (Some((STONE, 64)), None));
         assert_eq!(
-            inv.hotbar(8).map(|s| s.count),
+            inv.hotbar(8).map(|s| s.count()),
             Some(64),
             "same PlayerInventory slot"
         );
@@ -804,7 +804,7 @@ fn offhand_swap_key() {
             hotbar: 40,
         },
     );
-    assert_eq!(inv.offhand().map(|s| s.count), Some(5));
+    assert_eq!(inv.offhand().map(|s| s.count()), Some(5));
     assert_eq!(count(&inv, 45), Some((id16("torch"), 5)));
     let mut inv = player_inv(Version::V1_8, &[]);
     inv.tick();
@@ -1018,8 +1018,7 @@ fn binding_curse_keeps_armor_on() {
         )])),
     })
     .unwrap();
-    let mut helmet = s16("iron_helmet", 1);
-    helmet.data = ghast_inventory::ItemData::Nbt(nbt);
+    let helmet = s16("iron_helmet", 1).with_nbt(Some(nbt));
     let mut inv = player_inv(Version::V1_16_5, &[(5, helmet)]);
     let p = click(
         &mut inv,
@@ -1038,11 +1037,11 @@ fn v1_16_empty_stacks_are_dropped() {
     inv.on_set_slot(0, 36, Some(s16("stone", 0)));
     assert_eq!(inv.hotbar(0), None);
     inv.on_set_slot(-2, 40, Some(s16("stone", 2)));
-    assert_eq!(inv.offhand().map(|s| s.count), Some(2));
+    assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
     // 1.8 keeps zero-count stacks
     let mut inv = Inventory::new(Version::V1_8);
     inv.on_set_slot(0, 36, Some(s(STONE, 0)));
-    assert_eq!(inv.hotbar(0).map(|s| s.count), Some(0));
+    assert_eq!(inv.hotbar(0).map(|s| s.count()), Some(0));
 }
 
 #[test]
@@ -1133,7 +1132,7 @@ fn v1_8_items_without_subtypes_merge_across_damage() {
             right: false,
         },
     );
-    assert_eq!(inv.slot(36).map(|s| (s.damage, s.count)), Some((0, 8)));
+    assert_eq!(inv.slot(36).map(|s| (s.damage(), s.count())), Some((0, 8)));
     assert_eq!(count(&inv, 9), None);
 }
 
@@ -1349,7 +1348,7 @@ fn set_slot_routing() {
     assert_eq!(inv.window0_slot(10), None);
     // window 0 hotbar slots always reach window 0
     inv.on_set_slot(0, 36, Some(s(STONE, 2)));
-    assert_eq!(inv.window0_slot(36).map(|s| s.count), Some(2));
+    assert_eq!(inv.window0_slot(36).map(|s| s.count()), Some(2));
     assert_eq!(
         count(&inv, 54),
         Some((STONE, 2)),
@@ -1410,18 +1409,18 @@ fn consume_held_and_offhand() {
     let mut inv = player_inv(Version::V1_8, &[(36, s(STONE, 2)), (37, s(DIRT, 5))]);
     inv.drain_events();
     assert!(inv.consume_held(1));
-    assert_eq!(inv.hotbar(0).map(|s| s.count), Some(1));
+    assert_eq!(inv.hotbar(0).map(|s| s.count()), Some(1));
     assert!(inv.drain_events().player_changed);
     assert!(inv.consume_held(1));
     assert_eq!(inv.hotbar(0), None, "emptied at 0");
     assert!(!inv.consume_held(1), "nothing held");
     inv.select(1);
     assert!(inv.consume_held(2));
-    assert_eq!(inv.held().map(|s| s.count), Some(3));
+    assert_eq!(inv.held().map(|s| s.count()), Some(3));
     assert!(!inv.consume_offhand(1), "1.8 has no offhand");
     let mut inv = player_inv(Version::V1_16_5, &[(45, s16("torch", 3))]);
     assert!(inv.consume_offhand(1));
-    assert_eq!(inv.offhand().map(|s| s.count), Some(2));
+    assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
 }
 
 // ------------------------------------------------------------------ 1.12.2 specifics
@@ -1439,7 +1438,7 @@ fn v1_12_offhand_slot_and_shield_shift_click() {
     let v = Version::V1_12;
     let mut inv = player_inv(v, &[(36, s(SHIELD_12, 1)), (45, s(STONE, 3))]);
     assert_eq!(inv.slot_count(), 46);
-    assert_eq!(inv.offhand().map(|s| (s.id, s.count)), Some((STONE, 3)));
+    assert_eq!(inv.offhand().map(|s| (s.id(), s.count())), Some((STONE, 3)));
     // the offhand is occupied: the shield goes from the hotbar into the main inventory
     click(
         &mut inv,
@@ -1471,7 +1470,7 @@ fn v1_12_offhand_slot_and_shield_shift_click() {
             right: false,
         },
     );
-    assert_eq!(inv.offhand().map(|s| s.id), Some(SHIELD_12));
+    assert_eq!(inv.offhand().map(|s| s.id()), Some(SHIELD_12));
     // 1.12 has no offhand number-key swap (button 40)
     inv.tick();
     assert_eq!(
@@ -1503,8 +1502,8 @@ fn v1_12_damage_variants_do_not_merge() {
         },
     );
     // different damage: swapped
-    assert_eq!(inv.slot(37).map(|s| s.damage), Some(0));
-    assert_eq!(inv.cursor().map(|s| s.damage), Some(1));
+    assert_eq!(inv.slot(37).map(|s| s.damage()), Some(0));
+    assert_eq!(inv.cursor().map(|s| s.damage()), Some(1));
 }
 
 #[test]
@@ -1569,10 +1568,10 @@ fn v1_12_set_slot_player_inventory_and_window_types() {
     let v = Version::V1_12;
     let mut inv = Inventory::new(v);
     inv.on_set_slot(-2, 40, Some(s(STONE, 2)));
-    assert_eq!(inv.offhand().map(|s| s.count), Some(2));
+    assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
     inv.on_set_slot(-2, 3, Some(sd(WOOL, 1, 5)));
     assert_eq!(
-        inv.hotbar(3).map(|s| s.damage),
+        inv.hotbar(3).map(|s| s.damage()),
         Some(5),
         "1.12 keeps the damage"
     );
@@ -1587,7 +1586,7 @@ fn v1_12_set_slot_player_inventory_and_window_types() {
         Some(WindowKind::Chest { rows: 3 })
     );
     assert!(inv.consume_offhand(1));
-    assert_eq!(inv.offhand().map(|s| s.count), Some(1));
+    assert_eq!(inv.offhand().map(|s| s.count()), Some(1));
     assert_eq!(
         inv.open_inventory(),
         Ok(None),

@@ -149,7 +149,7 @@ fn lazy_and_generated_paths_agree_on_captured_items() {
         for i in 0..lazy.slot_count() {
             assert_eq!(lazy.slot(i), typed.slot(i), "slot {i}");
             if let Some(s) = lazy.slot(i)
-                && let ItemData::Components(p) = &s.data
+                && let ItemData::Components(p) = &s.data()
             {
                 for (t, _) in p.iter() {
                     seen_components.insert(t);
@@ -178,29 +178,28 @@ fn accessors_from_defaults_and_patches() {
     use ghast_protocol::types::slot::v775::ComponentPatch;
     let v = Version::V26_1;
     let pick = item_id("diamond_pickaxe").unwrap();
-    let mut s = ghast_inventory::Stack::new(pick, 1, 0);
+    let s = ghast_inventory::Stack::new(pick, 1, 0);
     assert_eq!(s.item_name(v), Some("diamond_pickaxe"));
     assert_eq!(s.max_damage(v), Some(1561));
     assert!(s.is_damageable(v));
     assert!(!s.unbreakable(v));
-    s.data = ItemData::Components(Box::new(ComponentPatch::from_parts(
+    let s = s.with_data(ItemData::Components(Box::new(ComponentPatch::from_parts(
         &[
             (component::DAMAGE, &[0x96, 0x01]),
             (component::UNBREAKABLE, &[]),
         ],
         &[],
-    )));
+    ))));
     assert_eq!(s.damage_value(v), 150);
     assert!(s.unbreakable(v));
     assert!(!s.is_damageable(v));
     // removing max_stack_size makes the default 1
-    let dirt = ghast_inventory::Stack {
-        data: ItemData::Components(Box::new(ComponentPatch::from_parts(
+    let dirt = ghast_inventory::Stack::new(item_id("dirt").unwrap(), 1, 0).with_data(
+        ItemData::Components(Box::new(ComponentPatch::from_parts(
             &[],
             &[component::MAX_STACK_SIZE],
         ))),
-        ..ghast_inventory::Stack::new(item_id("dirt").unwrap(), 1, 0)
-    };
+    );
     assert_eq!(dirt.max_stack_size(v), 1);
 }
 

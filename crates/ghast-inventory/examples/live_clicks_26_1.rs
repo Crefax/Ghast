@@ -219,7 +219,7 @@ fn dump(inv: &Inventory) {
             println!(
                 "  slot {i:2}: {} x{} dmg {}/{}{name} ench {:?}",
                 s.item_name(v).unwrap_or("?"),
-                s.count,
+                s.count(),
                 s.damage_value(v),
                 s.max_damage(v).unwrap_or(0),
                 ench.iter()
@@ -234,7 +234,7 @@ fn dump(inv: &Inventory) {
         }
     }
     if let Some(c) = inv.cursor() {
-        println!("  cursor: {:?} x{}", c.item_name(v), c.count);
+        println!("  cursor: {:?} x{}", c.item_name(v), c.count());
     }
 }
 
@@ -569,12 +569,12 @@ fn main() {
         "  after the corrections: cursor {:?}, pearls {:?}",
         lab.inv.cursor().map(|c| (
             c.item_name(Version::V26_1),
-            c.count,
-            c.data != ghast_inventory::ItemData::None
+            c.count(),
+            *c.data() != ghast_inventory::ItemData::None
         )),
         lab.find("ender_pearl")
             .and_then(|i| lab.inv.slot(i as usize))
-            .map(|s| s.count)
+            .map(|s| s.count())
     );
     let e = lab.empty_slot(9);
     run(

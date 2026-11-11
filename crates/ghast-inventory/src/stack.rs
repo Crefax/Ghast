@@ -39,20 +39,62 @@ impl ItemData {
 /// `count` is a Java `int` in vanilla (sent as a byte before 26.1). 1.8 keeps stacks with a
 /// count of zero or less as real stacks (they render as a red "0"); later versions treat them as
 /// empty, so their [`Inventory`](crate::Inventory) never stores one.
+///
+/// The fields are private so the representation can change without breaking users: read them
+/// with [`Stack::id`], [`Stack::count`], [`Stack::damage`], [`Stack::data`], build stacks with
+/// [`Stack::new`] and the `with_*` methods.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Stack {
-    /// Numeric item id (1.8 / 1.12: legacy id; 1.16.5 / 26.1: item registry id).
-    pub id: i32,
-    /// Stack size.
-    pub count: i32,
-    /// 1.8 / 1.12 damage / metadata. Always 0 on 1.16.5 (the `Damage` NBT tag) and 26.1 (the
-    /// `damage` component); see [`Stack::damage_value`].
-    pub damage: i16,
-    /// NBT or data components exactly as received.
-    pub data: ItemData,
+    pub(crate) id: i32,
+    pub(crate) count: i32,
+    pub(crate) damage: i16,
+    pub(crate) data: ItemData,
 }
 
 impl Stack {
+    /// Numeric item id (1.8 / 1.12: legacy id; 1.16.5 / 26.1: item registry id).
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+
+    /// Stack size.
+    #[inline]
+    #[must_use]
+    pub fn count(&self) -> i32 {
+        self.count
+    }
+
+    /// 1.8 / 1.12 damage / metadata. Always 0 on 1.16.5 (the `Damage` NBT tag) and 26.1 (the
+    /// `damage` component); see [`Stack::damage_value`].
+    #[inline]
+    #[must_use]
+    pub fn damage(&self) -> i16 {
+        self.damage
+    }
+
+    /// NBT or data components exactly as received.
+    #[inline]
+    #[must_use]
+    pub fn data(&self) -> &ItemData {
+        &self.data
+    }
+
+    /// This stack with another item data.
+    #[must_use]
+    pub fn with_data(mut self, data: ItemData) -> Stack {
+        self.data = data;
+        self
+    }
+
+    /// This stack with another damage / metadata value.
+    #[must_use]
+    pub fn with_damage(mut self, damage: i16) -> Stack {
+        self.damage = damage;
+        self
+    }
+
     /// A stack without NBT or component changes.
     #[must_use]
     pub fn new(id: i32, count: i32, damage: i16) -> Stack {
