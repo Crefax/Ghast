@@ -2,6 +2,8 @@
 # One entry point for the oracle. Needs a JDK 17+ (JAVA_HOME or java on PATH).
 #
 #   oracle/run.sh                 fetch + remap (first run) + build + regenerate tests/golden/<mc>/
+#   oracle/run.sh golden --out D  write the golden set into directory D instead (absolute path: the
+#                                 JVM runs in oracle/, a relative D is resolved there)
 #   oracle/run.sh verify          regenerate into a temp dir and compare content with tests/golden/<mc>/
 #   oracle/run.sh selftest        generate twice in one JVM and compare (determinism)
 #   oracle/run.sh coverage        rewrite YARN_COVERAGE.md
@@ -25,7 +27,8 @@ case "$cmd" in
     "$GRADLE" -q -Pmc="$MC" oracle --args="golden --out $tmp"
     "$GRADLE" -q -Pmc="$MC" oracle --args="compare $tmp $(cd .. && pwd)/tests/golden/$MC" ;;
   golden)
-    exec "$GRADLE" -q -Pmc="$MC" oracle --args="golden" ;;
+    # Extra arguments (e.g. --out DIR) are passed on; without --out the set goes to tests/golden/<mc>.
+    exec "$GRADLE" -q -Pmc="$MC" oracle --args="$*" ;;
   *)
     exec "$GRADLE" -q -Pmc="$MC" oracle --args="$*" ;;
 esac

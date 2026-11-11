@@ -21,6 +21,10 @@ oracle/run.sh verify     # regenerate into a temp dir, compare content with test
 oracle/run.sh selftest   # determinism: two runs, reverse order, read-back replay must all match
 ```
 
+`oracle/run.sh golden --out DIR` writes the whole golden set into `DIR` instead of `tests/golden/<mc>/`
+(every version; give an absolute path: the JVM runs in `oracle/`, a relative `DIR` is resolved there).
+Before 0.4.1 `run.sh golden` dropped its arguments and always overwrote `tests/golden/<mc>/`.
+
 `run.sh` uses `./gradlew` (Gradle 8.5, downloaded by the wrapper) unless `GRADLE=/path/to/gradle` is
 set. Other commands (`oracle/run.sh help` lists them):
 
@@ -1318,12 +1322,20 @@ client: `MultiPlayerGameMode.handleContainerInput` → the menu's `clicked` (`do
 recorded (a drop also sends `swing`).
 
 Real, per case: the menu, built as `MenuScreens.create` builds it (`MenuType.create(id,
-inventory)` for all 25 `minecraft:menu` types, or window 0's `InventoryMenu`); contents, carried
+inventory)` for all 25 `minecraft:menu` types, or window 0's `InventoryMenu`), or in 6 % a mount
+screen as `handleMountScreenOpen` builds it (a client entity of a random mount type added to the
+level — horse, donkey, mule, llama, trader llama, camel, skeleton / zombie horse, nautilus,
+zombie nautilus; baby or not, tamed or not, a chest and llama strength at random — and its
+`HorseInventoryMenu` / `NautilusInventoryMenu` over a `SimpleContainer` of its columns); contents, carried
 stack and state id through a real `container_set_content` (window 0 and the menu); game mode
 changes as a server sends them (game event, player info, abilities: creative cases enable
 `CLONE` and clone drags, and lift the binding curse lock); the experience level
 (`set_experience`: the anvil's cost check), the held slot, container data (crafter slot locks,
-anvil cost, stonecutter / loom selection). Once per file the vanilla data pack's recipes are
+anvil cost, stonecutter / loom selection), a villager's offers through a real
+`ClientboundMerchantOffersPacket`. Screen actions besides clicks, as the screens perform them: a
+trade picked (`MerchantScreen.postButtonClick`: hint, `tryMoveItems`, `select_trade`), a loom
+pattern button (`clickMenuButton` + `container_button_click`), an anvil rename (`AnvilScreen`'s
+name field: `setItemName` + `rename_item`). Once per file the vanilla data pack's recipes are
 loaded the way a server loads them and synced through a real `ClientboundUpdateRecipesPacket`
 (its bytes are the first line: the furnace, smithing and stonecutter item sets come from it);
 the item sets and stonecutter entries are written sorted (item id, recipe id) because the
@@ -1342,19 +1354,25 @@ Menus get contents that fit their slots most of the time. Gestures: a single cli
 (-999), of type split / one each / clone, sometimes broken (no start or end, a type change, an
 unrelated click in the middle).
 
-Lines: `{"type":"update_recipes","packet":hex}`; `{"type":"registry","name","entries"}` (every
+Lines: `{"type":"update_recipes","packet":hex}`; `{"type":"registry_data","registry","packet":hex}` (the
+enchantment and banner pattern registries as a server sends them, with data);
+`{"type":"update_tags","packet":hex}` (the server's tags, sorted); `{"type":"registry","name","entries"}` (every
 registry the client holds, ids in order); `{"type":"item","id","name","fuel",
 "brewing_ingredient","brewing_fuel","beacon_payment","loom_dye_tag","loom_pattern_tag","banner",
 "fits_container","has_dye","has_patterns","remainder"}` (the facts the slot rules read, after
 the configuration phase; `remainder` = `defaultCraftingReminder` of the item alone, stack hex);
 `{"type":"case","case","menu"` (registry id, -1 = window 0)`,"window"` (container id)`,
-"creative","xp","selected","data"`(crafter: 10 values, anvil / loom / stonecutter: 1)`` + state
-`,"clicks":[{"slot","button","mode","packets":[hex…]` + state `}]}`. State: `"w0"` (46 window 0
+"creative","xp","selected","data"`(crafter: 10 values, anvil / loom / stonecutter: 1)`,"offers"`
+(merchant: the packet hex)`,"mount"`(`{"type","type_id","columns","saddle","body"}`: entity type,
+chest columns, `canUseSlot(SADDLE / BODY)`)`` + state `,"clicks":[{"slot","button","mode"`
+(modes 100 select trade, 101 loom button, 102 rename with `"name"` sent)`,"packets":[hex…]` +
+state `}]}`; a state also carries `"slots_data"` (the menu's data slots after the click). State: `"w0"` (46 window 0
 slots), `"screen"` (the menu's slots or null), `"carried"`, `"inv"` (41 player inventory slots),
 `"state_id"`, `"drag"` (`quickcraftStatus`). Stack hex: `ItemStack.OPTIONAL_STREAM_CODEC`'s
 layout with the patch in component type id order and enchantment maps by registry id (the
 in-memory order depends on how the stack was built). Packet hex: a tag byte (0
-`container_click`, 1 `set_creative_mode_slot`, 2 any other packet followed by its type name),
+`container_click`, 1 `set_creative_mode_slot`, 2 any other packet followed by its type name, 3
+`select_trade`, 4 `container_button_click`, 5 `rename_item`),
 then the body: `container_click` exactly as `STREAM_CODEC` writes it (the changed-slot map in
 its own `Int2ObjectOpenHashMap` order) except that each `HashedStack`'s added components and
 removed types are in type id order (vanilla's `IdentityHashMap` / `HashSet` order is
