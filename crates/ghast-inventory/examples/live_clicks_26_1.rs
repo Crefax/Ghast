@@ -41,7 +41,14 @@ impl Conn {
         use ghast_protocol::McWrite;
         let keep = match (self.state, dir) {
             (4, 0) => ghast_inventory::PACKET_IDS_26_1.contains(&raw.id),
-            (4, 1) => raw.id == sb::id::WINDOW_CLICK || raw.id == sb::id::CLOSE_WINDOW,
+            (4, 1) => matches!(
+                raw.id,
+                sb::id::WINDOW_CLICK
+                    | sb::id::CLOSE_WINDOW
+                    | sb::id::NAME_ITEM
+                    | sb::id::SELECT_TRADE
+                    | sb::id::ENCHANT_ITEM
+            ),
             _ => false,
         };
         if let (true, Some(c)) = (keep, &mut self.capture) {
@@ -97,12 +104,18 @@ impl Conn {
     }
 }
 
+/// `minecraft:villager` in the 26.1 entity type registry.
+const VILLAGER: i32 = 139;
+
 struct Lab {
     c: Conn,
     inv: Inventory,
     pos: [f64; 3],
     corrections: usize,
     log_corrections: bool,
+    /// The last villager the server spawned (entity id).
+    villager: Option<i32>,
+    last_tick: Instant,
 }
 
 impl Lab {
@@ -110,7 +123,29 @@ impl Lab {
     fn pump(&mut self, ms: u64) {
         let end = Instant::now() + Duration::from_millis(ms);
         while Instant::now() < end {
+            // a client tick every 50 ms (the server sends chunks and entities to a ticking client)
+            if self.last_tick.elapsed() >= Duration::from_millis(50) {
+                self.last_tick = Instant::now();
+                self.c.send(&sb::Flying {
+                    flags: sb::MovementFlags::ON_GROUND,
+                });
+                self.c.send(&sb::TickEnd {});
+            }
             let Some(raw) = self.c.recv() else { continue };
+            if std::env::var("IDS").is_ok() {
+                let head: Vec<String> = raw
+                    .body
+                    .iter()
+                    .take(8)
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                println!(
+                    "    <- id {:#04x} {} bytes {}",
+                    raw.id,
+                    raw.body.len(),
+                    head.join("")
+                );
+            }
             if matches!(
                 raw.id,
                 cb::id::SET_SLOT
@@ -141,7 +176,15 @@ impl Lab {
                 let _ = std::fs::write(&path, &raw.body);
                 println!("  body saved to {path}");
             }
-            let Ok(p) = P::decode_raw(&raw) else { continue };
+            let p = match P::decode_raw(&raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    if raw.id == cb::id::SPAWN_ENTITY {
+                        println!("    spawn_entity does not decode: {e}");
+                    }
+                    continue;
+                }
+            };
             match p {
                 P::KeepAlive(k) => self.c.send(&sb::KeepAlive {
                     keep_alive_id: k.keep_alive_id,
@@ -161,6 +204,19 @@ impl Lab {
                         flags: sb::MovementFlags::ON_GROUND,
                     });
                     self.c.send(&sb::PlayerLoaded {});
+                }
+                // a player saved dead joins dead: respawn (a dead player gets no chunks)
+                P::UpdateHealth(h) if h.health <= 0.0 => {
+                    println!("    dead: respawning");
+                    self.c.send(&sb::ClientCommand {
+                        action_id: sb::ClientCommandActionId::PERFORM_RESPAWN,
+                    });
+                }
+                P::SpawnEntity(e) => {
+                    if e.r#type == VILLAGER {
+                        self.villager = Some(e.entity_id);
+                    }
+                    println!("    <- spawn entity {} type {}", e.entity_id, e.r#type);
                 }
                 P::ChunkBatchFinished(_) => self.c.send(&sb::ChunkBatchReceived {
                     chunks_per_tick: 20.0,
@@ -185,6 +241,9 @@ impl Lab {
         match p {
             sb::ServerboundPlayPacket::WindowClick(c) => self.c.send(&c),
             sb::ServerboundPlayPacket::CloseWindow(c) => self.c.send(&c),
+            sb::ServerboundPlayPacket::NameItem(c) => self.c.send(&c),
+            sb::ServerboundPlayPacket::EnchantItem(c) => self.c.send(&c),
+            sb::ServerboundPlayPacket::SelectTrade(c) => self.c.send(&c),
             other => panic!("{other:?}"),
         }
     }
@@ -352,14 +411,16 @@ fn snapshot(inv: &Inventory) -> (Vec<Option<Stack>>, Option<Stack>) {
     )
 }
 
-/// `MENUS=1`: drags, bundles, a crafting table, a furnace, an anvil, a shulker box and creative
-/// clicks (the driver gives the items and places the blocks around the player). A step's
+/// `MENUS=1`: drags, bundles, a crafting table, a furnace, an anvil (combine, rename, take), a
+/// grindstone, a villager's trades, a shulker box and creative clicks (the driver gives the
+/// items, places the blocks and summons the villager around the player). A step's
 /// mispredictions are the slots (and the cursor) the server's packets changed after ghast's
 /// prediction; crafting results the server sends after a grid change are not counted (the
 /// real client receives them too).
 fn menus(lab: &mut Lab) {
     let v = Version::V26_1;
     let mut total = (0usize, 0usize, 0usize); // clicks, predicted, mispredicted clicks
+    let mut actions = (0usize, 0usize); // screen actions, corrected
     let mut step = |lab: &mut Lab, label: &str, click: Option<Click>, ignore: &[usize]| {
         let Some(click) = click else {
             println!("{label:40} skipped (setup)");
@@ -607,6 +668,43 @@ fn menus(lab: &mut Lab) {
         }
     };
 
+    let open_villager = |lab: &mut Lab| -> bool {
+        lab.inv.tick();
+        if let Ok(o) = lab.inv.close() {
+            lab.send_out(&o);
+        }
+        lab.pump(300);
+        let Some(target) = lab.villager else {
+            println!("no villager spawned");
+            return false;
+        };
+        lab.c.send(&sb::UseEntity {
+            target,
+            hand: sb::UseEntityHand::MAIN_HAND,
+            location: ghast_protocol::types::LpVec3::from_vec3([0.0, 1.0, 0.0]),
+            sneaking: false,
+        });
+        lab.c.send(&sb::ArmAnimation {
+            hand: sb::ArmAnimationHand(0),
+        });
+        lab.pump(1000);
+        match lab.inv.window() {
+            Some(w) => {
+                println!(
+                    "opened window {} {:?} menu {:?}",
+                    w.id(),
+                    w.kind(),
+                    w.menu_26_1()
+                );
+                true
+            }
+            None => {
+                println!("no window opened at the villager");
+                false
+            }
+        }
+    };
+
     // crafting table: planks -> crafting table; honey bottle -> sugar (glass bottle remains)
     if open(lab, at(2, 0)) {
         let planks = find(lab, "oak_planks");
@@ -751,20 +849,64 @@ fn menus(lab: &mut Lab) {
             &[],
         );
     }
-    // anvil: its result is computed by the client from data ghast does not model (unpredicted)
+    // a screen action that is not a click (rename, trade selection): sent, then compared
+    let mut act = |lab: &mut Lab, label: &str, out: Option<Outgoing>| {
+        let Some(out) = out else {
+            println!("{label:40} nothing to send");
+            return;
+        };
+        let before = snapshot(&lab.inv);
+        lab.send_out(&out);
+        lab.pump(700);
+        let after = snapshot(&lab.inv);
+        // compared as the server compares stacks (component order aside)
+        let same = |a: &Option<Stack>, b: &Option<Stack>, lab: &Lab| {
+            let reg = lab.inv.registries_26_1();
+            ghast_inventory::v26_1::hashed_slot(a.as_ref(), reg)
+                == ghast_inventory::v26_1::hashed_slot(b.as_ref(), reg)
+        };
+        let diff: Vec<usize> = (0..before.0.len())
+            .filter(|&i| !same(&before.0[i], &after.0[i], lab))
+            .collect();
+        for &i in &diff {
+            println!(
+                "    slot {i}: ghast {:?}\n    server {:?}",
+                before.0[i], after.0[i]
+            );
+        }
+        println!(
+            "{label:40} sent {:?} -> server changed slots {diff:?} cursor {}",
+            std::mem::discriminant(&out),
+            !same(&before.1, &after.1, lab)
+        );
+        actions.0 += 1;
+        if !diff.is_empty() || !same(&before.1, &after.1, lab) {
+            actions.1 += 1;
+        }
+    };
+    // anvil: sword + book combined by the client (enchantments, cost), renamed, taken
     if open(lab, at(0, 2)) {
         let sword = find(lab, "diamond_sword");
         step(
             lab,
-            "anvil: quick move sword in (unpredicted)",
+            "anvil: quick move sword in",
             sword.map(|slot| Click::QuickMove { slot, right: false }),
             &[],
         );
+        let book = find(lab, "enchanted_book");
         step(
             lab,
-            "anvil: quick move sword out (unpredicted)",
+            "anvil: quick move book in (result)",
+            book.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        let o = lab.inv.anvil_rename_26_1("Bob").expect("rename");
+        act(lab, "anvil: rename to Bob", o);
+        step(
+            lab,
+            "anvil: take the result (quick move)",
             Some(Click::QuickMove {
-                slot: 0,
+                slot: 2,
                 right: false,
             }),
             &[],
@@ -781,6 +923,86 @@ fn menus(lab: &mut Lab) {
             lab,
             "anvil: put stone down",
             e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+    }
+    // grindstone: two damaged swords merged, the enchantment removed
+    if open(lab, at(0, -2)) {
+        let swords: Vec<i16> = (3..lab.inv.slot_count())
+            .filter(|&i| {
+                lab.inv
+                    .slot(i)
+                    .is_some_and(|s| s.item_name(v) == Some("iron_sword"))
+            })
+            .map(|i| i as i16)
+            .collect();
+        for (k, &slot) in swords.iter().take(2).enumerate() {
+            step(
+                lab,
+                if k == 0 {
+                    "grindstone: quick move sword 1 in"
+                } else {
+                    "grindstone: quick move sword 2 in"
+                },
+                Some(Click::QuickMove { slot, right: false }),
+                &[],
+            );
+        }
+        step(
+            lab,
+            "grindstone: take the result",
+            Some(Click::Pickup {
+                slot: 2,
+                right: false,
+            }),
+            &[],
+        );
+        let e = empty(lab, 3, &[]);
+        step(
+            lab,
+            "grindstone: put it down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+    }
+    // villager: a trade picked (payment moved), taken by quick move (repeats), a second trade
+    if open_villager(lab) {
+        let o = lab.inv.select_trade_26_1(0).expect("select trade");
+        act(lab, "trade: select 0 (stone -> emerald)", Some(o));
+        step(
+            lab,
+            "trade: quick move the result",
+            Some(Click::QuickMove {
+                slot: 2,
+                right: false,
+            }),
+            &[],
+        );
+        let o = lab.inv.select_trade_26_1(1).expect("select trade");
+        act(lab, "trade: select 1 (emerald+planks)", Some(o));
+        step(
+            lab,
+            "trade: take the result",
+            Some(Click::Pickup {
+                slot: 2,
+                right: false,
+            }),
+            &[],
+        );
+        let e = empty(lab, 3, &[]);
+        step(
+            lab,
+            "trade: put it down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "trade: quick move payment out",
+            Some(Click::QuickMove {
+                slot: 0,
+                right: false,
+            }),
             &[],
         );
     }
@@ -895,8 +1117,8 @@ fn menus(lab: &mut Lab) {
         lab.pump(500);
     }
     println!(
-        "RESULT MENUS: {} clicks, {} predicted, {} predicted clicks the server corrected",
-        total.0, total.1, total.2
+        "RESULT MENUS: {} clicks, {} predicted, {} predicted clicks the server corrected; {} screen actions, {} corrected",
+        total.0, total.1, total.2, actions.0, actions.1
     );
 }
 
@@ -946,6 +1168,8 @@ fn main() {
         player_uuid: Uuid::from_u128(0x6768_6173_745f_7465_7374_0000_0000_0002),
     });
     let mut reg = HashRegistries::default();
+    // configuration registry_data (true) and update_tags (false) bodies, for the inventory
+    let mut config: Vec<(bool, bytes::Bytes)> = Vec::new();
     // login + configuration
     let mut state = 2;
     while state != 4 {
@@ -994,6 +1218,11 @@ fn main() {
                 C::RegistryData(r) => {
                     reg.add(&r.id, r.entries.iter().map(|e| &*e.key));
                     c.record_registry(&raw);
+                    config.push((true, raw.body.clone()));
+                }
+                C::Tags(_) => {
+                    c.record_registry(&raw);
+                    config.push((false, raw.body.clone()));
                 }
                 C::KeepAlive(k) => c.send(&csb::KeepAlive {
                     keep_alive_id: k.keep_alive_id,
@@ -1022,10 +1251,19 @@ fn main() {
         pos: [0.0; 3],
         corrections: 0,
         log_corrections: true,
+        villager: None,
+        last_tick: Instant::now(),
     };
     // The inventory reset on login drops the registries: set them again after login.
     lab.pump(2000);
     lab.inv.set_registries_26_1(reg);
+    for (registry, body) in config {
+        if registry {
+            lab.inv.on_registry_data_26_1(body);
+        } else {
+            lab.inv.on_update_tags_26_1(body);
+        }
+    }
     if std::env::var("MENUS").is_ok() {
         println!("waiting for items");
         lab.pump(9000);

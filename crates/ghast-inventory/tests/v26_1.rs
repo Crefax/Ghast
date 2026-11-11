@@ -114,15 +114,17 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
             }
         }
         match (state, dir) {
-            (3, 0) => {
-                let ClientboundConfigurationPacket::RegistryData(r) =
-                    ClientboundConfigurationPacket::decode_raw(&raw).unwrap()
-                else {
-                    panic!()
-                };
-                reg.add(&r.id, r.entries.iter().map(|e| &*e.key));
-                inv.set_registries_26_1(reg.clone());
-            }
+            (3, 0) => match ClientboundConfigurationPacket::decode_raw(&raw).unwrap() {
+                ClientboundConfigurationPacket::RegistryData(r) => {
+                    reg.add(&r.id, r.entries.iter().map(|e| &*e.key));
+                    inv.set_registries_26_1(reg.clone());
+                    inv.on_registry_data_26_1(raw.body.clone());
+                }
+                ClientboundConfigurationPacket::Tags(_) => {
+                    inv.on_update_tags_26_1(raw.body.clone())
+                }
+                other => panic!("{other:?}"),
+            },
             (4, 0) => inv.apply_raw_v26_1(&raw).unwrap(),
             (4, 1) => {
                 let p = ServerboundPlayPacket::decode_raw(&raw).unwrap();
@@ -144,6 +146,15 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
                         out
                     }
                     ServerboundPlayPacket::CloseWindow(_) => inv.close().unwrap(),
+                    // screen actions: the same calls the live tool made
+                    ServerboundPlayPacket::NameItem(n) => {
+                        inv.anvil_rename_26_1(&n.name).unwrap().expect("a rename")
+                    }
+                    ServerboundPlayPacket::SelectTrade(t) => inv.select_trade_26_1(t.slot).unwrap(),
+                    ServerboundPlayPacket::EnchantItem(e) => inv
+                        .select_loom_pattern_26_1(e.enchantment)
+                        .unwrap()
+                        .expect("a pattern"),
                     other => panic!("{other:?}"),
                 };
                 let mut ours = inv.encode_v26_1(&out).unwrap();
@@ -252,25 +263,28 @@ fn component_hashes_session_replays() {
 /// `fixtures/menus_26_1_2.bin.zz`: `live_clicks_26_1` with `MENUS=1` on a vanilla 26.1.2 server
 /// (2026-11-12): drags (split, one each), bundles (insert, take out), a crafting table (a
 /// result taken, honey bottle -> sugar leaving the glass bottle), a furnace (shift-clicks into
-/// the input and fuel slots, a bucket as fuel), an anvil, a shulker box (shulker boxes refused)
-/// and creative clicks (clone, clone drag, Q). The server corrected none of the 59 predicted
-/// clicks; the anvil click, sent unpredicted then, is predicted now and the server's
-/// corrections in the capture confirm the prediction.
+/// the input and fuel slots, a bucket as fuel), an anvil (sword + enchanted book combined,
+/// renamed, the result taken), a grindstone (two damaged swords merged, the enchantment
+/// removed), a villager (two trades selected, results taken), a shulker box (shulker boxes
+/// refused) and creative clicks (clone, clone drag, Q). The configuration's tags and registry
+/// data are in the capture. All 69 clicks were predicted and the server corrected none, nor any
+/// of the three screen actions (rename, two trade selections); the replay sends every click
+/// and action byte for byte.
 #[test]
 fn menus_session_replays() {
     const MENUS: &[u8] = include_bytes!("fixtures/menus_26_1_2.bin.zz");
     let (clicks, unpredicted, outcomes) = replay(MENUS);
-    assert_eq!(clicks, 60);
-    // the anvil click sent unpredicted then is predicted now (its corrections confirm it)
+    assert_eq!(clicks, 69);
     assert_eq!(unpredicted, 0);
     use ghast_inventory::ClickOutcome as O;
     let rejected = outcomes.iter().filter(|o| **o == O::Rejected).count();
-    // "rejected" counts any container packet that arrives while a click settles: the anvil
-    // click's correction, the crafting table's new result after grid changes and the window
-    // resends around opening and closing GUIs (the real client receives all of them too; the
-    // live run compared every slot after each click and found no misprediction)
+    // "rejected" counts any container packet that arrives while a click settles: the crafting
+    // table's new result after grid changes and the window resends around opening and closing
+    // GUIs (the real client receives all of them too; the live run compared every slot after
+    // each click and found no misprediction). The anvil, grindstone and trade clicks all settle
+    // as accepted.
     eprintln!("menus session: {clicks} clicks, {rejected} rejected");
-    assert_eq!(rejected, 12, "{outcomes:?}");
+    assert_eq!(rejected, 11, "{outcomes:?}");
 }
 
 #[test]

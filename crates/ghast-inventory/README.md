@@ -150,18 +150,29 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
   corrects.
 - Prediction: vanilla 26.1's own click handling (`src/sim26.rs`: `AbstractContainerMenu.doClick`
   with every click mode, each menu's slot rules and quick move, the client-side result updates)
-  for window 0 and all 25 menus a server opens with `open_screen`. A 26.1 click is never
-  refused: one ghast cannot predict is sent unpredicted ([`ContainerClick::predicted`]) and the
-  server's corrections bring the result. The packet lists the changed slots in the real
+  for window 0, all 25 menus a server opens with `open_screen` and the mount screens of
+  `horse_screen_open` (`on_mount_screen_26_1`). The results the client computes itself are
+  computed too: the anvil (`createResult`: repair, combining, enchantment compatibility, cost,
+  renaming), the grindstone (merging, removing all but curses), the loom (selectable patterns,
+  the result of the selected one) and villager trades (the selected or first matching offer,
+  its payment). A 26.1 click is never refused: one ghast cannot predict (missing data) is sent
+  unpredicted ([`ContainerClick::predicted`]) and the server's corrections bring the result. The packet lists the changed slots in the real
   client's `Int2ObjectOpenHashMap` order; `ContainerClick::swings` is how many arm swings the
   client sends first (every dropped stack swings).
 - Server data the rules read: the furnace / blast furnace / smoker inputs, smithing slots and
   stonecutter inputs from `update_recipes` (`declare_recipes`), creative mode from `abilities`,
   the experience level from `experience` (the anvil), container data (anvil cost, crafter
-  locks), all read by `apply_raw_v26_1`. Fuels, brewing ingredients and fuel, beacon payments,
+  locks, loom selection), the offers of `merchant_offers`, the tags of `update_tags`, all read by
+  `apply_raw_v26_1`; the configuration state's `update_tags` and `registry_data` go to
+  `on_update_tags_26_1` / `on_registry_data_26_1` (the enchantment registry; a server that sends
+  it without data uses vanilla's definitions, `src/generated/enchantments_26_1.rs`). Recipes,
+  tags and enchantments are kept as raw bytes and parsed on the first click that needs them. Fuels, brewing ingredients and fuel, beacon payments,
   loom dyes and patterns, crafting remainders and "fits inside a bundle / shulker box" are
   item facts of the real client after configuration (`src/generated/menus_26_1.rs`, from the
   click vectors).
+- Screen actions that are not clicks: `anvil_rename_26_1(name)` (`rename_item`, the result
+  recomputed), `select_loom_pattern_26_1(index)` (`container_button_click`),
+  `select_trade_26_1(index)` (`select_trade`, payment moved into the slots like the screen).
 - Item use facts for the client engine: `v26_1::item_use(&stack)` (animation, duration,
   `use_effects` speed multiplier and sprinting, consumable, food).
 
@@ -173,10 +184,11 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 | furnace, blast furnace, smoker | input / fuel rules, quick moves by the server's item sets, a bucket as fuel | — |
 | brewing stand, enchanting table, beacon | slot rules and quick moves | — |
 | smithing table, stonecutter, cartography table | slot rules; the client's own result updates (none: no client recipes / map data) | — |
-| grindstone | while its result is empty (no enchanted / damageable pair to merge) | clicks after which the client computes a result |
-| loom | while the banner or the dye slot is empty | clicks with both (pattern selection) |
-| anvil | clicks with an empty input slot | clicks the client recomputes the result for (enchantment data); taking the result |
-| villager trading | clicks that leave both payment slots empty | anything with a payment (offers) |
+| grindstone | everything: merged / disenchanted results, taking them (experience is the server's) | — |
+| loom | everything: pattern buttons, results, taking them | — |
+| anvil | everything: results, costs, renames, taking them (experience level from `experience`) | — |
+| villager trading | everything: trade selection, results by offer, taking them (uses and stock) | — |
+| horse, donkey, mule, llama, trader llama, camel, skeleton / zombie horse, nautilus, zombie nautilus | everything: saddle and body armor slots by the entity's rules, chest columns | — |
 | bundles | insert into / take out of a bundle (carried or in the slot), nested bundles, weights | a bundle whose contents do not read |
 | creative mode | clone, clone drags, armor with the binding curse comes off, overflow vanishes; window 0 is the creative inventory screen (below) | — |
 
@@ -190,8 +202,7 @@ the screen's own: `swing`, the dropped stack as slot -1, the slot), and every se
 the inventory tab is modelled (the item tabs are a GUI for picking items; a bot sets a slot
 directly).
 
-Not covered: horse / llama / nautilus inventories (opened with `horse_screen_open`, not
-handled), the creative screen's item tabs, a server that changes tags or recipe item sets
+Not covered: the creative screen's item tabs, a server that changes tags or recipe item sets
 mid-session (the item facts are vanilla's), a selected bundle item (the bundle scroll wheel).
 
 ## Tests
@@ -241,10 +252,10 @@ cargo test -p ghast-inventory
   bytes, the client must have sent as many arm swings, and every slot, the carried stack and the
   player inventory must equal the client's afterwards (compared by item, count and component
   hashes, as the server compares them). **Committed `tests/golden/26.1/clicks_seed1.jsonl.gz`
-  (3000 cases): 23 904 clicks, 23 848 predicted, all byte-identical, 0 differences; 56 sent
-  unpredicted (anvil, loom, merchant). 30 000 cases (seed 2, 2026-11-12): 239 648 clicks,
-  239 108 predicted, all byte-identical, 0 differences; 540 unpredicted (anvil 254, merchant 203,
-  loom 79, grindstone 4).** Big runs: `MC=26.1 oracle/run.sh clicks --seed 2 --count 30000` then
+  (3000 cases, incl. 142 mount screens): 23 963 clicks and screen actions, all predicted and
+  byte-identical, 0 differences. 30 000 cases (seed 2, 2026-11-12): 237 292, all predicted and
+  byte-identical, 0 differences.** The vectors carry the server's tags, enchantment registry and
+  item facts, the villager offers, the anvil names sent and the data slots after each click. Big runs: `MC=26.1 oracle/run.sh clicks --seed 2 --count 30000` then
   `GHAST_CLICK_VECTORS_26_1=$PWD/oracle/cache/26.1/clicks/clicks-seed2-n30000.jsonl.gz cargo test --release -p ghast-inventory --test oracle_clicks_26_1 -- --nocapture`.
 - `tests/oracle_clicks_26_1.rs` `golden_26_1_creative_screen_matches_the_real_client`
   (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, oracle `creative-clicks`: the real
@@ -253,10 +264,14 @@ cargo test -p ghast-inventory
   differences.
 - `tests/v26_1.rs` `menus_session_replays` (`fixtures/menus_26_1_2.bin.zz`): `examples/live_clicks_26_1.rs`
   with `MENUS=1` on a vanilla 26.1.2 server (2026-11-12): drags, bundles, a crafting table
-  (remainders), a furnace, an anvil, a shulker box and creative clicks — 60 clicks, 59
-  predicted, none corrected by the server (every slot compared after each click); the anvil click
-  is sent unpredicted. The driver gives the items and places the blocks around the player
-  (`forceload add` first: right after a join `setblock` reports the position as not loaded).
+  (remainders), a furnace, an anvil (sword + enchanted book combined, renamed, taken), a
+  grindstone (two damaged swords merged), a villager (two trades selected and taken), a shulker
+  box and creative clicks — 69 clicks, all predicted, and 3 screen actions; the server
+  corrected none (every slot compared after each click and action). The capture holds the
+  configuration's tags and registry data; the replay sends every click and action byte for
+  byte. The driver gives the items, places the blocks and summons the villager around the
+  player (`forceload add` first: right after a join `setblock` reports the position as not
+  loaded; a player saved dead is respawned, a dead player gets no chunks or entities).
 - `tests/robustness.rs`: proptest sequences of random packets (wild ids, counts -3..130,
   oversized/short `window_items`, random window types) and clicks never panic; 1.12 and 1.16.5 never
   store empty stacks; clicks that only move items (all but drops) conserve every item.

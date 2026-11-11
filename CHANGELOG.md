@@ -36,16 +36,27 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - CI runs the protocol differential tests against node-minecraft-protocol (`setup-node`,
   `npm ci`); `GHAST_REQUIRE_NODE=1` makes a missing harness fail instead of skip.
 - **26.1 click prediction for every menu**, proven against the real client (oracle `clicks`,
-  `tests/golden/26.1/clicks_seed1.jsonl.gz`: all 25 `open_screen` menus and window 0, survival
-  and creative, every click mode; 239 648 clicks of a 30 000-case run, all predicted ones
-  byte-identical): drags (`Click::QuickCraft` with `DragStage` / `DragKind`), creative
-  middle-click (`Click::Clone`), bundles, crafting results taken with their remainders,
-  furnace / smoker / blast furnace input and fuel rules (from the server's `update_recipes`
-  item sets), brewing stand, enchanting table, beacon, grindstone (when its result is empty),
-  smithing, stonecutter, loom (banner or dye slot empty), cartography table, crafter (locked
-  slots), lectern, hopper, dispenser, shulker box. The anvil, a loom with banner and dye and a
-  villager's trade result are computed by the client from data ghast does not model: those
-  clicks are sent unpredicted.
+  `tests/golden/26.1/clicks_seed1.jsonl.gz`: all 25 `open_screen` menus, the mount screens
+  and window 0, survival and creative, every click mode, screen actions; 237 292 clicks and
+  actions of a 30 000-case run, all predicted and byte-identical): drags (`Click::QuickCraft`
+  with `DragStage` / `DragKind`), creative middle-click (`Click::Clone`), bundles, crafting
+  results taken with their remainders, furnace / smoker / blast furnace input and fuel rules
+  (from the server's `update_recipes` item sets), brewing stand, enchanting table, beacon,
+  smithing, stonecutter, cartography table, crafter (locked slots), lectern, hopper,
+  dispenser, shulker box, and the results the client computes itself: the anvil (repair,
+  combining, enchantment compatibility, cost, renaming), the grindstone, the loom (selectable
+  patterns) and villager trades (offers, payment, uses and stock).
+- Mount inventories (`horse_screen_open`): `Inventory::on_mount_screen_26_1(window_id,
+  columns, entity_type, can_saddle, can_body)` — horse, donkey, mule, llama, trader llama,
+  camel, skeleton / zombie horse, nautilus, zombie nautilus.
+- Screen actions: `Inventory::anvil_rename_26_1` (`Outgoing::RenameItem`),
+  `select_loom_pattern_26_1` (`Outgoing::ButtonClick`), `select_trade_26_1`
+  (`Outgoing::SelectTrade`; the payment moved like the villager screen does).
+  Server data for them: `on_update_tags_26_1`, `on_registry_data_26_1` (configuration state),
+  `on_merchant_offers_26_1`; `apply_raw_v26_1` reads play `update_tags` and `merchant_offers`
+  (`PACKET_IDS_26_1`). Recipes, tags, the enchantment registry and offers stay raw bytes until
+  a click needs them; vanilla's enchantment definitions are built in
+  (`src/generated/enchantments_26_1.rs`) for servers that send the registry by known pack.
 - `ContainerClick::swings`: the arm swings the real client sends before a click that drops a
   stack (send them first). `WindowKind::Crafter` (the crafter screen opens on 26.1).
   `Window::menu_26_1`. `Inventory::{on_open_screen_26_1, on_recipes_26_1, set_creative_26_1,
