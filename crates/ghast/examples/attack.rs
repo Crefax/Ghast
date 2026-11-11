@@ -18,6 +18,12 @@ use std::time::{Duration, Instant};
 use ghast::{Behavior, Buttons, Interests, TickContext, Vec3};
 
 struct Attack {
+    /// `--burst`: hit every 3 ticks, no right clicks.
+    burst: bool,
+    /// The last target and whether it was hit, to see the server remove it.
+    last_target: Option<i32>,
+    hit_target: bool,
+    last_attack: u64,
     n: u64,
     attacks: u32,
     interacts: u32,
@@ -61,7 +67,15 @@ impl Behavior for Attack {
         };
         let target = ents
             .within([eyes.x, eyes.y, eyes.z], 3.0)
-            .filter(|e| !e.is_player() && e.bounding_box().is_some())
+            .filter(|e| {
+                !e.is_player()
+                    && !matches!(
+                        e.class(),
+                        ghast::entity::EntityClass::Item
+                            | ghast::entity::EntityClass::ExperienceOrb
+                    )
+                    && e.bounding_box().is_some()
+            })
             .map(|e| (e.id(), e.bounding_box().unwrap_or_default()))
             .next();
         if self.n.is_multiple_of(100) {
@@ -81,9 +95,28 @@ impl Behavior for Attack {
                 );
             }
         }
+        if let Some(t) = self.last_target
+            && self.hit_target
+            && ents.get(t).is_none()
+        {
+            let items = ents
+                .within([eyes.x, eyes.y, eyes.z], 4.0)
+                .filter(|e| e.class() == ghast::entity::EntityClass::Item)
+                .count();
+            log::info!(
+                "target {t} removed by the server after {} attacks; {items} item entities near",
+                self.attacks
+            );
+            self.last_target = None;
+            self.hit_target = false;
+        }
         let Some((id, b)) = target else {
             return;
         };
+        if self.last_target != Some(id) {
+            self.last_target = Some(id);
+            self.hit_target = false;
+        }
         let c = Vec3::new(
             (b[0] + b[3]) / 2.0,
             (b[1] + b[4]) / 2.0,
@@ -95,6 +128,15 @@ impl Behavior for Attack {
         let cur = ctx.pose().yaw;
         ctx.set_aim(cur + ghast::rotation::wrap_degrees(yaw - cur), pitch);
         let on_it = ctx.target_entity().is_some_and(|e| e.id == id);
+        if self.burst {
+            if on_it && self.n >= self.last_attack + 3 && ctx.attack(id) {
+                self.last_attack = self.n;
+                self.attacks += 1;
+                self.hit_target = true;
+                log::info!("attack {} on {id}", self.attacks);
+            }
+            return;
+        }
         if on_it && self.n.is_multiple_of(40) {
             // Right click with the buttons (interact-at + interact, then the item).
             ctx.set_buttons(Buttons {
@@ -131,6 +173,10 @@ fn main() {
             }
         };
         let mut b = Attack {
+            burst: opts.burst,
+            last_target: None,
+            hit_target: false,
+            last_attack: 0,
             n: 0,
             attacks: 0,
             interacts: 0,

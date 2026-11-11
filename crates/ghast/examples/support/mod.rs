@@ -28,6 +28,8 @@ pub struct Options {
     pub view_distance: Option<i8>,
     /// `--entities`: track entities (examples that do not need them otherwise).
     pub entities: bool,
+    /// `--burst`: attack: two quick hits (3 ticks apart), no right clicks.
+    pub burst: bool,
 }
 
 pub const USAGE: &str = "options:
@@ -45,6 +47,7 @@ pub const USAGE: &str = "options:
   --grim-compat         send the position on sub-0.03 step-ups (not vanilla)
   --view-distance <n>   client view distance in chunks (default 8)
   --entities            track entities (afk: for measurements)
+  --burst               attack: hit every 3 ticks (breaks an armor stand), no right clicks
   -v, --verbose         debug logging";
 
 impl Options {
@@ -77,6 +80,7 @@ impl Options {
             grim_compat_up: false,
             view_distance: None,
             entities: false,
+            burst: false,
         };
         let mut args = args.peekable();
         while let Some(a) = args.next() {
@@ -105,6 +109,7 @@ impl Options {
                 "--grim-compat" => o.grim_compat = true,
                 "--grim-compat-up" => o.grim_compat_up = true,
                 "--entities" => o.entities = true,
+                "--burst" => o.burst = true,
                 "--seed" => o.seed = val()?.parse().map_err(|e| format!("--seed: {e}"))?,
                 "--view-distance" => {
                     o.view_distance = Some(
