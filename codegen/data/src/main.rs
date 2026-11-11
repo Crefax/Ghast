@@ -18,6 +18,7 @@ mod model;
 mod selection;
 mod v1_12;
 mod v26_1;
+mod v26_1_entities;
 mod v26_1_items;
 
 use std::path::{Path, PathBuf};

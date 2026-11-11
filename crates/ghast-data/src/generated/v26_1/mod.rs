@@ -5,6 +5,8 @@
 #[rustfmt::skip]
 pub(crate) mod blocks;
 #[rustfmt::skip]
+pub(crate) mod entities;
+#[rustfmt::skip]
 pub(crate) mod items;
 #[rustfmt::skip]
 pub(crate) mod selection;
