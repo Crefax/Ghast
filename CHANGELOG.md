@@ -107,8 +107,14 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `ghast_viewer::v26_1`), the 256 rows around the bot shown, entities from the 26.1 tracker,
   the hotbar from the component item model. Text stays the truth: new messages `ITEMS` (28) and
   `ENTITY` (29) carry the real 26.1 ids, English names, count, damage, enchantments, custom
-  names and a `standIn` flag; `HELLO` names the game (`game`, `drawnWith`, `worldMinY`). 1.8.9
-  payloads are byte-identical to 0.4.0. `BotView::build_height` (defaulted).
+  names (from `Inventory::enchantment_name_26_1`) and a `standIn` flag; `HELLO` and `STATE`
+  name the game (`game`, `drawnWith`, `worldMinY`; replays keep them). The page shows it: the
+  header ("26.1 (drawn with 1.8.9 assets)", world Y), the held item and armour, hotbar tooltips
+  (name, count, enchantments, durability, id), a ≈ mark on stand-in icons, durability bars from
+  the real damage, name tags over entities and dropped items drawn with a stand-in. 1.8.9
+  payloads and page behaviour are unchanged (byte-identical frames to 0.4.0).
+  `BotView::{build_height, enchantment_name}` (defaulted). The crate's `include` patterns are
+  anchored (a local `web/node_modules` no longer leaks into the package).
   `afk_viewer --version 26.1`.
 - `ghast_physics::modern::ModernMemoryWorld::{min_y, height}`.
 - **26.1 gliding (elytra) and firework rockets**, proven against the real client (oracle

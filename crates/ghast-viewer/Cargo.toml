@@ -12,7 +12,7 @@ keywords = ["minecraft", "bot", "viewer", "replay"]
 categories = ["game-development", "visualization"]
 readme = "README.md"
 documentation = "https://docs.rs/ghast-viewer"
-include = ["src/**", "web/dist/**", "docs/**", "examples/**", "tests/**", "README.md", "INTEGRATION.md", "LICENSE-*", "Cargo.toml"]
+include = ["/src/**", "/web/dist/**", "/docs/**", "/examples/**", "/tests/**", "/README.md", "/INTEGRATION.md", "/LICENSE-*", "/Cargo.toml"]
 
 [features]
 default = ["download", "v26_1"]
