@@ -111,6 +111,16 @@ pub struct ItemDefaults {
     pub bundle: bool,
     /// `rarity` (0 common, 1 uncommon, 2 rare, 3 epic).
     pub rarity: u8,
+    /// `use_effects`: can sprint, interact vibrations, speed multiplier (`f32` bits).
+    pub(crate) use_effects: (bool, bool, u32),
+    /// `consumable`: consume seconds (`f32` bits), animation id.
+    pub(crate) consumable: Option<(u32, u8)>,
+    /// `food`: nutrition, saturation (`f32` bits), can always eat.
+    pub(crate) food: Option<(i32, u32, bool)>,
+    /// Has `blocks_attacks` (a shield).
+    pub(crate) blocks_attacks: bool,
+    /// Has `kinetic_weapon` (a spear).
+    pub(crate) kinetic_weapon: bool,
 }
 
 /// Default components of item `id`.
@@ -356,6 +366,184 @@ pub(crate) fn potion(s: &Stack) -> Option<&'static str> {
     }
     let id = r.read_varint().ok()?;
     POTIONS.get(usize::try_from(id).ok()?).copied()
+}
+
+// ---------------------------------------------------------------------- item use
+
+/// How an item in use animates (`ItemUseAnimation`, by its network id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum UseAnimation {
+    /// `none`.
+    None,
+    /// `eat`.
+    Eat,
+    /// `drink`.
+    Drink,
+    /// `block` (shields: `blocks_attacks`).
+    Block,
+    /// `bow`.
+    Bow,
+    /// `trident`.
+    Trident,
+    /// `crossbow`.
+    Crossbow,
+    /// `spyglass`.
+    Spyglass,
+    /// `toot_horn` (goat horns).
+    TootHorn,
+    /// `brush`.
+    Brush,
+    /// `bundle`.
+    Bundle,
+    /// `spear` (`kinetic_weapon`).
+    Spear,
+}
+
+impl UseAnimation {
+    fn from_id(id: i32) -> Option<UseAnimation> {
+        Some(match id {
+            0 => UseAnimation::None,
+            1 => UseAnimation::Eat,
+            2 => UseAnimation::Drink,
+            3 => UseAnimation::Block,
+            4 => UseAnimation::Bow,
+            5 => UseAnimation::Trident,
+            6 => UseAnimation::Crossbow,
+            7 => UseAnimation::Spyglass,
+            8 => UseAnimation::TootHorn,
+            9 => UseAnimation::Brush,
+            10 => UseAnimation::Bundle,
+            11 => UseAnimation::Spear,
+            _ => return None,
+        })
+    }
+}
+
+/// `food` component: what eating the item restores.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct Food {
+    /// `nutrition`.
+    pub nutrition: i32,
+    /// `saturation`.
+    pub saturation: f32,
+    /// `can_always_eat` (eaten with a full hunger bar).
+    pub can_always_eat: bool,
+}
+
+/// What using (right-click holding) a 26.1 item does, from its components (the patch over the
+/// item's defaults) and its item class, as `Item.getUseAnimation` / `getUseDuration` and
+/// `LocalPlayer`'s movement read them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct ItemUse {
+    /// `getUseAnimation`.
+    pub animation: UseAnimation,
+    /// `getUseDuration` in ticks: 0 = the use does not last (no use state), 72000 = until
+    /// released (bows, shields, spears, tridents, crossbow charging); `None` when it depends on
+    /// data ghast does not have (a goat horn's instrument).
+    pub duration: Option<i32>,
+    /// `use_effects.speed_multiplier`: movement input factor while using (vanilla default
+    /// 0.2; the physics input of `ghast_physics::modern`).
+    pub speed_multiplier: f32,
+    /// `use_effects.can_sprint`: sprinting continues while using.
+    pub can_sprint: bool,
+    /// `use_effects.interact_vibrations`.
+    pub interact_vibrations: bool,
+    /// The stack has a `consumable` component (eaten / drunk over `duration` ticks).
+    pub consumable: bool,
+    /// The `food` component.
+    pub food: Option<Food>,
+}
+
+/// [`ItemUse`] of a 26.1 stack (`None` for an id outside the item registry). Components the
+/// stack patches but that do not read give the item defaults' values.
+#[must_use]
+pub fn item_use(s: &Stack) -> Option<ItemUse> {
+    let d = defaults(s.id)?;
+    let (mut can_sprint, mut vibrations, mut speed) = (
+        d.use_effects.0,
+        d.use_effects.1,
+        f32::from_bits(d.use_effects.2),
+    );
+    match patched(s, component::USE_EFFECTS) {
+        Some(Some(b)) => {
+            let mut r = Reader::new(&b);
+            if let (Ok(a), Ok(v), Ok(f)) = (r.read_bool(), r.read_bool(), r.read_f32()) {
+                (can_sprint, vibrations, speed) = (a, v, f);
+            }
+        }
+        // removed: `getOrDefault(USE_EFFECTS, DEFAULT)`
+        Some(None) => (can_sprint, vibrations, speed) = (false, true, 0.2),
+        None => {}
+    }
+    let consumable = match patched(s, component::CONSUMABLE) {
+        Some(Some(b)) => {
+            let mut r = Reader::new(&b);
+            match (r.read_f32(), r.read_varint()) {
+                (Ok(secs), Ok(anim)) => Some((secs, UseAnimation::from_id(anim))),
+                _ => d
+                    .consumable
+                    .map(|(b, a)| (f32::from_bits(b), UseAnimation::from_id(i32::from(a)))),
+            }
+        }
+        Some(None) => None,
+        None => d
+            .consumable
+            .map(|(b, a)| (f32::from_bits(b), UseAnimation::from_id(i32::from(a)))),
+    };
+    let food = match patched(s, component::FOOD) {
+        Some(Some(b)) => {
+            let mut r = Reader::new(&b);
+            match (r.read_varint(), r.read_f32(), r.read_bool()) {
+                (Ok(n), Ok(sat), Ok(a)) => Some(Food {
+                    nutrition: n,
+                    saturation: sat,
+                    can_always_eat: a,
+                }),
+                _ => None,
+            }
+        }
+        Some(None) => None,
+        None => d.food.map(|(n, sat, a)| Food {
+            nutrition: n,
+            saturation: f32::from_bits(sat),
+            can_always_eat: a,
+        }),
+    };
+    let blocks = has_component(s, component::BLOCKS_ATTACKS, d.blocks_attacks);
+    let kinetic = has_component(s, component::KINETIC_WEAPON, d.kinetic_weapon);
+    // Item.getUseAnimation / getUseDuration, then the item classes that override them
+    let (mut animation, mut duration) = match consumable {
+        Some((secs, anim)) => (
+            anim.unwrap_or(UseAnimation::Eat),
+            Some((secs * 20.0) as i32),
+        ),
+        None if blocks => (UseAnimation::Block, Some(72000)),
+        None if kinetic => (UseAnimation::Spear, Some(72000)),
+        None => (UseAnimation::None, Some(0)),
+    };
+    match d.name {
+        "bow" => (animation, duration) = (UseAnimation::Bow, Some(72000)),
+        "crossbow" => (animation, duration) = (UseAnimation::Crossbow, Some(72000)),
+        "trident" => (animation, duration) = (UseAnimation::Trident, Some(72000)),
+        "spyglass" => (animation, duration) = (UseAnimation::Spyglass, Some(1200)),
+        "brush" => (animation, duration) = (UseAnimation::Brush, Some(200)),
+        "goat_horn" => (animation, duration) = (UseAnimation::TootHorn, None),
+        "ender_eye" => duration = Some(0),
+        _ if d.bundle => (animation, duration) = (UseAnimation::Bundle, Some(200)),
+        _ => {}
+    }
+    Some(ItemUse {
+        animation,
+        duration,
+        speed_multiplier: speed,
+        can_sprint,
+        interact_vibrations: vibrations,
+        consumable: consumable.is_some(),
+        food,
+    })
 }
 
 // ---------------------------------------------------------------------- hashed stacks

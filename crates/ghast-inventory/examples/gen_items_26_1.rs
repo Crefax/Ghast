@@ -150,9 +150,48 @@ fn main() {
             "epic" => 3,
             o => panic!("rarity {o}"),
         };
+        // use_effects (every item has one), consumable, food, blocks_attacks, kinetic_weapon
+        let ue = &c["minecraft:use_effects"];
+        let use_sprint = ue["can_sprint"].as_bool().unwrap_or(false);
+        let use_vibrations = ue["interact_vibrations"].as_bool().unwrap_or(true);
+        let use_speed = ue["speed_multiplier"].as_f64().unwrap_or(0.2) as f32;
+        let consume = match c.get("minecraft:consumable") {
+            None => "None".to_string(),
+            Some(co) => {
+                let secs = co["consume_seconds"].as_f64().unwrap_or(1.6) as f32;
+                let anim = match co["animation"].as_str().unwrap_or("eat") {
+                    "none" => 0,
+                    "eat" => 1,
+                    "drink" => 2,
+                    "block" => 3,
+                    "bow" => 4,
+                    "trident" => 5,
+                    "crossbow" => 6,
+                    "spyglass" => 7,
+                    "toot_horn" => 8,
+                    "brush" => 9,
+                    "bundle" => 10,
+                    "spear" => 11,
+                    o => panic!("animation {o}"),
+                };
+                format!("Some(({:#x}, {anim}))", secs.to_bits())
+            }
+        };
+        let food = match c.get("minecraft:food") {
+            None => "None".to_string(),
+            Some(f) => format!(
+                "Some(({}, {:#x}, {}))",
+                f["nutrition"].as_i64().unwrap(),
+                (f["saturation"].as_f64().unwrap() as f32).to_bits(),
+                f["can_always_eat"].as_bool().unwrap_or(false)
+            ),
+        };
+        let blocks = c.get("minecraft:blocks_attacks").is_some();
+        let kinetic = c.get("minecraft:kinetic_weapon").is_some();
         let _ = writeln!(
             out,
-            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity} }},"
+            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic} }},",
+            use_speed.to_bits()
         );
     }
     out.push_str("];\n");

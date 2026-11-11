@@ -522,3 +522,132 @@ fn hashed_stacks_match_the_real_client() {
     assert_eq!(classes[1], 0, "partially hashed kinds");
     assert_eq!(whole_exact, stacks, "every whole HashedStack is exact");
 }
+
+/// The use facts the client engine reads (`v26_1::item_use`) decode the `use_effects`,
+/// `consumable` and `food` components the real client's codecs wrote: every such component in
+/// the oracle's `hashed_stacks.jsonl.gz` (values as the codec's JSON, defaults omitted).
+#[test]
+fn item_use_reads_the_real_components() {
+    use ghast_inventory::v26_1::{UseAnimation, item_use};
+    use ghast_protocol::types::slot::v775::ItemStack;
+    const VECTORS: &[u8] = include_bytes!("../../../tests/golden/26.1/hashed_stacks.jsonl.gz");
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(VECTORS)
+        .read_to_string(&mut text)
+        .unwrap();
+    let unhex = |s: &str| -> Bytes {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect::<Vec<u8>>()
+            .into()
+    };
+    let anim = |n: &str| match n {
+        "none" => UseAnimation::None,
+        "eat" => UseAnimation::Eat,
+        "drink" => UseAnimation::Drink,
+        "block" => UseAnimation::Block,
+        "bow" => UseAnimation::Bow,
+        "trident" => UseAnimation::Trident,
+        "crossbow" => UseAnimation::Crossbow,
+        "spyglass" => UseAnimation::Spyglass,
+        "toot_horn" => UseAnimation::TootHorn,
+        "brush" => UseAnimation::Brush,
+        "bundle" => UseAnimation::Bundle,
+        "spear" => UseAnimation::Spear,
+        o => panic!("{o}"),
+    };
+    let mut checked = [0usize; 3];
+    for line in text.lines() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        if v["type"] != "stack" {
+            continue;
+        }
+        let wire = unhex(v["wire"].as_str().unwrap());
+        let Ok(Some(st)) = ItemStack::read(&mut Reader::new(&wire)) else {
+            continue;
+        };
+        let name = v["item"].as_str().unwrap();
+        let st = ghast_inventory::Stack::from_v775(st);
+        let u = item_use(&st).unwrap();
+        for a in v["added"].as_array().unwrap() {
+            let j = &a["json"];
+            match a["component"].as_str().unwrap() {
+                "minecraft:use_effects" => {
+                    assert_eq!(u.can_sprint, j["can_sprint"].as_bool().unwrap_or(false));
+                    assert_eq!(
+                        u.interact_vibrations,
+                        j["interact_vibrations"].as_bool().unwrap_or(true)
+                    );
+                    let speed = j["speed_multiplier"].as_f64().unwrap_or(0.2) as f32;
+                    assert_eq!(u.speed_multiplier.to_bits(), speed.to_bits(), "{line}");
+                    checked[0] += 1;
+                }
+                "minecraft:consumable" => {
+                    assert!(u.consumable);
+                    let secs = j["consume_seconds"].as_f64().unwrap_or(1.6) as f32;
+                    // item classes that override the animation / duration win (bows, …)
+                    let plain = !matches!(
+                        name,
+                        "minecraft:bow"
+                            | "minecraft:crossbow"
+                            | "minecraft:trident"
+                            | "minecraft:spyglass"
+                            | "minecraft:brush"
+                            | "minecraft:goat_horn"
+                            | "minecraft:ender_eye"
+                    ) && !name.ends_with("bundle");
+                    if plain {
+                        assert_eq!(u.duration, Some((secs * 20.0) as i32), "{line}");
+                        assert_eq!(
+                            u.animation,
+                            anim(j["animation"].as_str().unwrap_or("eat")),
+                            "{line}"
+                        );
+                    }
+                    checked[1] += 1;
+                }
+                "minecraft:food" => {
+                    let f = u.food.unwrap();
+                    assert_eq!(f.nutrition, j["nutrition"].as_i64().unwrap() as i32);
+                    assert_eq!(
+                        f.saturation.to_bits(),
+                        (j["saturation"].as_f64().unwrap() as f32).to_bits()
+                    );
+                    assert_eq!(
+                        f.can_always_eat,
+                        j["can_always_eat"].as_bool().unwrap_or(false)
+                    );
+                    checked[2] += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    eprintln!(
+        "use_effects {} consumable {} food {}",
+        checked[0], checked[1], checked[2]
+    );
+    assert!(checked.iter().all(|&n| n >= 20), "{checked:?}");
+    // item defaults
+    let id = |n: &str| item_id(n).unwrap();
+    let plain = |n: &str| item_use(&ghast_inventory::Stack::new(id(n), 1, 0)).unwrap();
+    let shield = plain("shield");
+    assert_eq!(
+        (shield.animation, shield.duration),
+        (UseAnimation::Block, Some(72000))
+    );
+    assert_eq!((shield.speed_multiplier, shield.can_sprint), (0.2, false));
+    let spear = plain("diamond_spear");
+    assert_eq!(
+        (spear.animation, spear.speed_multiplier, spear.can_sprint),
+        (UseAnimation::Spear, 1.0, true)
+    );
+    assert_eq!(plain("potion").duration, Some(32));
+    assert_eq!(plain("potion").animation, UseAnimation::Drink);
+    assert_eq!(plain("honey_bottle").duration, Some(40));
+    assert_eq!(plain("dried_kelp").duration, Some(16));
+    assert_eq!(plain("bread").food.unwrap().nutrition, 5);
+    assert_eq!(plain("bow").animation, UseAnimation::Bow);
+    assert_eq!(plain("stone").duration, Some(0));
+}
