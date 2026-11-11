@@ -159,13 +159,18 @@ final class Scenarios26 {
                 .event(0, new Scenario.SectionCompiled(true)).run(12, 0));
         l.add(flat("join_float1_never_loaded").spawn(0.5, 65, 0.5, 90, 10).run(2, 0)
                 .event(0, new Scenario.SectionCompiled(true)).run(20, 0));
-        for (Scenario sc : l.subList(l.size() - 4, l.size())) {
+        // The engine's case: yaw 0, pitch 36.75, three ticks before the gate, then until well after landing.
+        l.add(flat("join_float1_pitch36_75").spawn(0.5, 65, 0.5, 0, 36.75F).event(0, new Scenario.LoadStart()).run(2, 0)
+                .event(0, new Scenario.SectionCompiled(true)).run(40, 0));
+        for (Scenario sc : l.subList(l.size() - 5, l.size())) {
             sc.delayedLoad = true;
         }
-        l.get(l.size() - 4).description = "section compiled at tick 2, level-load start at tick 6";
-        l.get(l.size() - 3).description = "never compiled; the 30 s timeout fires at tick 10";
-        l.get(l.size() - 2).description = "a second position packet (2.5, 66, 0.5) while the level loads";
-        l.get(l.size() - 1).description = "compiled, but the server never sends the level-load start";
+        l.get(l.size() - 1).description = "fresh player at y 65 (1 block up), yaw 0 pitch 36.75; load start at tick 1, "
+                + "section compiled at tick 4, 40 ticks after";
+        l.get(l.size() - 5).description = "section compiled at tick 2, level-load start at tick 6";
+        l.get(l.size() - 4).description = "never compiled; the 30 s timeout fires at tick 10";
+        l.get(l.size() - 3).description = "a second position packet (2.5, 66, 0.5) while the level loads";
+        l.get(l.size() - 2).description = "compiled, but the server never sends the level-load start";
         return l;
     }
 }
