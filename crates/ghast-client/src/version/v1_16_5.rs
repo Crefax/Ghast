@@ -464,6 +464,7 @@ impl ClientVersion for V1_16_5 {
             Outbound::PlayerInput(_)
             | Outbound::TickEnd
             | Outbound::PlayerLoaded
+            | Outbound::ChatSessionUpdate
             | Outbound::ChunkBatchReceived(_)
             | Outbound::Pong(_)
             | Outbound::ResourcePackStatus { .. }

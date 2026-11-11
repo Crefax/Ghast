@@ -89,6 +89,7 @@ pub use engine::{
     TickView,
 };
 pub use error::{ClientError, SessionEnd};
+pub use ghast_auth::chat::ProfileKeys;
 pub use ghast_entity as entity;
 pub use ghast_inventory as inventory;
 pub use ghast_protocol::BlockPos;

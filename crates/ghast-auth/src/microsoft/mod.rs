@@ -238,6 +238,8 @@ pub enum Stage {
     Profile,
     /// Session server `join`.
     Join,
+    /// Minecraft services `player/certificates` (the profile key pair for signed chat).
+    ProfileKeys,
 }
 
 impl fmt::Display for Stage {
@@ -250,6 +252,7 @@ impl fmt::Display for Stage {
             Self::MinecraftLogin => "Minecraft login",
             Self::Profile => "Minecraft profile request",
             Self::Join => "session server join",
+            Self::ProfileKeys => "profile key pair request",
         })
     }
 }
@@ -508,6 +511,25 @@ mod unix_seconds {
 pub struct MicrosoftAuth {
     http: reqwest::Client,
     config: MicrosoftConfig,
+    /// `player/certificates` (see [`MicrosoftAuth::with_certificates_url`]).
+    certificates: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CertificatesResponse {
+    key_pair: CertificatesKeyPair,
+    #[serde(rename = "publicKeySignatureV2")]
+    public_key_signature_v2: String,
+    expires_at: String,
+    refreshed_after: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CertificatesKeyPair {
+    private_key: String,
+    public_key: String,
 }
 
 #[derive(Deserialize)]
@@ -591,12 +613,42 @@ impl MicrosoftAuth {
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .build()?;
-        Ok(Self { http, config })
+        Ok(Self {
+            http,
+            config,
+            certificates: None,
+        })
     }
 
     /// A client using the given HTTP client (for proxies or custom TLS settings).
     pub fn with_http_client(config: MicrosoftConfig, http: reqwest::Client) -> Self {
-        Self { http, config }
+        Self {
+            http,
+            config,
+            certificates: None,
+        }
+    }
+
+    /// The `player/certificates` URL [`MicrosoftAuth::profile_keys`] posts to. Default: the
+    /// profile endpoint's host with the path `/player/certificates`
+    /// (`https://api.minecraftservices.com/player/certificates`, or `{base}/player/certificates`
+    /// for [`Endpoints::with_base_url`]).
+    #[must_use]
+    pub fn with_certificates_url(mut self, url: impl Into<String>) -> Self {
+        self.certificates = Some(url.into());
+        self
+    }
+
+    /// The `player/certificates` URL in use.
+    pub fn certificates_url(&self) -> String {
+        if let Some(u) = &self.certificates {
+            return u.clone();
+        }
+        let p = &self.config.endpoints.minecraft_profile;
+        match p.strip_suffix("/minecraft/profile") {
+            Some(base) => format!("{base}/player/certificates"),
+            None => "https://api.minecraftservices.com/player/certificates".to_owned(),
+        }
     }
 
     /// The configuration.
@@ -959,6 +1011,46 @@ impl MicrosoftAuth {
         })
     }
 
+    /// The profile key pair for signed chat (`UserApiService.getKeyPair`: an empty `POST` to
+    /// `player/certificates` with the Minecraft access token). Vanilla fetches it when it joins
+    /// an online-mode server and again once [`crate::chat::ProfileKeys::due_refresh`].
+    pub async fn profile_keys(
+        &self,
+        minecraft_access_token: &SecretString,
+    ) -> Result<crate::chat::ProfileKeys, MicrosoftError> {
+        let stage = Stage::ProfileKeys;
+        let resp = self
+            .http
+            .post(self.certificates_url())
+            .bearer_auth(minecraft_access_token.expose())
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body("")
+            .send()
+            .await?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            return Err(MicrosoftError::MinecraftTokenRejected);
+        }
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(rate_limited(&resp, stage));
+        }
+        let resp = check_status(resp, stage).await?;
+        let parsed: CertificatesResponse = read_json(resp, stage).await?;
+        let bad = |reason: String| MicrosoftError::InvalidResponse { stage, reason };
+        let private = crate::chat::pem_body(&parsed.key_pair.private_key)
+            .ok_or_else(|| bad("private key is not PEM/base64".into()))?;
+        let public = crate::chat::pem_body(&parsed.key_pair.public_key)
+            .ok_or_else(|| bad("public key is not PEM/base64".into()))?;
+        let signature = crate::chat::base64_decode(parsed.public_key_signature_v2.trim())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| bad("missing public key signature".into()))?;
+        let expires = parse_instant(&parsed.expires_at)
+            .ok_or_else(|| bad(format!("bad expiresAt {:?}", parsed.expires_at)))?;
+        let refresh = parse_instant(&parsed.refreshed_after)
+            .ok_or_else(|| bad(format!("bad refreshedAfter {:?}", parsed.refreshed_after)))?;
+        crate::chat::ProfileKeys::from_der(&private, &public, signature, expires, refresh)
+            .map_err(|e| bad(e.to_string()))
+    }
+
     /// The session-server `join` call an online-mode client makes during login, after
     /// receiving the Encryption Request and before sending the Encryption Response.
     ///
@@ -1021,6 +1113,61 @@ fn expires_at(expires_in_secs: u64) -> SystemTime {
             now_secs.saturating_add(expires_in_secs),
         ))
         .unwrap_or_else(SystemTime::now)
+}
+
+/// An ISO-8601 instant as `Instant.parse` reads it: `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`.
+fn parse_instant(s: &str) -> Option<SystemTime> {
+    let s = s.trim();
+    let b = s.as_bytes();
+    if b.len() < 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    let mut rest = &s[19..];
+    let mut nanos = 0i64;
+    if let Some(f) = rest.strip_prefix('.') {
+        let digits = f.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || digits > 9 {
+            return None;
+        }
+        nanos = f[..digits].parse::<i64>().ok()? * 10i64.pow(9 - digits as u32);
+        rest = &f[digits..];
+    }
+    let offset = match rest {
+        "Z" | "z" => 0,
+        o if o.len() == 6 && (o.starts_with('+') || o.starts_with('-')) && &o[3..4] == ":" => {
+            let v = o[1..3].parse::<i64>().ok()? * 3600 + o[4..6].parse::<i64>().ok()? * 60;
+            if o.starts_with('-') { -v } else { v }
+        }
+        _ => return None,
+    };
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y2 = if mo <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + h * 3600 + mi * 60 + sec - offset;
+    let base = SystemTime::UNIX_EPOCH;
+    if secs >= 0 {
+        base.checked_add(Duration::new(secs as u64, nanos as u32))
+    } else {
+        base.checked_sub(Duration::from_secs(secs.unsigned_abs()))?
+            .checked_add(Duration::from_nanos(nanos as u64))
+    }
 }
 
 fn rate_limited(resp: &Response, stage: Stage) -> MicrosoftError {

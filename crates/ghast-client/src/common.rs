@@ -321,6 +321,17 @@ pub enum LoginInbound {
         /// Token to encrypt and send back.
         verify_token: Bytes,
     },
+    /// The server asks for encryption without a session-server check (1.20.5+
+    /// `shouldAuthenticate = false`): the client encrypts and skips the `join` call, so an
+    /// offline account can answer it too.
+    EncryptionRequestUnauthenticated {
+        /// Server id (usually empty).
+        server_id: ByteString,
+        /// The server's RSA public key (DER).
+        public_key: Bytes,
+        /// Token to encrypt and send back.
+        verify_token: Bytes,
+    },
     /// Compression starts with the next packet.
     Compress(i32),
     /// Login finished; the connection is in the play state.
@@ -937,6 +948,9 @@ pub enum Outbound {
     TickEnd,
     /// The client finished loading the level (1.21.4+ `player_loaded`).
     PlayerLoaded,
+    /// Announce the chat session the wire layer holds (1.19.3+ `chat_session_update`; the
+    /// keys never pass through the core).
+    ChatSessionUpdate,
     /// Chunk batch acknowledgement with the desired chunks per tick (1.20.2+).
     ChunkBatchReceived(f32),
     /// Pong for a server ping (1.17+).

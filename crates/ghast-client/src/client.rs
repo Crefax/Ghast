@@ -111,7 +111,13 @@ pub struct Client {
     hold_turn_on_action: bool,
     world_config: Option<ghast_world::WorldConfig>,
     accept_required_packs: bool,
+    signed_chat: bool,
+    /// Profile keys for signed chat, shared by this client's sessions (fetched once, then
+    /// reused until they are due for a refresh).
+    profile_keys: Arc<std::sync::Mutex<Option<Arc<ProfileKeys>>>>,
 }
+
+use ghast_auth::chat::ProfileKeys;
 
 impl Client {
     /// A client with vanilla defaults: direct connection (see [`Client::connector`]),
@@ -134,7 +140,31 @@ impl Client {
             hold_turn_on_action: true,
             world_config: None,
             accept_required_packs: true,
+            signed_chat: true,
+            profile_keys: Arc::default(),
         }
+    }
+
+    /// Signed chat on encrypted (online-mode) connections, 1.19.3+ (default on, like vanilla):
+    /// the client gets the account's profile key pair (with the `microsoft` feature from the
+    /// Minecraft services, or the one given to [`Client::profile_keys`]), announces a chat
+    /// session after each join and signs chat messages and signable command arguments. Off:
+    /// everything is sent unsigned (servers with `enforce-secure-profile` then refuse chat).
+    /// Offline-mode connections never sign (vanilla has no key pair there).
+    #[must_use]
+    pub fn signed_chat(mut self, on: bool) -> Self {
+        self.signed_chat = on;
+        self
+    }
+
+    /// Uses this profile key pair for signed chat instead of fetching one (for example a pair
+    /// kept from an earlier run; it must belong to the account's profile id).
+    #[must_use]
+    pub fn profile_keys(self, keys: ProfileKeys) -> Self {
+        if let Ok(mut k) = self.profile_keys.lock() {
+            *k = Some(Arc::new(keys));
+        }
+        self
     }
 
     /// How to open the TCP connection (SOCKS5 proxy, proxy policy, timeouts).
@@ -343,6 +373,8 @@ where
     let mut wire = V::Wire::default();
     // Configuration-state registries, applied to the world once it exists.
     let mut registries = Vec::new();
+    // The connection is encrypted (vanilla starts a chat session only then).
+    let mut encrypted = false;
 
     let login = async {
         let stream = client.connector.connect(&client.address).await?;
@@ -355,6 +387,7 @@ where
             &mut enc,
             &mut wire,
             &mut registries,
+            &mut encrypted,
         )
         .await?;
         Ok::<_, ClientError>((rd, wr))
@@ -401,6 +434,9 @@ where
         wire,
         client,
         reconfigure: false,
+        encrypted,
+        keys_task: None,
+        keys_checked: None,
     };
     for raw in &registries {
         play.engine.sim.registry_data(raw);
@@ -431,6 +467,7 @@ where
 
 /// Handshake and login (and on 1.20.2+ the configuration state). Returns once the
 /// connection is in the play state.
+#[allow(clippy::too_many_arguments)] // the session's connection state, borrowed piecewise
 async fn login<V, R, W>(
     client: &Client,
     rd: &mut R,
@@ -439,6 +476,7 @@ async fn login<V, R, W>(
     enc: &mut FrameEncoder,
     wire: &mut V::Wire,
     registries: &mut Vec<RawPacket>,
+    encrypted: &mut bool,
 ) -> Result<(), ClientError>
 where
     V: ClientVersion,
@@ -483,6 +521,28 @@ where
                     flush(wr, enc).await?;
                     enc.enable_encryption(&secret);
                     dec.enable_encryption(&secret);
+                    *encrypted = true;
+                }
+                Some(LoginInbound::EncryptionRequestUnauthenticated {
+                    server_id,
+                    public_key,
+                    verify_token,
+                }) => {
+                    // handleHello without shouldAuthenticate: no session-server join.
+                    let resp = ghast_auth::crypto::respond_to_encryption_request(
+                        &server_id,
+                        &public_key,
+                        &verify_token,
+                    )?;
+                    V::write_encryption_response(
+                        enc,
+                        &resp.encrypted_shared_secret,
+                        &resp.encrypted_verify_token,
+                    )?;
+                    flush(wr, enc).await?;
+                    enc.enable_encryption(resp.shared_secret.as_bytes());
+                    dec.enable_encryption(resp.shared_secret.as_bytes());
+                    *encrypted = true;
                 }
                 Some(LoginInbound::CookieRequest(key)) => {
                     V::write_login_cookie_response(enc, &key)?;
@@ -661,7 +721,16 @@ struct Play<'c, V: ClientVersion + HasSim, R, W> {
     client: &'c Client,
     /// The server moved the connection to the configuration state (1.20.2+).
     reconfigure: bool,
+    /// The connection is encrypted (signed chat needs it).
+    encrypted: bool,
+    /// A profile key pair request in flight.
+    keys_task: Option<KeysTask<'c>>,
+    /// When the key pair was last checked for a refresh (vanilla: at most hourly).
+    keys_checked: Option<Instant>,
 }
+
+/// A profile key pair request (`ProfileKeyPairManager.prepareKeyPair`).
+type KeysTask<'c> = Pin<Box<dyn Future<Output = Result<ProfileKeys, String>> + Send + 'c>>;
 
 /// The entity tracking the interests ask for: positions and metadata (item stacks, sneak /
 /// pose flags); equipment and other entities' effects are not decoded (cheaper).
@@ -682,14 +751,109 @@ enum Wake {
     Read(std::io::Result<usize>),
     Tick,
     Shutdown,
+    Keys(Box<Result<ProfileKeys, String>>),
 }
 
-impl<V, R, W> Play<'_, V, R, W>
+impl<'c, V, R, W> Play<'c, V, R, W>
 where
     V: ClientVersion + HasSim,
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    /// The cached key pair, if any.
+    fn cached_keys(&self) -> Option<Arc<ProfileKeys>> {
+        self.client.profile_keys.lock().ok().and_then(|k| k.clone())
+    }
+
+    /// handleLogin with an encrypted connection: `prepareKeyPair` — the cached pair right
+    /// away unless it is due for a refresh, else a request.
+    fn on_join(&mut self) {
+        if !self.encrypted || !self.client.signed_chat {
+            return;
+        }
+        match self.cached_keys() {
+            Some(k) if !k.due_refresh() => self.start_chat_session(&k),
+            cached => {
+                if !self.request_keys()
+                    && let Some(k) = cached
+                {
+                    // Nothing to refresh with (no account service): keep using it.
+                    self.start_chat_session(&k);
+                }
+            }
+        }
+    }
+
+    fn start_chat_session(&mut self, keys: &Arc<ProfileKeys>) {
+        if V::begin_chat_session(&mut self.wire, keys, self.client.account.uuid()) {
+            log::debug!("[{}] chat session started", self.engine.name());
+            self.engine.request_chat_session();
+        }
+    }
+
+    /// Starts a key pair request if the account can make one; `false` if not.
+    fn request_keys(&mut self) -> bool {
+        if self.keys_task.is_some() {
+            return true;
+        }
+        self.keys_checked = Some(Instant::now());
+        match &self.client.account {
+            Account::Offline(_) => false,
+            #[cfg(feature = "microsoft")]
+            Account::Microsoft { session, auth } => {
+                let (auth, token) = (auth.clone(), session.access_token.clone());
+                self.keys_task = Some(Box::pin(async move {
+                    auth.profile_keys(&token).await.map_err(|e| e.to_string())
+                }));
+                true
+            }
+        }
+    }
+
+    /// The key pair request finished.
+    fn keys_done(&mut self, r: Result<ProfileKeys, String>) {
+        self.keys_task = None;
+        match r {
+            Ok(k) => {
+                let k = Arc::new(k);
+                if let Ok(mut c) = self.client.profile_keys.lock() {
+                    *c = Some(k.clone());
+                }
+                if self.engine.joined() {
+                    self.start_chat_session(&k);
+                }
+            }
+            Err(e) => {
+                // Vanilla logs it and keeps the cached pair (chat stays unsigned without one).
+                log::warn!(
+                    "[{}] profile key pair request failed: {e}",
+                    self.engine.name()
+                );
+                if let Some(k) = self.cached_keys()
+                    && self.engine.joined()
+                {
+                    self.start_chat_session(&k);
+                }
+            }
+        }
+    }
+
+    /// ClientPacketListener.tick: `shouldRefreshKeyPair` (at most hourly, once due).
+    fn maybe_refresh_keys(&mut self) {
+        if self.keys_task.is_some() || !self.encrypted || !self.client.signed_chat {
+            return;
+        }
+        let hour = Duration::from_secs(3600);
+        if self.keys_checked.is_some_and(|t| t.elapsed() < hour) {
+            return;
+        }
+        if self.cached_keys().is_some_and(|k| k.due_refresh()) {
+            self.request_keys();
+        } else {
+            self.keys_checked = Some(Instant::now());
+        }
+    }
+
     fn set_filter(&mut self, interests: Interests, raw: &[i32]) {
         self.interests = interests;
         raw.clone_into(&mut self.raw_ids);
@@ -836,6 +1000,10 @@ where
                     self.reconfigure = true;
                     return Ok(None);
                 }
+                Some(p @ Inbound::JoinGame(_)) => {
+                    self.engine.handle(p);
+                    self.on_join();
+                }
                 Some(Inbound::SetCompression(t)) => {
                     // 1.8 play-state Set Compression: applies to the next frame both ways.
                     self.dec.set_compression(t);
@@ -858,6 +1026,7 @@ where
         self.reconfigure = false;
         log::info!("[{}] server asked for reconfiguration", self.engine.name());
         self.encode_outbound()?;
+        V::write_configuration_start_replies(&mut self.enc, &mut self.wire)?;
         V::write_configuration_acknowledged(&mut self.enc)?;
         flush(&mut self.wr, &mut self.enc).await?;
         let play_filter = *self.dec.filter();
@@ -935,13 +1104,21 @@ where
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
+            let keys = async {
+                match self.keys_task.as_mut() {
+                    Some(t) => t.await,
+                    None => std::future::pending().await,
+                }
+            };
             let wake = tokio::select! {
                 biased;
                 () = shutdown.as_mut() => Wake::Shutdown,
                 _ = ticker.tick() => Wake::Tick,
                 r = read_more(&mut self.rd, &mut self.dec) => Wake::Read(r),
+                k = keys => Wake::Keys(Box::new(k)),
             };
             match wake {
+                Wake::Keys(k) => self.keys_done(*k),
                 Wake::Shutdown => {
                     self.encode_outbound()?;
                     flush(&mut self.wr, &mut self.enc).await?;
@@ -987,6 +1164,7 @@ where
                     {
                         return Err(ClientError::Timeout("no data from the server"));
                     }
+                    self.maybe_refresh_keys();
                     self.engine.tick(behavior, now);
                     self.encode_outbound()?;
                     flush(&mut self.wr, &mut self.enc).await?;

@@ -314,6 +314,19 @@ impl Sim for Sim26 {
         }
     }
 
+    fn drop_level(&mut self) {
+        // ClientPacketListener.handleConfigurationStart → clearClientLevel: no level, no
+        // entities until the next login (which enters a new level from the new registries).
+        self.world.clear();
+        self.session = SessionPackets::default();
+        self.updates.list.clear();
+        self.updates.dropped = 0;
+        if let Some(t) = &mut self.entities {
+            *t = ghast_entity::v26_1::Tracker::new(t.config());
+        }
+        self.reset_player();
+    }
+
     fn reset_player(&mut self) {
         // A fresh LocalPlayer; abilities and food are sent again by the server, the level
         // stays (attributes are re-sent too).

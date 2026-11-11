@@ -774,3 +774,92 @@ fn errors_do_not_leak_tokens() {
     };
     assert!(!format!("{session:?}").contains("super-secret-token"));
 }
+
+fn b64(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::new();
+    for c in data.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            if i <= c.len() {
+                s.push(A[(n >> (18 - 6 * i)) as usize & 63] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
+}
+
+/// `player/certificates`: the key pair in PEM blocks, the V2 signature, ISO-8601 times; the
+/// keys parse and sign (the signature verifies with the public key).
+#[tokio::test]
+async fn profile_keys_are_fetched_and_usable() {
+    use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+    use rsa::{Pkcs1v15Sign, RsaPrivateKey};
+    use sha2::{Digest, Sha256};
+
+    let server = MockServer::start().await;
+    let mut rng = rand_core::OsRng;
+    let key = RsaPrivateKey::new(&mut rng, 1024).unwrap();
+    let private = key.to_pkcs8_der().unwrap();
+    let public = key.to_public_key().to_public_key_der().unwrap();
+    // Crypt.pemRsaPrivateKeyToString: MIME lines of 76.
+    let pem = |tag: &str, der: &[u8]| {
+        let body = b64(der);
+        let lines: Vec<&str> = body
+            .as_bytes()
+            .chunks(76)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect();
+        format!(
+            "-----BEGIN {tag}-----\n{}\n-----END {tag}-----\n",
+            lines.join("\n")
+        )
+    };
+    Mock::given(method("POST"))
+        .and(path("/player/certificates"))
+        .and(header("authorization", "Bearer mc-token"))
+        .respond_with(json_response(
+            200,
+            json!({
+                "keyPair": {
+                    "privateKey": pem("RSA PRIVATE KEY", private.as_bytes()),
+                    "publicKey": pem("RSA PUBLIC KEY", public.as_bytes()),
+                },
+                "publicKeySignature": b64(&[1, 2, 3]),
+                "publicKeySignatureV2": b64(&[9; 512]),
+                "expiresAt": "2026-11-13T10:20:30.123456Z",
+                "refreshedAfter": "2026-11-12T22:20:30.123456Z",
+            }),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let auth = auth_for(&server, true);
+    assert_eq!(
+        auth.certificates_url(),
+        format!("{}/player/certificates", server.uri())
+    );
+    let keys = auth
+        .profile_keys(&SecretString::new("mc-token".to_owned()))
+        .await
+        .unwrap();
+    assert_eq!(keys.public_key_der(), public.as_bytes());
+    assert_eq!(keys.key_signature(), &[9; 512][..]);
+    assert_eq!(keys.expires_at_millis(), 1_794_565_230_123);
+    let sig = keys.sign(b"hello").unwrap();
+    let digest = Sha256::digest(b"hello");
+    let scheme = Pkcs1v15Sign {
+        hash_len: Some(32),
+        prefix: Box::new([
+            0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x01, 0x05, 0x00, 0x04, 0x20,
+        ]),
+    };
+    key.to_public_key()
+        .verify(scheme, &digest[..], &sig)
+        .unwrap();
+}

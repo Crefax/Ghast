@@ -78,6 +78,9 @@ name = "attack"
 name = "inventory_probe"
 
 [[example]]
+name = "server_switch"
+
+[[example]]
 name = "goto"
 required-features = ["ext", "pathfinder"]
 

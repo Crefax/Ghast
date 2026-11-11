@@ -202,6 +202,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError>;
     /// A new client player (join, respawn).
     fn reset_player(&mut self);
+    /// Play → configuration (`start_configuration`): vanilla's `clearClientLevel` drops the
+    /// level (chunks, entities) and the player until the next join.
+    fn drop_level(&mut self) {
+        self.reset_player();
+    }
     /// A new client player after a respawn; `keep` is the respawn packet's kept-data bits
     /// (1.20.2+).
     fn respawn_player(&mut self, keep: u8) {

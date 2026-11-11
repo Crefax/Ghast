@@ -48,6 +48,39 @@ pub struct Wire26_1 {
     salt: u64,
     /// Registry names the inventory needs for hashed click stacks.
     hash_registries: ghast_inventory::v26_1::HashRegistries,
+    /// The last `declare_commands` packet (parsed only when a command is sent).
+    commands_raw: Option<RawPacket>,
+    /// The tree parsed from `commands_raw`.
+    commands: Option<super::commands::CommandTree>,
+    /// The chat session (online mode with profile keys): signs chat and command arguments.
+    chat: Option<ChatSession>,
+    /// Our entity id (entity events 24–28 set the permission level).
+    entity_id: i32,
+    /// The player's permission level (`LocalPlayer.permissions`; selectors need 2).
+    op_level: u8,
+}
+
+/// `LocalChatSession` + its message encoder.
+struct ChatSession {
+    keys: std::sync::Arc<ghast_auth::chat::ProfileKeys>,
+    chain: ghast_auth::chat::SignedMessageChain,
+}
+
+impl std::fmt::Debug for ChatSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatSession")
+            .field("session", &self.chain.session_id())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `UUID.randomUUID`.
+fn random_uuid() -> uuid::Uuid {
+    let mut b = [0u8; 16];
+    ghast_auth::crypto::random_bytes(&mut b);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(b)
 }
 
 /// `LastSeenMessagesTracker`: a ring of the last 20 signed messages seen.
@@ -62,13 +95,14 @@ struct LastSeen {
 }
 
 impl LastSeen {
-    /// `addPending` (every shown signed message).
-    fn add(&mut self, sig: Bytes) {
+    /// `addPending(signature, wasShown)`: a message not shown (vanilla: blocked sender,
+    /// failed validation, hidden chat) takes a slot without a signature.
+    fn add(&mut self, sig: Bytes, shown: bool) {
         if self.last.as_ref() == Some(&sig) {
             return;
         }
         self.last = Some(sig.clone());
-        self.entries[self.tail] = Some(sig);
+        self.entries[self.tail] = shown.then_some(sig);
         self.tail = (self.tail + 1) % LAST_SEEN;
         self.offset += 1;
         if self.offset > ACK_AFTER {
@@ -78,7 +112,14 @@ impl LastSeen {
 
     /// `generateAndApplyUpdate`: offset, the acknowledged bit set (20 bits, 3 bytes) and the
     /// checksum of the acknowledged signatures.
+    #[cfg(test)]
     fn update(&mut self) -> (i32, [u8; 3], u8) {
+        self.update_with(|_| {})
+    }
+
+    /// [`LastSeen::update`], passing every acknowledged signature in order to `seen` (they
+    /// are the signed body's last-seen list).
+    fn update_with(&mut self, mut seen: impl FnMut(&Bytes)) -> (i32, [u8; 3], u8) {
         let offset = std::mem::take(&mut self.offset);
         self.ack_due = false;
         let mut bits = [0u8; 3];
@@ -87,6 +128,7 @@ impl LastSeen {
             if let Some(sig) = &self.entries[(self.tail + i) % LAST_SEEN] {
                 bits[i / 8] |= 1 << (i % 8);
                 checksum = checksum.wrapping_mul(31).wrapping_add(java_array_hash(sig));
+                seen(sig);
             }
         }
         let b = checksum as u8;
@@ -124,10 +166,130 @@ impl Wire26_1 {
         x.wrapping_mul(0x2545_F491_4F6C_DD1D) as i64
     }
 
+    /// Signs `content` with the chat session, if any (`signedMessageEncoder.pack`).
+    fn sign(&mut self, content: &str, timestamp: i64, salt: i64, seen: &[Bytes]) -> Option<Bytes> {
+        let s = self.chat.as_mut()?;
+        match s.chain.sign(
+            &s.keys,
+            content,
+            timestamp,
+            salt,
+            seen.iter().map(|b| &b[..]),
+        ) {
+            Ok(sig) => sig.map(Bytes::from),
+            Err(e) => {
+                log::warn!("chat signing failed: {e}");
+                None
+            }
+        }
+    }
+
+    /// `sendChat`: a chat message (signed when there is a chat session).
+    fn write_chat(&mut self, enc: &mut FrameEncoder, text: &str) -> Result<(), EncodeError> {
+        let salt = self.next_salt();
+        self.write_chat_at(enc, text, now_millis(), salt)
+    }
+
+    fn write_chat_at(
+        &mut self,
+        enc: &mut FrameEncoder,
+        text: &str,
+        timestamp: i64,
+        salt: i64,
+    ) -> Result<(), EncodeError> {
+        let message = truncate_utf16(text, V26_1::CHAT_LIMIT);
+        let mut seen = Vec::new();
+        let signing = self.chat.is_some();
+        let (offset, bits, checksum) = self.seen.update_with(|s| {
+            if signing {
+                seen.push(s.clone());
+            }
+        });
+        let signature = self.sign(message, timestamp, salt, &seen);
+        enc.write_packet(&sb::ChatMessage {
+            message: ByteString::from(message),
+            timestamp,
+            salt,
+            signature,
+            offset,
+            acknowledged: Bytes::copy_from_slice(&bits),
+            checksum,
+        })
+    }
+
+    /// `sendCommand`: `chat_command_signed` when the server's command tree gives the line
+    /// signable (`minecraft:message`) arguments, else `chat_command`.
+    fn write_command(&mut self, enc: &mut FrameEncoder, command: &str) -> Result<(), EncodeError> {
+        let salt = self.next_salt();
+        self.write_command_at(enc, command, now_millis(), salt)
+    }
+
+    fn write_command_at(
+        &mut self,
+        enc: &mut FrameEncoder,
+        command: &str,
+        timestamp: i64,
+        salt: i64,
+    ) -> Result<(), EncodeError> {
+        if self.commands.is_none()
+            && let Some(raw) = &self.commands_raw
+        {
+            match raw.decode_as::<cb::DeclareCommands>() {
+                Ok(p) => self.commands = super::commands::CommandTree::from_packet(&p),
+                Err(e) => log::warn!("bad declare_commands packet: {e}"),
+            }
+            if self.commands.is_some() {
+                self.commands_raw = None;
+            }
+        }
+        let signable = self
+            .commands
+            .as_ref()
+            .map(|t| t.signable_arguments(command, self.op_level >= 2))
+            .unwrap_or_default();
+        if signable.is_empty() {
+            return enc.write_packet(&sb::ChatCommand {
+                command: ByteString::from(command),
+            });
+        }
+        let mut seen = Vec::new();
+        let signing = self.chat.is_some();
+        let (offset, bits, checksum) = self.seen.update_with(|s| {
+            if signing {
+                seen.push(s.clone());
+            }
+        });
+        let mut argument_signatures = Vec::new();
+        for (name, value) in signable {
+            if let Some(signature) = self.sign(value, timestamp, salt, &seen) {
+                argument_signatures.push(sb::ChatCommandSignedArgumentSignatures {
+                    argument_name: ByteString::from(&*name),
+                    signature,
+                });
+            }
+        }
+        enc.write_packet(&sb::ChatCommandSigned {
+            command: ByteString::from(command),
+            timestamp,
+            salt,
+            argument_signatures,
+            message_count: offset,
+            acknowledged: Bytes::copy_from_slice(&bits),
+            checksum,
+        })
+    }
+
     fn new_level(&mut self, dimension: &str) {
         self.sequence = 0;
         dimension.clone_into(&mut self.dimension);
     }
+}
+
+/// `Instant.now()` in milliseconds.
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Plain text of a network chat component.
@@ -263,10 +425,18 @@ impl ClientVersion for V26_1 {
             }
             lc::id::ENCRYPTION_BEGIN => {
                 let p: lc::EncryptionBegin = raw.decode_as()?;
-                LoginInbound::EncryptionRequest {
-                    server_id: p.server_id,
-                    public_key: p.public_key,
-                    verify_token: p.verify_token,
+                if p.should_authenticate {
+                    LoginInbound::EncryptionRequest {
+                        server_id: p.server_id,
+                        public_key: p.public_key,
+                        verify_token: p.verify_token,
+                    }
+                } else {
+                    LoginInbound::EncryptionRequestUnauthenticated {
+                        server_id: p.server_id,
+                        public_key: p.public_key,
+                        verify_token: p.verify_token,
+                    }
                 }
             }
             lc::id::SUCCESS => {
@@ -428,6 +598,19 @@ impl ClientVersion for V26_1 {
         enc.write_packet(&sb::ConfigurationAcknowledged {})
     }
 
+    fn write_configuration_start_replies(
+        enc: &mut FrameEncoder,
+        wire: &mut Wire26_1,
+    ) -> Result<(), EncodeError> {
+        // handleConfigurationStart → sendChatAcknowledgement: the offset, if any.
+        wire.seen.ack_due = false;
+        let count = std::mem::take(&mut wire.seen.offset);
+        if count > 0 {
+            enc.write_packet(&sb::MessageAcknowledgement { count })?;
+        }
+        Ok(())
+    }
+
     fn write_wire_replies(enc: &mut FrameEncoder, wire: &mut Wire26_1) -> Result<(), EncodeError> {
         if wire.seen.ack_due {
             wire.seen.ack_due = false;
@@ -472,7 +655,9 @@ impl ClientVersion for V26_1 {
             .with(cb::id::COOKIE_REQUEST)
             .with(cb::id::STORE_COOKIE)
             // Signed player messages must be acknowledged even when nobody reads chat.
-            .with(cb::id::PLAYER_CHAT);
+            .with(cb::id::PLAYER_CHAT)
+            // The command tree decides which commands are signed (kept raw until used).
+            .with(cb::id::DECLARE_COMMANDS);
         for &id in ghast_world::v26_1::PACKET_IDS {
             f.insert(id);
         }
@@ -495,6 +680,11 @@ impl ClientVersion for V26_1 {
                 wire.new_level(&w.name);
                 wire.next_chat_index = 0;
                 wire.seen = LastSeen::default();
+                // handleLogin: no chat session until the key pair is set again; a new
+                // LocalPlayer (permission level 0 until the server's entity event).
+                wire.chat = None;
+                wire.entity_id = p.entity_id;
+                wire.op_level = 0;
                 Inbound::JoinGame(JoinGame {
                     entity_id: p.entity_id,
                     game_mode: GameMode::from_wire(w.gamemode.0 as u8),
@@ -539,7 +729,7 @@ impl ClientVersion for V26_1 {
                 }
                 wire.next_chat_index = p.global_index.wrapping_add(1);
                 if let Some(sig) = p.signature.clone() {
-                    wire.seen.add(sig);
+                    wire.seen.add(sig, true);
                 }
                 let content = p
                     .unsigned_chat_content
@@ -705,6 +895,9 @@ impl ClientVersion for V26_1 {
             }
             cb::id::ENTITY_STATUS => {
                 let p: cb::EntityStatus = raw.decode_as()?;
+                if p.entity_id == wire.entity_id && (24..=28).contains(&p.entity_status) {
+                    wire.op_level = (p.entity_status - 24) as u8;
+                }
                 Inbound::EntityStatus {
                     entity_id: p.entity_id,
                     status: p.entity_status,
@@ -733,8 +926,34 @@ impl ClientVersion for V26_1 {
                 wire.cookies.insert(p.key, p.value);
                 return Ok(None);
             }
+            cb::id::DECLARE_COMMANDS => {
+                // Kept raw: parsed only when a command is sent.
+                wire.commands_raw = Some(raw.clone());
+                wire.commands = None;
+                return Ok(None);
+            }
             _ => return Ok(None),
         }))
+    }
+
+    fn begin_chat_session(
+        wire: &mut Wire26_1,
+        keys: &std::sync::Arc<ghast_auth::chat::ProfileKeys>,
+        profile_id: uuid::Uuid,
+    ) -> bool {
+        // setKeyPair: a new session unless the same key pair is already in use.
+        if wire
+            .chat
+            .as_ref()
+            .is_some_and(|s| std::sync::Arc::ptr_eq(&s.keys, keys))
+        {
+            return false;
+        }
+        wire.chat = Some(ChatSession {
+            keys: keys.clone(),
+            chain: ghast_auth::chat::SignedMessageChain::new(profile_id, random_uuid()),
+        });
+        true
     }
 
     const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V26_1;
@@ -871,29 +1090,19 @@ impl ClientVersion for V26_1 {
                 })
             }
             Outbound::Pong(id) => enc.write_packet(&sb::Pong { id: *id }),
-            Outbound::Chat(text) => {
-                if let Some(command) = text.strip_prefix('/') {
-                    // Unsigned command (no chat session; offline mode).
-                    enc.write_packet(&sb::ChatCommand {
-                        command: ByteString::from(command),
-                    })
-                } else {
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |d| d.as_millis() as i64);
-                    let salt = wire.next_salt();
-                    let (offset, bits, checksum) = wire.seen.update();
-                    enc.write_packet(&sb::ChatMessage {
-                        message: ByteString::from(truncate_utf16(text, Self::CHAT_LIMIT)),
-                        timestamp,
-                        salt,
-                        signature: None,
-                        offset,
-                        acknowledged: Bytes::copy_from_slice(&bits),
-                        checksum,
-                    })
-                }
-            }
+            Outbound::Chat(text) => match text.strip_prefix('/') {
+                Some(command) => wire.write_command(enc, command),
+                None => wire.write_chat(enc, text),
+            },
+            Outbound::ChatSessionUpdate => match &wire.chat {
+                Some(s) => enc.write_packet(&sb::ChatSessionUpdate {
+                    session_uuid: s.chain.session_id(),
+                    expire_time: s.keys.expires_at_millis(),
+                    public_key: Bytes::copy_from_slice(s.keys.public_key_der()),
+                    signature: Bytes::copy_from_slice(s.keys.key_signature()),
+                }),
+                None => Ok(()),
+            },
             Outbound::Respawn => enc.write_packet(&sb::ClientCommand {
                 action_id: sb::ClientCommandActionId::PERFORM_RESPAWN,
             }),
@@ -1023,6 +1232,10 @@ impl super::HasSim for V26_1 {
 }
 
 #[cfg(test)]
+#[path = "v26_1_chat_golden.rs"]
+mod chat_golden;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1031,9 +1244,9 @@ mod tests {
         let mut t = LastSeen::default();
         // Nothing seen: checksum 1, no bits.
         assert_eq!(t.update(), (0, [0; 3], 1));
-        t.add(Bytes::from_static(&[1, 2, 3]));
-        t.add(Bytes::from_static(&[1, 2, 3])); // the same message again is ignored
-        t.add(Bytes::from_static(&[200]));
+        t.add(Bytes::from_static(&[1, 2, 3]), true);
+        t.add(Bytes::from_static(&[1, 2, 3]), true); // the same message again is ignored
+        t.add(Bytes::from_static(&[200]), true);
         let (offset, bits, checksum) = t.update();
         assert_eq!(offset, 2);
         // The ring starts at the tail: the two entries are the last two slots.

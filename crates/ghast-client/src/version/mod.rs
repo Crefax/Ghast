@@ -16,6 +16,8 @@ use crate::common::{
 use crate::interest::Interests;
 
 mod caps;
+#[cfg(feature = "v26_1")]
+mod commands;
 #[cfg(feature = "v1_12_2")]
 mod v1_12_2;
 #[cfg(feature = "v1_16_5")]
@@ -226,6 +228,26 @@ pub trait ClientVersion: Version + sealed::Sealed {
     /// Queues `configuration_acknowledged` (play → configuration, 1.20.2+).
     fn write_configuration_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {
         let _ = enc;
+        Ok(())
+    }
+    /// Starts a chat session with these profile keys (1.19.3+ `setKeyPair`: a new random
+    /// session id, a new signature chain); `false` when the version has no signed chat. The
+    /// core then announces it ([`crate::common::Outbound::ChatSessionUpdate`]).
+    fn begin_chat_session(
+        wire: &mut Self::Wire,
+        keys: &std::sync::Arc<ghast_auth::chat::ProfileKeys>,
+        profile_id: uuid::Uuid,
+    ) -> bool {
+        let _ = (wire, keys, profile_id);
+        false
+    }
+    /// What the client sends on `start_configuration` before `configuration_acknowledged`
+    /// (26.1 `handleConfigurationStart`: the pending chat acknowledgement).
+    fn write_configuration_start_replies(
+        enc: &mut FrameEncoder,
+        wire: &mut Self::Wire,
+    ) -> Result<(), EncodeError> {
+        let _ = (enc, wire);
         Ok(())
     }
     /// Packets the wire layer itself owes the server after decoding (chat acknowledgements).

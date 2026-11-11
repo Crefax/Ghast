@@ -62,6 +62,17 @@ impl Options {
         }
     }
 
+    /// Parses the given arguments (an example that took its own options out first).
+    pub fn parse_from(args: Vec<String>) -> Options {
+        match Self::try_parse(args.into_iter()) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("{e}\n\n{USAGE}");
+                std::process::exit(2);
+            }
+        }
+    }
+
     fn try_parse(args: impl Iterator<Item = String>) -> Result<Options, String> {
         let mut o = Options {
             host: "localhost".into(),

@@ -9,6 +9,8 @@
 //!   directly or through a proxy, under a configurable [`connect::ProxyPolicy`].
 //! * [`crypto`]: the client side of the login Encryption Request: a fresh shared secret, RSA
 //!   PKCS#1 v1.5 encryption with the server's key and the session-server hash.
+//! * [`chat`]: signed chat: the profile key pair and the message signature chain of a chat
+//!   session (SHA256withRSA, bit-identical to the vanilla client).
 //! * `microsoft` (cargo feature `microsoft`, off by default): Microsoft account login through the
 //!   OAuth device-code flow, Xbox Live, XSTS and Minecraft services, a token cache, and the
 //!   session-server `join` call used by online-mode servers.
@@ -41,6 +43,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
 
+pub mod chat;
 pub mod connect;
 pub mod crypto;
 pub mod offline;

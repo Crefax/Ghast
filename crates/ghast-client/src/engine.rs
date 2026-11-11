@@ -355,6 +355,8 @@ pub(crate) struct Core {
     level_load_started: bool,
     /// 1.21.4+: `player_loaded` was sent for the current level.
     client_loaded: bool,
+    /// 1.19.3+ signed chat: a chat session is ready to be announced (`setKeyPair`).
+    chat_session_due: bool,
     /// 1.21.4+: this tick sent `player_loaded` (no mouse turn on it).
     gate_tick: bool,
     /// Test hook: the level-load gate's "section compiled" / "timed out" inputs.
@@ -436,6 +438,7 @@ impl Core {
             swings: 0,
             level_load_started: false,
             client_loaded: false,
+            chat_session_due: false,
             gate_tick: false,
             #[cfg(test)]
             test_gate: None,
@@ -717,6 +720,17 @@ impl<S: Sim> Engine<S> {
             sim,
             state: BehaviorState::default(),
         }
+    }
+
+    /// A chat session was started in the wire layer: announce it on the next tick, from the
+    /// connection tick like vanilla (`ClientPacketListener.tick` → `setKeyPair`).
+    pub(crate) fn request_chat_session(&mut self) {
+        self.core.chat_session_due = true;
+    }
+
+    /// A join game arrived and no reconfiguration dropped the level since.
+    pub(crate) fn joined(&self) -> bool {
+        self.core.joined
     }
 
     /// Bytes arrived from the server (liveness for the silent-server guard).
@@ -1014,7 +1028,7 @@ impl<S: Sim> Engine<S> {
                 // Vanilla drops the level and the player until the next join.
                 c.joined = false;
                 c.reset_player("reconfiguration");
-                sim.reset_player();
+                sim.drop_level();
             }
             Inbound::ResourcePackPush { id, required } => {
                 // A client that never shows the prompt: optional packs are declined; required
@@ -1105,6 +1119,12 @@ impl<S: Sim> Engine<S> {
                     c.tick
                 );
             }
+        }
+        if c.chat_session_due && c.joined {
+            // ClientPacketListener.tick: the key pair future finished → chat_session_update,
+            // before the level-load check.
+            c.chat_session_due = false;
+            c.out.push(Outbound::ChatSessionUpdate);
         }
         if c.opts.caps.player_loaded_gate && c.joined && !c.client_loaded {
             // 1.21.4+ LevelLoadTracker: after the server's "chunks load start" the level is
@@ -2366,6 +2386,7 @@ mod tests {
                 Outbound::PlayerInput(_) => "player_input",
                 Outbound::TickEnd => "tick_end",
                 Outbound::PlayerLoaded => "player_loaded",
+                Outbound::ChatSessionUpdate => "chat_session_update",
                 Outbound::ChunkBatchReceived(_) => "chunk_batch_received",
                 Outbound::Pong(_) => "pong",
                 Outbound::ResourcePackStatus { .. } => "resource_pack",
@@ -2725,6 +2746,7 @@ mod tests {
             Some(match *o {
                 Outbound::TeleportConfirm(id) => serde_json::json!(["teleport_confirm", id]),
                 Outbound::PlayerLoaded => serde_json::json!(["player_loaded"]),
+                Outbound::ChatSessionUpdate => serde_json::json!(["chat_session_update"]),
                 Outbound::TickEnd => serde_json::json!(["tick_end"]),
                 Outbound::Move(MovePacket::PositionLook {
                     pos,
