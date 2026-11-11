@@ -290,3 +290,126 @@ fn dig_timing_changes() {
         }
     }
 }
+
+/// Crosshair changes vs 0.3.0 on 1.8.9 / 1.12.2: the oracle pick (now) against the old ray
+/// path (`hands::pick` over the block queries) for every block state, 96 rays each from
+/// around the block, once alone and once with the same state on its four sides and on top
+/// (so fences, panes, walls, stairs and wires connect). Prints, per block, how many rays now
+/// hit another block (or none), another face, or the same face with another cursor value as
+/// sent on the wire (1.8: whole sixteenths in a byte; 1.12: f32).
+#[test]
+#[ignore = "prints crosshair changes"]
+fn pick_changes() {
+    use crate::sim::WorldView;
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let mut rays = Vec::new();
+    for _ in 0..96 {
+        let eye = Vec3::new(
+            8.5 + rnd() * 6.0 - 3.0,
+            59.0 + rnd() * 3.0,
+            8.5 + rnd() * 6.0 - 3.0,
+        );
+        let target = Vec3::new(8.0 + rnd(), 60.0 + rnd(), 8.0 + rnd());
+        let (dx, dy, dz) = (target.x - eye.x, target.y - eye.y, target.z - eye.z);
+        let yaw = (-dx).atan2(dz).to_degrees() as f32;
+        let pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
+        rays.push((eye, yaw, pitch));
+    }
+    // [other block / none, other face, other cursor]
+    type Kinds = [usize; 3];
+    let compare = |w: &dyn WorldView, legacy_cursor: bool| -> Kinds {
+        let blocks = |x: i32, y: i32, z: i32| w.block_query(x, y, z);
+        let cursor = |h: &crate::hands::BlockHit| -> [u32; 3] {
+            let r = [
+                h.hit.x - h.pos.x as f64,
+                h.hit.y - h.pos.y as f64,
+                h.hit.z - h.pos.z as f64,
+            ];
+            if legacy_cursor {
+                r.map(|v| (v * 16.0) as u8 as u32)
+            } else {
+                r.map(|v| (v as f32).to_bits())
+            }
+        };
+        let mut k = [0; 3];
+        for &(eye, yaw, pitch) in &rays {
+            let look = crate::hands::look_vector(yaw, pitch);
+            let old = crate::hands::pick(&blocks, eye, look, crate::hands::REACH);
+            let new = w.crosshair(eye, (yaw, pitch), look, crate::hands::REACH);
+            match (old, new) {
+                (None, None) => {}
+                (Some(a), Some(b)) if a.pos == b.pos => {
+                    if a.face != b.face {
+                        k[1] += 1;
+                    } else if cursor(&a) != cursor(&b) {
+                        k[2] += 1;
+                    }
+                }
+                _ => k[0] += 1,
+            }
+        }
+        k
+    };
+    let mut changed: std::collections::BTreeMap<String, Kinds> = Default::default();
+    let mut add = |key: String, k: Kinds| {
+        if k != [0; 3] {
+            let e = changed.entry(key).or_default();
+            for i in 0..3 {
+                e[i] += k[i];
+            }
+        }
+    };
+    const AROUND: [(i32, i32, i32); 5] = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0)];
+    let mut s18 = crate::sim::Sim18::new();
+    s18.world_packet(&crate::sim::test_chunks::v1_8(0, 0))
+        .unwrap();
+    for raw in 1..(198u16 << 4) {
+        let Some(st) = ghast_data::v1_8::BlockState::from_raw(raw) else {
+            continue;
+        };
+        let name = st.block().info().name;
+        s18.test_set_block(8, 60, 8, st);
+        add(format!("1.8.9  {name} (alone)"), compare(&s18, true));
+        for (dx, dy, dz) in AROUND {
+            s18.test_set_block(8 + dx, 60 + dy, 8 + dz, st);
+        }
+        add(
+            format!("1.8.9  {name} (with neighbours)"),
+            compare(&s18, true),
+        );
+        for (dx, dy, dz) in AROUND {
+            s18.test_set_block(8 + dx, 60 + dy, 8 + dz, ghast_data::v1_8::BlockState::AIR);
+        }
+    }
+    let mut s12 = crate::sim::Sim12::new();
+    s12.world_packet(&crate::sim::test_chunks::v1_12_2(0, 0))
+        .unwrap();
+    for raw in 1..(256u16 << 4) {
+        let Some(st) = ghast_data::v1_12::BlockState::from_raw(raw) else {
+            continue;
+        };
+        let name = st.block().info().name;
+        s12.test_set_block(8, 60, 8, st);
+        add(format!("1.12.2 {name} (alone)"), compare(&s12, false));
+        for (dx, dy, dz) in AROUND {
+            s12.test_set_block(8 + dx, 60 + dy, 8 + dz, st);
+        }
+        add(
+            format!("1.12.2 {name} (with neighbours)"),
+            compare(&s12, false),
+        );
+        for (dx, dy, dz) in AROUND {
+            s12.test_set_block(8 + dx, 60 + dy, 8 + dz, ghast_data::v1_12::BlockState::AIR);
+        }
+    }
+    println!("block: rays [other block or none, other face, other cursor] over all its states");
+    for (k, v) in &changed {
+        println!("{k}: {v:?}");
+    }
+}
