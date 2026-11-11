@@ -254,14 +254,15 @@ fn component_hashes_session_replays() {
 /// result taken, honey bottle -> sugar leaving the glass bottle), a furnace (shift-clicks into
 /// the input and fuel slots, a bucket as fuel), an anvil, a shulker box (shulker boxes refused)
 /// and creative clicks (clone, clone drag, Q). The server corrected none of the 59 predicted
-/// clicks; the one sent unpredicted is the anvil's (its result is computed from data ghast does
-/// not model). The replay reproduces every click byte for byte.
+/// clicks; the anvil click, sent unpredicted then, is predicted now and the server's
+/// corrections in the capture confirm the prediction.
 #[test]
 fn menus_session_replays() {
     const MENUS: &[u8] = include_bytes!("fixtures/menus_26_1_2.bin.zz");
     let (clicks, unpredicted, outcomes) = replay(MENUS);
     assert_eq!(clicks, 60);
-    assert_eq!(unpredicted, 1);
+    // the anvil click sent unpredicted then is predicted now (its corrections confirm it)
+    assert_eq!(unpredicted, 0);
     use ghast_inventory::ClickOutcome as O;
     let rejected = outcomes.iter().filter(|o| **o == O::Rejected).count();
     // "rejected" counts any container packet that arrives while a click settles: the anvil
