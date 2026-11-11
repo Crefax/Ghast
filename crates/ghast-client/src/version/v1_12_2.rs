@@ -3,9 +3,7 @@
 use bytes::BytesMut;
 use ghast_protocol::types::ByteString;
 use ghast_protocol::v1_12_2::{handshaking, login, play};
-use ghast_protocol::{
-    DecodeError, EncodeError, FrameEncoder, McWrite, PacketFilter, PacketSet, RawPacket,
-};
+use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, McWrite, PacketFilter, RawPacket};
 
 use super::{ClientVersion, GameVersion, V1_12_2, teleport_target, truncate_utf16};
 use crate::common::{
@@ -288,21 +286,21 @@ impl ClientVersion for V1_12_2 {
         inv: &mut ghast_inventory::Inventory,
         raw: &RawPacket,
     ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError> {
-        match raw.id {
-            cb::id::LOGIN
-            | cb::id::RESPAWN
-            | cb::id::OPEN_WINDOW
-            | cb::id::CLOSE_WINDOW
-            | cb::id::WINDOW_ITEMS
-            | cb::id::SET_SLOT
-            | cb::id::TRANSACTION
-            | cb::id::HELD_ITEM_SLOT
-            | cb::id::CRAFT_PROGRESS_BAR => {
-                let p = cb::ClientboundPlayPacket::decode_raw(raw)?;
-                Ok(inv.apply_v1_12_2(&p))
-            }
-            _ => Ok(None),
-        }
+        // Only the window packets are decoded (decode_raw would link every packet's decoder).
+        use cb::ClientboundPlayPacket as P;
+        let p = match raw.id {
+            cb::id::LOGIN => P::Login(raw.decode_as()?),
+            cb::id::RESPAWN => P::Respawn(raw.decode_as()?),
+            cb::id::OPEN_WINDOW => P::OpenWindow(raw.decode_as()?),
+            cb::id::CLOSE_WINDOW => P::CloseWindow(raw.decode_as()?),
+            cb::id::WINDOW_ITEMS => P::WindowItems(raw.decode_as()?),
+            cb::id::SET_SLOT => P::SetSlot(raw.decode_as()?),
+            cb::id::TRANSACTION => P::Transaction(raw.decode_as()?),
+            cb::id::HELD_ITEM_SLOT => P::HeldItemSlot(raw.decode_as()?),
+            cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
+            _ => return Ok(None),
+        };
+        Ok(inv.apply_v1_12_2(&p))
     }
 
     fn write_play(enc: &mut FrameEncoder, out: &Outbound, (): &mut ()) -> Result<(), EncodeError> {
@@ -381,9 +379,12 @@ impl ClientVersion for V1_12_2 {
                 flying_speed: *flying_speed,
                 walking_speed: *walking_speed,
             }),
+            // Only the window packets' encoders (write_set would link every packet's).
             Outbound::Inventory(o) => match o.to_v1_12_2() {
-                Some(p) => enc.write_set(&p),
-                None => Ok(()),
+                Some(sb::ServerboundPlayPacket::WindowClick(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::Transaction(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
+                _ => Ok(()),
             },
             Outbound::UseEntity {
                 target,

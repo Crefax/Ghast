@@ -995,9 +995,11 @@ impl ClientVersion for V26_1 {
                 key: key.clone(),
                 value: value.clone().or_else(|| wire.cookies.get(key).cloned()),
             }),
+            // Only the window packets' encoders (write_set would link every packet's).
             Outbound::Inventory(o) => match o.to_v26_1(&wire.hash_registries) {
-                Some(p) => enc.write_set(&p),
-                None => Ok(()),
+                Some(sb::ServerboundPlayPacket::WindowClick(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
+                _ => Ok(()),
             },
             // No transactions since 1.17.
             Outbound::Transaction { .. } => Ok(()),

@@ -249,7 +249,40 @@ impl Sim for Sim26 {
             }
             _ => {}
         }
-        let applied = self.world.handle_raw(raw);
+        // Decode only this world packet: the packet-set enum's decode_raw (behind
+        // World::handle_raw) would link every 26.1 decoder into the binary.
+        use ghast_protocol::v26_1::play::clientbound::ClientboundPlayPacket as P;
+        use ghast_world::WorldError;
+        let d = |r: Result<P, ghast_protocol::DecodeError>| r.map_err(WorldError::Decode);
+        let applied = if raw.id == cb::id::MAP_CHUNK {
+            self.world.apply_map_chunk_body(&raw.body)
+        } else {
+            let p = match raw.id {
+                cb::id::LOGIN => d(raw.decode_as().map(P::Login))?,
+                cb::id::RESPAWN => d(raw.decode_as().map(P::Respawn))?,
+                cb::id::UNLOAD_CHUNK => d(raw.decode_as().map(P::UnloadChunk))?,
+                cb::id::BLOCK_CHANGE => d(raw.decode_as().map(P::BlockChange))?,
+                cb::id::MULTI_BLOCK_CHANGE => d(raw.decode_as().map(P::MultiBlockChange))?,
+                cb::id::CHUNK_BIOMES => d(raw.decode_as().map(P::ChunkBiomes))?,
+                cb::id::UPDATE_VIEW_POSITION => d(raw.decode_as().map(P::UpdateViewPosition))?,
+                cb::id::UPDATE_VIEW_DISTANCE => d(raw.decode_as().map(P::UpdateViewDistance))?,
+                cb::id::INITIALIZE_WORLD_BORDER => {
+                    d(raw.decode_as().map(P::InitializeWorldBorder))?
+                }
+                cb::id::WORLD_BORDER_CENTER => d(raw.decode_as().map(P::WorldBorderCenter))?,
+                cb::id::WORLD_BORDER_LERP_SIZE => d(raw.decode_as().map(P::WorldBorderLerpSize))?,
+                cb::id::WORLD_BORDER_SIZE => d(raw.decode_as().map(P::WorldBorderSize))?,
+                cb::id::WORLD_BORDER_WARNING_DELAY => {
+                    d(raw.decode_as().map(P::WorldBorderWarningDelay))?
+                }
+                cb::id::WORLD_BORDER_WARNING_REACH => {
+                    d(raw.decode_as().map(P::WorldBorderWarningReach))?
+                }
+                cb::id::TILE_ENTITY_DATA => d(raw.decode_as().map(P::TileEntityData))?,
+                _ => return Ok(()),
+            };
+            self.world.handle(&p)
+        };
         if matches!(raw.id, cb::id::LOGIN | cb::id::RESPAWN) {
             self.sync_level();
         }
