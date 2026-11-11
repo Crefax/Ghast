@@ -873,6 +873,24 @@ where
         Ok(())
     }
 
+    /// Ends the connection the way a client that keeps reading does: half-close (FIN), then
+    /// read and drop whatever the server still sends until it closes too (at most 1 s). Closing
+    /// with unread bytes in the receive buffer makes the kernel answer with a reset, which the
+    /// server logs as "Connection reset by peer" instead of a normal disconnect.
+    async fn close(&mut self) {
+        let _ = self.wr.shutdown().await;
+        let mut buf = [0u8; 16 * 1024];
+        let drain = async {
+            loop {
+                match self.rd.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(1), drain).await;
+    }
+
     /// Reads if data is available right now; `None` if the read would wait.
     async fn read_ready(&mut self) -> Option<std::io::Result<usize>> {
         let mut fut = std::pin::pin!(read_more(&mut self.rd, &mut self.dec));
@@ -918,7 +936,7 @@ where
                 Wake::Shutdown => {
                     self.encode_outbound()?;
                     flush(&mut self.wr, &mut self.enc).await?;
-                    let _ = self.wr.shutdown().await;
+                    self.close().await;
                     return Ok(SessionEnd::Shutdown);
                 }
                 Wake::Read(r) => {
@@ -965,7 +983,7 @@ where
                     flush(&mut self.wr, &mut self.enc).await?;
                     if let Some(reason) = self.engine.quit_requested() {
                         let reason = reason.to_owned();
-                        let _ = self.wr.shutdown().await;
+                        self.close().await;
                         return Ok(SessionEnd::Quit(reason));
                     }
                     let interests = self.engine.interests(behavior);
