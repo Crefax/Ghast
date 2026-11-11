@@ -255,6 +255,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn gliding(&self) -> bool {
         false
     }
+    /// A mount's screen facts (26.1): entity type id, `canUseSlot(SADDLE)`, `canUseSlot(BODY)`.
+    fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
+        let _ = entity_id;
+        None
+    }
     /// The client's main arm setting (left: `true`) for the parts of movement that read it.
     #[inline(always)]
     fn set_main_arm_left(&mut self, left: bool) {
@@ -1151,6 +1156,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn gliding(&self) -> bool {
         (**self).gliding()
+    }
+    fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
+        (**self).mount_info(entity_id)
     }
     #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_modern(

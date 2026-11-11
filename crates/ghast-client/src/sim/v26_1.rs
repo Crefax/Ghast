@@ -50,6 +50,47 @@ struct OwnEntity {
     main_arm_left: bool,
     /// Firework rockets spawned but not (yet) known as attached to us: id, spawn position.
     rockets: Vec<(i32, [f64; 3])>,
+    /// Mountable animals with an inventory screen (horses, llamas, nautili …): what their
+    /// screen reads off them (`canUseSlot(SADDLE / BODY)`).
+    mounts: Vec<Mount>,
+}
+
+/// A mount entity's screen facts.
+#[derive(Debug, Clone, Copy)]
+struct Mount {
+    id: i32,
+    /// `minecraft:entity_type` registry id.
+    ty: i32,
+    /// `AgeableMob.DATA_BABY_ID`.
+    baby: bool,
+    /// Index 18: `AbstractHorse.DATA_ID_FLAGS` (tamed = 2) or `TamableAnimal.DATA_FLAGS_ID`
+    /// (tame = 4).
+    flags: u8,
+}
+
+/// Entity types whose screen is a mount screen (26.1 registry ids): horse, donkey, mule,
+/// skeleton / zombie horse, camel, camel husk (`AbstractHorse`), llama, trader llama
+/// (`Llama`), nautilus, zombie nautilus (`AbstractNautilus`).
+const HORSES: [i32; 7] = [66, 36, 87, 116, 151, 19, 20];
+const LLAMAS: [i32; 2] = [78, 134];
+const NAUTILI: [i32; 2] = [88, 152];
+const DATA_BABY: u8 = 16;
+const DATA_MOUNT_FLAGS: u8 = 18;
+/// Mounts remembered at most (nearest first is not known: the oldest are dropped).
+const MAX_MOUNTS: usize = 128;
+
+impl Mount {
+    /// `canUseSlot(SADDLE)`, `canUseSlot(BODY)` (alive: the entity is still in the level).
+    fn slots(&self) -> (bool, bool) {
+        if LLAMAS.contains(&self.ty) {
+            (true, true)
+        } else if NAUTILI.contains(&self.ty) {
+            let ok = !self.baby && self.flags & 4 != 0;
+            (ok, ok)
+        } else {
+            (!self.baby && self.flags & 2 != 0, true)
+        }
+    }
 }
 
 /// Entity data indices (26.1, read from the real classes): `Entity.DATA_SHARED_FLAGS_ID`,
@@ -117,7 +158,8 @@ impl Sim26 {
             cb::id::ENTITY_METADATA => {
                 let id = r.read_varint()?;
                 let rocket = self.own.rockets.iter().position(|&(rid, _)| rid == id);
-                if id != self.own.id && rocket.is_none() {
+                let mount = self.own.mounts.iter().position(|m| m.id == id);
+                if id != self.own.id && rocket.is_none() && mount.is_none() {
                     return Ok(());
                 }
                 let p: cb::EntityMetadata = raw.decode_as()?;
@@ -129,6 +171,12 @@ impl Sim26 {
                         (V::HumanoidArm(a), DATA_PLAYER_MAIN_HAND) if id == self.own.id => {
                             // HumanoidArm: LEFT 0, RIGHT 1.
                             self.own.main_arm_left = a.0 == 0;
+                        }
+                        (V::Boolean(b), DATA_BABY) if mount.is_some() => {
+                            self.own.mounts[mount.unwrap_or(0)].baby = *b;
+                        }
+                        (V::Byte(f), DATA_MOUNT_FLAGS) if mount.is_some() => {
+                            self.own.mounts[mount.unwrap_or(0)].flags = *f as u8;
                         }
                         (V::OptionalUnsignedInt(v), DATA_ATTACHED_TO_TARGET) => {
                             if let Some(k) = rocket
@@ -146,7 +194,21 @@ impl Sim26 {
             cb::id::SPAWN_ENTITY => {
                 let id = r.read_varint()?;
                 r.skip(16)?; // uuid
-                if r.read_varint()? != FIREWORK_ROCKET {
+                let ty = r.read_varint()?;
+                if HORSES.contains(&ty) || LLAMAS.contains(&ty) || NAUTILI.contains(&ty) {
+                    self.own.mounts.retain(|m| m.id != id);
+                    if self.own.mounts.len() >= MAX_MOUNTS {
+                        self.own.mounts.remove(0);
+                    }
+                    self.own.mounts.push(Mount {
+                        id,
+                        ty,
+                        baby: false,
+                        flags: 0,
+                    });
+                    return Ok(());
+                }
+                if ty != FIREWORK_ROCKET {
                     return Ok(());
                 }
                 let p: cb::SpawnEntity = raw.decode_as()?;
@@ -156,12 +218,16 @@ impl Sim26 {
                 self.own.rockets.push((id, [p.x, p.y, p.z]));
             }
             cb::id::ENTITY_DESTROY => {
-                if self.own.rockets.is_empty() && self.ext.rocket_count() == 0 {
+                if self.own.rockets.is_empty()
+                    && self.ext.rocket_count() == 0
+                    && self.own.mounts.is_empty()
+                {
                     return Ok(());
                 }
                 let p: cb::EntityDestroy = raw.decode_as()?;
                 for id in p.entity_ids {
                     self.own.rockets.retain(|&(rid, _)| rid != id);
+                    self.own.mounts.retain(|m| m.id != id);
                     self.ext.remove_rocket(id);
                 }
             }
@@ -396,6 +462,7 @@ impl Sim for Sim26 {
             cb::id::LOGIN => {
                 self.own.id = raw.decode_as::<cb::Login>()?.entity_id;
                 self.own.rockets.clear();
+                self.own.mounts.clear();
             }
             _ => {}
         }
@@ -523,6 +590,12 @@ impl Sim for Sim26 {
 
     fn gliding(&self) -> bool {
         self.ext.fall_flying
+    }
+
+    fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
+        let m = self.own.mounts.iter().find(|m| m.id == entity_id)?;
+        let (saddle, body) = m.slots();
+        Some((m.ty, saddle, body))
     }
 
     #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]

@@ -263,6 +263,28 @@ pub trait ClientVersion: Version + sealed::Sealed {
         let _ = enc;
         Ok(())
     }
+    /// Gives the inventory what the configuration state carried for it (26.1: registry and tag
+    /// bodies, kept raw by the inventory until a screen needs them), once per configuration.
+    fn feed_inventory_config(inv: &mut ghast_inventory::Inventory, wire: &mut Self::Wire) {
+        let _ = (inv, wire);
+    }
+    /// The entity a mount screen (`horse_screen_open`) belongs to; `None` for other packets
+    /// and versions without one.
+    #[inline(always)]
+    fn mount_screen_entity(raw: &RawPacket) -> Option<i32> {
+        let _ = raw;
+        None
+    }
+    /// Opens the mount screen of [`ClientVersion::mount_screen_entity`] with what it reads off
+    /// the entity (type id, `canUseSlot(SADDLE)`, `canUseSlot(BODY)`; `None`: unknown).
+    fn open_mount_screen(
+        inv: &mut ghast_inventory::Inventory,
+        raw: &RawPacket,
+        mount: Option<(i32, bool, bool)>,
+    ) -> Result<(), DecodeError> {
+        let _ = (inv, raw, mount);
+        Ok(())
+    }
     /// Sees a batch of outbound packets before they are written (26.1: the rotation of this
     /// tick's movement packet, which `use_item` carries).
     #[inline(always)]

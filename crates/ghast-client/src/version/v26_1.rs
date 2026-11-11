@@ -52,6 +52,8 @@ pub struct Wire26_1 {
     salt: u64,
     /// Registry names the inventory needs for hashed click stacks.
     hash_registries: ghast_inventory::v26_1::HashRegistries,
+    /// This configuration's registry and tag bodies for the inventory (handed over at its end).
+    inv_config: Vec<(bool, Bytes)>,
     /// The last `declare_commands` packet (parsed only when a command is sent).
     commands_raw: Option<RawPacket>,
     /// The tree parsed from `commands_raw`.
@@ -564,6 +566,11 @@ impl ClientVersion for V26_1 {
             cc::id::CODE_OF_CONDUCT => ConfigInbound::CodeOfConduct(
                 raw.decode_as::<cc::CodeOfConduct>()?.contents.to_string(),
             ),
+            cc::id::TAGS => {
+                wire.inv_config
+                    .push((true, Bytes::copy_from_slice(&raw.body)));
+                return Ok(None);
+            }
             cc::id::TRANSFER => {
                 let p: cc::Transfer = raw.decode_as()?;
                 ConfigInbound::Transfer(format!("{}:{}", p.host, p.port))
@@ -627,7 +634,46 @@ impl ClientVersion for V26_1 {
         }
     }
 
+    fn feed_inventory_config(inv: &mut ghast_inventory::Inventory, wire: &mut Wire26_1) {
+        for (tags, body) in wire.inv_config.drain(..) {
+            if tags {
+                inv.on_update_tags_26_1(body);
+            } else {
+                inv.on_registry_data_26_1(body);
+            }
+        }
+    }
+
+    fn mount_screen_entity(raw: &RawPacket) -> Option<i32> {
+        if raw.id != cb::id::OPEN_HORSE_WINDOW {
+            return None;
+        }
+        raw.decode_as::<cb::OpenHorseWindow>()
+            .ok()
+            .map(|p| p.entity_id)
+    }
+
+    fn open_mount_screen(
+        inv: &mut ghast_inventory::Inventory,
+        raw: &RawPacket,
+        mount: Option<(i32, bool, bool)>,
+    ) -> Result<(), DecodeError> {
+        let p: cb::OpenHorseWindow = raw.decode_as()?;
+        match mount {
+            Some((ty, saddle, body)) => {
+                inv.on_mount_screen_26_1(p.window_id, p.nb_slots, ty, saddle, body);
+                Ok(())
+            }
+            // An entity the client does not know (spawned before it could see it): the
+            // generic screen.
+            None => inv.apply_raw_v26_1(raw),
+        }
+    }
+
     fn note_registry(raw: &RawPacket, wire: &mut Wire26_1) {
+        // A copy: the frame buffer the body points into is not kept alive.
+        wire.inv_config
+            .push((false, Bytes::copy_from_slice(&raw.body)));
         let Ok(p) = raw.decode_as::<configuration::clientbound::RegistryData>() else {
             return;
         };
@@ -1021,9 +1067,11 @@ impl ClientVersion for V26_1 {
         raw: &RawPacket,
     ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError> {
         // Slots keep their components as bytes (structural skip); no confirms since 1.17.
-        if raw.id == cb::id::LOGIN
+        if (raw.id == cb::id::LOGIN
             || raw.id == cb::id::RESPAWN
-            || ghast_inventory::PACKET_IDS_26_1.contains(&raw.id)
+            || ghast_inventory::PACKET_IDS_26_1.contains(&raw.id))
+            // The mount screen needs the entity (ClientVersion::open_mount_screen).
+            && raw.id != cb::id::OPEN_HORSE_WINDOW
         {
             inv.apply_raw_v26_1(raw)?;
             // CreativeInventoryListener.slotChanged → handleCreativeModeItemAdd: the open creative
@@ -1284,6 +1332,9 @@ impl ClientVersion for V26_1 {
                     enc.write_packet(&p)
                 }
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::NameItem(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::EnchantItem(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::SelectTrade(p)) => enc.write_packet(&p),
                 None => match o {
                     // The creative screen: swings and set_creative_mode_slot, in order.
                     ghast_inventory::Outgoing::Creative(list) => {
@@ -1437,6 +1488,135 @@ mod tests {
             r = &rest[len..];
         }
         v
+    }
+
+    /// The menu registry id of a window kind.
+    fn menu_of(kind: ghast_inventory::WindowKind) -> i32 {
+        (0..64)
+            .find(|&m| ghast_inventory::v26_1::window_kind(m) == Some(kind))
+            .unwrap()
+    }
+
+    /// An anvil rename and a trade selection are written as `rename_item` / `select_trade`.
+    #[test]
+    fn anvil_rename_and_trade_packets() {
+        use ghast_inventory::{Inventory, Stack, Version, WindowKind};
+        let mut wire = Wire26_1::default();
+        let mut enc = FrameEncoder::new();
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        inv.on_open_screen_26_1(
+            3,
+            menu_of(WindowKind::Anvil),
+            ByteString::from_static("Anvil"),
+        );
+        let sword = ghast_inventory::v26_1::item_id("iron_sword").unwrap();
+        inv.on_set_slot(3, 0, Some(Stack::new(sword, 1, 0)));
+        inv.tick();
+        let o = inv.anvil_rename_26_1("Blade").unwrap().expect("a rename");
+        V26_1::write_play(&mut enc, &Outbound::Inventory(o), &mut wire).unwrap();
+        assert_eq!(frame_ids(&mut enc), vec![sb::id::NAME_ITEM]);
+        // The same name again sends nothing.
+        assert!(inv.anvil_rename_26_1("Blade").unwrap().is_none());
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        inv.on_open_screen_26_1(
+            4,
+            menu_of(WindowKind::Merchant),
+            ByteString::from_static("Villager"),
+        );
+        inv.tick();
+        let o = inv.select_trade_26_1(1).unwrap();
+        V26_1::write_play(&mut enc, &Outbound::Inventory(o), &mut wire).unwrap();
+        assert_eq!(frame_ids(&mut enc), vec![sb::id::SELECT_TRADE]);
+    }
+
+    /// A mount screen opens with what the client knows about the entity: a tamed adult horse
+    /// (saddle + body), a baby horse (body only), a llama (both), an unknown entity (the
+    /// generic screen).
+    #[test]
+    fn mount_screen_reads_the_entity() {
+        use crate::sim::Sim;
+        use ghast_inventory::{Inventory, Version, WindowKind};
+        use ghast_protocol::v26_1::types::{
+            EntityMetadataEntry, EntityMetadataEntryType as T, EntityMetadataEntryValue as V,
+        };
+        fn body<P: ghast_protocol::Packet + ghast_protocol::Encode>(p: &P) -> Bytes {
+            let mut enc = FrameEncoder::new();
+            enc.write_packet(p).unwrap();
+            let out = enc.out_mut().split().freeze();
+            // one-byte length and id here
+            Bytes::copy_from_slice(&out[2..])
+        }
+        let mut sim = crate::sim::Sim26::test_overworld();
+        let spawn = |id: i32, ty: i32| {
+            RawPacket::new(
+                cb::id::SPAWN_ENTITY,
+                body(&cb::SpawnEntity {
+                    entity_id: id,
+                    object_uuid: uuid::Uuid::from_u64_pair(1, id as u64),
+                    r#type: ty,
+                    x: 0.5,
+                    y: 4.0,
+                    z: 0.5,
+                    velocity: LpVec3::ZERO,
+                    pitch: 0,
+                    yaw: 0,
+                    head_pitch: 0,
+                    object_data: 0,
+                }),
+            )
+        };
+        let meta = |id: i32, key: u8, ty: T, value: V| {
+            RawPacket::new(
+                cb::id::ENTITY_METADATA,
+                body(&cb::EntityMetadata {
+                    entity_id: id,
+                    metadata: vec![EntityMetadataEntry {
+                        key,
+                        r#type: ty,
+                        value,
+                    }],
+                }),
+            )
+        };
+        sim.world_packet(&spawn(50, 66)).unwrap(); // horse
+        assert_eq!(sim.mount_info(50), Some((66, false, true)));
+        sim.world_packet(&meta(50, 18, T::BYTE, V::Byte(2)))
+            .unwrap(); // tamed
+        assert_eq!(sim.mount_info(50), Some((66, true, true)));
+        sim.world_packet(&meta(50, 16, T::BOOLEAN, V::Boolean(true)))
+            .unwrap(); // baby
+        assert_eq!(sim.mount_info(50), Some((66, false, true)));
+        sim.world_packet(&spawn(51, 78)).unwrap(); // llama
+        assert_eq!(sim.mount_info(51), Some((78, true, true)));
+        sim.world_packet(&spawn(52, 88)).unwrap(); // nautilus, not tame
+        assert_eq!(sim.mount_info(52), Some((88, false, false)));
+        let destroy = RawPacket::new(
+            cb::id::ENTITY_DESTROY,
+            body(&cb::EntityDestroy {
+                entity_ids: vec![51],
+            }),
+        );
+        sim.world_packet(&destroy).unwrap();
+        assert_eq!(sim.mount_info(51), None);
+        // The screen packet: window 5, 3 columns, entity 50.
+        let open = RawPacket::new(
+            cb::id::OPEN_HORSE_WINDOW,
+            body(&cb::OpenHorseWindow {
+                window_id: 5,
+                nb_slots: 3,
+                entity_id: 50,
+            }),
+        );
+        assert_eq!(V26_1::mount_screen_entity(&open), Some(50));
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        V26_1::open_mount_screen(&mut inv, &open, sim.mount_info(50)).unwrap();
+        let w = inv.window().expect("mount screen");
+        assert_eq!(w.id(), 5);
+        assert!(
+            matches!(w.kind(), WindowKind::Horse { .. }),
+            "{:?}",
+            w.kind()
+        );
     }
 
     /// The play filter passes every packet the inventory reads.

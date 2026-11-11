@@ -532,6 +532,7 @@ where
     }
     drop(registries);
     V::configure_inventory(play.engine.inventory_mut(), &play.wire);
+    V::feed_inventory_config(play.engine.inventory_mut(), &mut play.wire);
     let result = play.run(behavior, shutdown).await;
     let reason = match &result {
         Ok(SessionEnd::Kicked { reason, .. }) => format!("kicked: {reason}"),
@@ -1082,6 +1083,17 @@ where
                     continue;
                 }
             }
+            // 1.20.2+ mount screens read the entity (type, saddle / body slots).
+            if let Some(eid) = V::mount_screen_entity(&raw) {
+                let mount = self.engine.sim.mount_info(eid);
+                V::open_mount_screen(self.engine.inventory_mut(), &raw, mount).map_err(
+                    |source| ClientError::Decode {
+                        state: State::Play,
+                        id: raw.id,
+                        source,
+                    },
+                )?;
+            }
             // The inventory answers window confirms itself (exactly once).
             let inv = V::inventory_packet(self.engine.inventory_mut(), &raw).map_err(|source| {
                 ClientError::Decode {
@@ -1174,6 +1186,7 @@ where
             self.engine.sim.registry_data(raw);
         }
         V::configure_inventory(self.engine.inventory_mut(), &self.wire);
+        V::feed_inventory_config(self.engine.inventory_mut(), &mut self.wire);
         self.dec.set_filter(play_filter);
         self.engine.note_inbound(Instant::now().into_std());
         Ok(None)

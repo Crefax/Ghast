@@ -1913,6 +1913,58 @@ impl TickContext<'_> {
         Ok(ticket)
     }
 
+    /// Renames the item in the open anvil (26.1 `rename_item`, written now; nothing is sent
+    /// when the name did not change or the input slot is empty). An empty name removes a
+    /// custom name.
+    pub fn anvil_rename(&mut self, name: &str) -> Result<(), ClickRefused> {
+        #[cfg(feature = "v26_1")]
+        if let Some(o) = self
+            .core
+            .inv
+            .anvil_rename_26_1(name)
+            .map_err(ClickRefused::Inventory)?
+        {
+            self.core.out.push(Outbound::Inventory(o));
+        }
+        #[cfg(not(feature = "v26_1"))]
+        let _ = name;
+        Ok(())
+    }
+
+    /// Selects a banner pattern in the open loom (26.1 `container_button_click`, written now;
+    /// nothing is sent for a pattern the loom does not offer).
+    pub fn select_loom_pattern(&mut self, index: i32) -> Result<(), ClickRefused> {
+        #[cfg(feature = "v26_1")]
+        if let Some(o) = self
+            .core
+            .inv
+            .select_loom_pattern_26_1(index)
+            .map_err(ClickRefused::Inventory)?
+        {
+            self.core.out.push(Outbound::Inventory(o));
+        }
+        #[cfg(not(feature = "v26_1"))]
+        let _ = index;
+        Ok(())
+    }
+
+    /// Selects a trade in the open villager screen (26.1 `select_trade`, written now; the
+    /// payment slots are refilled like the real screen).
+    pub fn select_trade(&mut self, index: i32) -> Result<(), ClickRefused> {
+        #[cfg(feature = "v26_1")]
+        {
+            let o = self
+                .core
+                .inv
+                .select_trade_26_1(index)
+                .map_err(ClickRefused::Inventory)?;
+            self.core.out.push(Outbound::Inventory(o));
+        }
+        #[cfg(not(feature = "v26_1"))]
+        let _ = index;
+        Ok(())
+    }
+
     /// Opens the player inventory GUI (1.8: the "open inventory" client command; 1.16: nothing
     /// is sent). Window 0 clicks need it open.
     pub fn open_inventory(&mut self) -> Result<(), ClickRefused> {
