@@ -21,6 +21,7 @@ import { CameraControl, type Mode, type View } from './camera.js';
 import { EntityRenderer, type EntityState } from './entities.js';
 import { GAMMA_STEPS, QuadIndex, SKY_FS, SKY_VS, compile, uniforms } from './gl.js';
 import { Hud, type Slot } from './hud.js';
+import { type EntityText, type Items, entityTag, gameLine } from './itemtext.js';
 import { Lightning } from './lightning.js';
 import { boxVisible, clamp, frustum, mat4, modelMatrix, multiply, perspective, viewFromYawPitch } from './math.js';
 import { Net, clientNow } from './net.js';
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
     }
     return { flat: pack.icons[baked.quads[0].layer] };
   });
+  hud.textTarget = $('items');
 
   // ---- particles and lightning ----
   const isTouch = matchMedia('(pointer: coarse)').matches;
@@ -178,6 +180,11 @@ async function main(): Promise<void> {
   /** The bot's own LOOKS (its armour in third person). */
   let selfLooks: Looks | null = null;
   let account = '', inGame = false, status = '', viewDistance = 8;
+  /** 26.1: the header suffix (game version, assets) and the real entity text by id (`ENTITY`). */
+  let game = '';
+  /** 26.1: world y = page y + worldMinY (the page shows 256 rows of a taller world). */
+  let worldMinY = 0;
+  const entityText = new Map<number, EntityText>();
   let health = 20, food = 20;
   let time = { at: 0, tod: 6000 };
   let lastPoseFrame = -1, lastPoseT = 0;
@@ -264,16 +271,20 @@ async function main(): Promise<void> {
     worker.postMessage({ type: 'reset' });
     terrain.clear();
     entities.clear();
+    entityText.clear();
     bot.clear();
   }
 
   function onMessage(type: number, r: Reader, frameAt: number): void {
     switch (type) {
-      case S.HELLO: { const h = readJson(r); account = h.account; viewDistance = h.viewDistance ?? 8; break; }
+      case S.HELLO: { const h = readJson(r); account = h.account; viewDistance = h.viewDistance ?? 8; game = gameLine(h); worldMinY = h.worldMinY ?? 0; hud.setItemText(null); entityText.clear(); break; }
+      case S.ITEMS: hud.setItemText(readJson<Items>(r)); break;
+      case S.ENTITY: { const t = readJson<EntityText>(r); entityText.set(t.id, t); break; }
       case S.STATE: {
         const st = readJson(r);
         const was = inGame;
         inGame = !!st.inGame; status = st.status ?? ''; account = st.account || account;
+        if (st.game) { game = gameLine(st); worldMinY = st.worldMinY ?? worldMinY; }
         if (!inGame) { show(st.message || NOT_IN_GAME); clearWorld(); }
         // back in game: the not-in-game message (any text the server sent) or a connection notice gives way
         else if (!was || stateBox.textContent === CONNECTING || stateBox.textContent?.startsWith('Connection')) show(LOADING_WORLD);
@@ -333,7 +344,7 @@ async function main(): Promise<void> {
       case S.REMOVE: {
         // a dying entity finishes its fall first (the server removes it at deathTime 20, give or take a tick)
         const n = r.u16();
-        for (let i = 0; i < n; i++) { const id = r.u32(), e = entities.get(id); if (e && e.life.death > 0 && e.life.death < DEATH_TICKS) e.gone = true; else entities.delete(id); }
+        for (let i = 0; i < n; i++) { const id = r.u32(), e = entities.get(id); entityText.delete(id); if (e && e.life.death > 0 && e.life.death < DEATH_TICKS) e.gone = true; else entities.delete(id); }
         break;
       }
       case S.EVENTS: {
@@ -759,6 +770,14 @@ async function main(): Promise<void> {
       // nametags over everything
       ents.begin(viewProj, fogColor, fog, daylight);
       for (const { s, flags, collected } of entities.values()) {
+        // 26.1: entities drawn with a stand-in model (or item) carry their real name
+        const standIn = s.kind !== KIND.PLAYER ? entityText.get(s.id) : undefined;
+        const tag = standIn ? entityTag(standIn) : null;
+        if (tag && !collected && !(flags & EFLAG.INVISIBLE)) {
+          const rx = s.x - cam.x, ry = s.y - cam.y, rz = s.z - cam.z;
+          if (rx * rx + rz * rz <= 32 * 32) ents.drawTag(tag, rx, ry + (s.height || 0.5) + 0.35, rz, cam.yaw, cam.pitch, false);
+          continue;
+        }
         if (s.kind !== KIND.PLAYER || !s.label || collected || flags & EFLAG.INVISIBLE) continue;
         const rx = s.x - cam.x, ry = s.y - cam.y, rz = s.z - cam.z;
         if (rx * rx + rz * rz > 64 * 64) continue;
@@ -785,8 +804,8 @@ async function main(): Promise<void> {
     } else slowSince = 0;
 
     if (p) {
-      info.textContent = `${account}`;
-      $('coords').textContent = `XYZ ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}`;
+      info.textContent = `${account}${game}`;
+      $('coords').textContent = `XYZ ${p.x.toFixed(1)} ${(p.y + worldMinY).toFixed(1)} ${p.z.toFixed(1)}`;
     }
     if (showDebug && Math.floor(now / 250) !== lastDebug) { lastDebug = Math.floor(now / 250); updateDebug(fps, delay, lagP90); }
   }

@@ -5,6 +5,7 @@
  * Everything is drawn with nearest-neighbour scaling in one canvas, redrawn only when it changes.
  */
 import type { Baked } from './bake.js';
+import { type Items, armourLine, durability, durabilityColor, itemLines, itemTitle } from './itemtext.js';
 
 export interface Slot { id: number; meta: number; count: number }
 export interface Vitals { health: number; food: number; saturation: number; level: number; progress: number }
@@ -21,16 +22,38 @@ export class Hud {
   private dirty = true;
   private scale = 2;
   private readonly iconCache = new Map<string, HTMLCanvasElement | null>();
+  /** 26.1: the real item text (`ITEMS`); `null` for 1.8 sessions (nothing below changes then). */
+  private text: Items | null = null;
+  private tips: HTMLElement | null = null;
+  /** Where the held item and armour line goes (a line of the top panel). */
+  textTarget: HTMLElement | null = null;
   visible = true;
 
-  constructor(parent: HTMLElement, private readonly images: Map<string, ImageBitmap>, private readonly icon: IconSource) {
+  constructor(private readonly parent: HTMLElement, private readonly images: Map<string, ImageBitmap>, private readonly icon: IconSource) {
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'hud-bar';
     parent.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d')!;
   }
 
-  setInventory(held: number, slots: Slot[]): void { this.held = held; this.slots = slots; this.dirty = true; }
+  setInventory(held: number, slots: Slot[]): void { this.held = held; this.slots = slots; this.dirty = true; this.updateText(); }
+
+  /** 26.1 item text: the held item's name over the hotbar, the armour, a tooltip per slot. */
+  setItemText(items: Items | null): void { this.text = items; this.dirty = true; this.updateText(); }
+
+  private updateText(): void {
+    const t = this.text;
+    const label = this.textTarget;
+    if (!t) { if (label) label.textContent = ''; this.tips?.remove(); this.tips = null; return; }
+    if (!this.tips) {
+      this.tips = document.createElement('div'); this.tips.id = 'hud-tips';
+      for (let i = 0; i < 9; i++) this.tips.appendChild(document.createElement('span'));
+      this.parent.appendChild(this.tips);
+    }
+    const held = t.hotbar[this.held];
+    if (label) label.textContent = [held ? `Held: ${itemTitle(held)}` : '', armourLine(t.armour)].filter(Boolean).join(' · ');
+    this.tips.childNodes.forEach((n, i) => { const it = t.hotbar[i]; (n as HTMLElement).title = it ? itemLines(it).join('\n') : ''; });
+  }
   setVitals(v: Vitals): void { this.vitals = v; this.dirty = true; }
   invalidate(): void { this.dirty = true; }
 
@@ -42,6 +65,7 @@ export class Hud {
     if (scale !== this.scale) { this.scale = scale; this.dirty = true; }
     if (!this.dirty) return;
     this.dirty = false;
+    if (this.tips) this.tips.style.height = `${22 * scale}px`;
     const W = 182, H = 22 + 7 + 11;
     const c = this.canvas, ctx = this.ctx;
     c.style.width = `${W * scale}px`; c.style.height = `${H * scale}px`;
@@ -62,6 +86,20 @@ export class Hud {
       const img = this.iconFor(s.id, s.meta);
       const x = 3 + i * 20, y = top + 3;
       if (img) ctx.drawImage(img, x, y, 16, 16);
+      const tx = this.text?.hotbar[i];
+      if (tx) {
+        // the vanilla durability bar (from the real damage), and the stand-in mark
+        const f = durability(tx);
+        if (f !== null && f < 1) {
+          ctx.fillStyle = '#000'; ctx.fillRect(x + 2, y + 13, 13, 2);
+          ctx.fillStyle = durabilityColor(f); ctx.fillRect(x + 2, y + 13, Math.max(1, Math.round(13 * f)), 1);
+        }
+        if (tx.standIn) {
+          ctx.font = '700 7px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillStyle = '#000'; ctx.fillText('≈', x + 0.5, y - 0.5);
+          ctx.fillStyle = '#ffcf4a'; ctx.fillText('≈', x, y - 1);
+        }
+      }
       if (s.count > 1) {
         ctx.font = '600 8px ui-monospace, Menlo, Consolas, monospace';
         ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';

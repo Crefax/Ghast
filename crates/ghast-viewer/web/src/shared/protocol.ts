@@ -60,7 +60,7 @@ export const S = {
   HELLO: 1, STATE: 2, CHUNK: 3, UNLOAD: 4, BLOCKS: 5, POSE: 6, SPAWN: 7, MOVES: 8, REMOVE: 9,
   EQUIP: 10, INVENTORY: 11, VITALS: 12, TIME: 13, PONG: 14, RESET: 15, CRACKS: 16, WEATHER: 17,
   EVENTS: 18, ESTATE: 19, COLLECT: 20, CHESTS: 21, SKIN: 22, LOOKS: 23,
-  PARTICLES: 24, EXPLOSION: 25, LIGHTNING: 26, REPLAY: 27,
+  PARTICLES: 24, EXPLOSION: 25, LIGHTNING: 26, REPLAY: 27, ITEMS: 28, ENTITY: 29,
 } as const;
 /** Page → server. REPLAY (recordings only): f64 speed (0 = paused), f64 seek ms from the start (−1: none). */
 export const C = { PING: 1, ACK: 2, REPLAY: 3 } as const;

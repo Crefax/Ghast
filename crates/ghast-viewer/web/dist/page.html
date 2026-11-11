@@ -34,6 +34,10 @@
   #cross[hidden] { display: none; }
   #hud { position: fixed; left: 50%; bottom: calc(4px + env(safe-area-inset-bottom)); transform: translateX(-50%); pointer-events: none; }
   #hud-bar { display: block; image-rendering: pixelated; }
+  #items { display: block; font-size: 12px; opacity: .9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #items:empty { display: none; }
+  #hud-tips { position: absolute; left: 0; right: 0; bottom: 0; display: flex; pointer-events: auto; }
+  #hud-tips span { flex: 1; }
   #rec-list { position: fixed; right: calc(8px + env(safe-area-inset-right)); z-index: 5; max-height: 60vh; overflow: auto; min-width: 230px;
     max-width: calc(100vw - 16px); padding: 6px; border-radius: 10px; background: rgba(12, 14, 20, .92); box-sizing: border-box; }
   #rec-list a { display: block; padding: 8px 10px; border-radius: 6px; color: #e8ebf2; text-decoration: none; }
@@ -54,7 +58,7 @@
 </head>
 <body>
 <canvas id="view"></canvas>
-<div id="top" class="panel"><b id="info"></b><span id="status"></span><span id="coords"></span></div>
+<div id="top" class="panel"><b id="info"></b><span id="status"></span><span id="coords"></span><span id="items"></span></div>
 <div id="debug" class="panel" hidden></div>
 <div id="modes">
   <button data-mode="fp" title="Through the bot's eyes">1st person</button>

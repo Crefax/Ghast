@@ -172,6 +172,9 @@ fn a_26_1_session_is_drawn_with_1_8_blocks_and_items() {
     assert_eq!(hello["worldMinY"], -64);
     let state: serde_json::Value = serde_json::from_slice(&first[1].1).unwrap();
     assert_eq!(state["inGame"], true);
+    assert_eq!(state["game"], "26.1");
+    assert_eq!(state["drawnWith"], "1.8.9");
+    assert_eq!(state["worldMinY"], -64);
     hub.tick(&bot);
     bot.tick += 1;
     hub.tick(&bot);

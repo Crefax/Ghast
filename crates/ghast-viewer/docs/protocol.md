@@ -34,7 +34,7 @@ Types used below:
 | type | name | payload |
 |---|---|---|
 | 1 | HELLO | json `{protocol, version, account, mode, viewDistance, now, replay?}`. `replay` = `{name, start, duration}` on a recording's socket. A 26.1 session adds `game: "26.1"`, `drawnWith: "1.8.9"` and `worldMinY` (page `y` = world `y − worldMinY`; blocks and items are drawn with 1.8 stand-ins where 1.8 has none, see `ITEMS` / `ENTITY` for the real names) |
-| 2 | STATE | json `{inGame, message, status, account}` |
+| 2 | STATE | json `{inGame, message, status, account}`; a 26.1 session adds `game`, `drawnWith`, `worldMinY` (as in `HELLO`) |
 | 3 | CHUNK | `i32 cx, i32 cz, u8 deflated`, then a column body (below), deflate-raw when `deflated = 1` |
 | 4 | UNLOAD | `i32 cx, i32 cz` |
 | 5 | BLOCKS | `u16 n × (i32 x, u8 y, i32 z, u16 state)` |
@@ -60,7 +60,7 @@ Types used below:
 | 25 | EXPLOSION | `f64 x, y, z, f32 radius, u16 n × (i8 dx, dy, dz)` |
 | 26 | LIGHTNING | `f64 x, y, z` |
 | 27 | REPLAY | `f64 cursor ms, f64 duration ms, f32 speed, f64 start`: a recording's playback state, about 4 per second |
-| 28 | ITEMS | 26.1 only. json `{hotbar: [9 × item or null], armour: [4 × item or null]}` (armour: head, chest, legs, feet), item = `{id, name, count, damage?, maxDamage?, enchantments?: [{registry, level}], customName?, standIn, drawn: [id, meta]}`: the real 26.1 item (`id` is `minecraft:…`, `name` its English name); `drawn` is the 1.8 icon `INVENTORY` / `LOOKS` use, `standIn` true when 1.8 has no such item. Enchantments are indices into the server's `minecraft:enchantment` registry. Sent with the snapshot and on change |
+| 28 | ITEMS | 26.1 only. json `{hotbar: [9 × item or null], armour: [4 × item or null]}` (armour: head, chest, legs, feet), item = `{id, name, count, damage?, maxDamage?, enchantments?: [{id?, registry, level}], customName?, standIn, drawn: [id, meta]}`: the real 26.1 item (`id` is `minecraft:…`, `name` its English name); `drawn` is the 1.8 icon `INVENTORY` / `LOOKS` use, `standIn` true when 1.8 has no such item. An enchantment's `registry` is its index in the server's `minecraft:enchantment` registry, `id` its name there (`minecraft:sharpness`) when the client knows the registry. Sent with the snapshot and on change |
 | 29 | ENTITY | 26.1 only. json `{id, type, name, standIn, item?}` after the entity's `SPAWN` (and when a dropped item's stack changes): the real entity type and English name; `standIn` true when the model drawn is another mob's or a box; `item` = `{id, name, count, standIn}` of a dropped item |
 
 A page connects and gets `HELLO`, `STATE` and a snapshot: the inventory, vitals, time, weather,

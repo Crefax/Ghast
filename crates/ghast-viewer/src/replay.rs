@@ -64,6 +64,16 @@ fn open_recording(file: &Path) -> std::io::Result<Frames> {
     Ok(frames)
 }
 
+/// The first recorded `HELLO`, parsed.
+fn recorded_hello(frames: &[(u32, Bytes)]) -> Option<serde_json::Value> {
+    frames.iter().take(16).find_map(|(_, f)| {
+        crate::protocol::messages(f)
+            .filter_map(Result::ok)
+            .find(|m| m.ty == s::HELLO)
+            .and_then(|m| serde_json::from_slice(m.body).ok())
+    })
+}
+
 /// Message types a seek drops (one-off effects that would all play at once).
 fn seek_drop(ty: u8) -> bool {
     matches!(
@@ -414,14 +424,20 @@ impl ReplayStream {
         self.duration = frames.last().map_or(0.0, |f| f64::from(f.0));
         self.frames = frames;
         let mut w = Writer::with_capacity(256);
-        w.json(
-            s::HELLO,
-            &serde_json::json!({
-                "protocol": PROTOCOL, "version": "1.8.8", "account": self.meta.account, "mode": self.mode,
-                "viewDistance": 8, "now": now_ms(),
-                "replay": { "name": self.meta.name, "start": self.meta.start, "duration": self.duration },
-            }),
-        );
+        let mut hello = serde_json::json!({
+            "protocol": PROTOCOL, "version": "1.8.8", "account": self.meta.account, "mode": self.mode,
+            "viewDistance": 8, "now": now_ms(),
+            "replay": { "name": self.meta.name, "start": self.meta.start, "duration": self.duration },
+        });
+        // A 26.1 recording: its game fields (the 1.8 HELLO has none, so 1.8 replays are as before).
+        if let Some(rec) = recorded_hello(&self.frames) {
+            for k in ["game", "drawnWith", "worldMinY"] {
+                if let Some(v) = rec.get(k) {
+                    hello[k] = v.clone();
+                }
+            }
+        }
+        w.json(s::HELLO, &hello);
         self.send(Bytes::from(w.into_vec()));
         self.anchor(0.0);
         let from = self.from.clamp(0.0, self.duration);

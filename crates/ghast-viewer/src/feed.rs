@@ -96,6 +96,12 @@ pub trait BotView {
     fn build_height(&self) -> Option<(i32, i32)> {
         None
     }
+    /// 26.1: the name of an enchantment registry id (`minecraft:sharpness`), from the server's
+    /// registries.
+    fn enchantment_name(&self, id: i32) -> Option<&str> {
+        let _ = id;
+        None
+    }
 }
 
 /// Whether the page can show sessions of this version.
@@ -454,12 +460,19 @@ impl Feed {
         } else {
             self.message.clone()
         };
-        serde_json::json!({
+        let mut j = serde_json::json!({
             "inGame": self.in_game || self.live,
             "account": self.cfg.account,
             "message": message,
             "status": self.status,
-        })
+        });
+        if self.modern {
+            // also here: a recording starts before the session, its HELLO names no game
+            j["game"] = "26.1".into();
+            j["drawnWith"] = "1.8.9".into();
+            j["worldMinY"] = self.lo.into();
+        }
+        j
     }
 
     fn write_state_if_changed(&mut self) {
@@ -1701,7 +1714,9 @@ impl Feed {
         if self.modern {
             let text = |s: Option<&Stack>| {
                 s.filter(|s| s.id() > 0 && s.count() > 0)
-                    .map_or(serde_json::Value::Null, crate::v26_1::stack_text)
+                    .map_or(serde_json::Value::Null, |s| {
+                        crate::v26_1::stack_text(s, |id| v.enchantment_name(id))
+                    })
             };
             let j = serde_json::json!({
                 "hotbar": (0..9).map(|k| text(v.hotbar(k))).collect::<Vec<_>>(),

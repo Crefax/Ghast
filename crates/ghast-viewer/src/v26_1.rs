@@ -448,11 +448,14 @@ pub fn item_drawn(id: i32, damage: i16) -> ((u16, u16), bool) {
 }
 
 /// The truth about a 26.1 item for text (labels, tooltips, scripts): its registry id and
-/// English name, count, damage, enchantments (26.1 `minecraft:enchantment` registry indices:
-/// the names are data the server sent), custom name, and whether its icon is a stand-in (with
-/// the 1.8 `[id, meta]` drawn).
+/// English name, count, damage, enchantments (the server's `minecraft:enchantment` registry
+/// index and, when `enchantment_name` knows it, its name), custom name, and whether its icon is
+/// a stand-in (with the 1.8 `[id, meta]` drawn).
 #[must_use]
-pub fn stack_text(st: &ghast_inventory::Stack) -> serde_json::Value {
+pub fn stack_text<'a>(
+    st: &ghast_inventory::Stack,
+    enchantment_name: impl Fn(i32) -> Option<&'a str>,
+) -> serde_json::Value {
     use ghast_inventory::Version as V;
     let dmg = st.damage_value(V::V26_1).clamp(0, i32::from(i16::MAX)) as i16;
     let ((did, dmeta), stand_in) = item_drawn(st.id(), dmg);
@@ -461,9 +464,10 @@ pub fn stack_text(st: &ghast_inventory::Stack) -> serde_json::Value {
         .enchantments(V::V26_1)
         .iter()
         .map(|e| match &e.id {
-            ghast_inventory::EnchantmentId::Registry(i) => {
-                serde_json::json!({ "registry": i, "level": e.level })
-            }
+            ghast_inventory::EnchantmentId::Registry(i) => match enchantment_name(*i) {
+                Some(n) => serde_json::json!({ "id": n, "registry": i, "level": e.level }),
+                None => serde_json::json!({ "registry": i, "level": e.level }),
+            },
             ghast_inventory::EnchantmentId::Name(n) => {
                 serde_json::json!({ "id": n, "level": e.level })
             }

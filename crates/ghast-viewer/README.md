@@ -21,7 +21,11 @@ dash cam and replays on the same page.
   when the bot leaves it). Entities are listed from the 26.1 tracker (mob models where 1.8 has
   the mob, else a box of the entity's size; dropped items show their stack); other entities'
   held items and armour, chest lids, particles, weather, experience and other players' block
-  cracks are 1.8-only.
+  cracks are 1.8-only. Text is never a stand-in: the header names the game ("26.1 (drawn with
+  1.8.9 assets)") and the real height, the top panel names the held item and the armour, each
+  hotbar slot's tooltip has the real name, count, enchantments, durability and id; stand-in
+  icons carry a "≈" mark, durability bars come from the real damage, and entities or dropped
+  items drawn with a stand-in get a name tag with their real name.
 
 ## Use
 
