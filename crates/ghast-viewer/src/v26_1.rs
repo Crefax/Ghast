@@ -321,18 +321,21 @@ fn by_shape(s: BlockState) -> u16 {
     if top <= 0.5 + 1e-9 { 44 << 4 } else { 1 << 4 }
 }
 
+/// Bit 15 of a table entry: the 1.8 state is a stand-in, not the same block (1.8 states use
+/// 12 bits).
+const STAND_IN: u16 = 1 << 15;
+
 fn map_state(s: BlockState) -> u16 {
     if s.is_air() {
         return 0;
     }
-    best(s.block(), s)
-        .or_else(|| lookalike(s))
-        .unwrap_or_else(|| by_shape(s))
+    match best(s.block(), s) {
+        Some(raw) => raw,
+        None => lookalike(s).unwrap_or_else(|| by_shape(s)) | STAND_IN,
+    }
 }
 
-/// The 1.8 state (`id << 4 | meta`) the page draws for a 26.1 state id.
-#[must_use]
-pub fn block(state: u32) -> u16 {
+fn block_entry(state: u32) -> u16 {
     static T: OnceLock<Vec<u16>> = OnceLock::new();
     let t = T.get_or_init(|| {
         (0..d26::STATE_COUNT)
@@ -340,6 +343,18 @@ pub fn block(state: u32) -> u16 {
             .collect()
     });
     t.get(state as usize).copied().unwrap_or(0)
+}
+
+/// The 1.8 state (`id << 4 | meta`) the page draws for a 26.1 state id.
+#[must_use]
+pub fn block(state: u32) -> u16 {
+    block_entry(state) & !STAND_IN
+}
+
+/// Whether a 26.1 state is drawn with a stand-in (1.8 has no such block).
+#[must_use]
+pub fn block_is_stand_in(state: u32) -> bool {
+    block_entry(state) & STAND_IN != 0
 }
 
 /// Items newer than 1.8 → a 1.8 item of the same kind.
@@ -386,6 +401,12 @@ const UNKNOWN_ITEM: (u16, u16) = (339, 0);
 /// The 1.8 `(id, meta)` the page draws for a 26.1 item id with this damage.
 #[must_use]
 pub fn item(id: i32, damage: i16) -> (u16, u16) {
+    item_drawn(id, damage).0
+}
+
+/// [`item`] and whether the icon is a stand-in (1.8 has no such item).
+#[must_use]
+pub fn item_drawn(id: i32, damage: i16) -> ((u16, u16), bool) {
     static T: OnceLock<HashMap<&'static str, (u16, u16)>> = OnceLock::new();
     let names = T.get_or_init(|| {
         let mut m = HashMap::new();
@@ -397,32 +418,103 @@ pub fn item(id: i32, damage: i16) -> (u16, u16) {
         m
     });
     if id <= 0 {
-        return (0, 0);
+        return ((0, 0), false);
     }
     let Some(it) = u16::try_from(id).ok().and_then(d26::Item::from_id) else {
-        return UNKNOWN_ITEM;
+        return (UNKNOWN_ITEM, true);
     };
     let name = it.name();
     let damaged = |(i, m): (u16, u16)| (i, if m == 0 { damage.max(0) as u16 } else { m });
     if let Some(&v) = names.get(name) {
-        return damaged(v);
+        return (damaged(v), false);
     }
     if let Some(&v) = item_alternative(name).and_then(|n| names.get(n.as_str())) {
-        return damaged(v);
+        return (damaged(v), true);
     }
     // A block item: its block's 1.8 look-alike.
     if let Some(b) = d26::Block::from_name(name) {
-        let raw = block(u32::from(b.default_state().id()));
+        let st = u32::from(b.default_state().id());
+        let raw = block(st);
         if raw != 0 {
-            return (raw >> 4, raw & 15);
+            return ((raw >> 4, raw & 15), block_is_stand_in(st));
         }
     }
     for alt in alternatives(name) {
         if let Some(&v) = names.get(alt.as_str()) {
-            return damaged(v);
+            return (damaged(v), true);
         }
     }
-    UNKNOWN_ITEM
+    (UNKNOWN_ITEM, true)
+}
+
+/// The truth about a 26.1 item for text (labels, tooltips, scripts): its registry id and
+/// English name, count, damage, enchantments (26.1 `minecraft:enchantment` registry indices:
+/// the names are data the server sent), custom name, and whether its icon is a stand-in (with
+/// the 1.8 `[id, meta]` drawn).
+#[must_use]
+pub fn stack_text(st: &ghast_inventory::Stack) -> serde_json::Value {
+    use ghast_inventory::Version as V;
+    let dmg = st.damage_value(V::V26_1).clamp(0, i32::from(i16::MAX)) as i16;
+    let ((did, dmeta), stand_in) = item_drawn(st.id(), dmg);
+    let it = u16::try_from(st.id()).ok().and_then(d26::Item::from_id);
+    let ench: Vec<serde_json::Value> = st
+        .enchantments(V::V26_1)
+        .iter()
+        .map(|e| match &e.id {
+            ghast_inventory::EnchantmentId::Registry(i) => {
+                serde_json::json!({ "registry": i, "level": e.level })
+            }
+            ghast_inventory::EnchantmentId::Name(n) => {
+                serde_json::json!({ "id": n, "level": e.level })
+            }
+            ghast_inventory::EnchantmentId::Legacy(i) => {
+                serde_json::json!({ "legacy": i, "level": e.level })
+            }
+            _ => serde_json::json!({ "level": e.level }),
+        })
+        .collect();
+    let mut j = serde_json::json!({
+        "id": it.map_or_else(|| format!("#{}", st.id()), |i| format!("minecraft:{}", i.name())),
+        "name": it.map_or("", |i| i.data().display_name),
+        "count": st.count(),
+        "standIn": stand_in,
+        "drawn": [did, dmeta],
+    });
+    if st.is_damageable(V::V26_1) {
+        j["damage"] = st.damage_value(V::V26_1).into();
+        j["maxDamage"] = st.max_damage(V::V26_1).into();
+    }
+    if !ench.is_empty() {
+        j["enchantments"] = ench.into();
+    }
+    if let Some(n) = st.custom_name(V::V26_1) {
+        j["customName"] = n.to_plain().into();
+    }
+    j
+}
+
+/// The truth about a 26.1 entity for text: registry id, English name, whether its model is a
+/// stand-in, and a dropped item's real item.
+#[must_use]
+pub fn entity_text(e: &ghast_entity::Entity) -> Option<serde_json::Value> {
+    let info = ghast_entity::v26_1::info(e.entity_type())?;
+    let mut j = serde_json::json!({
+        "id": e.id(),
+        "type": format!("minecraft:{}", info.name),
+        "name": info.display_name,
+        "standIn": entity_is_stand_in(info.name),
+    });
+    if let Some(st) = ghast_entity::v26_1::item_stack(e) {
+        let it = u16::try_from(st.id).ok().and_then(d26::Item::from_id);
+        let (_, stand_in) = item_drawn(st.id, 0);
+        j["item"] = serde_json::json!({
+            "id": it.map_or_else(|| format!("#{}", st.id), |i| format!("minecraft:{}", i.name())),
+            "name": it.map_or("", |i| i.data().display_name),
+            "count": st.count,
+            "standIn": stand_in,
+        });
+    }
+    Some(j)
 }
 
 /// 26.1 entity names → 1.8 entity list names where the CamelCase rule does not give one.
@@ -473,6 +565,47 @@ const ENTITY_NAMES: &[(&str, &str)] = &[
     ("evoker", "Villager"),
     ("wandering_trader", "Villager"),
 ];
+
+/// Table entries that are the same entity in 1.8 (the rest of [`ENTITY_NAMES`] are stand-ins).
+const SAME_ENTITY: &[&str] = &[
+    "zombified_piglin",
+    "magma_cube",
+    "mooshroom",
+    "iron_golem",
+    "snow_golem",
+    "ocelot",
+    "horse",
+    "wither",
+    "end_crystal",
+    "tnt",
+    "falling_block",
+    "minecart",
+    "chest_minecart",
+    "furnace_minecart",
+    "tnt_minecart",
+    "spawner_minecart",
+    "hopper_minecart",
+    "command_block_minecart",
+    "egg",
+    "ender_pearl",
+    "splash_potion",
+    "experience_bottle",
+    "eye_of_ender",
+    "firework_rocket",
+    "fishing_bobber",
+];
+
+/// Whether a 26.1 entity type is drawn with a stand-in model (or a plain box).
+#[must_use]
+pub fn entity_is_stand_in(name: &str) -> bool {
+    if ENTITY_NAMES.iter().any(|n| n.0 == name) {
+        return !SAME_ENTITY.contains(&name);
+    }
+    if name.ends_with("_boat") {
+        return name != "oak_boat";
+    }
+    entity_name(name).is_empty()
+}
 
 /// The 1.8 entity list name the page draws a 26.1 entity type with (`""`: a plain box).
 #[must_use]

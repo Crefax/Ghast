@@ -40,6 +40,10 @@ pub mod s {
     pub const EXPLOSION: u8 = 25;
     pub const LIGHTNING: u8 = 26;
     pub const REPLAY: u8 = 27;
+    /// 26.1: json text of the hotbar and armour (real ids and names, stand-in icons marked).
+    pub const ITEMS: u8 = 28;
+    /// 26.1: json text of an entity (real type and name, stand-in model marked).
+    pub const ENTITY: u8 = 29;
 }
 
 /// Page → server message types.

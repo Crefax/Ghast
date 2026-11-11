@@ -373,6 +373,16 @@ enum Planning {
     },
 }
 
+/// A search with the live player's movement limits when the client has one (26.1).
+fn with_player<I: Io + ?Sized>(ctx: &I, search: Search) -> Search {
+    #[cfg(feature = "v26_1")]
+    if let Some(p) = ctx.modern_player() {
+        return search.with_modern_player(p);
+    }
+    let _ = ctx;
+    search
+}
+
 /// The verification of `path` with the live player when the client has one (26.1).
 fn new_sim<I: Io + ?Sized>(ctx: &I, path: &Path, cfg: &ControllerConfig) -> Simulation {
     #[cfg(feature = "v26_1")]
@@ -507,7 +517,10 @@ impl Follower {
         self.plans += 1;
         self.plan_ticks = 0;
         self.planning = Some(Planning::Search {
-            search: Box::new(self.pf.search(version, start, goal, self.banned.clone())),
+            search: Box::new(with_player(
+                ctx,
+                self.pf.search(version, start, goal, self.banned.clone()),
+            )),
             bans: HashSet::new(),
             attempt: 0,
             last: None,
@@ -607,7 +620,10 @@ impl Follower {
                     let goal = self.goal.clone().expect("planning without a goal");
                     let mut all = self.banned.clone();
                     all.extend(bans.iter().copied());
-                    let search = self.pf.search(path.version, path.steps[0].pos, goal, all);
+                    let search = with_player(
+                        ctx,
+                        self.pf.search(path.version, path.steps[0].pos, goal, all),
+                    );
                     self.planning = Some(Planning::Search {
                         search: Box::new(search),
                         bans,
@@ -1332,6 +1348,8 @@ pub(crate) mod tests {
         }
         assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
         assert!(through_gap, "the step was not avoided");
+        // Planned around at plan time (the move set follows the attributes), not by repairs.
+        assert_eq!(f.plans(), 1, "replanned");
     }
 
     fn run_corridor<P: Physics, W: BlockSource>(w: &W) {

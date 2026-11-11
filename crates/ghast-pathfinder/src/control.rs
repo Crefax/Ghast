@@ -703,10 +703,11 @@ impl Controller {
                     // Braking only helps when moving: slowly, a touch is unavoidable (a box
                     // grazing a wall), and standing still would never get anywhere.
                     let moving = obs.vel[0].hypot(obs.vel[2]) > 0.03;
-                    // Braking that has made no progress for a while (forward and back taking
-                    // turns at a corridor's mouth, off its axis) gives way to the graze: sliding
-                    // along the wall lines the player up.
-                    let wedged = self.idle >= WEDGED_TICKS;
+                    // 26.1: braking that has made no progress for a while (forward and back
+                    // taking turns at a corridor's mouth, off its axis; the exact look-ahead of
+                    // the live player sees every graze coming) gives way to the graze: sliding
+                    // along the wall lines the player up. The other versions keep 0.4.0's rule.
+                    let wedged = self.idle >= WEDGED_TICKS && exact_look_ahead(self.path.version);
                     let pick = checks
                         .iter()
                         .position(|&(floor, clear)| floor && (clear || !moving || wedged))
@@ -1092,6 +1093,16 @@ impl Controller {
 
 /// Ticks without progress after which the walk accepts grazing a wall instead of braking.
 const WEDGED_TICKS: u32 = 10;
+
+/// The look-ahead runs from the live player's exact state (26.1).
+fn exact_look_ahead(version: Version) -> bool {
+    match version {
+        #[cfg(feature = "v26_1")]
+        Version::V26_1 => true,
+        #[allow(unreachable_patterns)]
+        _ => false,
+    }
+}
 
 /// A step without digs or places.
 fn plain(s: &Step) -> bool {

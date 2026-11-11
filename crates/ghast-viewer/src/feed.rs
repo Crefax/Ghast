@@ -255,6 +255,8 @@ struct Known {
     size: (f32, f32),
     player: bool,
     uuid: u128,
+    /// 26.1: the `ENTITY` text message.
+    text: Option<Vec<u8>>,
 }
 
 /// Feed options.
@@ -305,6 +307,8 @@ pub struct Feed {
     last_pose_at: f64,
     pose_msg: Option<Vec<u8>>,
     last_inv: Option<Vec<u8>>,
+    /// 26.1: the `ITEMS` text message.
+    last_items: Option<Vec<u8>>,
     last_self_looks: Option<Vec<u8>>,
     last_vitals: Option<Vec<u8>>,
     last_cracks: Option<Vec<u8>>,
@@ -374,6 +378,7 @@ impl Feed {
             last_pose_at: 0.0,
             pose_msg: None,
             last_inv: None,
+            last_items: None,
             last_self_looks: None,
             last_vitals: None,
             last_cracks: None,
@@ -470,17 +475,22 @@ impl Feed {
     #[must_use]
     pub fn hello(&self, mode: &str) -> Bytes {
         let mut w = Writer::with_capacity(256);
-        w.json(
-            s::HELLO,
-            &serde_json::json!({
-                "protocol": PROTOCOL,
-                "version": "1.8.8",
-                "account": self.cfg.account,
-                "mode": mode,
-                "viewDistance": self.cfg.view_distance,
-                "now": now_ms(),
-            }),
-        );
+        let mut hello = serde_json::json!({
+            "protocol": PROTOCOL,
+            "version": "1.8.8",
+            "account": self.cfg.account,
+            "mode": mode,
+            "viewDistance": self.cfg.view_distance,
+            "now": now_ms(),
+        });
+        if self.modern {
+            // The game is 26.1; the page draws it with the 1.8.9 assets (stand-ins are marked
+            // in ITEMS / ENTITY; page y = world y - worldMinY).
+            hello["game"] = "26.1".into();
+            hello["drawnWith"] = "1.8.9".into();
+            hello["worldMinY"] = self.lo.into();
+        }
+        w.json(s::HELLO, &hello);
         Bytes::from(w.into_vec())
     }
 
@@ -539,6 +549,7 @@ impl Feed {
         let message = std::mem::take(&mut self.message);
         self.unbind();
         self.last_inv = None;
+        self.last_items = None;
         self.last_self_looks = None;
         self.last_vitals = None;
         self.last_weather = None;
@@ -555,6 +566,13 @@ impl Feed {
     pub fn observe(&mut self, v: &dyn BotView) {
         self.live = drawn(v.version());
         if v.version() != GameVersion::V1_8_9 {
+            #[cfg(feature = "v26_1")]
+            if self.live && !self.in_game {
+                // the HELLO of a page that comes now already names the game
+                self.modern = true;
+                let h = v.build_height().unwrap_or((-64, 384));
+                self.lo = crate::v26_1::Window::around(v.pose().pos.y, h).lo;
+            }
             return;
         }
         for p in v.raw() {
@@ -736,7 +754,9 @@ impl Feed {
     fn page_item(&self, st: &Stack) -> (u16, u16) {
         #[cfg(feature = "v26_1")]
         if self.modern {
-            return crate::v26_1::item(st.id(), st.damage());
+            // 26.1 keeps the damage in the `damage` component (`Stack::damage` is 0 there).
+            let d = st.damage_value(ghast_inventory::Version::V26_1);
+            return crate::v26_1::item(st.id(), d.clamp(0, i32::from(i16::MAX)) as i16);
         }
         (st.id() as u16, st.damage() as u16)
     }
@@ -757,6 +777,7 @@ impl Feed {
         self.has_sky = !(matches!(d, "-1" | "1") || d.contains("nether") || d.contains("the_end"));
         self.last_pose = None;
         self.last_inv = None;
+        self.last_items = None;
         self.last_vitals = None;
         self.last_self_looks = None;
         self.swings = v.swings();
@@ -1061,6 +1082,28 @@ impl Feed {
                                 self.reliable.u32(id as u32).u16(st.0).u16(st.1);
                                 self.reliable.end(at);
                             }
+                            if self.modern {
+                                let text = {
+                                    #[cfg(feature = "v26_1")]
+                                    {
+                                        crate::v26_1::entity_text(e).map(|j| {
+                                            let mut w = Writer::with_capacity(128);
+                                            w.json(s::ENTITY, &j);
+                                            w.into_vec()
+                                        })
+                                    }
+                                    #[cfg(not(feature = "v26_1"))]
+                                    {
+                                        None
+                                    }
+                                };
+                                if text != k.text {
+                                    if let Some(t) = &text {
+                                        self.reliable.bytes(t);
+                                    }
+                                    k.text = text;
+                                }
+                            }
                         }
                         self.estate_dirty.insert(id);
                     }
@@ -1140,8 +1183,12 @@ impl Feed {
             size: size_of_entity(e),
             player,
             uuid: e.uuid().as_u128(),
+            text: self.entity_text(e),
         };
         write_spawn(&mut self.reliable, id as u32, &k);
+        if let Some(t) = &k.text {
+            self.reliable.bytes(t);
+        }
         if player {
             self.refresh_profile(k.uuid, ents.player_info(&e.uuid()));
             let key = self.skin_key(k.uuid);
@@ -1149,6 +1196,19 @@ impl Feed {
             k.skin = Some(key);
         }
         self.known.insert(id, k);
+    }
+
+    /// 26.1: the `ENTITY` text message of an entity.
+    fn entity_text(&self, e: &Entity) -> Option<Vec<u8>> {
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            let j = crate::v26_1::entity_text(e)?;
+            let mut w = Writer::with_capacity(128);
+            w.json(s::ENTITY, &j);
+            return Some(w.into_vec());
+        }
+        let _ = e;
+        None
     }
 
     /// An entity position on the page.
@@ -1637,6 +1697,24 @@ impl Feed {
             self.reliable.bytes(&m);
             self.last_inv = Some(m);
         }
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            let text = |s: Option<&Stack>| {
+                s.filter(|s| s.id() > 0 && s.count() > 0)
+                    .map_or(serde_json::Value::Null, crate::v26_1::stack_text)
+            };
+            let j = serde_json::json!({
+                "hotbar": (0..9).map(|k| text(v.hotbar(k))).collect::<Vec<_>>(),
+                "armour": (0..4).map(|a| text(v.armor(a))).collect::<Vec<_>>(),
+            });
+            let mut m = Writer::with_capacity(256);
+            m.json(s::ITEMS, &j);
+            let m = m.into_vec();
+            if force || self.last_items.as_ref() != Some(&m) {
+                self.reliable.bytes(&m);
+                self.last_items = Some(m);
+            }
+        }
     }
 
     fn self_looks(&mut self, v: &dyn BotView, force: bool) {
@@ -1769,6 +1847,9 @@ impl Feed {
             let mut states = Vec::new();
             for (id, k) in &self.known {
                 write_spawn(&mut w, *id as u32, k);
+                if let Some(t) = &k.text {
+                    w.bytes(t);
+                }
                 if let Some(key) = &k.skin {
                     write_skin_msg(&mut w, *id as u32, key);
                 }
@@ -1792,6 +1873,7 @@ impl Feed {
             }
             for m in [
                 &self.last_inv,
+                &self.last_items,
                 &self.last_self_looks,
                 &self.last_vitals,
                 &self.time_msg,

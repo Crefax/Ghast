@@ -100,8 +100,11 @@ fn mazes_of_growing_size() {
                     },
                 ),
             ] {
-                // Corners of one-wide corridors: at most a few ticks of grazing a wall (26.1
-                // turns one corner of the 63 maze 0.007 blocks early: 3 ticks).
+                // Corners of one-wide corridors: at most a few ticks of grazing a wall. 26.1:
+                // 3 at one corner of the 63 maze. Its sprint speed applies in the tick the
+                // sprint starts (1.16.5: a tick later; oracle-proven both), so the same path
+                // arrives at that corner faster and the momentum carries the box 0.007 past
+                // the wall line before braking can stop it.
                 let touches = if v == Version::V26_1 { 3 } else { 2 };
                 let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, touches);
                 // Sliced like the follower does it: the same path.

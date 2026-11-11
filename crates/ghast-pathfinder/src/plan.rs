@@ -68,6 +68,68 @@ pub struct Config {
     pub max_nodes: usize,
     /// Heuristic weight (1 = optimal; larger plans faster, slightly longer paths).
     pub heuristic_weight: f64,
+    /// What the player's body can do (26.1 attributes; vanilla by default).
+    pub(crate) limits: Limits,
+}
+
+/// Plan-time movement limits of the player.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Limits {
+    /// Highest step walked up.
+    pub(crate) step: f64,
+    /// Highest block jumped onto.
+    pub(crate) jump_up: f64,
+    /// The measured gap-jump table applies (vanilla jump, gravity, speed and size).
+    pub(crate) parkour: bool,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            step: STEP,
+            jump_up: MAX_JUMP_UP,
+            parkour: true,
+        }
+    }
+}
+
+impl Limits {
+    /// The limits of a 26.1 player from its attributes and effects: step height, the apex of a
+    /// standing jump (jump strength, jump boost, gravity); the gap-jump table only with vanilla
+    /// jump, gravity, movement speed and scale.
+    #[cfg(feature = "v26_1")]
+    pub(crate) fn of(p: &ghast_physics::modern::PlayerState) -> Limits {
+        let a = &p.attributes;
+        let boost = p
+            .effects
+            .jump_boost
+            .map_or(0.0, |amp| 0.1 * f64::from(amp + 1));
+        let power = a.jump_strength.value() + boost;
+        let gravity = a.gravity.value();
+        let (mut y, mut v, mut apex) = (0.0f64, power, 0.0f64);
+        for _ in 0..200 {
+            y += v;
+            apex = apex.max(y);
+            v = (v - gravity) * 0.98;
+            if v <= 0.0 {
+                break;
+            }
+        }
+        let eq = |x: f64, d: f64| (x - d).abs() < 1e-9;
+        let vanilla = eq(a.jump_strength.value(), f64::from(0.42f32))
+            && boost == 0.0
+            && eq(gravity, 0.08)
+            && eq(a.movement_speed.base(), f64::from(0.1f32))
+            && eq(a.scale.value(), 1.0)
+            && !p.effects.slow_falling
+            && p.effects.levitation.is_none();
+        Limits {
+            step: f64::from(p.step_height()).min(STEP),
+            // Room for the arc: what the vanilla jump keeps above the 1-block step (~0.25).
+            jump_up: MAX_JUMP_UP.min(apex - 0.2),
+            parkour: vanilla,
+        }
+    }
 }
 
 impl Default for Config {
@@ -83,6 +145,7 @@ impl Default for Config {
             place: None,
             max_nodes: 250_000,
             heuristic_weight: 1.0,
+            limits: Limits::default(),
         }
     }
 }
@@ -568,6 +631,16 @@ impl std::fmt::Debug for Search {
 }
 
 impl Search {
+    /// 26.1: plans with the moves the live player's attributes and effects allow (step height,
+    /// jump strength, jump boost, gravity; gap jumps only with vanilla jump, gravity, movement
+    /// speed and scale) instead of the vanilla ones. Call before the first [`Search::step`].
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn with_modern_player(mut self, player: &ghast_physics::modern::PlayerState) -> Search {
+        self.cfg.limits = Limits::of(player);
+        self
+    }
+
     /// Nodes expanded so far.
     #[must_use]
     pub fn expanded(&self) -> usize {
@@ -1037,7 +1110,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
                     );
                     found = true;
                 }
-            } else if dh <= STEP + 1e-6 {
+            } else if dh <= cfg.limits.step + 1e-6 {
                 if clear(g, x, z, f0 + HEIGHT, t.floor + HEIGHT) {
                     push(
                         out,
@@ -1048,7 +1121,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
                     );
                     found = true;
                 }
-            } else if dh <= MAX_JUMP_UP && jump_room(g, x, z, bx, bz, f0, &t) {
+            } else if dh <= cfg.limits.jump_up && jump_room(g, x, z, bx, bz, f0, &t) {
                 push(
                     out,
                     [bx, y + 1, bz],
@@ -1078,11 +1151,11 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
             if let Some(t) = spot(g, bx, yt, bz) {
                 let dh = t.floor - f0;
                 let top = t.floor.max(f0) + HEIGHT;
-                if dh > STEP + 1e-6 {
+                if dh > cfg.limits.step + 1e-6 {
                     // A higher floor in the same block (soul sand, a slab on a step).
                     if !swimming
                         && !climbing
-                        && dh <= MAX_JUMP_UP
+                        && dh <= cfg.limits.jump_up
                         && jump_room(g, x, z, bx, bz, f0, &t)
                     {
                         push(
@@ -1183,7 +1256,13 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
         {
             fill_hole(g, pc, per_block, p, f0, (dx, dz), out);
         }
-        if cfg.parkour && !swimming && !climbing && s.kind == NodeKind::Ground && !s.water {
+        if cfg.parkour
+            && cfg.limits.parkour
+            && !swimming
+            && !climbing
+            && s.kind == NodeKind::Ground
+            && !s.water
+        {
             parkour(g, cfg, version, p, s, (dx, dz), out);
         }
     }
@@ -1199,7 +1278,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
                 continue;
             };
             let dh = t.floor - f0;
-            if dh.abs() > STEP + 1e-6 {
+            if dh > cfg.limits.step + 1e-6 || dh < -STEP - 1e-6 {
                 if yt == y {
                     break;
                 }

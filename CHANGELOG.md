@@ -81,7 +81,13 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   live player (server attributes such as step height, jump strength, movement speed and scale,
   effects, abilities): `Controller::set_modern_player`, `Simulation::with_modern_player`; the
   `Follower` feeds `TickContext::modern_player` every tick. Build height from the dimension
-  (negative Y; below the bottom is unknown): `BlockSource::build_height` (defaulted).
+  (negative Y; below the bottom is unknown): `BlockSource::build_height` (defaulted). The
+  move set follows the live attributes at plan start (`Search::with_modern_player`, used by
+  the `Follower`): step height, jump strength / jump boost / gravity (jump-ups up to the
+  jump's apex), gap jumps only with vanilla jump, gravity, speed and scale. On 26.1 only: a
+  walk braking before a wall without progress for 10 ticks accepts the graze (the exact
+  look-ahead could otherwise alternate forward and back at a corridor's mouth); 1.8.9 –
+  1.16.5 plans and simulated runs are identical to 0.4.0 (209 cases compared).
   `Bot::goto` works on 26.1. Live: the lab parkour corridor and maze on Paper 26.1.2 + Grim
   2.3.74, 0 flags, 0 setbacks.
 - `ghast_client::TickContext::modern_player` (26.1 movement state) and
@@ -90,7 +96,10 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   forwards it): a 26.1 world is drawn with the 1.8.9 assets — blocks and items mapped onto
   their 1.8 states (exact where 1.8 has them, look-alikes for newer ones, by shape otherwise;
   `ghast_viewer::v26_1`), the 256 rows around the bot shown, entities from the 26.1 tracker,
-  the hotbar from the component item model. `BotView::build_height` (defaulted).
+  the hotbar from the component item model. Text stays the truth: new messages `ITEMS` (28) and
+  `ENTITY` (29) carry the real 26.1 ids, English names, count, damage, enchantments, custom
+  names and a `standIn` flag; `HELLO` names the game (`game`, `drawnWith`, `worldMinY`). 1.8.9
+  payloads are byte-identical to 0.4.0. `BotView::build_height` (defaulted).
   `afk_viewer --version 26.1`.
 - `ghast_physics::modern::ModernMemoryWorld::{min_y, height}`.
 - **26.1 gliding (elytra) and firework rockets**, proven against the real client (oracle
@@ -101,9 +110,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `on_climbable_ext`, `Packet::StartFallFlying`. The glide uses `Math.cos` exactly as the
   HotSpot x86-64 JVM computes it (`modern::jdk_math`, a generated exception table).
   `ghast_data::v26_1::block_flags::CAN_GLIDE_THROUGH`.
+- **26.1 riptide**, proven against the real client (oracle `riptide`,
+  `tests/golden/26.1/riptide.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): `modern::riptide` (the
+  launch on releasing the trident), `modern::in_water_or_rain`, `PlayerExt::{spin_attack,
+  auto_spin_ticks, apply_living_flags, living_flags}` (spin counter and pose).
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
-
 
 ### Changed (behaviour)
 
@@ -120,9 +132,6 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   used hand no longer holds that item. The client writes the swings of a dropping click
   (`ContainerClick::swings`) before the `container_click`, and lets `update_recipes`,
   `abilities` and `experience` through to the inventory.
-- Path following (all versions): a walk that brakes before a wall without progress for 10
-  ticks now accepts grazing it (an exact look-ahead could otherwise alternate forward and back
-  at a corridor's mouth).
 - 26.1 clicks: the changed slots are written in the real client's map order and each hashed
   stack's components in type id order (both are maps the server compares by content); bundle
   clicks, crafting results and the other menus above are predicted instead of sent

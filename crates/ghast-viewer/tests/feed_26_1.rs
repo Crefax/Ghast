@@ -155,7 +155,7 @@ fn a_26_1_session_is_drawn_with_1_8_blocks_and_items() {
             ..Pose::default()
         },
         hotbar: vec![
-            item("diamond_pickaxe", 1, 5),
+            item("diamond_pickaxe", 1, 0),
             item("cherry_planks", 32, 0),
             item("netherite_ingot", 3, 0),
             item("music_disc_creator", 1, 0),
@@ -166,6 +166,10 @@ fn a_26_1_session_is_drawn_with_1_8_blocks_and_items() {
     let cap = Capture::default();
     let _id = hub.add(Box::new(cap.clone()), "fp", 1 << 20, true);
     let first = cap.take();
+    let hello: serde_json::Value = serde_json::from_slice(&first[0].1).unwrap();
+    assert_eq!(hello["game"], "26.1");
+    assert_eq!(hello["drawnWith"], "1.8.9");
+    assert_eq!(hello["worldMinY"], -64);
     let state: serde_json::Value = serde_json::from_slice(&first[1].1).unwrap();
     assert_eq!(state["inGame"], true);
     hub.tick(&bot);
@@ -213,8 +217,27 @@ fn a_26_1_session_is_drawn_with_1_8_blocks_and_items() {
     }
     assert_eq!(
         slots,
-        vec![(278, 5, 1), (5, 2, 32), (265, 0, 3), (339, 0, 1)]
+        vec![(278, 0, 1), (5, 2, 32), (265, 0, 3), (339, 0, 1)]
     );
+
+    // The text is the truth: real ids and names, the stand-in icons marked.
+    let items = &msgs.iter().find(|m| m.0 == s::ITEMS).expect("ITEMS").1;
+    let j: serde_json::Value = serde_json::from_slice(items).unwrap();
+    let h = &j["hotbar"];
+    assert_eq!(h[0]["id"], "minecraft:diamond_pickaxe");
+    assert_eq!(h[0]["standIn"], false);
+    assert_eq!(h[0]["damage"], 0);
+    assert_eq!(h[0]["maxDamage"], 1561);
+    assert_eq!(h[1]["id"], "minecraft:cherry_planks");
+    assert_eq!(h[1]["name"], "Cherry Planks");
+    assert_eq!(h[1]["count"], 32);
+    assert_eq!(h[1]["standIn"], true);
+    assert_eq!(h[2]["id"], "minecraft:netherite_ingot");
+    assert_eq!(h[2]["name"], "Netherite Ingot");
+    assert_eq!(h[2]["standIn"], true);
+    assert_eq!(h[2]["drawn"], serde_json::json!([265, 0]));
+    assert!(h[4].is_null());
+    assert_eq!(j["armour"].as_array().unwrap().len(), 4);
 
     // A block change: shifted and mapped.
     bot.updates = vec![(BlockPos::new(3, 4, 4), id("copper_block"))];

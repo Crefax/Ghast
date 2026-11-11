@@ -32,9 +32,14 @@ forward to ghast-data, ghast-physics and, with `client`, ghast-client).
   strength, gravity, scale, ...). The controller's look-ahead, the pre-jump check and the
   verification simulate with the live client player when they have it
   (`Controller::set_modern_player`, `Simulation::with_modern_player`; the `Follower` passes
-  `TickContext::modern_player` every tick), vanilla defaults otherwise. The planner's move set
-  and the jump table assume the default attributes; moves the live attributes cannot do fail
-  the verification (or the pre-jump check) and are planned around.
+  `TickContext::modern_player` every tick), vanilla defaults otherwise. The move set follows
+  the attributes at plan start (`Search::with_modern_player`): step-ups up to the step height
+  (at most vanilla's 0.6), jump-ups only as high as the jump reaches (jump strength, jump
+  boost, gravity), gap jumps only with vanilla jump, gravity, movement speed and scale.
+  Approximate: move costs stay vanilla's (a faster or slower player gets the same route); a
+  higher step height is not used beyond 0.6; a scaled body (scale ≠ 1) still plans with the
+  1.8-block clearance (the verification catches what does not fit); attributes that change
+  during the walk are seen by the controller, not by the plan.
 - **Build height.** From the dimension (`BlockSource::build_height`; the `Follower` takes it
   from the live player): negative Y works, below the bottom is unknown (never entered), above
   the top is air.
@@ -237,6 +242,11 @@ three times) and `follow_path` after the armor stand, **0 failed, 0 Grim flags, 
 the corridor twice each way (16–17 s per leg), the maze centre, out and back in, then 150 s of
 `follow_path` after the armor stand: **7 of 7 legs ok, 0 Grim flags, 0 setbacks**.
 
+The same session on 2026-11-12 on the 1.8 (Paper 1.8.8 + Grim 2.3.73), 1.12 (Paper 1.12.2 +
+Grim 2.3.73) and 1.16 (Paper 1.16.5 + Grim 2.3.73) labs: 7 of 7 legs each, 0 Grim flags, 0
+setbacks; corridor legs 15.1–15.6 s (1.8), 16.1–16.4 s (1.12), 16.2–16.4 s (1.16), maze legs
+27.5–34.2 s on all four versions.
+
 ## Known limits
 
 - About 1 in 1000 fuzzed rough terrains still ends `Stuck` / `OffPath` in the simulation
@@ -247,7 +257,7 @@ the corridor twice each way (16–17 s per leg), the maze centre, out and back i
   `Stuck` otherwise and the follower plans around them).
 - Not modelled: doors and gates (solid), trapdoors, entities in the way, flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
-- 1.16.5 is validated in the simulation only (1.8.9, 1.12.2 and 26.1 also live); digging and
+- Digging and
   placing are validated in the
   simulation only (no live run yet).
 

@@ -54,8 +54,9 @@ fn main() {
     let version = match args.get(5).map(String::as_str) {
         None | Some("1.8.9") => GameVersion::V1_8_9,
         Some("1.12.2") => GameVersion::V1_12_2,
+        Some("1.16.5") => GameVersion::V1_16_5,
         Some("26.1") => GameVersion::V26_1,
-        Some(v) => panic!("version {v}: 1.8.9, 1.12.2 or 26.1 (the lab course scripts)"),
+        Some(v) => panic!("version {v}: 1.8.9, 1.12.2, 1.16.5 or 26.1 (the lab course scripts)"),
     };
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
