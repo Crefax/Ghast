@@ -47,6 +47,17 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
+// Without a version feature the client compiles (every connect fails with
+// `ClientError::VersionNotEnabled`) but the per-version machinery is unused.
+#![cfg_attr(
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(dead_code, unused_variables, unused_imports)
+)]
 
 mod client;
 pub mod common;

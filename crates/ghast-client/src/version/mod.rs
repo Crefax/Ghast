@@ -1,7 +1,7 @@
 //! Per-version glue between the generated packets of `ghast-protocol` and the common layer.
 //!
-//! [`ClientVersion`] is implemented for the protocol marker types ([`V1_8`], [`V1_12_2`],
-//! [`V1_16_5`]).
+//! [`ClientVersion`] is implemented for the protocol marker types of the enabled versions
+//! (`ghast_protocol::{V1_8, V1_12_2, V1_16_5, V26_1}`).
 //! The connection and its tick loop are generic over it, so every hot path is monomorphised
 //! per version (no trait objects); the bot API above it only sees [`crate::common`] types.
 
@@ -161,7 +161,8 @@ impl FromStr for GameVersion {
 
 /// What a protocol version needs to provide to the client.
 ///
-/// Sealed: implemented for [`V1_8`], [`V1_12_2`] and [`V1_16_5`] only.
+/// Sealed: implemented for the enabled versions' markers (`ghast_protocol::{V1_8, V1_12_2,
+/// V1_16_5, V26_1}`) only.
 pub trait ClientVersion: Version + sealed::Sealed {
     /// The run-time tag of this version.
     const GAME: GameVersion;

@@ -3120,11 +3120,11 @@ mod tests {
         let _ = b;
         let t = ticket.expect("click sent");
         assert_eq!(t.window_id, 0);
-        assert!(t.matches(&ghast_inventory::ClickResult {
-            window_id: 0,
-            action: t.action,
-            outcome: ghast_inventory::ClickOutcome::Accepted,
-        }));
+        assert!(t.matches(&ghast_inventory::ClickResult::new(
+            0,
+            t.action,
+            ghast_inventory::ClickOutcome::Accepted,
+        )));
     }
 
     /// 1.8 planting uses the seed at once (vanilla `SeedItem.use` on the client); a

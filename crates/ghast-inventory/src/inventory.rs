@@ -326,6 +326,7 @@ pub enum ClickOutcome {
 
 /// A finished click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct ClickResult {
     /// Window id the click was sent for.
     pub window_id: i32,

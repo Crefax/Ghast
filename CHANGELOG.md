@@ -67,8 +67,8 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
     VersionNotEnabled}`, `ghast_world::{Border, v26_1::{Registries, Dimension,
     DimensionType}}`, `ghast_protocol::frame::DecoderStats`,
     `ghast_client::version::Capabilities`, `ghast_protocol::versions::ProtocolVersion`.
-  - `ghast_inventory::ClickResult` gained `ClickResult::new(window_id, action, outcome)` for
-    tests and replays.
+  - `ghast_inventory::ClickResult` is `#[non_exhaustive]`; build one with the new
+    `ClickResult::new(window_id, action, outcome)` (tests and replays).
 - New variants in already open enums: `GameVersion::V26_1`, `ghast_inventory::Version::V26_1`,
   `ghast_protocol::State::Configuration`, `Outgoing::ContainerClick`.
 
