@@ -99,7 +99,7 @@ impl Behavior for DigPlace {
                         "dig: target {:?} mining {:?} held {:?} block {:?}",
                         ctx.target().map(|t| (t.pos, t.face)),
                         ctx.mining(),
-                        ctx.inventory().held().map(|s| (s.id, s.count)),
+                        ctx.inventory().held().map(|s| (s.id(), s.count())),
                         ctx.world().raw_block(b.x, b.y, b.z)
                     );
                 }

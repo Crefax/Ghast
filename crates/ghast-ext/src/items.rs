@@ -125,11 +125,11 @@ impl Matcher {
     }
 
     pub(crate) fn matches(&self, s: &Stack) -> bool {
-        if s.count <= 0 && s.id <= 0 {
+        if s.count() <= 0 && s.id() <= 0 {
             return false;
         }
         match &self.0 {
-            ItemMatchInner::Id(i) => s.id == *i,
+            ItemMatchInner::Id(i) => s.id() == *i,
             ItemMatchInner::Pred(p) => p(s),
         }
     }
@@ -376,7 +376,7 @@ impl Bot {
                 let next = self
                     .with(move |ctx| {
                         let k = find_player(ctx, &m2)?;
-                        let n = ctx.inventory().player(k)?.count;
+                        let n = ctx.inventory().player(k)?.count();
                         Some((ctx.inventory().slot_of_player(k)?, n))
                     })
                     .await?;

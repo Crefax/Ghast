@@ -157,13 +157,13 @@ impl WorldView for Sim26 {
             -1.0
         };
         Some(BlockQuery {
-            modern: Some(crate::hands::ModernDig {
+            exact: Some(crate::hands::ExactDig::V26_1(crate::hands::ModernDig {
                 state: s.id(),
                 mining_efficiency: self.mining[0].value(),
                 block_break_speed: self.mining[1].value(),
                 submerged_mining_speed: self.mining[2].value(),
                 conduit_power: self.conduit_power,
-            }),
+            })),
             air: s.is_air(),
             water: d.name == "water",
             block: s.block().default_state().id(),

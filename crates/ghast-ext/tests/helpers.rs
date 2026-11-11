@@ -133,7 +133,7 @@ async fn equip_from_the_main_inventory_and_item_queries() {
         // The pickaxe is in main slot 20: swapped into the first empty hotbar slot (0).
         assert_eq!(bot.equip("diamond_pickaxe").await?, 0);
         let held = bot.held_item().await?.expect("held");
-        assert_eq!(held.id, i32::from(DIAMOND_PICKAXE));
+        assert_eq!(held.id(), i32::from(DIAMOND_PICKAXE));
         assert_eq!(bot.held_slot(), 0);
         // Toss the bread (a Q click with ctrl).
         assert_eq!(bot.toss("bread").await?, 5);

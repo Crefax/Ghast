@@ -416,16 +416,12 @@ impl ClientVersion for V26_1 {
         let Ok(p) = raw.decode_as::<configuration::clientbound::RegistryData>() else {
             return;
         };
-        match &*p.id {
-            "minecraft:chat_type" => {
-                wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
-            }
-            "minecraft:enchantment" => {
-                wire.hash_registries.enchantments =
-                    p.entries.iter().map(|e| e.key.to_string()).collect();
-            }
-            _ => {}
+        if &*p.id == "minecraft:chat_type" {
+            wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
         }
+        // Every data-driven registry's names (click hashes of components that name entries).
+        wire.hash_registries
+            .add(&p.id, p.entries.iter().map(|e| &*e.key));
     }
 
     fn write_configuration_acknowledged(enc: &mut FrameEncoder) -> Result<(), EncodeError> {

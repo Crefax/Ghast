@@ -258,7 +258,7 @@ fn stack(s: Option<&str>) -> Option<ghast_inventory::Stack> {
 fn stack_text(s: Option<&ghast_inventory::Stack>) -> String {
     s.map_or_else(
         || "null".to_owned(),
-        |s| format!("{}:{}x{}", s.id, s.damage, s.count),
+        |s| format!("{}:{}x{}", s.id(), s.damage(), s.count()),
     )
 }
 

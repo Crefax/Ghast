@@ -70,7 +70,7 @@ impl Behavior for UseItem {
             log::info!(
                 "tick {}: using_item {using} (held {:?}, health {:?})",
                 ctx.tick(),
-                ctx.inventory().held().map(|s| (s.id, s.count)),
+                ctx.inventory().held().map(|s| (s.id(), s.count())),
                 ctx.health()
             );
             self.was_using = using;

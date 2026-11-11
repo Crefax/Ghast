@@ -476,8 +476,8 @@ fn held_item<W: Sim + ?Sized>(
     sim: &W,
 ) -> Option<hands::HeldItem> {
     let s = inv.held()?;
-    let id = u16::try_from(s.id).ok()?;
-    let count = u8::try_from(s.count.clamp(0, 255)).unwrap_or(0);
+    let id = u16::try_from(s.id()).ok()?;
+    let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
     Some(sim.held_item(id, count, efficiency(s)))
 }
 
@@ -543,8 +543,8 @@ fn off_held_item<W: Sim + ?Sized>(
     sim: &W,
 ) -> Option<hands::HeldItem> {
     let s = inv.offhand()?;
-    let id = u16::try_from(s.id).ok()?;
-    let count = u8::try_from(s.count.clamp(0, 255)).unwrap_or(0);
+    let id = u16::try_from(s.id()).ok()?;
+    let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
     Some(sim.held_item(id, count, 0))
 }
 
@@ -1038,7 +1038,7 @@ impl<S: Sim> Engine<S> {
                 let soul = ench(3, -1, "minecraft:soul_speed");
                 c.aqua_affinity = ench(0, 6, "minecraft:aqua_affinity") > 0;
                 self.sim.boots(depth, soul);
-                self.sim.feet_item(c.inv.armor(3).map(|s| s.id));
+                self.sim.feet_item(c.inv.armor(3).map(|s| s.id()));
             }
             let started = self.state.started;
             self.state.started = true;
@@ -1093,7 +1093,7 @@ impl<S: Sim> Engine<S> {
             let sim = &self.sim;
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
-            let held_id = c.inv.held().and_then(|s| u16::try_from(s.id).ok());
+            let held_id = c.inv.held().and_then(|s| u16::try_from(s.id()).ok());
             let target = sim.crosshair_now(eyes, (c.pose.yaw, c.pose.pitch), look, held_id);
             let entity = entity_pick(sim, c.opts.caps, eyes, look, target.map(|t| t.distance));
             let in_water = blocks(
@@ -1412,13 +1412,13 @@ fn predict_planting(c: &mut Core, world: &dyn WorldView, first: usize) {
         };
         // Seed item → its soil (wheat, pumpkin, melon seeds, carrot, potato: farmland;
         // nether wart: soul sand).
-        let soil = match held.id {
+        let soil = match held.id() {
             295 | 361 | 362 | 391 | 392 => 60,
             372 => 88,
             _ => continue,
         };
         let id = |y: i32| world.raw_block(pos.x, y, pos.z).map(|s| s >> 4);
-        if held.count > i32::from(uses) && id(pos.y) == Some(soil) && id(pos.y + 1) == Some(0) {
+        if held.count() > i32::from(uses) && id(pos.y) == Some(soil) && id(pos.y + 1) == Some(0) {
             uses += 1;
         }
     }
@@ -1855,8 +1855,8 @@ impl TickContext<'_> {
     /// ```
     #[must_use]
     pub fn item_facts(&self, stack: &ghast_inventory::Stack) -> Option<hands::HeldItem> {
-        let id = u16::try_from(stack.id).ok()?;
-        let count = u8::try_from(stack.count.clamp(0, 255)).unwrap_or(0);
+        let id = u16::try_from(stack.id()).ok()?;
+        let count = u8::try_from(stack.count().clamp(0, 255)).unwrap_or(0);
         Some(crate::sim::held_item_facts(
             self.core.opts.caps.data,
             id,
@@ -2538,7 +2538,7 @@ mod tests {
         let first = results.iter().position(|r| *r).unwrap();
         assert!(first > 3, "refused while still turning");
         assert_eq!(placed_tick, Some(first));
-        assert_eq!(e.core.inv.held().map(|s| s.id), Some(1));
+        assert_eq!(e.core.inv.held().map(|s| s.id()), Some(1));
     }
 
     #[test]
@@ -2937,13 +2937,13 @@ mod tests {
                 e.tick(&mut b, t0);
                 for o in e.outbound().drain(..) {
                     if let Outbound::Place { held, .. } = o {
-                        sent = held.map(|h| h.count);
+                        sent = held.map(|h| h.count());
                     }
                 }
             }
             let _ = b;
             assert_eq!(sent, Some(64), "the packet carries the stack before use");
-            let left = e.core.inv.held().map(|s| s.count);
+            let left = e.core.inv.held().map(|s| s.count());
             assert_eq!(
                 left,
                 Some(if used { 63 } else { 64 }),

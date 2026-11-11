@@ -44,12 +44,30 @@ pub struct BlockQuery {
     pub stairs: Option<[Option<[f64; 6]>; 8]>,
     /// Right-clicking the block activates it (containers, doors, levers, …).
     pub activates: bool,
-    /// 1.20.5+: the block state and the player's mining attributes for the exact destroy
-    /// progress (`ghast_data::v26_1::dig`).
-    pub(crate) modern: Option<ModernDig>,
+    /// The version's oracle-verified destroy progress (`ghast_data::<version>::dig`); `None`
+    /// uses the generic formula over `hardness` / `dig_material` / `harvest_tools`.
+    pub(crate) exact: Option<ExactDig>,
+}
+
+/// Which jar-derived destroy-progress function digs the block.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ExactDig {
+    /// `ghast_data::v1_8::dig` (block id in [`BlockQuery::block`]).
+    #[cfg(feature = "v1_8")]
+    V1_8,
+    /// `ghast_data::v1_12::dig`.
+    #[cfg(feature = "v1_12_2")]
+    V1_12,
+    /// `ghast_data::v1_16_5::dig`.
+    #[cfg(feature = "v1_16_5")]
+    V1_16_5,
+    /// `ghast_data::v26_1::dig` with the player's mining attributes.
+    #[cfg(feature = "v26_1")]
+    V26_1(ModernDig),
 }
 
 /// The facts of the 26.1 destroy-progress formula (attributes replace enchantment levels).
+#[cfg(feature = "v26_1")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ModernDig {
     /// Block state id.
@@ -95,7 +113,7 @@ impl BlockQuery {
     #[must_use]
     pub const fn new(block: u16) -> Self {
         BlockQuery {
-            modern: None,
+            exact: None,
             air: false,
             water: false,
             block,
@@ -282,6 +300,58 @@ pub struct DigFactors {
     pub fatigue: u8,
 }
 
+/// The version's destroy progress per tick (oracle-verified functions of `ghast-data`).
+fn exact_progress(b: &BlockQuery, e: ExactDig, held: Option<&HeldItem>, f: DigFactors) -> f32 {
+    let item = held.map(|h| h.id);
+    let efficiency = held.map_or(0, |h| h.efficiency);
+    let amp = |level: u8| (level > 0).then(|| i32::from(level) - 1);
+    let _ = (item, efficiency, &amp, b);
+    match e {
+        #[cfg(feature = "v1_8")]
+        ExactDig::V1_8 => ghast_data::v1_8::dig::destroy_progress(
+            item,
+            b.block,
+            &ghast_data::v1_8::dig::DigConditions {
+                efficiency,
+                haste: amp(f.haste),
+                mining_fatigue: amp(f.fatigue),
+                eye_in_water: f.in_water,
+                aqua_affinity: f.aqua_affinity,
+                on_ground: f.on_ground,
+            },
+        ),
+        #[cfg(feature = "v1_12_2")]
+        ExactDig::V1_12 => ghast_data::v1_12::dig::destroy_progress(
+            item,
+            b.block,
+            &ghast_data::v1_12::dig::DigConditions {
+                efficiency,
+                haste: amp(f.haste),
+                mining_fatigue: amp(f.fatigue),
+                eye_in_water: f.in_water,
+                aqua_affinity: f.aqua_affinity,
+                on_ground: f.on_ground,
+            },
+        ),
+        #[cfg(feature = "v1_16_5")]
+        ExactDig::V1_16_5 => ghast_data::v1_16_5::dig::destroy_progress(
+            item,
+            b.block,
+            &ghast_data::v1_16_5::dig::DigConditions {
+                efficiency,
+                haste: amp(f.haste),
+                conduit_power: None,
+                mining_fatigue: amp(f.fatigue),
+                eye_in_water: f.in_water,
+                aqua_affinity: f.aqua_affinity,
+                on_ground: f.on_ground,
+            },
+        ),
+        #[cfg(feature = "v26_1")]
+        ExactDig::V26_1(m) => modern_progress(&m, held, f),
+    }
+}
+
 /// 26.1 `BlockBehaviour.getDestroyProgress` (oracle-verified in `ghast_data::v26_1::dig`).
 #[cfg(feature = "v26_1")]
 fn modern_progress(m: &ModernDig, held: Option<&HeldItem>, f: DigFactors) -> f32 {
@@ -306,9 +376,8 @@ fn modern_progress(m: &ModernDig, held: Option<&HeldItem>, f: DigFactors) -> f32
 /// `Block.calcBlockBreakingData` (float maths): break progress per tick.
 #[must_use]
 pub fn relative_hardness(b: &BlockQuery, held: Option<&HeldItem>, f: DigFactors) -> f32 {
-    #[cfg(feature = "v26_1")]
-    if let Some(m) = b.modern {
-        return modern_progress(&m, held, f);
+    if let Some(e) = b.exact {
+        return exact_progress(b, e, held, f);
     }
     let h = b.hardness;
     if h < 0.0 {
@@ -1209,7 +1278,7 @@ mod tests {
 
     fn stone() -> BlockQuery {
         BlockQuery {
-            modern: None,
+            exact: None,
             air: false,
             water: false,
             block: 1,

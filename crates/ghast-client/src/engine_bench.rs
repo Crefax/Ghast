@@ -166,3 +166,92 @@ fn type_sizes() {
         std::mem::size_of::<crate::common::Pose>(),
     );
 }
+
+/// Break ticks of every 1.8.9 / 1.16.5 block with the exact (jar) destroy progress vs the
+/// minecraft-data formula used before (0.3.0), for a few held items: prints the differences.
+#[test]
+#[ignore = "prints dig timing changes"]
+fn dig_timing_changes() {
+    use crate::hands::{DigFactors, relative_hardness};
+    use crate::sim::WorldView;
+    let ticks = |p: f32| {
+        if p <= 0.0 {
+            u32::MAX
+        } else {
+            (1.0 / p).ceil() as u32
+        }
+    };
+    let f = DigFactors::default().with_on_ground(true);
+    let mut s18 = crate::sim::Sim18::new();
+    s18.world_packet(&crate::sim::test_chunks::v1_8(0, 0))
+        .unwrap();
+    // empty hand, diamond pickaxe, axe, shovel, sword, shears
+    for item in [
+        None,
+        Some(278u16),
+        Some(279),
+        Some(277),
+        Some(276),
+        Some(359),
+    ] {
+        let held =
+            item.map(|id| crate::sim::held_item_facts(crate::version::DataSet::V1_8, id, 1, 0));
+        for id in 1..=197u16 {
+            let st = ghast_data::v1_8::BlockState::from_raw(id << 4).unwrap();
+            s18.test_set_block(1, 62, 1, st);
+            let Some(b) = s18.block_query(1, 62, 1) else {
+                continue;
+            };
+            let new = relative_hardness(&b, held.as_ref(), f);
+            let mut old_b = b;
+            old_b.exact = None;
+            let old = relative_hardness(&old_b, held.as_ref(), f);
+            if ticks(new) != ticks(old) {
+                println!(
+                    "1.8.9 item {item:?} block {id} {}: {} -> {} ticks",
+                    st.block().info().name,
+                    ticks(old),
+                    ticks(new)
+                );
+            }
+        }
+    }
+    let mut s16 = crate::sim::Sim16::new();
+    s16.world_packet(&crate::sim::test_chunks::v1_16_5(0, 0))
+        .unwrap();
+    let items = [
+        "diamond_pickaxe",
+        "diamond_axe",
+        "diamond_shovel",
+        "diamond_sword",
+        "shears",
+    ];
+    let mut held_ids: Vec<Option<u16>> = vec![None];
+    held_ids.extend(
+        items
+            .iter()
+            .map(|n| ghast_data::v1_16_5::Item::from_name(n).map(|i| i.id())),
+    );
+    for item in held_ids {
+        let held =
+            item.map(|id| crate::sim::held_item_facts(crate::version::DataSet::V1_16_5, id, 1, 0));
+        for b in ghast_data::v1_16_5::Block::all() {
+            s16.test_set_block(1, 62, 1, b.default_state());
+            let Some(q) = s16.block_query(1, 62, 1) else {
+                continue;
+            };
+            let new = relative_hardness(&q, held.as_ref(), f);
+            let mut old_q = q;
+            old_q.exact = None;
+            let old = relative_hardness(&old_q, held.as_ref(), f);
+            if ticks(new) != ticks(old) {
+                println!(
+                    "1.16.5 item {item:?} block {}: {} -> {} ticks",
+                    b.info().name,
+                    ticks(old),
+                    ticks(new)
+                );
+            }
+        }
+    }
+}

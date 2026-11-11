@@ -482,9 +482,9 @@ fn legacy_slot(s: Option<&ghast_inventory::Stack>) -> ghast_protocol::types::slo
     use ghast_protocol::types::slot::legacy::{ItemStack, Slot};
     Slot(s.and_then(|s| {
         Some(ItemStack {
-            id: i16::try_from(s.id).ok()?,
-            count: i8::try_from(s.count).unwrap_or(i8::MAX),
-            damage: s.damage,
+            id: i16::try_from(s.id()).ok()?,
+            count: i8::try_from(s.count()).unwrap_or(i8::MAX),
+            damage: s.damage(),
             nbt: s.nbt().cloned(),
         })
     }))

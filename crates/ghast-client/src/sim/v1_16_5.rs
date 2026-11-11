@@ -34,6 +34,18 @@ impl std::fmt::Debug for Sim16 {
 }
 
 impl Sim16 {
+    /// Test hook: sets one block.
+    #[cfg(test)]
+    pub(crate) fn test_set_block(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        st: ghast_data::v1_16_5::BlockState,
+    ) {
+        self.world.set_block_state(x, y, z, st);
+    }
+
     pub(crate) fn new() -> Self {
         Sim16 {
             world: ghast_world::v1_16_5::World::new(config()),
@@ -97,7 +109,7 @@ impl WorldView for Sim16 {
             "water" | "lava" | "fire" | "nether_portal" | "end_portal"
         );
         Some(BlockQuery {
-            modern: None,
+            exact: Some(crate::hands::ExactDig::V1_16_5),
             air,
             water: info.name == "water",
             block: s.block().id(),

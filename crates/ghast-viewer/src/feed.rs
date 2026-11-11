@@ -1554,11 +1554,11 @@ impl Feed {
         let at = m.begin(s::INVENTORY);
         m.u8(v.held_slot());
         for k in 0..9 {
-            match v.hotbar(k).filter(|s| s.id > 0 && s.count > 0) {
+            match v.hotbar(k).filter(|s| s.id() > 0 && s.count() > 0) {
                 Some(st) => m
-                    .u16(st.id as u16)
-                    .u16(st.damage as u16)
-                    .u8(st.count.clamp(0, 255) as u8),
+                    .u16(st.id() as u16)
+                    .u16(st.damage() as u16)
+                    .u8(st.count().clamp(0, 255) as u8),
                 None => m.u16(0).u16(0).u8(0),
             };
         }
@@ -1573,9 +1573,9 @@ impl Feed {
     fn self_looks(&mut self, v: &dyn BotView, force: bool) {
         let mut armour = Vec::new();
         for slot in 1..=4u8 {
-            if let Some(st) = v.armor(4 - usize::from(slot)).filter(|s| s.id > 0) {
+            if let Some(st) = v.armor(4 - usize::from(slot)).filter(|s| s.id() > 0) {
                 let color = st.nbt().map_or(NO_COLOR, leather_color_nbt);
-                armour.push((slot, st.id as u16, st.damage as u16, color));
+                armour.push((slot, st.id() as u16, st.damage() as u16, color));
             }
         }
         let mut m = Writer::with_capacity(64);

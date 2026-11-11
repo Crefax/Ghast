@@ -67,6 +67,18 @@ impl Sim18 {
         sync_pose(pose, &self.player);
     }
 
+    /// Test hook: sets one block.
+    #[cfg(test)]
+    pub(crate) fn test_set_block(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        s: ghast_data::v1_8::BlockState,
+    ) {
+        self.world.set_block_state(x, y, z, s);
+    }
+
     /// Test hook: the chunk store.
     pub(crate) fn test_world(&self) -> &ghast_world::v1_8::World {
         &self.world
@@ -134,7 +146,7 @@ impl WorldView for Sim18 {
         let info = b.info();
         let ray = ray_1_8(&self.world, x, y, z);
         Some(BlockQuery {
-            modern: None,
+            exact: Some(crate::hands::ExactDig::V1_8),
             air: s.is_air(),
             water: matches!(b.id(), 8 | 9),
             block: u16::from(b.id()),
