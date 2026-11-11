@@ -121,8 +121,14 @@ fn status_ping(addr: &str, host: &str, port: u16) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let addr = args.first().map_or("127.0.0.1:25565", String::as_str).to_string();
-    let name = args.get(1).map_or("ghast_probe", String::as_str).to_string();
+    let addr = args
+        .first()
+        .map_or("127.0.0.1:25565", String::as_str)
+        .to_string();
+    let name = args
+        .get(1)
+        .map_or("ghast_probe", String::as_str)
+        .to_string();
     let seconds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(5);
     let capture = args.get(3).cloned();
     let (host, port) = addr.rsplit_once(':').expect("host:port");
@@ -225,7 +231,10 @@ fn main() {
                         println!("configuration done");
                     }
                     C::Disconnect(d) => {
-                        panic!("configuration disconnect: {}", chat::nbt_to_plain_text(&d.reason))
+                        panic!(
+                            "configuration disconnect: {}",
+                            chat::nbt_to_plain_text(&d.reason)
+                        )
                     }
                     _ => {}
                 }
@@ -289,6 +298,10 @@ fn main() {
         z.write_all(&buf).unwrap();
         let data = z.finish().unwrap();
         std::fs::write(&path, &data).unwrap();
-        println!("capture: {} bytes raw, {} compressed -> {path}", buf.len(), data.len());
+        println!(
+            "capture: {} bytes raw, {} compressed -> {path}",
+            buf.len(),
+            data.len()
+        );
     }
 }

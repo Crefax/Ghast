@@ -29,7 +29,10 @@ fn checksum(raws: &[RawPacket]) -> u64 {
     h
 }
 
-fn corpus<S: PacketSet>(id: i32, generate: fn(i32, &mut Gen) -> Option<S>) -> (Vec<S>, Vec<RawPacket>) {
+fn corpus<S: PacketSet>(
+    id: i32,
+    generate: fn(i32, &mut Gen) -> Option<S>,
+) -> (Vec<S>, Vec<RawPacket>) {
     let mut values = Vec::with_capacity(N);
     let mut raws = Vec::with_capacity(N);
     for seed in 0..N as u64 {
@@ -127,5 +130,11 @@ fn bench_v26_1(c: &mut Criterion) {
 #[cfg(not(feature = "v26_1"))]
 fn bench_v26_1(_: &mut Criterion) {}
 
-criterion_group!(benches, bench_v1_8, bench_v1_12_2, bench_v1_16_5, bench_v26_1);
+criterion_group!(
+    benches,
+    bench_v1_8,
+    bench_v1_12_2,
+    bench_v1_16_5,
+    bench_v26_1
+);
 criterion_main!(benches);

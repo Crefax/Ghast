@@ -89,8 +89,12 @@ fn every_captured_packet_decodes_and_reencodes() {
             (1, 1) => check::<status::serverbound::ServerboundStatusPacket>(&rec.raw).0,
             (2, 0) => check::<login::clientbound::ClientboundLoginPacket>(&rec.raw).0,
             (2, 1) => check::<login::serverbound::ServerboundLoginPacket>(&rec.raw).0,
-            (3, 0) => check::<configuration::clientbound::ClientboundConfigurationPacket>(&rec.raw).0,
-            (3, 1) => check::<configuration::serverbound::ServerboundConfigurationPacket>(&rec.raw).0,
+            (3, 0) => {
+                check::<configuration::clientbound::ClientboundConfigurationPacket>(&rec.raw).0
+            }
+            (3, 1) => {
+                check::<configuration::serverbound::ServerboundConfigurationPacket>(&rec.raw).0
+            }
             (4, 0) => {
                 let (n, p) = check::<play::clientbound::ClientboundPlayPacket>(&rec.raw);
                 if let play::clientbound::ClientboundPlayPacket::SetSlot(s) = &p
@@ -150,6 +154,9 @@ fn every_captured_packet_decodes_and_reencodes() {
     ] {
         assert!(has(s, d, n), "fixture has no {n}");
     }
-    assert!(chunks > 0 && sections >= chunks * 16, "{chunks} chunks, {sections} sections");
+    assert!(
+        chunks > 0 && sections >= chunks * 16,
+        "{chunks} chunks, {sections} sections"
+    );
     assert!(components >= 8, "only {components} item components decoded");
 }

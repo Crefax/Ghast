@@ -533,7 +533,12 @@ impl<'a> Resolver<'a> {
                 .and_then(|l| l.get(name))
                 .or_else(|| self.types.get(name))
             {
-                Some(d) if d.as_array().and_then(|a| a.first()).and_then(Value::as_str) == Some("container") => def = d,
+                Some(d)
+                    if d.as_array().and_then(|a| a.first()).and_then(Value::as_str)
+                        == Some("container") =>
+                {
+                    def = d
+                }
                 _ => break,
             }
         }
@@ -566,7 +571,12 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_name(&mut self, name: &str, args: Option<&Value>, ctx: &Ctx) -> Ty {
-        assert!(ctx.prefix.len() < 400, "{}: runaway type nesting at {name} ({})", ctx.path, ctx.prefix);
+        assert!(
+            ctx.prefix.len() < 400,
+            "{}: runaway type nesting at {name} ({})",
+            ctx.path,
+            ctx.prefix
+        );
         let prim = match name {
             "varint" | "optvarint" => Some(Prim::VarInt),
             "varlong" => Some(Prim::VarLong),
@@ -952,7 +962,9 @@ pub fn box_cycles(roots: &mut [Container], shared: bool) {
     };
     for (ri, c) in roots.iter_mut().enumerate() {
         for f in &mut c.fields {
-            box_refs(&mut f.ty, shared, &mut |n| idx(n).is_some_and(|ni| reaches(ni, ri)));
+            box_refs(&mut f.ty, shared, &mut |n| {
+                idx(n).is_some_and(|ni| reaches(ni, ri))
+            });
         }
     }
 }
@@ -976,9 +988,14 @@ fn box_refs(t: &mut Ty, shared: bool, cyclic: &mut dyn FnMut(&str) -> bool) {
             let inner = std::mem::replace(t, Ty::Void);
             *t = Ty::Boxed(Box::new(inner));
         }
-        Ty::Container(c) => c.fields.iter_mut().for_each(|x| box_refs(&mut x.ty, shared, cyclic)),
+        Ty::Container(c) => c
+            .fields
+            .iter_mut()
+            .for_each(|x| box_refs(&mut x.ty, shared, cyclic)),
         Ty::Switch(s) => {
-            s.cases.iter_mut().for_each(|(_, x)| box_refs(x, shared, cyclic));
+            s.cases
+                .iter_mut()
+                .for_each(|(_, x)| box_refs(x, shared, cyclic));
             box_refs(&mut s.default, shared, cyclic);
         }
         Ty::Option(e) | Ty::Holder(e) => box_refs(e, shared, cyclic),

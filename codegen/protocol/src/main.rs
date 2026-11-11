@@ -213,100 +213,118 @@ pub struct Patch {
     pub why: &'static str,
 }
 
-pub const PATCHES: &[Patch] = &[Patch {
-    data_key: "26.1",
-    pointer: "/play/toClient/types/packet_multi_block_change/1/1/type/1/type",
-    expect: "\"varint\"",
-    replace: "\"varlong\"",
-    why: "ClientboundSectionBlocksUpdatePacket reads/writes each record with \
+pub const PATCHES: &[Patch] = &[
+    Patch {
+        data_key: "26.1",
+        pointer: "/play/toClient/types/packet_multi_block_change/1/1/type/1/type",
+        expect: "\"varint\"",
+        replace: "\"varlong\"",
+        why: "ClientboundSectionBlocksUpdatePacket reads/writes each record with \
           readVarLong/writeVarLong (state id << 12 | position); minecraft-data has varint \
           since 1.20.2 (1.16.2 - 1.20.1 had varlong)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/play/toClient/types/packet_initialize_world_border/1/4/type",
-    expect: "\"varint\"",
-    replace: "\"varlong\"",
-    why: "ClientboundInitializeBorderPacket reads the lerp time with readVarLong",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/play/toClient/types/packet_world_border_lerp_size/1/2/type",
-    expect: "\"varint\"",
-    replace: "\"varlong\"",
-    why: "ClientboundSetBorderLerpSizePacket reads the lerp time with readVarLong",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/damage_type",
-    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "damageType", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "damageTypeId", "otherwise": {"name": "data", "type": "DamageTypeData"}}], "false": "string"}}]}]]"#,
-    replace: r#""varint""#,
-    why: "DamageType.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/damage_resistant",
-    expect: r#""string""#,
-    replace: r#"["container", [{"name": "types", "type": "IDSet"}]]"#,
-    why: "DamageResistant.STREAM_CODEC is ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/provides_banner_patterns",
-    expect: r#""string""#,
-    replace: r#""IDSet""#,
-    why: "PROVIDES_BANNER_PATTERNS is networkSynchronized(ByteBufCodecs.holderSet(BANNER_PATTERN)) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/provides_trim_material",
-    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "material", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}], "false": "string"}}]}]]"#,
-    replace: r#"["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}]"#,
-    why: "TrimMaterial.STREAM_CODEC is ByteBufCodecs.holder(TRIM_MATERIAL, direct) with no leading bool (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/jukebox_playable",
-    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "song", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}], "false": "string"}}]}]]"#,
-    replace: r#"["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}]"#,
-    why: "JukeboxPlayable.STREAM_CODEC is JukeboxSong.STREAM_CODEC = ByteBufCodecs.holder(JUKEBOX_SONG, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/instrument",
-    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "data", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}], "false": "string"}}]}]]"#,
-    replace: r#"["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}]"#,
-    why: "InstrumentComponent.STREAM_CODEC is Instrument.STREAM_CODEC = ByteBufCodecs.holder(INSTRUMENT, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1variant",
-    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
-    replace: r#""varint""#,
-    why: "ChickenVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1sound_variant",
-    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
-    replace: r#""varint""#,
-    why: "ChickenSoundVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/zombie_nautilus~1variant",
-    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
-    replace: r#""varint""#,
-    why: "ZombieNautilusVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/blocks_attacks/1/4/type",
-    expect: r#"["option", "string"]"#,
-    replace: r#"["option", "IDSet"]"#,
-    why: "BlocksAttacks.STREAM_CODEC sends bypassedBy as an optional ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by the oracle HashedStack vectors)",
-}, Patch {
-    data_key: "26.1",
-    pointer: "/types/SlotComponent/1/1/type/1/fields/bees",
-    expect: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
-    replace: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "entityType", "type": "varint"}, {"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
-    why: "BeehiveBlockEntity.Occupant.STREAM_CODEC starts with TypedEntityData.streamCodec(EntityType.STREAM_CODEC): the entity type id, then the compound (found by the oracle HashedStack vectors)",
-}];
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/play/toClient/types/packet_initialize_world_border/1/4/type",
+        expect: "\"varint\"",
+        replace: "\"varlong\"",
+        why: "ClientboundInitializeBorderPacket reads the lerp time with readVarLong",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/play/toClient/types/packet_world_border_lerp_size/1/2/type",
+        expect: "\"varint\"",
+        replace: "\"varlong\"",
+        why: "ClientboundSetBorderLerpSizePacket reads the lerp time with readVarLong",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/damage_type",
+        expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "damageType", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "damageTypeId", "otherwise": {"name": "data", "type": "DamageTypeData"}}], "false": "string"}}]}]]"#,
+        replace: r#""varint""#,
+        why: "DamageType.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/damage_resistant",
+        expect: r#""string""#,
+        replace: r#"["container", [{"name": "types", "type": "IDSet"}]]"#,
+        why: "DamageResistant.STREAM_CODEC is ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/provides_banner_patterns",
+        expect: r#""string""#,
+        replace: r#""IDSet""#,
+        why: "PROVIDES_BANNER_PATTERNS is networkSynchronized(ByteBufCodecs.holderSet(BANNER_PATTERN)) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/provides_trim_material",
+        expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "material", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}], "false": "string"}}]}]]"#,
+        replace: r#"["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}]"#,
+        why: "TrimMaterial.STREAM_CODEC is ByteBufCodecs.holder(TRIM_MATERIAL, direct) with no leading bool (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/jukebox_playable",
+        expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "song", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}], "false": "string"}}]}]]"#,
+        replace: r#"["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}]"#,
+        why: "JukeboxPlayable.STREAM_CODEC is JukeboxSong.STREAM_CODEC = ByteBufCodecs.holder(JUKEBOX_SONG, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/instrument",
+        expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "data", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}], "false": "string"}}]}]]"#,
+        replace: r#"["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}]"#,
+        why: "InstrumentComponent.STREAM_CODEC is Instrument.STREAM_CODEC = ByteBufCodecs.holder(INSTRUMENT, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1variant",
+        expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+        replace: r#""varint""#,
+        why: "ChickenVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1sound_variant",
+        expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+        replace: r#""varint""#,
+        why: "ChickenSoundVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/zombie_nautilus~1variant",
+        expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+        replace: r#""varint""#,
+        why: "ZombieNautilusVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/blocks_attacks/1/4/type",
+        expect: r#"["option", "string"]"#,
+        replace: r#"["option", "IDSet"]"#,
+        why: "BlocksAttacks.STREAM_CODEC sends bypassedBy as an optional ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by the oracle HashedStack vectors)",
+    },
+    Patch {
+        data_key: "26.1",
+        pointer: "/types/SlotComponent/1/1/type/1/fields/bees",
+        expect: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
+        replace: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "entityType", "type": "varint"}, {"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
+        why: "BeehiveBlockEntity.Occupant.STREAM_CODEC starts with TypedEntityData.streamCodec(EntityType.STREAM_CODEC): the entity type id, then the compound (found by the oracle HashedStack vectors)",
+    },
+];
 
 /// Applies the [`PATCHES`] of one minecraft-data version.
 pub fn apply_patches(data_key: &str, proto: &mut Value) {
     for p in PATCHES.iter().filter(|p| p.data_key == data_key) {
-        let target = proto
-            .pointer_mut(p.pointer)
-            .unwrap_or_else(|| panic!("patch {}: {} is gone from minecraft-data", data_key, p.pointer));
+        let target = proto.pointer_mut(p.pointer).unwrap_or_else(|| {
+            panic!(
+                "patch {}: {} is gone from minecraft-data",
+                data_key, p.pointer
+            )
+        });
         let expect: Value = serde_json::from_str(p.expect).unwrap();
         assert!(
             *target == expect,
@@ -331,9 +349,13 @@ const DIRECTIONS: &[(&str, &str, &str)] = &[
     ("toServer", "serverbound", "Serverbound"),
 ];
 
-fn states_of(spec: &VersionSpec) -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
+fn states_of(
+    spec: &VersionSpec,
+) -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
     let conf = spec.configuration;
-    STATES.iter().filter(move |(k, _, _)| conf || *k != "configuration")
+    STATES
+        .iter()
+        .filter(move |(k, _, _)| conf || *k != "configuration")
 }
 
 fn main() {
@@ -378,17 +400,21 @@ fn main() {
     for (vi, out) in outs.iter().enumerate() {
         files.extend(write_version(vi, out, &shared));
     }
-    files.push((
-        "versions_table.rs".into(),
-        versions_table(&proto_versions),
-    ));
+    files.push(("versions_table.rs".into(), versions_table(&proto_versions)));
     for (path, code) in &files {
         let p = out_root.join(path);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, code).unwrap();
     }
-    let mut roots: Vec<PathBuf> = vec![out_root.join("defs/mod.rs"), out_root.join("versions_table.rs")];
-    roots.extend(VERSIONS.iter().map(|s| out_root.join(s.module).join("mod.rs")));
+    let mut roots: Vec<PathBuf> = vec![
+        out_root.join("defs/mod.rs"),
+        out_root.join("versions_table.rs"),
+    ];
+    roots.extend(
+        VERSIONS
+            .iter()
+            .map(|s| out_root.join(s.module).join("mod.rs")),
+    );
     let status = Command::new("rustfmt")
         .args(["--edition", "2024"])
         .args(&roots)
@@ -573,7 +599,12 @@ fn emit_version(spec: &'static VersionSpec, proto: &Value, source: String) -> Ve
             let mut local_roots: Vec<ir::Container> = local_list
                 .iter()
                 .map(|(name, rust)| {
-                    resolver.resolve_root(rust, &format!("{state}.{dir_mod}.{name}"), &ns[name], false)
+                    resolver.resolve_root(
+                        rust,
+                        &format!("{state}.{dir_mod}.{name}"),
+                        &ns[name],
+                        false,
+                    )
                 })
                 .collect();
             ir::box_cycles(&mut local_roots, false);
@@ -608,14 +639,25 @@ fn emit_version(spec: &'static VersionSpec, proto: &Value, source: String) -> Ve
                 rows.push((id, name, rust, root));
             }
             rows.sort_by_key(|r| r.0);
-            sets.push((state, state_mod, state_pascal, dir_mod, dir_pascal, rows, local_roots));
+            sets.push((
+                state,
+                state_mod,
+                state_pascal,
+                dir_mod,
+                dir_pascal,
+                rows,
+                local_roots,
+            ));
         }
     }
     resolver.set_local(None);
     resolver.assert_presence_used();
 
     let mut em = Emitter::new(spec.layout, spec.slot, variant_names);
-    for (_, c) in named_roots.iter().chain(sets.iter().flat_map(|s| s.6.iter())) {
+    for (_, c) in named_roots
+        .iter()
+        .chain(sets.iter().flat_map(|s| s.6.iter()))
+    {
         let prev = em.named.insert(c.rust_name.clone(), c);
         assert!(
             prev.is_none_or(|p| p.same_shape_root(c)),
@@ -829,7 +871,10 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
                 .entry(v.item.scope.clone())
                 .or_default()
                 .push(text);
-            owner_cfg.entry(vi).or_default().extend(users.iter().copied());
+            owner_cfg
+                .entry(vi)
+                .or_default()
+                .extend(users.iter().copied());
         }
     }
     let mut files = Vec::new();
@@ -857,7 +902,10 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
         let mut states: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for scope in scopes.keys() {
             if let Some((st, d)) = scope.split_once('/') {
-                states.entry(st.to_string()).or_default().insert(d.to_string());
+                states
+                    .entry(st.to_string())
+                    .or_default()
+                    .insert(d.to_string());
             }
         }
         let mut m = hdr.clone();
@@ -868,7 +916,10 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
         );
         for (scope, texts) in scopes {
             let (path, doc) = match scope.split_once('/') {
-                None => (format!("{dir}/types.rs"), "Types shared by several packets.".to_string()),
+                None => (
+                    format!("{dir}/types.rs"),
+                    "Types shared by several packets.".to_string(),
+                ),
                 Some((st, d)) => (
                     format!("{dir}/{st}/{d}.rs"),
                     format!("{} packets of the {st} state.", capitalize(d)),
@@ -917,7 +968,12 @@ fn scope_users(
     let mut set = BTreeSet::new();
     for v in &outs[owner].items {
         if pred(&v.item.scope) && shared.owner(owner, &v.item.scope, &v.item.name) == owner {
-            set.extend(shared.users(owner, &v.item.scope, &v.item.name).iter().copied());
+            set.extend(
+                shared
+                    .users(owner, &v.item.scope, &v.item.name)
+                    .iter()
+                    .copied(),
+            );
         }
     }
     set
@@ -1005,12 +1061,14 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
         file.push_str(IMPORTS);
         file.push('\n');
         file.push_str(&body);
-        files.push((format!("{}/{}/{}.rs", spec.module, set.state_mod, set.dir_mod), file));
+        files.push((
+            format!("{}/{}/{}.rs", spec.module, set.state_mod, set.dir_mod),
+            file,
+        ));
     }
     for &(state, state_mod, _) in states_of(spec) {
-        let file = format!(
-            "{hdr}//! The {state} state.\n\npub mod clientbound;\npub mod serverbound;\n"
-        );
+        let file =
+            format!("{hdr}//! The {state} state.\n\npub mod clientbound;\npub mod serverbound;\n");
         files.push((format!("{}/{state_mod}/mod.rs", spec.module), file));
     }
 
@@ -1018,10 +1076,17 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
     let mut t = hdr.clone();
     t.push_str("//! Types shared by several packets of this version.\n\n");
     if let Some(slot) = spec.slot {
-        let _ = writeln!(t, "/// Item slot in this version's format.\npub type Slot = {slot};\n");
+        let _ = writeln!(
+            t,
+            "/// Item slot in this version's format.\npub type Slot = {slot};\n"
+        );
     }
     for v in out.items.iter().filter(|v| v.item.scope == "types") {
-        let _ = writeln!(t, "pub use {};", def_path(vi, "types", &v.item.name, shared));
+        let _ = writeln!(
+            t,
+            "pub use {};",
+            def_path(vi, "types", &v.item.name, shared)
+        );
     }
     files.push((format!("{}/types.rs", spec.module), t));
 
@@ -1046,7 +1111,10 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
     }
     let conf = |dir: &str| {
         if spec.configuration {
-            format!("configuration::{dir}::{}ConfigurationPacket", capitalize(dir))
+            format!(
+                "configuration::{dir}::{}ConfigurationPacket",
+                capitalize(dir)
+            )
         } else {
             "crate::packet::NoPackets".to_string()
         }
@@ -1141,10 +1209,7 @@ fn packet_enum(name: &str, state: &str, dir: &str, packets: &[(String, String, i
     }
     s.push_str("}\n\n");
     let arms = |f: &dyn Fn(&str, &str) -> String| {
-        packets
-            .iter()
-            .map(|(n, r, _)| f(n, r))
-            .collect::<String>()
+        packets.iter().map(|(n, r, _)| f(n, r)).collect::<String>()
     };
     let _ = write!(
         s,

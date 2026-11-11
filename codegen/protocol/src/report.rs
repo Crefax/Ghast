@@ -34,8 +34,8 @@ pub fn write_table(proto: &Value, report: &Value, out: &Path) {
     let mut problems = Vec::new();
     for (st, rst) in STATES {
         for (dir, rdir) in DIRECTIONS {
-            let ours: BTreeMap<i64, String> = proto[*st][*dir]["types"]["packet"][1][0]["type"]
-                [1]["mappings"]
+            let ours: BTreeMap<i64, String> = proto[*st][*dir]["types"]["packet"][1][0]["type"][1]
+                ["mappings"]
                 .as_object()
                 .map(|m| {
                     m.iter()
@@ -64,7 +64,9 @@ pub fn write_table(proto: &Value, report: &Value, out: &Path) {
                 let a = theirs.get(&id).map_or("-", String::as_str);
                 let b = ours.get(&id).map_or("-", String::as_str);
                 if a == "-" || b == "-" {
-                    problems.push(format!("{st} {rdir} {id:#04x}: vanilla {a}, minecraft-data {b}"));
+                    problems.push(format!(
+                        "{st} {rdir} {id:#04x}: vanilla {a}, minecraft-data {b}"
+                    ));
                 }
                 let _ = writeln!(s, "{st}\t{rdir}\t{id}\t{a}\t{b}");
             }

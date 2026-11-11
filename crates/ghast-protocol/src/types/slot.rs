@@ -160,8 +160,9 @@ pub mod modern {
 /// On the wire (vanilla `ItemStack.OPTIONAL_STREAM_CODEC`): VarInt count (`<= 0` = empty),
 /// VarInt item id, VarInt added-component count, VarInt removed-component count, the added
 /// components (VarInt type + value, **not** length-prefixed), the removed component types.
-/// [`ItemStack::read`] walks the components with the generated structural skip
-/// ([`SlotComponent::skip`]) and keeps the patch as one zero-copy [`Bytes`] slice; a
+/// [`ItemStack::read`](v775::ItemStack::read) walks the components with the generated
+/// structural skip ([`SlotComponent::skip`](crate::defs::p775::types::SlotComponent::skip))
+/// and keeps the patch as one zero-copy [`Bytes`](bytes::Bytes) slice; a
 /// component is decoded only when asked for.
 #[cfg(feature = "v26_1")]
 pub mod v775 {

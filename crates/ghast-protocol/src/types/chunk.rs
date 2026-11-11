@@ -241,7 +241,13 @@ mod tests {
         assert_eq!(s[1].blocks.get(1), Some(0));
         assert_eq!(s[1].biomes.get(5), Some(3));
         assert_eq!(s[1].blocks.get(4096), None);
-        assert_eq!(PalettedContainer::long_count(ContainerKind::Blocks, 15), Some(1024));
-        assert_eq!(PalettedContainer::long_count(ContainerKind::Biomes, 7), Some(8));
+        assert_eq!(
+            PalettedContainer::long_count(ContainerKind::Blocks, 15),
+            Some(1024)
+        );
+        assert_eq!(
+            PalettedContainer::long_count(ContainerKind::Biomes, 7),
+            Some(8)
+        );
     }
 }

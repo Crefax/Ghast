@@ -27,7 +27,10 @@ pub struct Hint {
 #[derive(Clone)]
 enum Kind<'t> {
     Int(Prim),
-    Bits { size: u32, signed: bool },
+    Bits {
+        size: u32,
+        signed: bool,
+    },
     Bool,
     Str,
     Mapper(&'t Mapper),
@@ -598,7 +601,10 @@ impl<'t> Emitter<'t> {
                     .iter()
                     .map(|l| l.entries.iter().map(|e| e.name.as_str()).collect())
                     .collect();
-                panic!("cannot resolve `{path}` in {}; scope {names:?}", self.cur_root)
+                panic!(
+                    "cannot resolve `{path}` in {}; scope {names:?}",
+                    self.cur_root
+                )
             })
             .clone();
         match segs.get(1) {
@@ -692,12 +698,9 @@ impl<'t> Emitter<'t> {
             Kind::OptInt(n, p) => {
                 let (lo, hi) = p.int_range();
                 match parse_int(key) {
-                    Some(v) if (v as i128) >= lo && (v as i128) <= hi => format!(
-                        "({} == {}{v}{})",
-                        e.expr,
-                        "Some(".repeat(n),
-                        ")".repeat(n)
-                    ),
+                    Some(v) if (v as i128) >= lo && (v as i128) <= hi => {
+                        format!("({} == {}{v}{})", e.expr, "Some(".repeat(n), ")".repeat(n))
+                    }
                     _ => "false".to_string(),
                 }
             }

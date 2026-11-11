@@ -162,7 +162,14 @@ fn table_matches_cached_report() {
             r.state
         };
         let id = report[state][r.dir][r.vanilla]["protocol_id"].as_i64();
-        assert_eq!(id, Some(i64::from(r.id)), "{} {} {}", r.state, r.dir, r.vanilla);
+        assert_eq!(
+            id,
+            Some(i64::from(r.id)),
+            "{} {} {}",
+            r.state,
+            r.dir,
+            r.vanilla
+        );
         n += 1;
     }
     let total: usize = report

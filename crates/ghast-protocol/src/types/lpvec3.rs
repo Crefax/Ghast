@@ -84,13 +84,20 @@ impl LpVec3 {
             return [0.0; 3];
         }
         let s = self.scale() as f64;
-        let unpack = |shift: u32| ((self.packed >> shift & 0x7fff) as f64).min(MAX_Q) * 2.0 / MAX_Q - 1.0;
+        let unpack =
+            |shift: u32| ((self.packed >> shift & 0x7fff) as f64).min(MAX_Q) * 2.0 / MAX_Q - 1.0;
         [unpack(3) * s, unpack(18) * s, unpack(33) * s]
     }
 
     /// Quantises a vector the way the server does.
     pub fn from_vec3(v: [f64; 3]) -> Self {
-        let clean = |x: f64| if x.is_nan() { 0.0 } else { x.clamp(-ABS_MAX, ABS_MAX) };
+        let clean = |x: f64| {
+            if x.is_nan() {
+                0.0
+            } else {
+                x.clamp(-ABS_MAX, ABS_MAX)
+            }
+        };
         let [x, y, z] = v.map(clean);
         let len = x.abs().max(y.abs()).max(z.abs());
         if len < ABS_MIN {

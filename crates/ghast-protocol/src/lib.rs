@@ -77,5 +77,5 @@ pub use io::{FramedReader, FramedWriter};
 pub use packet::{
     Direction, NoPackets, Packet, PacketFilter, PacketSet, RawPacket, State, Version,
 };
-pub use versions::ProtocolVersion;
 pub use types::BlockPos;
+pub use versions::ProtocolVersion;

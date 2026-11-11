@@ -142,7 +142,10 @@ mod tests {
                 }),
             ),
         ]));
-        assert_eq!(nbt_to_plain_text(&AnonNbt::from_tag(&c).unwrap()), "Hi there!");
+        assert_eq!(
+            nbt_to_plain_text(&AnonNbt::from_tag(&c).unwrap()),
+            "Hi there!"
+        );
         let tr = Tag::Compound(Compound(vec![
             ("translate".into(), Tag::String("chat.type.text".into())),
             (
