@@ -45,6 +45,7 @@ import java.util.function.Consumer;
  */
 final class HashDump {
     static final int CASES = 4000;
+    private static final boolean DEBUG = false;
 
     private HashDump() {}
 
@@ -85,11 +86,20 @@ final class HashDump {
         c("custom_name", "\"Name\"", "{\"text\":\"Bold\",\"bold\":true,\"color\":\"red\"}", "[\"a\",{\"text\":\"b\",\"italic\":false}]");
         c("item_name", "\"Item\"", "{\"translate\":\"item.minecraft.diamond\"}");
         c("lore", "[\"one\",\"two\"]", "[{\"text\":\"x\",\"color\":\"#123456\"}]");
-        // Enchantment maps and debug-stick maps are keyed by holders and written in identity-hash order,
-        // which differs between JVM runs: single entries only, so the vectors are reproducible.
+        // Enchantment maps: vanilla keeps them in an Object2IntOpenHashMap keyed by holders (identity
+        // hash), so its own wire order varies between JVM runs; the dump writes them sorted by
+        // registry id (see canonicalWire) and keeps multi-entry maps.
         c("enchantments", "{\"minecraft:sharpness\":5}", "{\"minecraft:efficiency\":3}", "{\"minecraft:protection\":255}",
-                "{\"minecraft:unbreaking\":2}");
-        c("stored_enchantments", "{\"minecraft:mending\":1}", "{\"minecraft:fortune\":3}");
+                "{\"minecraft:efficiency\":5,\"minecraft:unbreaking\":3}",
+                "{\"minecraft:sharpness\":5,\"minecraft:looting\":3,\"minecraft:fire_aspect\":2}",
+                "{\"minecraft:protection\":4,\"minecraft:unbreaking\":3,\"minecraft:mending\":1,\"minecraft:thorns\":3}",
+                "{\"minecraft:efficiency\":5,\"minecraft:fortune\":3,\"minecraft:unbreaking\":3,\"minecraft:mending\":1,\"minecraft:vanishing_curse\":1}",
+                "{\"minecraft:binding_curse\":1,\"minecraft:vanishing_curse\":1}");
+        c("stored_enchantments", "{\"minecraft:mending\":1}", "{\"minecraft:fortune\":3}",
+                "{\"minecraft:fortune\":3,\"minecraft:looting\":2}",
+                "{\"minecraft:power\":5,\"minecraft:punch\":2,\"minecraft:flame\":1,\"minecraft:infinity\":1}");
+        c("debug_stick_state", "{\"minecraft:oak_stairs\":\"facing\",\"minecraft:lever\":\"powered\",\"minecraft:oak_door\":\"half\"}",
+                "{\"minecraft:oak_stairs\":\"half\",\"minecraft:stone_slab\":\"type\"}");
         c("can_place_on", "{\"blocks\":\"minecraft:stone\"}", "[{\"blocks\":[\"minecraft:dirt\",\"minecraft:grass_block\"]}]");
         c("can_break", "{\"blocks\":\"#minecraft:logs\"}", "[{\"blocks\":\"minecraft:stone\",\"state\":{}}]");
         c("attribute_modifiers", "[{\"type\":\"minecraft:attack_damage\",\"id\":\"oracle:a\",\"amount\":2.5,\"operation\":\"add_value\",\"slot\":\"mainhand\"}]",
@@ -229,6 +239,8 @@ final class HashDump {
             for (String g : CURATED.getOrDefault(name, new String[0])) {
                 if (tryJson(t, g, pools.get(t), access, hasher, jsonOps)) {
                     sources.get(t)[2]++;
+                } else if (DEBUG) {
+                    System.err.println("curated value rejected: " + name + " " + g);
                 }
             }
         }
@@ -252,6 +264,7 @@ final class HashDump {
         }
         Rng rng = new Rng(0x6861736865645f73L);
         int written = 0;
+        int skipped = 0;
         for (int k = 0; written < CASES && k < CASES * 4; k++) {
             Item item = items.get(rng.nextInt(items.size()));
             int count = rng.chance(0.6) ? rng.range(1, 64) : rng.chance(0.7) ? rng.range(65, 99) : rng.range(100, 5000);
@@ -284,7 +297,11 @@ final class HashDump {
             byte[] wire;
             try {
                 stack = new ItemStack(BuiltInRegistries.ITEM.wrapAsHolder(item), count, b.build());
-                wire = encode(access, buf -> ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, stack));
+                byte[] vanillaWire = encode(access, buf -> ItemStack.OPTIONAL_STREAM_CODEC.encode(buf, stack));
+                wire = encode(access, buf -> canonicalWire(buf, stack));
+                if (!holderMapsWithSeveralEntries(stack) && !java.util.Arrays.equals(wire, vanillaWire)) {
+                    throw new IllegalStateException("canonical wire differs from vanilla's for " + stack);
+                }
                 // The client's view: the stack decoded from the server's bytes.
                 RegistryFriendlyByteBuf in = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(wire), access);
                 ItemStack decoded = ItemStack.OPTIONAL_STREAM_CODEC.decode(in);
@@ -292,6 +309,17 @@ final class HashDump {
                     continue;
                 }
                 HashedStack hashed = HashedStack.create(decoded, hasher);
+                // The hash does not depend on the map's iteration order: the original stack (built
+                // from the pool, its own map order) hashes the same as the decoded one.
+                HashedPatchMap orig = ((HashedStack.ActualItem) HashedStack.create(stack, hasher)).components();
+                HashedPatchMap dec = ((HashedStack.ActualItem) hashed).components();
+                // (IdentityHashMap equality compares the Integer values by reference: compare as HashMaps.)
+                if (!new java.util.HashMap<>(orig.addedComponents()).equals(new java.util.HashMap<>(dec.addedComponents()))
+                        || !new java.util.HashSet<>(orig.removedComponents()).equals(new java.util.HashSet<>(dec.removedComponents()))) {
+                    throw new IllegalStateException("hash depends on map order: " + stack + " original "
+                            + ((HashedStack.ActualItem) HashedStack.create(stack, hasher)).components() + " decoded "
+                            + ((HashedStack.ActualItem) hashed).components() + " patch " + stack.getComponentsPatch() + " / " + decoded.getComponentsPatch());
+                }
                 // Vanilla writes the added map / removed set in IdentityHashMap / HashSet order (arbitrary;
                 // the server compares contents). The vector uses type id order.
                 HashedStack.ActualItem actual = (HashedStack.ActualItem) hashed;
@@ -340,8 +368,11 @@ final class HashDump {
                 j.field("hashed_wire", ByteBufUtil.hexDump(hashedWire));
                 sink.accept(j.endObject().toString());
                 written++;
+            } catch (IllegalStateException e) {
+                throw e;
             } catch (RuntimeException e) {
                 // A combination the codecs reject (e.g. a value only valid for other items): skip.
+                skipped++;
             }
         }
         // Per component type: id, name, transient, value pool size by source, cases where added / removed.
@@ -353,6 +384,69 @@ final class HashDump {
             j.field("values", pools.get(t).size()).field("from_defaults", s[0]).field("from_generic", s[1]).field("from_curated", s[2]);
             j.field("cases_added", c[0]).field("cases_removed", c[1]);
             sink.accept(j.endObject().toString());
+        }
+    }
+
+    /** Any enchantment map in the stack's patch has two or more entries. */
+    private static boolean holderMapsWithSeveralEntries(ItemStack stack) {
+        for (Map.Entry<DataComponentType<?>, java.util.Optional<?>> e : stack.getComponentsPatch().entrySet()) {
+            if (e.getValue().orElse(null) instanceof net.minecraft.world.item.enchantment.ItemEnchantments ench && ench.size() > 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code ItemStack.OPTIONAL_STREAM_CODEC}'s layout (count, item holder, patch: added count,
+     * removed count, added (type, value)..., removed type...) with enchantment maps written sorted by
+     * registry id instead of vanilla's identity-hash order. Byte-identical to vanilla for every stack
+     * without a multi-entry enchantment map (checked).
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void canonicalWire(RegistryFriendlyByteBuf buf, ItemStack stack) {
+        if (stack.isEmpty()) {
+            buf.writeVarInt(0);
+            return;
+        }
+        buf.writeVarInt(stack.getCount());
+        Item.STREAM_CODEC.encode(buf, stack.typeHolder());
+        DataComponentPatch patch = stack.getComponentsPatch();
+        int added = 0;
+        int removed = 0;
+        for (Map.Entry<DataComponentType<?>, java.util.Optional<?>> e : patch.entrySet()) {
+            if (e.getValue().isPresent()) {
+                added++;
+            } else {
+                removed++;
+            }
+        }
+        buf.writeVarInt(added);
+        buf.writeVarInt(removed);
+        for (Map.Entry<DataComponentType<?>, java.util.Optional<?>> e : patch.entrySet()) {
+            if (e.getValue().isPresent()) {
+                DataComponentType.STREAM_CODEC.encode(buf, e.getKey());
+                Object v = e.getValue().get();
+                if (v instanceof net.minecraft.world.item.enchantment.ItemEnchantments ench) {
+                    List<it.unimi.dsi.fastutil.objects.Object2IntMap.Entry<Holder<net.minecraft.world.item.enchantment.Enchantment>>> es =
+                            new ArrayList<>(ench.entrySet());
+                    Registry<net.minecraft.world.item.enchantment.Enchantment> reg =
+                            buf.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+                    es.sort(java.util.Comparator.comparingInt(x -> reg.getId(x.getKey().value())));
+                    buf.writeVarInt(es.size());
+                    for (var x : es) {
+                        net.minecraft.world.item.enchantment.Enchantment.STREAM_CODEC.encode(buf, x.getKey());
+                        buf.writeVarInt(x.getIntValue());
+                    }
+                } else {
+                    ((net.minecraft.network.codec.StreamCodec) e.getKey().streamCodec()).encode(buf, v);
+                }
+            }
+        }
+        for (Map.Entry<DataComponentType<?>, java.util.Optional<?>> e : patch.entrySet()) {
+            if (e.getValue().isEmpty()) {
+                DataComponentType.STREAM_CODEC.encode(buf, e.getKey());
+            }
         }
     }
 

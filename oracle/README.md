@@ -1053,11 +1053,18 @@ prototype lacks is normalised away when the stack is built (as on a real server)
 cannot be removed. Values are validated by a network round trip and a hash before use; patches the
 codecs reject are skipped.
 
-Reproducibility: vanilla writes holder-keyed maps (enchantments, stored enchantments, debug stick
-state) and the `HashedPatchMap` in identity-hash order, which changes between JVM runs. The dump
-therefore uses single-entry holder maps, writes `hashed_wire` with added / removed entries in
-component type id order (vanilla's order is arbitrary; the server compares contents), and keys
-`json` with sorted object keys. Two separate runs produce identical files.
+Holder-keyed enchantment maps: vanilla keeps `enchantments` / `stored_enchantments` in an
+`Object2IntOpenHashMap` keyed by holders (identity hash), so the order a real server writes their
+entries in depends on the JVM run — **a client must accept any entry order**. The `HashOps` hash is
+order-independent (checked for every stack: the stack as built and as decoded, in different map
+orders, hash the same). `wire` is written in vanilla's layout with those maps sorted by
+enchantment registry id; for every stack without a multi-entry enchantment map it is
+byte-identical to vanilla's own encoding (checked), and the bytes decode to an equal stack. The
+vectors hold 1–5-entry enchantment maps and 1–4-entry stored enchantments. `hashed_wire` is
+written with the added map / removed set in component type id order (vanilla's order is
+arbitrary: IdentityHashMap / HashSet; the server compares contents); `json` has sorted keys. Two
+separate JVM runs produce identical files. (Debug-stick maps with several entries did not survive
+the network round trip in the harness; only single-entry ones are in the vectors.)
 
 ## Notes for implementers
 
