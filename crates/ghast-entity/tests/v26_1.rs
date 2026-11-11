@@ -414,7 +414,10 @@ fn garbage_never_panics() {
     let mut t = tracker(Config::default().with_skins(true));
     spawn(&mut t, 10, ZOMBIE, [0.5, 64.0, 0.5], [0; 3]);
     spawn(&mut t, 11, ITEM, [0.5, 64.0, 0.5], [0; 3]);
-    let ids: Vec<i32> = t.packet_ids().filter(|&i| i != id::LOGIN && i != id::RESPAWN).collect();
+    let ids: Vec<i32> = t
+        .packet_ids()
+        .filter(|&i| i != id::LOGIN && i != id::RESPAWN)
+        .collect();
     let mut x = 0x9E37_79B9_7F4A_7C15u64;
     let mut next = || {
         x ^= x << 13;

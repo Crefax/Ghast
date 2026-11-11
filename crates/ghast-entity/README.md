@@ -181,14 +181,21 @@ entities (35 % rel move, 20 % move+look, 15 % look, 10 % head rotation, 7 % velo
 | 1.8 tracker, everything on | 25 ns (40 M packets/s) |
 | 1.8 generated full decode alone (no tracking), for comparison | 29 ns |
 | 1.16.5 tracker, everything on | 26-29 ns (shared machine) |
-| 26.1 tracker, everything on (same mix, 26.1 formats; syncs instead of teleports) | 45 ns |
-| 1.16.5 / 26.1 relative move alone | 25 ns / 39 ns |
-| 26.1 `tick()`, 300 interpolating zombies / 300 settled | 44 ns / 10 ns per entity |
+| 26.1 tracker, everything on (same mix, 26.1 formats; syncs instead of teleports) | 40 ns |
+| 1.16.5 / 26.1 relative move alone | 22 ns / 39 ns |
+| 26.1 `tick()`, 300 interpolating zombies / 300 settled | 40 ns / 7 ns per entity |
 | `wants()` filter check | 0.8 ns |
 
-Memory: `size_of::<Entity>()` is 232 bytes without the `v26_1` feature and 400 with it (the
-26.1 client state: codec base, interpolation target and previous step, head / body turn,
-cached dimensions); the hash map slot adds the key.
+Where 26.1 spends the extra time per move (measured by removing parts): about 13 ns is the
+client's interpolation bookkeeping on every position packet (compare with the running target,
+store target, rotation and the previous position / rotation, as `InterpolationHandler.interpolateTo`
+does), about 7 ns the second cache line of the boxed 26.1 state. Syncs read 64 bytes instead of
+1.16's 34-byte teleport and look up the chunk. LpVec3 velocities cost what 1.16's shorts do.
+
+Memory: `size_of::<Entity>()` is 232 bytes with every version compiled in (as in 0.3.0) and 224
+without `v26_1`; a 26.1 entity adds one 120-byte heap block (interpolation target and previous
+step, head / body turn, cached dimensions, size keys; the `VecDeltaCodec` base lives inline in
+the entity's version slot). The hash map slot adds the key.
 
 ## Tests
 

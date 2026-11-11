@@ -114,83 +114,140 @@ pub mod meta {
     pub const ITEM: u8 = 8;
 }
 
-/// The 26.1 client state of an entity (`InterpolationHandler`, `VecDeltaCodec`, size keys).
+/// Bits of `State::flags`.
+mod st {
+    /// `previousTickPosition` / `previousTickRot` are set.
+    pub const HAS_PREV: u8 = 1;
+    /// The scale changed: vanilla refreshes the dimensions at the end of the entity's next tick
+    /// (`refreshDirtyAttributes`).
+    pub const SCALE_DIRTY: u8 = 2;
+    /// Nothing changes in a tick until a packet or a movement disturbs the entity.
+    pub const SETTLED: u8 = 4;
+    /// Living: a sleeping position is set (`isSleeping`: the tick zeroes xRot).
+    pub const SLEEPING: u8 = 8;
+    /// The baby flag.
+    pub const BABY: u8 = 16;
+    /// `dims` holds the cached dimensions.
+    pub const HAS_DIMS: u8 = 32;
+}
+
+/// The 26.1 client state of an entity (`InterpolationHandler`, `VecDeltaCodec`, size keys),
+/// boxed so entities of the other versions do not carry it.
 #[derive(Clone, Debug)]
 pub(crate) struct State {
     pub(crate) td: Option<&'static EntityTypeData>,
-    /// `VecDeltaCodec` base (the last absolute packet position).
-    pub(crate) base: [f64; 3],
     /// Interpolation target and its rotation `(yRot, xRot)`.
     target: [f64; 3],
-    target_rot: [f32; 2],
-    /// `previousTickPosition` / `previousTickRot` (`(xRot, yRot)`, vanilla's `Vec2` order).
+    /// `previousTickPosition` (valid with [`st::HAS_PREV`]).
     prev: [f64; 3],
+    target_rot: [f32; 2],
+    /// `previousTickRot` (`(xRot, yRot)`, vanilla's `Vec2` order).
     prev_rot: [f32; 2],
-    has_prev: bool,
-    /// Remaining interpolation steps (0 = none active).
-    steps: u8,
+    /// Vanilla's cached `dimensions` (valid with [`st::HAS_DIMS`]; refreshed on size metadata, at
+    /// spawn, and after a scale change at the end of the next tick).
+    dims: ghast_data::EntityDimensions,
     head_target: f32,
-    head_steps: u8,
-    pose: u8,
-    baby: bool,
-    stand_flags: u8,
-    slime_size: i32,
-    /// `getScale()` (sanitized `minecraft:scale` attribute).
-    scale: f32,
-    /// The scale changed: vanilla refreshes the dimensions in the entity's next tick
-    /// (`refreshDirtyAttributes` in `baseTick`).
-    scale_dirty: bool,
-    /// Vanilla's cached `dimensions` (refreshed on size metadata, at spawn, and after a scale
-    /// change in the next tick).
-    dims: Option<ghast_data::EntityDimensions>,
     /// `yBodyRot`, and the mob `BodyRotationControl` state.
     body_yaw: f32,
-    head_stable_time: i32,
     last_stable_head: f32,
-    /// Nothing changes in a tick until a packet or a movement disturbs the entity.
-    settled: bool,
-    /// Living: a sleeping position is set (`isSleeping`: the tick zeroes xRot).
-    sleeping: bool,
-    /// Players: the tab list object the entity cached (`AbstractClientPlayer.getPlayerInfo`,
-    /// 0 = none yet) and its game mode once it left the tab list.
-    info_gen: u64,
-    frozen_game_mode: i32,
-    /// Foxes: their own flags byte (`Fox.isSleeping` = bit 0x20 instead of the bed position).
-    fox_flags: u8,
+    /// `getScale()` (sanitized `minecraft:scale` attribute).
+    scale: f32,
+    slime_size: i32,
     /// Item entities: the stack size (0 = empty / unknown).
     item_count: i32,
+    /// Players: the tab list object the entity cached (`AbstractClientPlayer.getPlayerInfo`,
+    /// 0 = none yet) and its game mode once it left the tab list.
+    info_gen: u32,
+    frozen_game_mode: i8,
+    /// Remaining interpolation steps (0 = none active).
+    steps: u8,
+    head_steps: u8,
+    /// `headStableTime`, saturated at 30 (vanilla only compares it with 10 and 20).
+    head_stable_time: u8,
+    pose: u8,
+    stand_flags: u8,
+    /// Foxes: their own flags byte (`Fox.isSleeping` = bit 0x20 instead of the bed position).
+    fox_flags: u8,
+    /// [`st`] bits.
+    flags: u8,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State {
-            td: None,
-            base: [0.0; 3],
-            target: [0.0; 3],
-            target_rot: [0.0; 2],
-            prev: [0.0; 3],
-            prev_rot: [0.0; 2],
-            has_prev: false,
-            steps: 0,
-            head_target: 0.0,
-            head_steps: 0,
-            pose: 0,
-            baby: false,
-            stand_flags: 0,
-            slime_size: 1,
-            scale: 1.0,
-            scale_dirty: false,
-            dims: None,
-            body_yaw: 0.0,
-            head_stable_time: 0,
-            last_stable_head: 0.0,
-            settled: false,
-            sleeping: false,
-            fox_flags: 0,
-            info_gen: 0,
-            frozen_game_mode: 0,
-            item_count: 0,
+impl State {
+    const EMPTY: State = State {
+        td: None,
+        target: [0.0; 3],
+        prev: [0.0; 3],
+        target_rot: [0.0; 2],
+        prev_rot: [0.0; 2],
+        dims: ghast_data::EntityDimensions {
+            width: 0.0,
+            height: 0.0,
+            eye_height: 0.0,
+        },
+        head_target: 0.0,
+        body_yaw: 0.0,
+        last_stable_head: 0.0,
+        scale: 1.0,
+        slime_size: 1,
+        item_count: 0,
+        info_gen: 0,
+        frozen_game_mode: 0,
+        steps: 0,
+        head_steps: 0,
+        head_stable_time: 0,
+        pose: 0,
+        stand_flags: 0,
+        fox_flags: 0,
+        flags: 0,
+    };
+
+    #[inline]
+    fn flag(&self, f: u8) -> bool {
+        self.flags & f != 0
+    }
+
+    #[inline]
+    fn set_flag(&mut self, f: u8, on: bool) {
+        if on {
+            self.flags |= f;
+        } else {
+            self.flags &= !f;
         }
+    }
+
+    #[inline]
+    fn dims(&self) -> Option<ghast_data::EntityDimensions> {
+        self.flag(st::HAS_DIMS).then_some(self.dims)
+    }
+
+    #[inline]
+    fn set_dims(&mut self, d: Option<ghast_data::EntityDimensions>) {
+        self.set_flag(st::HAS_DIMS, d.is_some());
+        if let Some(d) = d {
+            self.dims = d;
+        }
+    }
+}
+
+/// The boxed 26.1 state of an entity: empty (one pointer) for the other versions; reads of an
+/// empty one see the defaults, the first write allocates.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Ext(Option<Box<State>>);
+
+static EMPTY_STATE: State = State::EMPTY;
+
+impl Deref for Ext {
+    type Target = State;
+    #[inline]
+    fn deref(&self) -> &State {
+        self.0.as_deref().unwrap_or(&EMPTY_STATE)
+    }
+}
+
+impl std::ops::DerefMut for Ext {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut State {
+        self.0.get_or_insert_with(|| Box::new(State::EMPTY))
     }
 }
 
@@ -220,22 +277,41 @@ fn chunk_key(x: i32, z: i32) -> u64 {
     u64::from(x as u32) | (u64::from(z as u32) << 32)
 }
 
+/// `Mth.floor(double)`: `(int) v`, minus one when that is above `v` (no libm `floor` call).
+#[inline]
+fn mth_floor(v: f64) -> i32 {
+    let i = v as i32;
+    if v < f64::from(i) { i - 1 } else { i }
+}
+
 /// `Mth.floor` of a coordinate, then the chunk.
 #[inline]
 fn chunk_of(p: [f64; 3]) -> u64 {
-    let f = |v: f64| (v.floor() as i32) >> 4;
-    chunk_key(f(p[0]), f(p[2]))
+    chunk_key(mth_floor(p[0]) >> 4, mth_floor(p[2]) >> 4)
 }
 
-/// Java `Math.round(double)` (half up, saturating, NaN = 0).
+/// Java `Math.round(double)` (half up, saturating, NaN = 0), without a libm `floor` call.
 #[inline]
 fn jround(x: f64) -> i64 {
-    if x.is_nan() {
-        return 0;
+    if x.is_nan() || x.abs() >= 4.5e15 {
+        // Integral already (or NaN / out of range): the saturating cast is Java's result.
+        return x as i64;
     }
-    let f = x.floor();
-    let r = if x - f >= 0.5 { f + 1.0 } else { f };
-    r as i64
+    let t = x as i64;
+    let f = if x < t as f64 { t - 1 } else { t };
+    if x - f as f64 >= 0.5 { f + 1 } else { f }
+}
+
+/// The `VecDeltaCodec` base (the last absolute packet position), kept inline in the entity's
+/// version-specific `traced` slot (as `f64` bits) so a move needs no second cache line for it.
+#[inline]
+fn base(e: &Entity) -> [f64; 3] {
+    e.traced.map(|b| f64::from_bits(b as u64))
+}
+
+#[inline]
+fn set_base(e: &mut Entity, p: [f64; 3]) {
+    e.traced = p.map(|c| c.to_bits() as i64);
 }
 
 /// `VecDeltaCodec.decode`.
@@ -307,28 +383,31 @@ fn snap_to(e: &mut Entity, p: [f64; 3], y: f32, x: f32) {
 }
 
 /// `Entity.moveOrInterpolateTo(position?, yRot?, xRot?)`.
+#[inline]
 fn move_or_interpolate(e: &mut Entity, p: Option<[f64; 3]>, y: Option<f32>, x: Option<f32>) {
-    match e.m.td.and_then(|t| t.interpolation) {
+    // One borrow of the boxed state for the whole update.
+    let m = &mut *e.m;
+    match m.td.and_then(|t| t.interpolation) {
         Some(n) => {
-            let active = e.m.steps > 0;
-            let p = p.unwrap_or(if active { e.m.target } else { e.pos });
-            let y = y.unwrap_or(if active { e.m.target_rot[0] } else { e.yaw });
-            let x = x.unwrap_or(if active { e.m.target_rot[1] } else { e.pitch });
+            let active = m.steps > 0;
+            let p = p.unwrap_or(if active { m.target } else { e.pos });
+            let y = y.unwrap_or(if active { m.target_rot[0] } else { e.yaw });
+            let x = x.unwrap_or(if active { m.target_rot[1] } else { e.pitch });
             if n == 0 {
+                m.steps = 0;
+                m.set_flag(st::HAS_PREV, false);
                 snap_to(e, p, y, x);
-                e.m.steps = 0;
-                e.m.has_prev = false;
             } else if !active
-                || !same_f32(e.m.target_rot[0], y)
-                || !same_f32(e.m.target_rot[1], x)
-                || !(0..3).all(|i| same_f64(e.m.target[i], p[i]))
+                || !same_f32(m.target_rot[0], y)
+                || !same_f32(m.target_rot[1], x)
+                || !(0..3).all(|i| same_f64(m.target[i], p[i]))
             {
-                e.m.steps = n;
-                e.m.target = p;
-                e.m.target_rot = [y, x];
-                e.m.prev = e.pos;
-                e.m.prev_rot = [e.pitch, e.yaw];
-                e.m.has_prev = true;
+                m.steps = n;
+                m.target = p;
+                m.target_rot = [y, x];
+                m.prev = e.pos;
+                m.prev_rot = [e.pitch, e.yaw];
+                m.set_flag(st::HAS_PREV, true);
             }
         }
         None => {
@@ -461,7 +540,7 @@ impl Tracker {
         let mut discard: Vec<i32> = Vec::new();
         let players = &self.store.players;
         for e in self.store.map.values_mut() {
-            if e.m.settled || Some(e.id) == me {
+            if e.m.flag(st::SETTLED) || Some(e.id) == me {
                 continue;
             }
             if !e.is_player() && !chunks.contains_key(&chunk_of(e.pos)) {
@@ -539,7 +618,7 @@ impl Tracker {
                     Some(e) if living(e) => {
                         e.m.head_target = angle(b);
                         e.m.head_steps = 3;
-                        e.m.settled = false;
+                        e.m.set_flag(st::SETTLED, false);
                         true
                     }
                     _ => false,
@@ -591,7 +670,7 @@ impl Tracker {
                 let r = s.set_passengers(vehicle, ids);
                 // Riding changes the body turn of mob vehicles: let every entity tick again.
                 for e in s.map.values_mut() {
-                    e.m.settled = false;
+                    e.m.set_flag(st::SETTLED, false);
                 }
                 r
             }
@@ -684,7 +763,7 @@ impl Tracker {
                 // Game modes feed Player.tick (spectators leave the ground).
                 for e in s.map.values_mut() {
                     if e.is_player() {
-                        e.m.settled = false;
+                        e.m.set_flag(st::SETTLED, false);
                     }
                 }
                 true
@@ -698,7 +777,7 @@ impl Tracker {
                         // Player entities holding this tab list object keep it, frozen.
                         for e in s.map.values_mut() {
                             if e.m.info_gen == p.generation {
-                                e.m.frozen_game_mode = p.game_mode;
+                                e.m.frozen_game_mode = p.game_mode as i8;
                             }
                         }
                     }
@@ -821,7 +900,7 @@ fn tick_entity(
         e.m.head_steps -= 1;
     }
     let Some(t) = e.m.td else {
-        e.m.settled = true;
+        e.m.set_flag(st::SETTLED, true);
         return;
     };
     let mut settled =
@@ -848,7 +927,7 @@ fn tick_entity(
                 m.body_yaw = rotate_if_necessary(m.body_yaw, e.head_yaw, max);
                 settled = false;
             } else {
-                m.head_stable_time = m.head_stable_time.saturating_add(1).min(1000);
+                m.head_stable_time = m.head_stable_time.saturating_add(1).min(30);
                 if m.head_stable_time > 10 {
                     let since = m.head_stable_time - 10;
                     let frac = (since as f32 / 10.0).clamp(0.0, 1.0);
@@ -865,17 +944,20 @@ fn tick_entity(
     let sleeping = if t.name == "fox" {
         e.m.fox_flags & 0x20 != 0
     } else {
-        e.m.sleeping
+        e.m.flag(st::SLEEPING)
     };
     if sleeping {
         set_xrot(e, 0.0);
     }
     // refreshDirtyAttributes, at the end of LivingEntity.tick.
-    if e.m.scale_dirty {
-        e.m.scale_dirty = false;
-        e.m.dims = compute_dims(e);
+    if e.m.flag(st::SCALE_DIRTY) {
+        e.m.set_flag(st::SCALE_DIRTY, false);
+        {
+            let d = compute_dims(e);
+            e.m.set_dims(d);
+        }
     }
-    e.m.settled = settled;
+    e.m.set_flag(st::SETTLED, settled);
 }
 
 /// The game mode a player entity sees (`AbstractClientPlayer.getPlayerInfo` caches the tab list
@@ -887,14 +969,14 @@ fn game_mode(players: &Fast<uuid::Uuid, PlayerInfo>, e: &Entity) -> Option<i32> 
     }
     match cur {
         Some(p) if p.generation == e.m.info_gen => Some(p.game_mode),
-        _ => Some(e.m.frozen_game_mode),
+        _ => Some(i32::from(e.m.frozen_game_mode)),
     }
 }
 
 /// One `InterpolationHandler.interpolate()` step.
 fn step(e: &mut Entity, no_collision: &mut impl FnMut(&Entity, [f64; 6]) -> bool) {
     let alpha = 1.0 / f64::from(e.m.steps);
-    if e.m.has_prev {
+    if e.m.flag(st::HAS_PREV) {
         let d = [
             e.pos[0] - e.m.prev[0],
             e.pos[1] - e.m.prev[1],
@@ -934,7 +1016,7 @@ fn step(e: &mut Entity, no_collision: &mut impl FnMut(&Entity, [f64; 6]) -> bool
     e.m.steps -= 1;
     e.m.prev = p;
     e.m.prev_rot = [e.pitch, e.yaw];
-    e.m.has_prev = true;
+    e.m.set_flag(st::HAS_PREV, true);
 }
 
 /// What a spawn did to vanilla's id-keyed tick list.
@@ -972,7 +1054,7 @@ fn spawn(s: &mut Entities, r: &mut Reader<'_>, chunks: &Fast<u64, ()>) -> R<(App
     e.living = td.is_living();
     e.uuid = uuid;
     e.m.td = Some(td);
-    e.m.base = pos;
+    set_base(&mut e, pos);
     e.data = data;
     e.velocity = v;
     if td.is_living() {
@@ -993,7 +1075,8 @@ fn spawn(s: &mut Entities, r: &mut Reader<'_>, chunks: &Fast<u64, ()>) -> R<(App
         snap_to(&mut e, pos, yaw, pitch);
         e.head_yaw = e.yaw;
     }
-    e.m.dims = compute_dims(&e);
+    let d = compute_dims(&e);
+    e.m.set_dims(d);
     // ClientLevel.addEntity: the old entity with this id goes first; then the entity lookup
     // refuses a UUID that another entity already has ("Duplicate entity UUID").
     let removed = s.remove(eid);
@@ -1049,14 +1132,15 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         return Ok(false);
     };
     let ctl = controlled(me, e);
+    let m = &mut *e.m;
     if ctl {
-        e.m.base = decode_delta(e.m.base, d);
+        set_base(e, decode_delta(base(e), d));
         return Ok(true);
     }
-    e.m.settled = false;
+    m.set_flag(st::SETTLED, false);
     if pos {
-        let p = decode_delta(e.m.base, d);
-        e.m.base = p;
+        let p = decode_delta(base(e), d);
+        set_base(e, p);
         move_or_interpolate(e, Some(p), rot.map(|r| r.0), rot.map(|r| r.1));
     } else if let Some((y, x)) = rot {
         move_or_interpolate(e, None, Some(y), Some(x));
@@ -1097,8 +1181,8 @@ fn sync(
         return Ok(false);
     };
     let ctl = controlled(me, e);
-    e.m.base = p;
-    e.m.settled = false;
+    set_base(e, p);
+    e.m.set_flag(st::SETTLED, false);
     if !ctl {
         let far = dist_sqr(e.pos, p) > 4096.0;
         let ticking =
@@ -1126,7 +1210,7 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
         return Ok(false);
     };
     let has = |bit: u32| flags & (1 << bit) != 0;
-    e.m.settled = false;
+    e.m.set_flag(st::SETTLED, false);
     // PositionMoveRotation.of: the interpolation target while interpolating.
     let active = e.m.steps > 0;
     let (sp, sy, sx) = if active {
@@ -1396,7 +1480,7 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
         for (i, v) in scratch.drain(..) {
             e.meta.set(i, v);
         }
-        e.m.settled = false;
+        e.m.set_flag(st::SETTLED, false);
         let resize = keys.pose.is_some()
             || keys.baby.is_some()
             || keys.stand.is_some()
@@ -1405,7 +1489,7 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
             e.m.pose = p;
         }
         if let Some(b) = keys.baby {
-            e.m.baby = b;
+            e.m.set_flag(st::BABY, b);
         }
         if let Some(f) = keys.stand {
             e.m.stand_flags = f;
@@ -1420,10 +1504,13 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
             e.m.body_yaw = e.head_yaw;
         }
         if resize {
-            e.m.dims = compute_dims(e);
+            {
+                let d = compute_dims(e);
+                e.m.set_dims(d);
+            }
         }
         if let Some(b) = keys.bed {
-            e.m.sleeping = b.is_some();
+            e.m.set_flag(st::SLEEPING, b.is_some());
             if let Some(b) = b {
                 // LivingEntity.setPosToBed.
                 e.pos = [
@@ -1504,8 +1591,8 @@ fn attributes(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
             Some("happy_ghast") => v.min(1.0),
             _ => v,
         };
-        e.m.scale_dirty = true;
-        e.m.settled = false;
+        e.m.set_flag(st::SCALE_DIRTY, true);
+        e.m.set_flag(st::SETTLED, false);
     }
     Ok(true)
 }
@@ -1551,7 +1638,7 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                     skip_string(r)?;
                 }
             }
-            let next = s.generations + 1;
+            let next = s.generations.wrapping_add(1).max(1);
             let fresh = !s.players.contains_key(&uuid);
             if fresh {
                 s.generations = next;
@@ -1577,7 +1664,16 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
             let k = r.read_len_varint(r.remaining())?;
             r.skip(k)?;
         }
-        let gm = if has(2) { Some(r.read_varint()?) } else { None };
+        // GameType.byId: out-of-range ids read as survival.
+        let gm = if has(2) {
+            Some(
+                Some(r.read_varint()?)
+                    .filter(|g| (0..4).contains(g))
+                    .unwrap_or(0),
+            )
+        } else {
+            None
+        };
         let listed = if has(3) { Some(r.read_bool()?) } else { None };
         let ping = if has(4) { Some(r.read_varint()?) } else { None };
         let display = if has(5) {
@@ -1621,7 +1717,7 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
 /// or position sync; teleports do not change it).
 #[must_use]
 pub fn server_position(e: &Entity) -> [f64; 3] {
-    e.m.base
+    base(e)
 }
 
 /// The interpolation target and its `(yRot, xRot)` while an interpolation is active.
@@ -1726,7 +1822,7 @@ pub(crate) fn vanilla_size(e: &Entity) -> Option<&'static ghast_data::VanillaEnt
 
 /// The client's cached dimensions (`Entity.dimensions`).
 pub(crate) fn dimensions(e: &Entity) -> Option<ghast_data::EntityDimensions> {
-    e.m.dims
+    e.m.dims()
 }
 
 /// `getDimensions(getPose())`: variant (baby flag, slime size, armor stand flags), pose, scale.
@@ -1744,7 +1840,7 @@ fn compute_dims(e: &Entity) -> Option<ghast_data::EntityDimensions> {
             _ => "default",
         };
         (v, None)
-    } else if t.baby_meta.is_some() && m.baby {
+    } else if t.baby_meta.is_some() && m.flag(st::BABY) {
         ("baby", None)
     } else {
         ("default", None)
@@ -1770,6 +1866,15 @@ mod tests {
         assert_eq!(jround(-2.500_000_1), -3);
         assert_eq!(jround(0.499_999_999_999_999_94), 0);
         assert_eq!(jround(f64::NAN), 0);
+        assert_eq!(jround(-0.5), 0);
+        assert_eq!(jround(-0.500_000_000_000_000_1), -1);
+        assert_eq!(jround(1e300), i64::MAX);
+        assert_eq!(jround(-4.5e15 - 1.0), -4_500_000_000_000_001);
+        for i in -2000..2000 {
+            let x = f64::from(i) * 0.137_5 + 1e-3 * f64::from(i % 7);
+            assert_eq!(jround(x), (x + 0.5).floor() as i64, "{x}");
+            assert_eq!(mth_floor(x), x.floor() as i32, "{x}");
+        }
         let b = [1.0 / 3.0, -7.25, 1e-9];
         assert_eq!(decode_delta(b, [0; 3]), b);
         let d = decode_delta(b, [4096, 0, -1]);

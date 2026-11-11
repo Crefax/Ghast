@@ -256,8 +256,9 @@ pub struct Entity {
     /// Vanilla size table entry (resolved at spawn).
     pub(crate) sizer: Option<&'static ghast_data::VanillaEntitySize>,
     pub(crate) pos: [f64; 3],
-    pub(crate) fixed: [i32; 3],
-    /// 1.9 – 1.12: the tracked position in 1/4096 blocks (`lfloor(x * 4096)`, plus moves).
+    /// Per version: 1.8 the server position in 1/32 blocks (`serverPos`, i32 values); 1.9 – 1.12
+    /// the tracked position in 1/4096 blocks (`lfloor(x * 4096)`, plus moves); 26.1 the
+    /// `VecDeltaCodec` base (`f64` bits).
     pub(crate) traced: [i64; 3],
     pub(crate) yaw: f32,
     pub(crate) pitch: f32,
@@ -271,9 +272,10 @@ pub struct Entity {
     pub(crate) meta: Metadata,
     pub(crate) equipment: Option<Box<[Option<Item>; EQUIPMENT_SLOTS]>>,
     pub(crate) effects: Vec<Effect>,
-    /// 26.1 client state (codec base, interpolation, size keys).
+    /// 26.1 client state (codec base, interpolation, size keys), boxed: one pointer for the
+    /// other versions.
     #[cfg(feature = "v26_1")]
-    pub(crate) m: crate::v26_1::State,
+    pub(crate) m: crate::v26_1::Ext,
 }
 
 impl Entity {
@@ -286,7 +288,6 @@ impl Entity {
             era: Era::V1_8,
             sizer: None,
             pos: [0.0; 3],
-            fixed: [0; 3],
             traced: [0; 3],
             yaw: 0.0,
             pitch: 0.0,
@@ -301,7 +302,7 @@ impl Entity {
             equipment: None,
             effects: Vec::new(),
             #[cfg(feature = "v26_1")]
-            m: crate::v26_1::State::default(),
+            m: crate::v26_1::Ext::default(),
         }
     }
 
@@ -435,7 +436,11 @@ impl Entity {
     /// 1.8 only: the raw server position in 1/32 blocks (`[0; 3]` in 1.12 and 1.16).
     #[must_use]
     pub fn fixed_position(&self) -> [i32; 3] {
-        self.fixed
+        if self.era == Era::V1_8 {
+            self.traced.map(|t| t as i32)
+        } else {
+            [0; 3]
+        }
     }
 
     /// Body yaw in degrees as vanilla computes it from the angle byte (`b * 360 / 256f`).

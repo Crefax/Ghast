@@ -163,7 +163,7 @@ pub struct PlayerInfo {
     /// 26.1 tab list order (`UPDATE_LIST_ORDER`; 0 before).
     pub list_order: i32,
     /// Which tab list object this is (26.1 player entities keep the one they first saw).
-    pub(crate) generation: u64,
+    pub(crate) generation: u32,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -215,7 +215,7 @@ pub struct Entities {
     /// The tracker's protocol family (selects the vanilla size table).
     pub(crate) era: crate::entity::Era,
     /// Last tab list object generation handed out.
-    pub(crate) generations: u64,
+    pub(crate) generations: u32,
 }
 
 impl Entities {
@@ -535,7 +535,14 @@ mod tests {
     fn entity_size() {
         let n = std::mem::size_of::<Entity>();
         eprintln!("size_of::<Entity>() = {n}");
-        assert!(n <= if cfg!(feature = "v26_1") { 400 } else { 264 }, "{n}");
+        // 0.3.0: 232 bytes. The 26.1 state is boxed: one pointer in the entity.
+        assert!(n <= if cfg!(feature = "v26_1") { 232 } else { 224 }, "{n}");
+        #[cfg(feature = "v26_1")]
+        {
+            let b = std::mem::size_of::<crate::v26_1::State>();
+            eprintln!("size_of::<v26_1::State>() = {b} (heap, 26.1 entities only)");
+            assert!(b <= 120, "{b}");
+        }
     }
 
     #[test]

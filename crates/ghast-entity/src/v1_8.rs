@@ -367,7 +367,7 @@ pub fn info(ty: EntityType) -> Option<&'static ghast_data::EntityInfo> {
 
 #[inline]
 fn set_fixed(e: &mut Entity, p: [i32; 3]) {
-    e.fixed = p;
+    e.traced = p.map(i64::from);
     e.pos = p.map(|c| f64::from(c) / 32.0);
 }
 
@@ -399,9 +399,9 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         return Ok(false);
     };
     let f = [
-        e.fixed[0].wrapping_add(i32::from(d[0])),
-        e.fixed[1].wrapping_add(i32::from(d[1])),
-        e.fixed[2].wrapping_add(i32::from(d[2])),
+        (e.traced[0] as i32).wrapping_add(i32::from(d[0])),
+        (e.traced[1] as i32).wrapping_add(i32::from(d[1])),
+        (e.traced[2] as i32).wrapping_add(i32::from(d[2])),
     ];
     set_fixed(e, f);
     if let Some((y, p)) = rot {

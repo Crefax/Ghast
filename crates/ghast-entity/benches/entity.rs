@@ -383,6 +383,24 @@ fn benches(c: &mut Criterion) {
             }
         })
     });
+    for (name, pid) in [
+        ("move+look", id16::ENTITY_MOVE_LOOK),
+        ("look", id16::ENTITY_LOOK),
+        ("head", id16::ENTITY_HEAD_ROTATION),
+        ("velocity", id16::ENTITY_VELOCITY),
+        ("teleport", id16::ENTITY_TELEPORT),
+        ("metadata", id16::ENTITY_METADATA),
+    ] {
+        let only: Vec<RawPacket> = stream.iter().filter(|p| p.id == pid).cloned().collect();
+        g.throughput(Throughput::Elements(only.len() as u64));
+        g.bench_function(format!("1.16.5 {name} only"), |b| {
+            b.iter(|| {
+                for p in &only {
+                    black_box(t.apply(p).unwrap());
+                }
+            })
+        });
+    }
     g.throughput(Throughput::Elements(N as u64));
 
     let (spawns, stream) = stream_26_1(N);
@@ -408,6 +426,24 @@ fn benches(c: &mut Criterion) {
             }
         })
     });
+    for (name, pid) in [
+        ("move+look", id26::ENTITY_MOVE_LOOK),
+        ("look", id26::ENTITY_LOOK),
+        ("head", id26::ENTITY_HEAD_ROTATION),
+        ("velocity", id26::ENTITY_VELOCITY),
+        ("sync", id26::SYNC_ENTITY_POSITION),
+        ("metadata", id26::ENTITY_METADATA),
+    ] {
+        let only: Vec<RawPacket> = stream.iter().filter(|p| p.id == pid).cloned().collect();
+        g.throughput(Throughput::Elements(only.len() as u64));
+        g.bench_function(format!("26.1 {name} only"), |b| {
+            b.iter(|| {
+                for p in &only {
+                    black_box(t.apply(p).unwrap());
+                }
+            })
+        });
+    }
     let moves: Vec<RawPacket> = stream
         .iter()
         .filter(|p| p.id == id26::REL_ENTITY_MOVE)
