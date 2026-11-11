@@ -1063,8 +1063,9 @@ byte-identical to vanilla's own encoding (checked), and the bytes decode to an e
 vectors hold 1–5-entry enchantment maps and 1–4-entry stored enchantments. `hashed_wire` is
 written with the added map / removed set in component type id order (vanilla's order is
 arbitrary: IdentityHashMap / HashSet; the server compares contents); `json` has sorted keys. Two
-separate JVM runs produce identical files. (Debug-stick maps with several entries did not survive
-the network round trip in the harness; only single-entry ones are in the vectors.)
+separate JVM runs produce identical files. (Debug-stick maps: the curated several-entry values came
+out of parsing + network round trip with one entry; the cause is not investigated, so only
+single-entry debug-stick maps are in the vectors.)
 
 ## Notes for implementers
 
