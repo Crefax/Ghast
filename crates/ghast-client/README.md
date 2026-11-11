@@ -436,4 +436,3 @@ time, standing at the superflat spawn:
 | RSS / PSS | 3.9 MB / 1.8 MB | 3.8 MB / 2.1 MB |
 | threads | 1 | 1 |
 
-mineflayer AFK baseline on the same 1.8 lab: 1.70 % of one core, ~120 MB RSS, 7 threads.

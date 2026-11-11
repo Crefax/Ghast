@@ -16,7 +16,6 @@ Status: early (0.3, on crates.io). APIs will still change; see CONTRIBUTING.md f
 
 | | ghast | |
 |---|---|---|
-| AFK bot on a Raspberry Pi 5, 300 s, side by side with a mineflayer 4.39 / Node 22 AFK bot on the same 1.8 server | **0.33 %** of one core, **4.1 MB** RSS, 1 thread | mineflayer: 2.19 %, 120 MB RSS, 7 threads |
 | Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 9.32 million ticks | positions, velocities, flags and packets compared by their bits |
 | Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use) | **0 diffs** over 4.0 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |

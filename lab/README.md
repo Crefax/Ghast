@@ -71,14 +71,6 @@ and run `measure.sh <pid> 300` for each after a warm-up.
 
 ## Results
 
-mineflayer 4.39.0 AFK bot (Node 24, 1.8.9, local 1.8 lab, x86_64 WSL), 300 s after a 30 s warm-up
-(2026-11-03): **1.70 % of one core** (10 s max 2.65 %), RSS 110-143 MB (peak 144 MB), PSS avg 121 MB,
-7 threads, ~11.5 packets/s in, 0 Grim flags. A 20 s check on a Raspberry Pi 5 (Node 22): 4.05 %, RSS 120 MB.
-
-Side by side on a Raspberry Pi 5 (Paper 1.8.8 + Grim on the same machine, 300 s AFK, 2026-11-03): ghast `afk`
-0.33 % of one core (worst 10 s 0.40 %), RSS 4.1 MB, PSS 2.8 MB, 1 thread; mineflayer 4.39 / Node 22 2.19 %
-(worst 3.88 %), RSS 120 MB, PSS 77 MB, 7 threads; 0 Grim flags for both.
-
 ghast-protocol criterion benches, Pi 5 (Cortex-A76 @ 2.4 GHz, cross-built as above, `--warm-up-time 1
 --measurement-time 3`) vs x86_64 WSL (same benches, earlier run on the dev machine):
 
