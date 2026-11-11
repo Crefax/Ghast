@@ -121,7 +121,7 @@ impl Behavior for Probe {
         }
         let steps = self.steps();
         if self.step < steps.len() {
-            let (what, click) = steps[self.step].clone();
+            let (what, click) = steps[self.step];
             self.clicking = true;
             match ctx.click(click) {
                 Ok(_) => {
