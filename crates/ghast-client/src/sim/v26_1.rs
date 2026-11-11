@@ -494,17 +494,9 @@ impl Sim for Sim26 {
                     log::debug!("entity tracker: session packet 0x{:02x}: {e}", r.id);
                 }
             });
-            // The columns already loaded tick their entities (the tracker reads only the
-            // column coordinates of map_chunk).
-            use ghast_protocol::v26_1::play::clientbound::id;
+            // The columns already loaded tick their entities.
             for (c, _) in self.world.columns().iter() {
-                let mut b = c.x.to_be_bytes().to_vec();
-                b.extend(c.z.to_be_bytes());
-                let r = RawPacket {
-                    id: id::MAP_CHUNK,
-                    body: b.into(),
-                };
-                let _ = t.apply(&r);
+                t.mark_column_loaded(c.x, c.z);
             }
             t
         });
@@ -523,9 +515,23 @@ impl Sim for Sim26 {
     }
 
     fn tick_entities(&mut self) {
-        // Assumes a moved interpolation target is free (no Level.noCollision test yet).
+        // ClientLevel.tickEntities; a moved interpolation target must be free of blocks and
+        // the border (Level.noCollision without the entity part).
         if let Some(t) = &mut self.entities {
-            t.tick();
+            let (world, level) = (&self.world, &self.player.level);
+            t.tick_with(|e, bb| {
+                let pos = e.position();
+                modern::no_block_collision::<V26_1, _>(
+                    world,
+                    level,
+                    pos,
+                    bb,
+                    &modern::CollisionContext {
+                        feet_y: pos[1],
+                        ..Default::default()
+                    },
+                )
+            });
         }
     }
 
