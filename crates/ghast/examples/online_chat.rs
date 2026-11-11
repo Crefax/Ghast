@@ -17,10 +17,10 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use ghast::auth::SecretString;
 use ghast::auth::microsoft::{
     Endpoints, MicrosoftAuth, MicrosoftConfig, MinecraftProfile, MinecraftSession,
 };
-use ghast::auth::SecretString;
 use ghast::{Account, Behavior, Client, Controls, Interests, TickContext};
 
 struct Online {
@@ -60,8 +60,8 @@ impl Behavior for Online {
         let t = since / 30;
         ctx.set_aim(90.0, 0.0);
         ctx.set_controls(Controls {
-            forward: t % 2 == 0,
-            back: t % 2 == 1,
+            forward: t.is_multiple_of(2),
+            back: !t.is_multiple_of(2),
             ..Controls::NONE
         });
         if since >= 80 && since.is_multiple_of(40) && self.step < SAY.len() {
