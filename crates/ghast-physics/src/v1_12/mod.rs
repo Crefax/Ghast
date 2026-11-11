@@ -10,6 +10,7 @@
 mod blocks;
 mod fluid;
 mod player;
+mod ray;
 
 pub use player::{
     Effects, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT, SentState,
@@ -18,6 +19,7 @@ pub use player::{
 
 /// The 1.12 block state the world view returns (re-exported from `ghast-data`).
 pub use ghast_data::v1_12::BlockState;
+pub use ray::{RayShape, ray_shape};
 
 use crate::input::{Packets, TickInput};
 use crate::math::Aabb;

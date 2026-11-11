@@ -46,7 +46,6 @@ mod input;
 pub mod math;
 #[cfg(feature = "v26_1")]
 pub mod modern;
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub mod pick;
 pub mod rotation;
 #[cfg(feature = "v1_12")]

@@ -27,6 +27,7 @@ pub(crate) mod id {
     pub const IRON_TRAPDOOR: u8 = 167;
     pub const CHORUS_PLANT: u8 = 199;
     pub const CHORUS_FLOWER: u8 = 200;
+    pub const PISTON_EXTENSION: u8 = 36;
 }
 
 /// How a block's collision boxes are produced.

@@ -26,10 +26,21 @@
 //! (26.1 spears), multipart entities (ender dragon), and block-entity-dependent outlines (shulker
 //! boxes are a full cube here; moving pistons have no outline here).
 
+#![cfg_attr(
+    not(any(feature = "v1_16_5", feature = "v26_1")),
+    allow(dead_code, unused_imports)
+)]
+
 use ghast_data::{Aabb, SelectionShape};
 
+#[cfg(any(feature = "v1_8", feature = "v1_12"))]
+pub mod legacy;
+#[cfg(feature = "v1_12")]
+pub mod v1_12;
 #[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
+#[cfg(feature = "v1_8")]
+pub mod v1_8;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
 
