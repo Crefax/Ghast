@@ -186,7 +186,10 @@ dig + place, chest clicks).
 
 - Cached oracle fuzz: 16.9 M ticks, 0 diffs (1.8.9 4.16 M, 1.12.2 4.16 M, 1.16.5 4.40 M,
   26.1 4.20 M); crosshair: 400 000 cached rays (1.16.5, 26.1) and 240 000 cached picks (1.8.9,
-  1.12.2) bit-identical; click vectors for 1.8.9 / 1.12.2 / 1.16.5 with 0 diffs.
+  1.12.2) bit-identical; click vectors for 1.8.9 / 1.12.2 / 1.16.5 with 0 diffs; 26.1 entity
+  tracking against the real client: 51 728 ticks (204 000 packets, 8.96 M fields) equal; the
+  27 oracle joins through the level-load gate bit-identical; 26.1 click hashes: 4000 oracle
+  stacks byte-identical.
 
 ## 0.3.0 — 2026-11-07
 
