@@ -341,6 +341,17 @@ pub enum Outgoing {
     /// 26.1 creative inventory screen (window 0 in creative mode): the packets the real
     /// client sends, in order (often none). See [`CreativePacket`].
     Creative(Vec<CreativePacket>),
+    /// 26.1 `rename_item`: the anvil's name field ([`Inventory::anvil_rename_26_1`]).
+    RenameItem(String),
+    /// 26.1 `container_button_click` (a loom pattern: [`Inventory::select_loom_pattern_26_1`]).
+    ButtonClick {
+        /// Container id.
+        window_id: i32,
+        /// Button id.
+        button: i32,
+    },
+    /// 26.1 `select_trade` ([`Inventory::select_trade_26_1`]).
+    SelectTrade(i32),
 }
 
 /// One packet the 26.1 creative inventory screen sends (`Outgoing::Creative`): the server
@@ -553,6 +564,9 @@ pub struct Inventory {
     /// 26.1 `update_recipes` body, not parsed yet (parsed when a menu needs its item sets).
     #[cfg(feature = "v26_1")]
     recipes_raw: Option<bytes::Bytes>,
+    /// 26.1 tags and enchantment definitions (raw until a menu needs them).
+    #[cfg(feature = "v26_1")]
+    d26: crate::data26::Data26,
 }
 
 impl Inventory {
@@ -600,6 +614,8 @@ impl Inventory {
             drop_throttle: 0,
             #[cfg(feature = "v26_1")]
             recipes_raw: None,
+            #[cfg(feature = "v26_1")]
+            d26: Default::default(),
         }
     }
 
@@ -637,6 +653,8 @@ impl Inventory {
         let w26 = std::mem::take(&mut self.w26);
         #[cfg(feature = "v26_1")]
         let recipes_raw = self.recipes_raw.take();
+        #[cfg(feature = "v26_1")]
+        let d26 = std::mem::take(&mut self.d26);
         *self = Inventory {
             timeout: self.timeout,
             settle: self.settle,
@@ -647,6 +665,8 @@ impl Inventory {
             w26,
             #[cfg(feature = "v26_1")]
             recipes_raw,
+            #[cfg(feature = "v26_1")]
+            d26,
             ..Inventory::empty(self.version)
         };
         self.events.player_changed = true;
@@ -1047,6 +1067,12 @@ impl Inventory {
         ) {
             self.ensure_recipes_26_1();
         }
+        if matches!(
+            kind,
+            crate::sim26::Kind::Anvil | crate::sim26::Kind::Grindstone | crate::sim26::Kind::Loom
+        ) {
+            self.d26.ensure(&self.reg26.enchantments);
+        }
         let w = usize::from(matches!(self.screen, ScreenState::Window(_)));
         let mut m = self.m.clone();
         let mut scr = self.s26[w].clone();
@@ -1058,11 +1084,15 @@ impl Inventory {
                 m: &mut m,
                 s: &mut scr,
                 w: &self.w26,
+                d: &self.d26,
+                reg: &self.reg26,
                 swings: 0,
+                xp_spent: 0,
             };
             let r = sim.click(slot, button as i8, mode);
-            (r, sim.swings)
+            (r, (sim.swings, sim.xp_spent))
         };
+        let (swings, xp_spent) = swings;
         let predicted = result.is_ok();
         let mut changed = Vec::new();
         let mut swings_out = 0;
@@ -1088,6 +1118,11 @@ impl Inventory {
             self.commit(m, lay);
             self.s26[w] = scr;
             swings_out = swings;
+            if xp_spent != 0
+                && let Some(x) = &mut self.w26.xp_level
+            {
+                *x -= xp_spent;
+            }
         } else {
             // the outcome is unknown, including how far a drag got: start over
             self.s26[w].drag.reset();
@@ -1128,6 +1163,143 @@ impl Inventory {
     #[cfg(feature = "v26_1")]
     pub fn set_creative_26_1(&mut self, creative: bool) {
         self.w26.creative = creative;
+    }
+
+    /// 26.1 `update_tags` (configuration `tags` or play `tags`): the body is kept and parsed
+    /// at the first click in an anvil, grindstone, loom or mount screen (the item, enchantment,
+    /// banner pattern and entity type tags those read). The play packet is also handled by
+    /// [`Inventory::apply_raw_v26_1`].
+    #[cfg(feature = "v26_1")]
+    pub fn on_update_tags_26_1(&mut self, body: bytes::Bytes) {
+        self.d26.set_tags_raw(body);
+    }
+
+    /// 26.1 configuration `registry_data`: the `minecraft:enchantment` body is kept (parsed
+    /// with the tags) for the anvil's rules; other registries are ignored. Entries sent without
+    /// data (a server and client sharing the vanilla pack) use the vanilla definitions.
+    #[cfg(feature = "v26_1")]
+    pub fn on_registry_data_26_1(&mut self, body: bytes::Bytes) {
+        self.d26.set_registry_raw(body);
+    }
+
+    /// 26.1 `merchant_offers`: the open villager screen's offers.
+    #[cfg(feature = "v26_1")]
+    pub fn on_merchant_offers_26_1(&mut self, body: &bytes::Bytes) {
+        if let Some((window, offers)) = crate::sim26::parse_offers(body)
+            && let ScreenState::Window(w) = &self.screen
+            && w.id == window
+            && w.menu == 19
+        {
+            self.s26[1].offers = offers;
+        }
+    }
+
+    /// Runs one 26.1 screen action on the open menu (no container click).
+    #[cfg(feature = "v26_1")]
+    fn screen_action_26_1<T>(
+        &mut self,
+        f: impl FnOnce(&mut crate::sim26::Sim26<'_>) -> Result<T, crate::sim::Unpredictable>,
+    ) -> Result<T, crate::sim::Unpredictable> {
+        let kind = self.kind_26();
+        let lay = self.layout();
+        let mut m = self.m.clone();
+        let mut scr = self.s26[1].clone();
+        self.w26.binding_curse = self.binding_curse();
+        self.w26.can_drop = self.drop_throttle < 1280;
+        let r = {
+            let mut sim = crate::sim26::Sim26 {
+                kind,
+                m: &mut m,
+                s: &mut scr,
+                w: &self.w26,
+                d: &self.d26,
+                reg: &self.reg26,
+                swings: 0,
+                xp_spent: 0,
+            };
+            f(&mut sim)
+        };
+        if r.is_ok() {
+            self.commit(m, lay);
+            self.s26[1] = scr;
+        }
+        r
+    }
+
+    /// 26.1 anvil: types `name` into the name field (`AnvilMenu.setItemName`; the name is
+    /// filtered like vanilla's and limited to 50 characters). Returns the `rename_item` to send
+    /// when the name changed (`Ok(None)`: nothing to send). An empty name removes a custom
+    /// name. Like the real screen, it does nothing while the input slot is empty.
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no anvil is open.
+    #[cfg(feature = "v26_1")]
+    pub fn anvil_rename_26_1(&mut self, name: &str) -> Result<Option<Outgoing>, ClickError> {
+        if self.kind_26() != crate::sim26::Kind::Anvil {
+            return Err(ClickError::NoScreen);
+        }
+        if self.m.container.first().is_none_or(Option::is_none) {
+            return Ok(None);
+        }
+        let filtered: String = name
+            .chars()
+            .filter(|&c| c != '\u{a7}' && c >= ' ' && c != '\u{7f}')
+            .collect();
+        if filtered.chars().count() > 50 || self.s26[1].anvil_name.as_deref() == Some(&filtered) {
+            return Ok(None);
+        }
+        self.d26.ensure(&self.reg26.enchantments);
+        let n = filtered.clone();
+        let r = self.screen_action_26_1(|sim| {
+            sim.s.anvil_name = Some(n);
+            sim.anvil_create()
+        });
+        if r.is_err() {
+            // the result could not be computed: keep the name, the server sends the result
+            self.s26[1].anvil_name = Some(filtered.clone());
+        }
+        Ok(Some(Outgoing::RenameItem(filtered)))
+    }
+
+    /// 26.1 loom: clicks pattern button `index` (`LoomMenu.clickMenuButton`). Returns the
+    /// `container_button_click` when the loom accepts it (`Ok(None)`: not a selectable pattern).
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no loom is open; [`ClickError::Unpredictable`] when the
+    /// patterns are not known.
+    #[cfg(feature = "v26_1")]
+    pub fn select_loom_pattern_26_1(&mut self, index: i32) -> Result<Option<Outgoing>, ClickError> {
+        if self.kind_26() != crate::sim26::Kind::Loom {
+            return Err(ClickError::NoScreen);
+        }
+        self.d26.ensure(&self.reg26.enchantments);
+        let ok = self
+            .screen_action_26_1(|sim| sim.loom_button(index))
+            .map_err(|_| ClickError::Unpredictable)?;
+        Ok(ok.then(|| Outgoing::ButtonClick {
+            window_id: self.open_id(),
+            button: index,
+        }))
+    }
+
+    /// 26.1 villager screen: picks trade `index` (`setSelectionHint`, `tryMoveItems`: the
+    /// payment goes back to the inventory and the trade's costs come out of it). Returns the
+    /// `select_trade` to send.
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no villager screen is open.
+    #[cfg(feature = "v26_1")]
+    pub fn select_trade_26_1(&mut self, index: i32) -> Result<Outgoing, ClickError> {
+        if self.kind_26() != crate::sim26::Kind::Merchant {
+            return Err(ClickError::NoScreen);
+        }
+        if self
+            .screen_action_26_1(|sim| sim.select_trade(index))
+            .is_err()
+        {
+            self.s26[1].trade_hint = index;
+        }
+        Ok(Outgoing::SelectTrade(index))
     }
 
     /// 26.1: keeps an `update_recipes` body for later parsing.
@@ -1269,7 +1441,10 @@ impl Inventory {
                 m: &mut m,
                 s: &mut scr,
                 w: &self.w26,
+                d: &self.d26,
+                reg: &self.reg26,
                 swings: 0,
+                xp_spent: 0,
             };
             let r = sim.click(slot, button as i8, mode);
             (r, sim.swings)
@@ -1350,44 +1525,68 @@ impl Inventory {
         self.s26[1] = Default::default();
     }
 
-    /// 26.1: the client-side effects of setting the open menu's container slot `k` from a
-    /// packet (vanilla runs the slot's `set` and the menu's `slotsChanged`).
+    /// 26.1: the client-side effects of setting the open menu's container slots from a packet:
+    /// vanilla runs each slot's `set` in order (the container caps it and the menu's
+    /// `slotsChanged` recomputes results and remembered state: the anvil's cost and repair
+    /// counts, the loom's patterns, the trade, the stonecutter input). `old` is the container
+    /// before the packet; the packet's slots are replayed one by one from it.
     #[cfg(feature = "v26_1")]
-    fn inbound_26_1(&mut self, k: usize, content: bool) {
+    fn inbound_26_1(&mut self, old: Vec<Option<Stack>>, slots: std::ops::Range<usize>) {
         use crate::sim26::Kind;
         let kind = self.kind_26();
-        match kind {
-            Kind::Beacon => {
-                if let Some(Some(s)) = self.m.container.get_mut(0)
-                    && s.count > 1
-                {
-                    s.count = 1;
-                }
-            }
-            Kind::Stonecutter if k == 0 => {
-                let id = self
-                    .m
-                    .container
-                    .first()
-                    .and_then(|s| s.as_ref())
-                    .map_or(0, |s| s.id);
-                if id != self.s26[1].cutter_input {
-                    self.s26[1].cutter_input = id;
-                    // a content packet sets the result slot after the input
-                    if !content && let Some(r) = self.m.container.get_mut(1) {
-                        *r = None;
-                    }
-                }
-            }
-            Kind::Cartography if k <= 2 => {
-                let c = &mut self.m.container;
-                if c.len() >= 3 && c[2].is_some() && !(c[0].is_some() && c[1].is_some()) {
-                    c[2] = None;
-                }
-            }
-            _ => {}
+        if !matches!(
+            kind,
+            Kind::Anvil
+                | Kind::Beacon
+                | Kind::Grindstone
+                | Kind::Smithing
+                | Kind::Stonecutter
+                | Kind::Loom
+                | Kind::Cartography
+                | Kind::Merchant
+        ) {
+            return;
         }
+        if matches!(kind, Kind::Anvil | Kind::Grindstone | Kind::Loom) {
+            self.d26.ensure(&self.reg26.enchantments);
+        }
+        let new = std::mem::replace(&mut self.m.container, old);
+        let mut scr = self.s26[1].clone();
+        let mut m = std::mem::take(&mut self.m);
+        let mut ok = true;
+        {
+            let mut sim = crate::sim26::Sim26 {
+                kind,
+                m: &mut m,
+                s: &mut scr,
+                w: &self.w26,
+                d: &self.d26,
+                reg: &self.reg26,
+                swings: 0,
+                xp_spent: 0,
+            };
+            for k in slots.clone() {
+                if k >= new.len() {
+                    break;
+                }
+                if sim.inbound_set(k, new[k].clone()).is_err() {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            // a hook ghast cannot compute: the packet's slots as sent
+            for k in slots {
+                if let (Some(d), Some(v)) = (m.container.get_mut(k), new.get(k)) {
+                    *d = v.clone();
+                }
+            }
+        }
+        self.m = m;
+        self.s26[1] = scr;
     }
+
     /// Replaces the model with the simulated one, records which parts changed and marks a
     /// crafting result unknown when its grid changed.
     fn commit(&mut self, new: Model, lay: Layout) {
@@ -1791,15 +1990,17 @@ impl Inventory {
             return;
         }
         self.correction_26_1(Some(window_id));
+        #[cfg(feature = "v26_1")]
+        let old = (window_id != 0).then(|| self.m.container.clone());
         self.on_window_items(window_id, items);
         if window_id == 0 {
             self.state_player = state_id;
         } else {
             self.state_window = state_id;
             #[cfg(feature = "v26_1")]
-            {
-                self.inbound_26_1(0, true);
-                self.inbound_26_1(2, true);
+            if let Some(old) = old {
+                let n = old.len();
+                self.inbound_26_1(old, 0..n);
             }
         }
         if current {
@@ -1844,6 +2045,8 @@ impl Inventory {
             }
             _ => {}
         }
+        #[cfg(feature = "v26_1")]
+        let old = matches!(l, Loc::Container(_)).then(|| self.m.container.clone());
         let s = self.m.at_mut(l);
         if *s != item {
             *s = item;
@@ -1853,10 +2056,10 @@ impl Inventory {
             }
         }
         #[cfg(feature = "v26_1")]
-        if let Loc::Container(k) = l
+        if let (Loc::Container(k), Some(old)) = (l, old)
             && window_id != 0
         {
-            self.inbound_26_1(k, false);
+            self.inbound_26_1(old, k..k + 1);
         }
         // the creative screen broadcasts window 0 after every server slot
         #[cfg(feature = "v26_1")]
@@ -1923,6 +2126,8 @@ impl Inventory {
             match w.menu {
                 // anvil: the cost data slot
                 8 if property == 0 => self.s26[1].anvil_cost = i32::from(value),
+                // loom: the selected pattern
+                18 if property == 0 => self.s26[1].loom_selected = i32::from(value),
                 // crafter: slot locks
                 7 if (0..9).contains(&property) => {
                     let bit = 1u16 << property;

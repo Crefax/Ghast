@@ -177,12 +177,15 @@ fn replay(path: Option<&str>) -> Stats {
     };
     let mut reg = HashRegistries::default();
     let mut recipes: Option<Bytes> = None;
+    let mut sync: Vec<(bool, Bytes)> = Vec::new();
     let mut st = Stats::default();
     for line in reader.lines() {
         let line = line.unwrap();
         let c: Value = serde_json::from_str(&line).unwrap();
         match c["type"].as_str().unwrap() {
             "update_recipes" => recipes = Some(hex(c["packet"].as_str().unwrap())),
+            "registry_data" => sync.push((false, hex(c["packet"].as_str().unwrap()))),
+            "update_tags" => sync.push((true, hex(c["packet"].as_str().unwrap()))),
             "registry" => {
                 let names: Vec<&str> = c["entries"]
                     .as_array()
@@ -192,19 +195,35 @@ fn replay(path: Option<&str>) -> Stats {
                     .collect();
                 reg.add(c["name"].as_str().unwrap(), names);
             }
-            "case" => case(&c, &reg, recipes.as_ref().unwrap(), &mut st),
+            "case" => case(&c, &reg, recipes.as_ref().unwrap(), &sync, &mut st),
             _ => {}
         }
     }
     st
 }
 
-fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, st: &mut Stats) {
+/// The anvil / loom / trade state a resync needs: the menu's data slots after the click.
+fn load_data(inv: &mut Inventory, window: i32, stage: &Value) {
+    if let Some(d) = stage["slots_data"].as_array() {
+        for (k, v) in d.iter().enumerate() {
+            inv.on_window_property(window, k as i16, v.as_i64().unwrap() as i16);
+        }
+    }
+}
+
+fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, sync: &[(bool, Bytes)], st: &mut Stats) {
     let mut inv = Inventory::new(Version::V26_1).unwrap();
     inv.set_registries_26_1(reg.clone());
     inv.set_click_settle_ticks(1);
     inv.apply_raw_v26_1(&RawPacket::new(cb::id::DECLARE_RECIPES, recipes.clone()))
         .expect("update_recipes decodes");
+    for (tags, b) in sync {
+        if *tags {
+            inv.on_update_tags_26_1(b.clone());
+        } else {
+            inv.on_registry_data_26_1(b.clone());
+        }
+    }
     inv.set_creative_26_1(c["creative"].as_bool().unwrap());
     inv.set_experience_level_26_1(c["xp"].as_i64().unwrap() as i32);
     inv.on_held_slot(c["selected"].as_i64().unwrap() as i8);
@@ -217,16 +236,20 @@ fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, st: &mut Stats) {
     };
     if menu >= 0 {
         inv.on_open_screen_26_1(window, menu, "".into());
-        if let Some(d) = c["data"].as_array() {
-            for (k, v) in d.iter().enumerate() {
-                inv.on_window_property(window, k as i16, v.as_i64().unwrap() as i16);
-            }
-        }
     } else {
         inv.tick();
         let _ = inv.open_inventory();
     }
     load(&mut inv, c, window, menu, c);
+    // as the server sends them: content, then the data slots, then the offers
+    if let Some(d) = c["data"].as_array() {
+        for (k, v) in d.iter().enumerate() {
+            inv.on_window_property(window, k as i16, v.as_i64().unwrap() as i16);
+        }
+    }
+    if let Some(o) = c["offers"].as_str() {
+        inv.on_merchant_offers_26_1(&hex(o));
+    }
     if let Err(e) = compare(&inv, c, menu, reg) {
         panic!("{}: initial state does not load: {e}", c["case"]);
     }
@@ -241,11 +264,85 @@ fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, st: &mut Stats) {
             if k["drag"].as_i64().unwrap() == 0 {
                 skip_drag = false;
                 load(&mut inv, c, window, menu, k);
+                load_data(&mut inv, window, k);
             }
             continue;
         }
         inv.tick();
         inv.tick();
+        if mode >= 100 {
+            // a screen action: trade picked, loom pattern button, anvil name
+            let out = match mode {
+                100 => Some(inv.select_trade_26_1(i32::from(slot)).unwrap()),
+                101 => inv
+                    .select_loom_pattern_26_1(i32::from(slot))
+                    .unwrap_or(None),
+                _ => match k["name"].as_str() {
+                    Some(n) => inv.anvil_rename_26_1(n).unwrap(),
+                    None => None,
+                },
+            };
+            let mut ours: Vec<u8> = Vec::new();
+            match &out {
+                Some(Outgoing::SelectTrade(i)) => {
+                    ours.push(3);
+                    let mut b = BytesMut::new();
+                    ghast_protocol::McWrite::put_varint(&mut b, *i);
+                    ours.extend_from_slice(&b);
+                }
+                Some(Outgoing::ButtonClick { window_id, button }) => {
+                    ours.push(4);
+                    let mut b = BytesMut::new();
+                    ghast_protocol::McWrite::put_varint(&mut b, *window_id);
+                    ghast_protocol::McWrite::put_varint(&mut b, *button);
+                    ours.extend_from_slice(&b);
+                }
+                Some(Outgoing::RenameItem(n)) => {
+                    ours.push(5);
+                    let mut b = BytesMut::new();
+                    ghast_protocol::McWrite::put_varint(&mut b, n.len() as i32);
+                    b.extend_from_slice(n.as_bytes());
+                    ours.extend_from_slice(&b);
+                }
+                None => {}
+                other => panic!("{other:?}"),
+            }
+            let want: Vec<u8> = k["packets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|p| hex(p.as_str().unwrap()).to_vec())
+                .collect();
+            let e = st.per_menu.entry(name.clone()).or_default();
+            e[0] += 1;
+            st.predicted += 1;
+            let mut problems = Vec::new();
+            if ours != want {
+                problems.push(format!(
+                    "action packets ghast {} client {}",
+                    hexs(&ours),
+                    hexs(&want)
+                ));
+            } else {
+                st.bytes_exact += 1;
+            }
+            if let Err(e) = compare(&inv, k, menu, reg) {
+                problems.push(e);
+            }
+            if !problems.is_empty() {
+                st.diffs += 1;
+                if st.first_diffs.len() < 25 {
+                    st.first_diffs.push(format!(
+                        "{} ({name}) action {slot}/{mode}: {}",
+                        c["case"],
+                        problems.join("; ")
+                    ));
+                }
+                load(&mut inv, c, window, menu, k);
+                load_data(&mut inv, window, k);
+            }
+            continue;
+        }
         let carried_before = inv.cursor().cloned();
         let out = inv.click(click_of(slot, button, mode)).unwrap_or_else(|e| {
             panic!("{}: click {slot}/{button}/{mode} refused: {e:?}", c["case"])
@@ -271,6 +368,7 @@ fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, st: &mut Stats) {
             e[1] += 1;
             em[1] += 1;
             load(&mut inv, c, window, menu, k);
+            load_data(&mut inv, window, k);
             skip_drag = k["drag"].as_i64().unwrap() != 0;
             continue;
         }
@@ -320,6 +418,7 @@ fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, st: &mut Stats) {
                 ));
             }
             load(&mut inv, c, window, menu, k);
+            load_data(&mut inv, window, k);
             skip_drag = k["drag"].as_i64().unwrap() != 0;
         }
     }

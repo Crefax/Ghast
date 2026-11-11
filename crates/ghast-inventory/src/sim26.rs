@@ -18,6 +18,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use ghast_protocol::codec::{McWrite, Reader};
 use ghast_protocol::types::slot::v775::ComponentPatch;
 
+use crate::data26::{Data26, Holders, Reg};
 use crate::sim::{Loc, Model, OUTSIDE, Unpredictable};
 use crate::stack::{ItemData, Stack};
 use crate::v26_1::{self as v, Equip, component as c};
@@ -380,6 +381,97 @@ pub(crate) struct Screen26 {
     pub anvil_cost: i32,
     /// Crafter: locked slots (data slots 0..9 = 1).
     pub crafter_locked: u16,
+    /// Anvil: `itemName` (set by [`crate::Inventory::anvil_rename_26_1`]).
+    pub anvil_name: Option<String>,
+    /// Anvil: `repairItemCountCost` and `onlyRenaming` of the last `createResult`.
+    pub anvil_repair_count: i32,
+    pub anvil_only_renaming: bool,
+    /// Loom: `selectablePatterns` (banner pattern registry ids) and `selectedBannerPatternIndex`.
+    pub loom_patterns: Vec<i32>,
+    pub loom_selected: i32,
+    /// Merchant: the offers of `merchant_offers`, `selectionHint`, `activeOffer`.
+    pub offers: Vec<Offer>,
+    pub trade_hint: i32,
+    pub trade_active: Option<usize>,
+}
+
+/// One `ItemCost` of a villager offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Cost {
+    pub item: i32,
+    pub count: i32,
+    /// `DataComponentExactPredicate`: components the stack must have with these values.
+    pub components: Vec<(i32, Bytes)>,
+}
+
+/// A villager offer as the client holds it (`MerchantOffer`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Offer {
+    pub cost_a: Cost,
+    pub cost_b: Option<Cost>,
+    pub result: Option<Stack>,
+    pub uses: i32,
+    pub max_uses: i32,
+    pub special: i32,
+    pub multiplier_bits: u32,
+    pub demand: i32,
+}
+
+/// Parses a `merchant_offers` body: the container id and its offers.
+pub(crate) fn parse_offers(body: &Bytes) -> Option<(i32, Vec<Offer>)> {
+    use ghast_protocol::defs::p775::types::SlotComponent;
+    let mut r = Reader::new(body);
+    let window = r.read_varint().ok()?;
+    let cost = |r: &mut Reader<'_>| -> Option<Cost> {
+        let item = r.read_varint().ok()?;
+        let count = r.read_varint().ok()?;
+        let n = r.read_varint().ok()?;
+        let mut components = Vec::new();
+        for _ in 0..n.max(0) {
+            let mut v = r.clone();
+            let ty = v.read_varint().ok()?;
+            let start = v.position();
+            SlotComponent::skip(r).ok()?;
+            components.push((ty, body.slice(start..r.position())));
+        }
+        Some(Cost {
+            item,
+            count,
+            components,
+        })
+    };
+    let n = r.read_varint().ok()?;
+    let mut offers = Vec::new();
+    for _ in 0..n.max(0) {
+        let cost_a = cost(&mut r)?;
+        let result = ghast_protocol::types::slot::v775::ItemStack::read(&mut r)
+            .ok()?
+            .map(Stack::from_v775);
+        let cost_b = if r.read_bool().ok()? {
+            Some(cost(&mut r)?)
+        } else {
+            None
+        };
+        let out_of_stock = r.read_bool().ok()?;
+        let uses = r.read_i32().ok()?;
+        let max_uses = r.read_i32().ok()?;
+        let _xp = r.read_i32().ok()?;
+        let special = r.read_i32().ok()?;
+        let multiplier_bits = r.read_f32().ok()?.to_bits();
+        let demand = r.read_i32().ok()?;
+        offers.push(Offer {
+            cost_a,
+            cost_b,
+            result,
+            // `setToOutOfStock`: uses = maxUses
+            uses: if out_of_stock { max_uses } else { uses },
+            max_uses,
+            special,
+            multiplier_bits,
+            demand,
+        });
+    }
+    Some((window, offers))
 }
 
 /// One click being simulated.
@@ -388,8 +480,14 @@ pub(crate) struct Sim26<'a> {
     pub m: &'a mut Model,
     pub s: &'a mut Screen26,
     pub w: &'a World26,
+    /// Tags and enchantment definitions (parsed before a click in a menu that reads them).
+    pub d: &'a Data26,
+    /// Registry names (banner patterns).
+    pub reg: &'a v::HashRegistries,
     /// `ServerboundSwingPacket`s the click makes the client send first (each drop swings).
     pub swings: u8,
+    /// Experience levels the click spent (taking an anvil result).
+    pub xp_spent: i32,
 }
 
 /// Fraction arithmetic of `org.apache.commons.lang3.math.Fraction` (reduced, positive
@@ -1007,7 +1105,7 @@ impl Sim26<'_> {
                     }
                     Ok(())
                 }
-                _ => Err(Unpredictable),
+                _ => self.anvil_take(),
             },
             Ty::GrindResult => {
                 self.c_set(0, None)?;
@@ -1027,12 +1125,26 @@ impl Sim26<'_> {
                 self.map_changed();
                 Ok(())
             }
-            Ty::LoomResult | Ty::TradeResult => Err(Unpredictable),
+            Ty::LoomResult => {
+                // banner and dye one each (each removal runs slotsChanged)
+                let _ = self.remove_container(0, 1)?;
+                let _ = self.remove_container(1, 1)?;
+                if self.c(0).is_none() || self.c(1).is_none() {
+                    self.s.loom_selected = -1;
+                }
+                Ok(())
+            }
+            Ty::TradeResult => self.trade_take(),
             _ => {
                 // Slot.onTake: setChanged
                 self.changed(i)
             }
         }
+    }
+
+    /// A server packet sets container slot `k` (`Slot.set`: the cap, then the menu's hooks).
+    pub(crate) fn inbound_set(&mut self, k: usize, s: Option<Stack>) -> R<()> {
+        self.c_set(k, s)
     }
 
     /// `setItem(k, s)` on the menu's own container (slot `k` of the container part).
@@ -1078,46 +1190,306 @@ impl Sim26<'_> {
                 self.c_set_raw(3, None);
                 Ok(())
             }
+            _ => self.anvil_create(),
+        }
+    }
+
+    /// `AnvilMenu.createResult`.
+    pub(crate) fn anvil_create(&mut self) -> R<()> {
+        self.s.anvil_only_renaming = false;
+        self.s.anvil_cost = 1;
+        let mut price: i64 = 0;
+        let mut naming: i64 = 0;
+        let input = match self.c(0).cloned() {
+            Some(i) if has_component(&i, ench_type(&i), true) => i,
             _ => {
-                let Some(input) = self.c(0) else {
-                    self.c_set_raw(2, None);
-                    self.s.anvil_cost = 0;
-                    return Ok(());
-                };
-                // `canStoreEnchantments`: the enchantments component (stored for books)
-                let ty = if is_item(input, "enchanted_book") {
-                    c::STORED_ENCHANTMENTS
-                } else {
-                    c::ENCHANTMENTS
-                };
-                if v::patched(input, ty) == Some(None) {
+                self.c_set_raw(2, None);
+                self.s.anvil_cost = 0;
+                return Ok(());
+            }
+        };
+        let creative = self.w.creative;
+        let mut result = input.clone();
+        let addition = self.c(1).cloned();
+        let mut ench = enchantments_of(&result);
+        let mut tax: i64 = i64::from(repair_cost(&input))
+            + addition.as_ref().map_or(0, |a| i64::from(repair_cost(a)));
+        self.s.anvil_repair_count = 0;
+        if let Some(add) = &addition {
+            let using_book =
+                has_component(add, c::STORED_ENCHANTMENTS, is_item(add, "enchanted_book"));
+            if v::is_damageable(&result) && self.valid_repair(&input, add)? {
+                let quarter = |s: &Stack| v::damage_value(s).min(v::max_damage(s).unwrap_or(0) / 4);
+                let mut amount = quarter(&result);
+                if amount <= 0 {
                     self.c_set_raw(2, None);
                     self.s.anvil_cost = 0;
                     return Ok(());
                 }
-                Err(Unpredictable)
+                let mut count = 0;
+                while amount > 0 && count < add.count {
+                    let d = v::damage_value(&result) - amount;
+                    set_damage(&mut result, d);
+                    price += 1;
+                    amount = quarter(&result);
+                    count += 1;
+                }
+                self.s.anvil_repair_count = count;
+            } else {
+                if !using_book && (result.id != add.id || !v::is_damageable(&result)) {
+                    self.c_set_raw(2, None);
+                    self.s.anvil_cost = 0;
+                    return Ok(());
+                }
+                if v::is_damageable(&result) && !using_book {
+                    let max = |s: &Stack| v::max_damage(s).unwrap_or(0);
+                    let r1 = max(&input) - v::damage_value(&input);
+                    let r2 = max(add) - v::damage_value(add);
+                    let remaining = r1 + r2 + max(&result) * 12 / 100;
+                    let rd = (max(&result) - remaining).max(0);
+                    if rd < v::damage_value(&result) {
+                        set_damage(&mut result, rd);
+                        price += 2;
+                    }
+                }
+                let (mut any_ok, mut any_bad) = (false, false);
+                for (e, lvl) in enchantments_of(add) {
+                    let current = ench.iter().find(|x| x.0 == e).map_or(0, |x| x.1);
+                    let mut level = if current == lvl {
+                        lvl + 1
+                    } else {
+                        lvl.max(current)
+                    };
+                    let def = self.d.enchantment(e).ok_or(Unpredictable)?;
+                    let mut ok = self
+                        .d
+                        .contains(Reg::Item, &def.supported, input.id)
+                        .ok_or(Unpredictable)?;
+                    if creative || is_item(&input, "enchanted_book") {
+                        ok = true;
+                    }
+                    for &(other, _) in &ench.clone() {
+                        if other != e && !self.compatible(e, other)? {
+                            ok = false;
+                            price += 1;
+                        }
+                    }
+                    if !ok {
+                        any_bad = true;
+                    } else {
+                        any_ok = true;
+                        level = level.min(def.max_level);
+                        match ench.iter_mut().find(|x| x.0 == e) {
+                            Some(x) => x.1 = level,
+                            None => ench.push((e, level)),
+                        }
+                        let mut fee = i64::from(def.anvil_cost);
+                        if using_book {
+                            fee = (fee / 2).max(1);
+                        }
+                        price += fee * i64::from(level);
+                        if input.count > 1 {
+                            price = 40;
+                        }
+                    }
+                }
+                if any_bad && !any_ok {
+                    self.c_set_raw(2, None);
+                    self.s.anvil_cost = 0;
+                    return Ok(());
+                }
             }
         }
+        match self.s.anvil_name.clone() {
+            Some(n) if !n.trim().is_empty() => {
+                if hover_name(&input).as_deref() != Some(n.as_str()) {
+                    naming = 1;
+                    price += 1;
+                    let text = ghast_protocol::nbt::AnonNbt::from_tag(
+                        &ghast_protocol::nbt::Tag::String(n.clone()),
+                    )
+                    .map_err(|_| Unpredictable)?;
+                    put(&mut result, c::CUSTOM_NAME, Some(text.as_bytes()))?;
+                }
+            }
+            _ => {
+                if has_component(&input, c::CUSTOM_NAME, false) {
+                    naming = 1;
+                    price += 1;
+                    put(&mut result, c::CUSTOM_NAME, None)?;
+                }
+            }
+        }
+        let fin = if price <= 0 {
+            0
+        } else {
+            (tax + price).clamp(0, i64::from(i32::MAX))
+        };
+        tax = fin;
+        self.s.anvil_cost = tax as i32;
+        let mut result = (price > 0).then_some(result);
+        if naming == price && naming > 0 {
+            if self.s.anvil_cost >= 40 {
+                self.s.anvil_cost = 39;
+            }
+            self.s.anvil_only_renaming = true;
+        }
+        if self.s.anvil_cost >= 40 && !creative {
+            result = None;
+        }
+        if let Some(r) = &mut result {
+            let mut base = repair_cost(r);
+            let add_cost = addition.as_ref().map_or(0, repair_cost);
+            if base < add_cost {
+                base = add_cost;
+            }
+            if naming != price || naming == 0 {
+                base = (i64::from(base) * 2 + 1).min(i64::from(i32::MAX)) as i32;
+            }
+            put_varint(r, c::REPAIR_COST, base)?;
+            set_enchantments(r, &ench)?;
+        }
+        self.c_set_raw(2, result);
+        Ok(())
     }
 
-    /// Grindstone `createResult` (predicted when the result is empty).
+    /// `AnvilMenu.onTake`.
+    fn anvil_take(&mut self) -> R<()> {
+        if !self.w.creative {
+            self.xp_spent += self.s.anvil_cost;
+        }
+        let repair = self.s.anvil_repair_count;
+        if repair > 0 {
+            match self.c(1).cloned() {
+                Some(mut a) if a.count > repair => {
+                    a.count -= repair;
+                    self.c_set(1, Some(a))?;
+                }
+                _ => self.c_set(1, None)?,
+            }
+        } else if !self.s.anvil_only_renaming {
+            self.c_set(1, None)?;
+        }
+        self.s.anvil_cost = 0;
+        self.c_set(0, None)
+    }
+
+    /// `ItemStack.isValidRepairItem`: the `repairable` component's items.
+    fn valid_repair(&self, input: &Stack, add: &Stack) -> R<bool> {
+        let set = match v::patched(input, c::REPAIRABLE) {
+            Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
+            Some(None) => return Ok(false),
+            None => {
+                let spec = v::defaults(input.id).map_or("", |d| d.repairable);
+                if spec.is_empty() {
+                    return Ok(false);
+                }
+                crate::data26::holders_from_names(spec, v::item_id).ok_or(Unpredictable)?
+            }
+        };
+        self.d
+            .contains(Reg::Item, &set, add.id)
+            .ok_or(Unpredictable)
+    }
+
+    /// `Enchantment.areCompatible`.
+    fn compatible(&self, a: i32, b: i32) -> R<bool> {
+        let ea = self.d.enchantment(a).ok_or(Unpredictable)?;
+        let eb = self.d.enchantment(b).ok_or(Unpredictable)?;
+        let excl = |e: &crate::data26::Ench, x: i32| -> R<bool> {
+            match &e.exclusive {
+                None => Ok(false),
+                Some(h) => self.d.contains(Reg::Enchantment, h, x).ok_or(Unpredictable),
+            }
+        };
+        Ok(!excl(ea, b)? && !excl(eb, a)?)
+    }
+
+    fn is_curse(&self, e: i32) -> R<bool> {
+        self.d
+            .tag(Reg::Enchantment, "minecraft:curse")
+            .map(|t| t.contains(&e))
+            .ok_or(Unpredictable)
+    }
+
+    /// Grindstone `createResult` (`computeResult`).
     fn grind_result(&mut self) -> R<()> {
         let (a, b) = (self.c(0).cloned(), self.c(1).cloned());
-        let empty = match (&a, &b) {
-            (None, None) => true,
+        let result = match (&a, &b) {
+            (None, None) => None,
             _ if a.as_ref().is_some_and(|s| s.count > 1)
                 || b.as_ref().is_some_and(|s| s.count > 1) =>
             {
-                true
+                None
             }
-            (Some(x), None) | (None, Some(x)) => !enchanted(x),
-            (Some(x), Some(y)) => x.id != y.id,
+            (Some(x), None) | (None, Some(x)) => {
+                if enchanted(x) {
+                    Some(self.remove_non_curses(x.clone())?)
+                } else {
+                    None
+                }
+            }
+            (Some(x), Some(y)) => self.grind_merge(x, y)?,
         };
-        if !empty {
-            return Err(Unpredictable);
-        }
-        self.c_set_raw(2, None);
+        self.c_set_raw(2, result);
         Ok(())
+    }
+
+    fn grind_merge(&self, input: &Stack, add: &Stack) -> R<Option<Stack>> {
+        if input.id != add.id {
+            return Ok(None);
+        }
+        let max = |s: &Stack| v::max_damage(s).unwrap_or(0);
+        let durability = max(input).max(max(add));
+        let r1 = max(input) - v::damage_value(input);
+        let r2 = max(add) - v::damage_value(add);
+        let remaining = r1 + r2 + durability * 5 / 100;
+        let mut count = 1;
+        if !v::is_damageable(input) {
+            let same_stack = input.count == add.count && input.id == add.id && input.data_eq(add);
+            if max_size(input) < 2 || !same_stack {
+                return Ok(None);
+            }
+            count = 2;
+        }
+        let mut item = input.with_count(count);
+        if v::is_damageable(&item) {
+            put_varint(&mut item, c::MAX_DAMAGE, durability)?;
+            set_damage(&mut item, (durability - remaining).max(0));
+        }
+        // mergeEnchantsFrom: non-curses upgraded, curses only when missing
+        let mut ench = enchantments_of(&item);
+        for (e, l) in enchantments_of(add) {
+            let have = ench.iter().find(|x| x.0 == e).map_or(0, |x| x.1);
+            if (!self.is_curse(e)? || have == 0) && l > 0 {
+                match ench.iter_mut().find(|x| x.0 == e) {
+                    Some(x) => x.1 = x.1.max(l),
+                    None => ench.push((e, l)),
+                }
+            }
+        }
+        set_enchantments(&mut item, &ench)?;
+        Ok(Some(self.remove_non_curses(item)?))
+    }
+
+    /// `GrindstoneMenu.removeNonCursesFrom`.
+    fn remove_non_curses(&self, mut item: Stack) -> R<Stack> {
+        let mut kept = Vec::new();
+        for (e, l) in enchantments_of(&item) {
+            if self.is_curse(e)? {
+                kept.push((e, l));
+            }
+        }
+        set_enchantments(&mut item, &kept)?;
+        if is_item(&item, "enchanted_book") && kept.is_empty() {
+            item = transmute(&item, v::item_id("book").ok_or(Unpredictable)?)?;
+        }
+        let mut cost: i32 = 0;
+        for _ in 0..kept.len() {
+            cost = (i64::from(cost) * 2 + 1).min(i64::from(i32::MAX)) as i32;
+        }
+        put_varint(&mut item, c::REPAIR_COST, cost)?;
+        Ok(item)
     }
 
     /// Stonecutter `slotsChanged`: a new input item resets the recipe list and the result.
@@ -1130,13 +1502,120 @@ impl Sim26<'_> {
         Ok(())
     }
 
-    /// Loom `slotsChanged`: predicted while the banner or the dye slot is empty.
+    /// Loom `slotsChanged`.
     fn loom_changed(&mut self) -> R<()> {
-        if self.c(0).is_some() && self.c(1).is_some() {
-            return Err(Unpredictable);
+        let (Some(banner), Some(_)) = (self.c(0).cloned(), self.c(1).cloned()) else {
+            self.c_set_raw(3, None);
+            self.s.loom_patterns.clear();
+            self.s.loom_selected = -1;
+            return Ok(());
+        };
+        let sel = self.s.loom_selected;
+        let prev = std::mem::take(&mut self.s.loom_patterns);
+        let valid = sel >= 0 && (sel as usize) < prev.len();
+        self.s.loom_patterns = self.selectable_patterns()?;
+        let display = if self.s.loom_patterns.len() == 1 {
+            self.s.loom_selected = 0;
+            Some(self.s.loom_patterns[0])
+        } else if !valid {
+            self.s.loom_selected = -1;
+            None
+        } else {
+            let v = prev[sel as usize];
+            match self.s.loom_patterns.iter().position(|&p| p == v) {
+                Some(i) => {
+                    self.s.loom_selected = i as i32;
+                    Some(v)
+                }
+                None => {
+                    self.s.loom_selected = -1;
+                    None
+                }
+            }
+        };
+        match display {
+            Some(p) => {
+                if banner_layers(&banner)?.0 >= 6 {
+                    self.s.loom_selected = -1;
+                    self.c_set_raw(3, None);
+                } else {
+                    self.loom_setup(p)?;
+                }
+            }
+            None => self.c_set_raw(3, None),
         }
-        self.c_set_raw(3, None);
         Ok(())
+    }
+
+    /// `LoomMenu.getSelectablePatterns(pattern slot)`.
+    fn selectable_patterns(&self) -> R<Vec<i32>> {
+        let Some(p) = self.c(2) else {
+            return self
+                .d
+                .tag(Reg::BannerPattern, "minecraft:no_item_required")
+                .map(<[i32]>::to_vec)
+                .ok_or(Unpredictable);
+        };
+        let set = match v::patched(p, c::PROVIDES_BANNER_PATTERNS) {
+            Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
+            Some(None) => return Ok(Vec::new()),
+            None => {
+                let spec = v::defaults(p.id).map_or("", |d| d.patterns);
+                if spec.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let names = self
+                    .reg
+                    .names("minecraft:banner_pattern")
+                    .ok_or(Unpredictable)?;
+                crate::data26::holders_from_names(spec, |n| {
+                    names.iter().position(|x| x == n).map(|i| i as i32)
+                })
+                .ok_or(Unpredictable)?
+            }
+        };
+        self.d
+            .resolve(Reg::BannerPattern, &set)
+            .ok_or(Unpredictable)
+    }
+
+    /// `LoomMenu.setupResultSlot(pattern)`.
+    fn loom_setup(&mut self, pattern: i32) -> R<()> {
+        let mut result = None;
+        if let (Some(banner), Some(dye)) = (self.c(0).cloned(), self.c(1).cloned()) {
+            let color = match v::patched(&dye, c::DYE) {
+                Some(Some(b)) => Reader::new(&b).read_varint().ok(),
+                Some(None) => None,
+                None => v::defaults(dye.id)
+                    .map(|d| d.dye)
+                    .filter(|&d| d != 255)
+                    .map(i32::from),
+            };
+            if let Some(color) = color {
+                let mut r = banner.with_count(1);
+                let (n, rest) = banner_layers(&banner)?;
+                let mut w = BytesMut::new();
+                w.put_varint(n + 1);
+                w.put_slice(&rest);
+                w.put_varint(pattern + 1);
+                w.put_varint(color);
+                put(&mut r, c::BANNER_PATTERNS, Some(&w))?;
+                result = Some(r);
+            }
+        }
+        self.c_set_raw(3, result);
+        Ok(())
+    }
+
+    /// `LoomMenu.clickMenuButton`.
+    pub(crate) fn loom_button(&mut self, id: i32) -> R<bool> {
+        if id < 0 || id as usize >= self.s.loom_patterns.len() {
+            return Ok(false);
+        }
+        self.s.loom_selected = id;
+        let p = self.s.loom_patterns[id as usize];
+        self.loom_setup(p)?;
+        Ok(true)
     }
 
     /// Cartography `slotsChanged`: a result without both inputs is removed (the client never
@@ -1148,18 +1627,163 @@ impl Sim26<'_> {
         }
     }
 
-    /// `MerchantContainer.updateSellItem`: without a payment the result is empty; with one
-    /// it comes from the villager's offers.
+    /// `MerchantContainer.updateSellItem`.
     fn trade_update(&mut self) -> R<()> {
-        let buy = if self.c(0).is_none() {
-            self.c(1)
+        self.s.trade_active = None;
+        let (a, b) = if self.c(0).is_none() {
+            (self.c(1).cloned(), None)
         } else {
-            self.c(0)
+            (self.c(0).cloned(), self.c(1).cloned())
         };
-        if buy.is_some() {
-            return Err(Unpredictable);
+        if a.is_none() {
+            self.c_set_raw(2, None);
+            return Ok(());
         }
-        self.c_set_raw(2, None);
+        if self.s.offers.is_empty() {
+            return Ok(());
+        }
+        let hint = self.s.trade_hint;
+        let mut o = self.recipe_for(a.as_ref(), b.as_ref(), hint)?;
+        if o.is_none_or(|i| self.s.offers[i].uses >= self.s.offers[i].max_uses) {
+            self.s.trade_active = o;
+            o = self.recipe_for(b.as_ref(), a.as_ref(), hint)?;
+        }
+        match o {
+            Some(i) if self.s.offers[i].uses < self.s.offers[i].max_uses => {
+                self.s.trade_active = Some(i);
+                let mut r = self.s.offers[i].result.clone();
+                if let Some(st) = &mut r {
+                    // MerchantContainer.setItem: limitSize
+                    let max = 99.min(max_size(st));
+                    if st.count > max {
+                        st.count = max;
+                    }
+                }
+                self.c_set_raw(2, r);
+            }
+            _ => self.c_set_raw(2, None),
+        }
+        Ok(())
+    }
+
+    /// `MerchantOffers.getRecipeFor(a, b, hint)`.
+    fn recipe_for(&self, a: Option<&Stack>, b: Option<&Stack>, hint: i32) -> R<Option<usize>> {
+        let n = self.s.offers.len();
+        if hint > 0 && (hint as usize) < n {
+            let i = hint as usize;
+            return Ok(self.satisfied(i, a, b)?.then_some(i));
+        }
+        for i in 0..n {
+            if self.satisfied(i, a, b)? {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
+    }
+
+    /// `MerchantOffer.satisfiedBy`.
+    fn satisfied(&self, i: usize, a: Option<&Stack>, b: Option<&Stack>) -> R<bool> {
+        let o = &self.s.offers[i];
+        let Some(a) = a else { return Ok(false) };
+        if !cost_test(&o.cost_a, a)? || a.count < modified_cost(o)? {
+            return Ok(false);
+        }
+        match &o.cost_b {
+            None => Ok(b.is_none()),
+            Some(cb) => match b {
+                None => Ok(false),
+                Some(b) => Ok(cost_test(cb, b)? && b.count >= cb.count),
+            },
+        }
+    }
+
+    /// `MerchantResultSlot.onTake`.
+    fn trade_take(&mut self) -> R<()> {
+        let Some(i) = self.s.trade_active else {
+            return Ok(());
+        };
+        let mut a = self.c(0).cloned();
+        let mut b = self.c(1).cloned();
+        let took = if self.offer_take(i, &mut a, &mut b)? {
+            true
+        } else {
+            self.offer_take(i, &mut b, &mut a)?
+        };
+        if took {
+            // ClientSideMerchant.notifyTrade
+            self.s.offers[i].uses += 1;
+            self.c_set(0, a)?;
+            self.c_set(1, b)?;
+        }
+        Ok(())
+    }
+
+    fn offer_take(&self, i: usize, a: &mut Option<Stack>, b: &mut Option<Stack>) -> R<bool> {
+        if !self.satisfied(i, a.as_ref(), b.as_ref())? {
+            return Ok(false);
+        }
+        let o = &self.s.offers[i];
+        let ca = modified_cost(o)?;
+        let _ = split(a, ca);
+        if let Some(cb) = &o.cost_b {
+            let _ = split(b, cb.count);
+        }
+        Ok(true)
+    }
+
+    /// The villager screen picking trade `idx` (`setSelectionHint`, `tryMoveItems`).
+    pub(crate) fn select_trade(&mut self, idx: i32) -> R<()> {
+        self.s.trade_hint = idx;
+        self.trade_update()?;
+        if idx < 0 || idx as usize >= self.s.offers.len() {
+            return Ok(());
+        }
+        for k in 0..2 {
+            if self.c(k).is_some() {
+                if !self.move_to(k, 3, 39, true)? {
+                    return Ok(());
+                }
+                let left = self.c(k).cloned();
+                self.c_set(k, left)?;
+            }
+        }
+        if self.c(0).is_none() && self.c(1).is_none() {
+            let o = self.s.offers[idx as usize].clone();
+            self.move_to_payment(0, &o.cost_a)?;
+            if let Some(cb) = &o.cost_b {
+                self.move_to_payment(1, cb)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `MerchantMenu.moveFromInventoryToPaymentSlot`.
+    fn move_to_payment(&mut self, k: usize, cost: &Cost) -> R<()> {
+        for i in 3..39 {
+            let Some(inv) = self.get(i).cloned() else {
+                continue;
+            };
+            if !cost_test(cost, &inv)? {
+                continue;
+            }
+            let cur = self.c(k).cloned();
+            if cur.as_ref().is_none_or(|c| same(&inv, c)) {
+                let max = max_size(&inv);
+                let have = cur.as_ref().map_or(0, |c| c.count);
+                let mv = (max - have).min(inv.count);
+                let pay = inv.with_count(have + mv);
+                if let Some(x) = self.slot_mut(i) {
+                    x.count -= mv;
+                    if x.count <= 0 {
+                        *self.slot_mut(i) = None;
+                    }
+                }
+                self.c_set(k, norm(pay.clone()))?;
+                if pay.count >= max {
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2124,6 +2748,217 @@ impl Sim26<'_> {
             None => Err(Unpredictable),
         }
     }
+}
+
+/// `ItemCost.test`: the item and the predicate's components.
+fn cost_test(cost: &Cost, s: &Stack) -> R<bool> {
+    if s.id != cost.item {
+        return Ok(false);
+    }
+    for (ty, want) in &cost.components {
+        let have = value(s, *ty)?;
+        if have.as_deref() != Some(want.as_ref()) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// `MerchantOffer.getModifiedCostCount(costA)`.
+fn modified_cost(o: &Offer) -> R<i32> {
+    let base = o.cost_a.count;
+    let m = f32::from_bits(o.multiplier_bits);
+    let demand_diff = ((base * o.demand) as f32 * m).floor().max(0.0) as i32;
+    let mut st = Stack::new(o.cost_a.item, 1, 0);
+    if !o.cost_a.components.is_empty() {
+        let parts: Vec<(i32, &[u8])> = o
+            .cost_a
+            .components
+            .iter()
+            .map(|(t, b)| (*t, b.as_ref()))
+            .collect();
+        st.data = ItemData::Components(Box::new(ComponentPatch::from_parts(&parts, &[])));
+    }
+    Ok((base + demand_diff + o.special).clamp(1, max_size(&st).max(1)))
+}
+
+/// The value of component `ty` (patch, else the item default for the types whose defaults are
+/// known): `Ok(None)` when absent.
+fn value(s: &Stack, ty: i32) -> R<Option<Bytes>> {
+    match v::patched(s, ty) {
+        Some(x) => Ok(x),
+        None => default_value(s.id, ty)
+            .ok_or(Unpredictable)
+            .map(|d| d.map(Bytes::from)),
+    }
+}
+
+/// The item default of component `ty` as wire bytes (`Some(None)`: the item has none; `None`:
+/// not known here).
+fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
+    let d = v::defaults(id)?;
+    let varint = |v: i32| {
+        let mut w = BytesMut::new();
+        w.put_varint(v);
+        w.to_vec()
+    };
+    Some(match ty {
+        c::ENCHANTMENTS | c::REPAIR_COST => Some(vec![0]),
+        c::STORED_ENCHANTMENTS => (d.name == "enchanted_book").then(|| vec![0]),
+        c::DAMAGE => d.damage.then(|| vec![0]),
+        c::MAX_DAMAGE => (d.max_damage > 0).then(|| varint(i32::from(d.max_damage))),
+        c::BANNER_PATTERNS => (fact(id, v::BANNER) || d.name == "shield").then(|| vec![0]),
+        c::DYE => (d.dye != 255).then(|| varint(i32::from(d.dye))),
+        c::CUSTOM_NAME => None,
+        _ => return None,
+    })
+}
+
+/// `ItemStack.set(ty, value)` / `remove(ty)` with the patch normalised like
+/// `PatchedDataComponentMap`: a value equal to the item default leaves the patch, removing a
+/// component the item has by default marks it removed.
+fn put(s: &mut Stack, ty: i32, value: Option<&[u8]>) -> R<()> {
+    let def = default_value(s.id, ty).ok_or(Unpredictable)?;
+    let mut added: Vec<(i32, Bytes)> = Vec::new();
+    let mut removed: Vec<i32> = Vec::new();
+    if let Some(p) = s.components() {
+        for (t, b) in p.iter() {
+            if t != ty && !added.iter().any(|(x, _)| *x == t) {
+                added.push((t, b));
+            }
+        }
+        removed.extend(p.removed().filter(|&t| t != ty));
+    }
+    match (value, &def) {
+        (Some(v), Some(d)) if v == d.as_slice() => {}
+        (Some(v), _) => added.push((ty, Bytes::copy_from_slice(v))),
+        (None, Some(_)) => removed.push(ty),
+        (None, None) => {}
+    }
+    let parts: Vec<(i32, &[u8])> = added.iter().map(|(t, b)| (*t, b.as_ref())).collect();
+    let p = ComponentPatch::from_parts(&parts, &removed);
+    s.data = if p.is_empty() {
+        ItemData::None
+    } else {
+        ItemData::Components(Box::new(p))
+    };
+    Ok(())
+}
+
+fn put_varint(s: &mut Stack, ty: i32, v: i32) -> R<()> {
+    let mut w = BytesMut::new();
+    w.put_varint(v);
+    put(s, ty, Some(&w))
+}
+
+/// `setDamageValue`: clamped to `0..=max_damage`.
+fn set_damage(s: &mut Stack, d: i32) {
+    let d = d.clamp(0, v::max_damage(s).unwrap_or(0));
+    let _ = put_varint(s, c::DAMAGE, d);
+}
+
+/// `repair_cost` (default 0).
+fn repair_cost(s: &Stack) -> i32 {
+    match v::patched(s, c::REPAIR_COST) {
+        Some(Some(b)) => Reader::new(&b).read_varint().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// `EnchantmentHelper.getComponentType`: stored enchantments on an enchanted book.
+fn ench_type(s: &Stack) -> i32 {
+    if is_item(s, "enchanted_book") {
+        c::STORED_ENCHANTMENTS
+    } else {
+        c::ENCHANTMENTS
+    }
+}
+
+/// `getEnchantmentsForCrafting`.
+fn enchantments_of(s: &Stack) -> Vec<(i32, i32)> {
+    v::enchantments(s, ench_type(s) == c::STORED_ENCHANTMENTS).unwrap_or_default()
+}
+
+/// `EnchantmentHelper.setEnchantments` (written in registry id order).
+fn set_enchantments(s: &mut Stack, e: &[(i32, i32)]) -> R<()> {
+    let mut e: Vec<(i32, i32)> = e.iter().copied().filter(|x| x.1 > 0).collect();
+    e.sort_unstable();
+    let mut w = BytesMut::new();
+    w.put_varint(e.len() as i32);
+    for (id, l) in e {
+        w.put_varint(id);
+        w.put_varint(l);
+    }
+    let ty = ench_type(s);
+    put(s, ty, Some(&w))
+}
+
+/// `transmuteCopy(item)`: the patch onto another item (entries equal to its defaults leave).
+fn transmute(s: &Stack, item: i32) -> R<Stack> {
+    let mut out = Stack::new(item, s.count, 0);
+    if let Some(p) = s.components() {
+        for (t, b) in p.iter() {
+            let def = default_value(item, t);
+            if def
+                .as_ref()
+                .is_some_and(|d| d.as_deref() == Some(b.as_ref()))
+            {
+                continue;
+            }
+            put_raw(&mut out, t, Some(&b));
+        }
+        for t in p.removed() {
+            if default_value(item, t).is_none_or(|d| d.is_some()) {
+                put_raw(&mut out, t, None);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn put_raw(s: &mut Stack, ty: i32, value: Option<&[u8]>) {
+    let mut added: Vec<(i32, Bytes)> = Vec::new();
+    let mut removed: Vec<i32> = Vec::new();
+    if let Some(p) = s.components() {
+        added.extend(p.iter().filter(|(t, _)| *t != ty));
+        removed.extend(p.removed().filter(|&t| t != ty));
+    }
+    match value {
+        Some(v) => added.push((ty, Bytes::copy_from_slice(v))),
+        None => removed.push(ty),
+    }
+    let parts: Vec<(i32, &[u8])> = added.iter().map(|(t, b)| (*t, b.as_ref())).collect();
+    s.data = ItemData::Components(Box::new(ComponentPatch::from_parts(&parts, &removed)));
+}
+
+/// The plain text of the `custom_name` (`getHoverName().getString()` when the stack is named).
+fn hover_name(s: &Stack) -> Option<String> {
+    let b = v::patched(s, c::CUSTOM_NAME)??;
+    let n = ghast_protocol::nbt::AnonNbt::read(&mut Reader::new(&b)).ok()?;
+    Some(ghast_protocol::chat::nbt_to_plain_text(&n))
+}
+
+/// A holder set component value: 0 + tag name, or n + 1 registry ids.
+fn read_holders(b: &Bytes) -> Option<Holders> {
+    let mut r = Reader::new(b);
+    let n = r.read_varint().ok()?;
+    if n == 0 {
+        let t = r.read_string().ok()?;
+        return Some(Holders::Tag(t.to_string()));
+    }
+    let mut ids = Vec::new();
+    for _ in 0..n - 1 {
+        ids.push(r.read_varint().ok()?);
+    }
+    Some(Holders::Ids(ids))
+}
+
+/// `banner_patterns`: the layer count and the layers' bytes.
+fn banner_layers(s: &Stack) -> R<(i32, Bytes)> {
+    let b = value(s, c::BANNER_PATTERNS)?.unwrap_or_else(|| Bytes::from_static(&[0]));
+    let mut r = Reader::new(&b);
+    let n = r.read_varint().map_err(|_| Unpredictable)?;
+    Ok((n, b.slice(r.position()..)))
 }
 
 /// A `BundleItem` (only those override clicks; any item's `bundle_contents` counts for weights).

@@ -81,7 +81,11 @@ impl Outgoing {
                     payload: sb8::ClientCommandPayload(2),
                 })
             }
-            Outgoing::ContainerClick(_) | Outgoing::Creative(_) => return None,
+            Outgoing::ContainerClick(_)
+            | Outgoing::Creative(_)
+            | Outgoing::RenameItem(_)
+            | Outgoing::ButtonClick { .. }
+            | Outgoing::SelectTrade(_) => return None,
         })
     }
 
@@ -102,7 +106,12 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb12::ServerboundPlayPacket::CloseWindow(sb12::CloseWindow { window_id: *id })
             }
-            Outgoing::OpenInventory | Outgoing::ContainerClick(_) | Outgoing::Creative(_) => {
+            Outgoing::OpenInventory
+            | Outgoing::ContainerClick(_)
+            | Outgoing::Creative(_)
+            | Outgoing::RenameItem(_)
+            | Outgoing::ButtonClick { .. }
+            | Outgoing::SelectTrade(_) => {
                 return None;
             }
         })
@@ -125,7 +134,12 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb16::ServerboundPlayPacket::CloseWindow(sb16::CloseWindow { window_id: *id })
             }
-            Outgoing::OpenInventory | Outgoing::ContainerClick(_) | Outgoing::Creative(_) => {
+            Outgoing::OpenInventory
+            | Outgoing::ContainerClick(_)
+            | Outgoing::Creative(_)
+            | Outgoing::RenameItem(_)
+            | Outgoing::ButtonClick { .. }
+            | Outgoing::SelectTrade(_) => {
                 return None;
             }
         })
@@ -269,6 +283,8 @@ mod v26_1 {
         cb::id::DECLARE_RECIPES,
         cb::id::ABILITIES,
         cb::id::EXPERIENCE,
+        cb::id::TAGS,
+        cb::id::TRADE_LIST,
     ];
 
     fn slot(r: &mut Reader<'_>) -> Result<Option<Stack>, DecodeError> {
@@ -387,6 +403,18 @@ mod v26_1 {
                     sb::ServerboundPlayPacket::CloseWindow(sb::CloseWindow {
                         window_id: i32::from(*id),
                     })
+                }
+                Outgoing::RenameItem(n) => sb::ServerboundPlayPacket::NameItem(sb::NameItem {
+                    name: n.as_str().into(),
+                }),
+                Outgoing::ButtonClick { window_id, button } => {
+                    sb::ServerboundPlayPacket::EnchantItem(sb::EnchantItem {
+                        window_id: *window_id,
+                        enchantment: *button,
+                    })
+                }
+                Outgoing::SelectTrade(i) => {
+                    sb::ServerboundPlayPacket::SelectTrade(sb::SelectTrade { slot: *i })
                 }
                 _ => return None,
             })
@@ -528,6 +556,8 @@ mod v26_1 {
                 cb::id::DECLARE_RECIPES => {
                     self.set_recipes_raw_26_1(bytes::Bytes::copy_from_slice(&raw.body));
                 }
+                cb::id::TAGS => self.on_update_tags_26_1(bytes::Bytes::copy_from_slice(&raw.body)),
+                cb::id::TRADE_LIST => self.on_merchant_offers_26_1(&raw.body),
                 cb::id::ABILITIES => {
                     let a = raw.decode_as::<cb::Abilities>()?;
                     self.set_creative_26_1(a.flags & 0x08 != 0);

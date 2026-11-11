@@ -51,6 +51,15 @@ pub(crate) fn crafting_remainder(id: i32) -> Option<Stack> {
         .map(|i| Stack::new(menus::REMAINDERS[i].1, menus::REMAINDERS[i].2, 0))
 }
 
+/// `(name, Some((max_level, anvil_cost, supported_items, exclusive_set)))` of the entries of a
+/// `minecraft:enchantment` `registry_data` body (code generation; holder sets as `#tag` or
+/// comma-separated names).
+#[doc(hidden)]
+#[must_use]
+pub fn enchantment_specs(body: &[u8]) -> Option<Vec<crate::data26::EnchantmentSpec>> {
+    crate::data26::enchantment_specs(body)
+}
+
 /// The equipment slot of an item's `equippable` component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -121,6 +130,12 @@ pub struct ItemDefaults {
     pub(crate) blocks_attacks: bool,
     /// Has `kinetic_weapon` (a spear).
     pub(crate) kinetic_weapon: bool,
+    /// `repairable.items` (`#tag` or an item name; empty when absent).
+    pub(crate) repairable: &'static str,
+    /// `provides_banner_patterns` (`#tag` or a pattern name; empty when absent).
+    pub(crate) patterns: &'static str,
+    /// `dye` color id (255 when absent).
+    pub(crate) dye: u8,
 }
 
 /// Default components of item `id`.

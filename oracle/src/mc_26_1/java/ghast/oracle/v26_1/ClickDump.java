@@ -128,6 +128,9 @@ final class ClickDump {
     static final String[] BUNDLED = {"stone", "dirt", "ender_pearl", "diamond_sword", "egg", "red_bundle", "beehive", "torch", "potion"};
 
     private static RecipeManager recipes;
+    /** The server's registry layers of the recipe load (registry sync and tags come from them). */
+    private static LayeredRegistryAccess<RegistryLayer> serverLayers;
+    private static List<String> syncLines;
     private static String recipesHex;
     private static RegistryOps<JsonElement> jsonOps;
 
@@ -172,6 +175,9 @@ final class ClickDump {
     private static void header(Consumer<String> sink) {
         syncRecipes();
         sink.accept(new Json().beginObject().field("type", "update_recipes").field("packet", recipesHex).endObject().toString());
+        for (String line : syncLines()) {
+            sink.accept(line);
+        }
         RegistryAccess access = Harness.listener.registryAccess();
         jsonOps = access.createSerializationContext(JsonOps.INSTANCE);
         access.registries().sorted(Comparator.comparing(e -> e.key().identifier().toString())).forEach(e -> {
@@ -243,6 +249,7 @@ final class ClickDump {
                 staticTags.forEach(Registry.PendingTags::apply);
                 rm.finalizeRecipeLoading(net.minecraft.world.flag.FeatureFlags.DEFAULT_FLAGS);
                 recipes = rm;
+                serverLayers = layers;
             }
             // RecipePropertySet keys sorted: getSynchronizedItemProperties is a plain map
             Map<net.minecraft.resources.ResourceKey<net.minecraft.world.item.crafting.RecipePropertySet>,
@@ -281,6 +288,60 @@ final class ClickDump {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /**
+     * The configuration data the anvil, grindstone and loom rules read, as the server sends it:
+     * the enchantment and banner pattern {@code registry_data} packets (every element in full,
+     * no known packs) and the {@code update_tags} packet (sorted by registry and tag name; the
+     * server's own map order depends on hash codes). The harness client received the same data in
+     * {@code Vanilla.configure}.
+     */
+    private static List<String> syncLines() {
+        if (syncLines != null) {
+            return syncLines;
+        }
+        List<String> out = new ArrayList<>();
+        RegistryAccess.Frozen serverAccess = serverLayers.compositeAccess();
+        net.minecraft.core.RegistrySynchronization.packRegistries(serverAccess.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),
+                serverAccess, Set.of(), (key, entries) -> {
+                    String name = key.identifier().toString();
+                    if (!name.equals("minecraft:enchantment") && !name.equals("minecraft:banner_pattern")) {
+                        return;
+                    }
+                    var buf = new net.minecraft.network.FriendlyByteBuf(Unpooled.buffer());
+                    net.minecraft.network.protocol.configuration.ClientboundRegistryDataPacket.STREAM_CODEC.encode(buf,
+                            new net.minecraft.network.protocol.configuration.ClientboundRegistryDataPacket(key, entries));
+                    out.add(new Json().beginObject().field("type", "registry_data").field("registry", name)
+                            .field("packet", ByteBufUtil.hexDump(buf)).endObject().toString());
+                });
+        Map<net.minecraft.resources.ResourceKey<? extends Registry<?>>, net.minecraft.tags.TagNetworkSerialization.NetworkPayload> tags =
+                net.minecraft.tags.TagNetworkSerialization.serializeTagsToNetwork(serverLayers);
+        Map<net.minecraft.resources.ResourceKey<? extends Registry<?>>, net.minecraft.tags.TagNetworkSerialization.NetworkPayload> sorted =
+                new LinkedHashMap<>();
+        try {
+            var ctor = net.minecraft.tags.TagNetworkSerialization.NetworkPayload.class.getDeclaredConstructor(Map.class);
+            ctor.setAccessible(true);
+            List<net.minecraft.resources.ResourceKey<? extends Registry<?>>> keys = new ArrayList<>(tags.keySet());
+            keys.sort(Comparator.comparing(k -> k.identifier().toString()));
+            for (var k : keys) {
+                @SuppressWarnings("unchecked")
+                Map<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList> m =
+                        (Map<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList>) Reflect.get(
+                                net.minecraft.tags.TagNetworkSerialization.NetworkPayload.class, tags.get(k), "tags");
+                Map<net.minecraft.resources.Identifier, it.unimi.dsi.fastutil.ints.IntList> ms = new LinkedHashMap<>();
+                m.entrySet().stream().sorted(Comparator.comparing(e -> e.getKey().toString())).forEach(e -> ms.put(e.getKey(), e.getValue()));
+                sorted.put(k, ctor.newInstance(ms));
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+        var buf = new net.minecraft.network.FriendlyByteBuf(Unpooled.buffer());
+        net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket.STREAM_CODEC.encode(buf,
+                new net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket(sorted));
+        out.add(new Json().beginObject().field("type", "update_tags").field("packet", ByteBufUtil.hexDump(buf)).endObject().toString());
+        syncLines = out;
+        return out;
     }
 
     // ------------------------------------------------------------------ random stacks
@@ -361,6 +422,34 @@ final class ClickDump {
             }
             case 8 -> s.remove(r.chance(0.5) ? DataComponents.EQUIPPABLE : DataComponents.ENCHANTMENTS);
             default -> set(s, DataComponents.LORE, "[\"l\"]");
+        }
+    }
+
+    /** One or two random enchantments (stored on books), sometimes a repair cost or a name. */
+    private static void enchant(Rng r, ItemStack s) {
+        String[] e = {"minecraft:sharpness", "minecraft:smite", "minecraft:unbreaking", "minecraft:efficiency", "minecraft:mending",
+            "minecraft:binding_curse", "minecraft:vanishing_curse", "minecraft:protection", "minecraft:fire_protection", "minecraft:power",
+            "minecraft:infinity", "minecraft:silk_touch", "minecraft:fortune"};
+        StringBuilder j = new StringBuilder("{");
+        int n = r.range(1, 2);
+        Set<String> used = new LinkedHashSet<>();
+        for (int k = 0; k < n; k++) {
+            String id = r.pick(e);
+            if (used.add(id)) {
+                j.append(used.size() > 1 ? "," : "").append('"').append(id).append("\":").append(r.range(1, 4));
+            }
+        }
+        j.append('}');
+        boolean book = s.is(Items.BOOK) || s.is(Items.ENCHANTED_BOOK);
+        if (s.is(Items.BOOK)) {
+            return;
+        }
+        set(s, book ? DataComponents.STORED_ENCHANTMENTS : DataComponents.ENCHANTMENTS, j.toString());
+        if (r.chance(0.3)) {
+            s.set(DataComponents.REPAIR_COST, r.range(0, 7));
+        }
+        if (r.chance(0.2)) {
+            set(s, DataComponents.CUSTOM_NAME, "\"Old\"");
         }
     }
 
@@ -454,10 +543,19 @@ final class ClickDump {
                     items.add(slot.getItem().copy());
                 } else {
                     String[] pool = menuPool(menuId, k);
-                    items.add(pool != null && r.chance(0.6) ? maybe(r, 0.7, pool) : maybe(r, fill, ITEMS));
+                    ItemStack it = pool != null && r.chance(0.6) ? maybe(r, 0.7, pool) : maybe(r, fill, ITEMS);
+                    if ((menuId == 8 || menuId == 15) && !it.isEmpty() && r.chance(0.5)) {
+                        enchant(r, it);
+                    }
+                    items.add(it);
                 }
             }
             content(containerId, r.nextInt(32768), items, r.chance(0.35) ? stack(r, ITEMS) : ItemStack.EMPTY);
+            if (menuId == 19) {
+                offersHex = offers(r, containerId);
+            } else {
+                offersHex = null;
+            }
             // container data: crafter slot locks, anvil cost, stonecutter / loom selection
             if (menuId == 7) {
                 for (int k = 0; k < 9; k++) {
@@ -478,6 +576,9 @@ final class ClickDump {
         b.append("{\"type\":\"case\",\"case\":\"").append(name).append("\",\"menu\":").append(menuId).append(",\"window\":").append(containerId)
                 .append(",\"creative\":").append(gm == GameType.CREATIVE).append(",\"xp\":").append(xp)
                 .append(",\"selected\":").append(player.getInventory().getSelectedSlot());
+        if (menuId == 19) {
+            b.append(",\"offers\":\"").append(offersHex).append('"');
+        }
         if (menuId == 7 || menuId == 8 || menuId == 18 || menuId == 24) {
             b.append(",\"data\":[");
             int n = menuId == 7 ? 10 : 1;
@@ -492,8 +593,38 @@ final class ClickDump {
         int written = 0;
         for (int c = 0; c < clicks; c++) {
             List<int[]> seq = gesture(r, h, gm == GameType.CREATIVE);
+            String typed = null;
+            if (menuId == 19 && r.chance(0.15)) {
+                seq = List.of(new int[] {r.range(-1, 6), 0, ACTION_SELECT_TRADE});
+            } else if (menuId == 18 && r.chance(0.15)) {
+                seq = List.of(new int[] {r.range(0, 8), 0, ACTION_BUTTON});
+            } else if (menuId == 8 && r.chance(0.2)) {
+                seq = List.of(new int[] {0, 0, ACTION_RENAME});
+                typed = r.pick(NAMES);
+                if (typed.equals("=") && h.getSlot(0).hasItem()) {
+                    typed = h.getSlot(0).getItem().getHoverName().getString();
+                }
+            }
             for (int[] g : seq) {
                 Harness.connection.sent.clear();
+                if (g[2] >= 100) {
+                    sentName = null;
+                    action(h, player, containerId, g, typed);
+                    if (written++ > 0) {
+                        b.append(',');
+                    }
+                    b.append("{\"slot\":").append(g[0]).append(",\"button\":").append(g[1]).append(",\"mode\":").append(g[2]);
+                    if (sentName != null) {
+                        b.append(",\"name\":");
+                        b.append(new Json().value(sentName).toString());
+                    }
+                    b.append(",\"packets\":[");
+                    packets(b);
+                    b.append(']');
+                    state(b, player, w0, h);
+                    b.append('}');
+                    continue;
+                }
                 Harness.client.gameMode.handleContainerInput(containerId, g[0], g[1], ContainerInput.values()[g[2]], player);
                 if (written++ > 0) {
                     b.append(',');
@@ -533,7 +664,9 @@ final class ClickDump {
             };
             case 13 -> k == 0 ? new String[] {"diamond_sword", "book", "diamond_pickaxe", "bow"} : new String[] {"lapis_lazuli"};
             case 9 -> new String[] {"iron_ingot", "gold_ingot", "emerald", "diamond", "netherite_ingot"};
-            case 8, 15 -> new String[] {"diamond_sword", "diamond_pickaxe", "enchanted_book", "iron_axe", "book", "bow", "shears"};
+            case 8 -> k == 1 ? new String[] {"diamond_sword", "enchanted_book", "diamond", "iron_ingot", "stick", "diamond_pickaxe", "bow"}
+                    : new String[] {"diamond_sword", "diamond_pickaxe", "enchanted_book", "iron_axe", "book", "bow", "shears"};
+            case 15 -> new String[] {"diamond_sword", "diamond_pickaxe", "enchanted_book", "iron_axe", "book", "bow", "shears"};
             case 21 -> switch (k) {
                 case 0 -> new String[] {"netherite_upgrade_smithing_template", "coast_armor_trim_smithing_template"};
                 case 1 -> new String[] {"diamond_sword", "iron_chestplate", "diamond_leggings"};
@@ -565,6 +698,83 @@ final class ClickDump {
     private static void resetDropThrottle(LocalPlayer player) {
         Object t = Reflect.get(LocalPlayer.class, player, "dropSpamThrottler");
         Reflect.setInt(net.minecraft.util.TickThrottler.class, t, "count", 0);
+    }
+
+    static final int ACTION_SELECT_TRADE = 100;
+    static final int ACTION_BUTTON = 101;
+    static final int ACTION_RENAME = 102;
+    /** Anvil names: "=" is the item's current hover name (the screen sends "" for it). */
+    static final String[] NAMES = {"", "x", "Named", "=", "a b", "Bob"};
+    private static String offersHex;
+    private static String sentName;
+
+    /**
+     * A screen action that is not a container click: a trade picked in the villager screen
+     * ({@code MerchantScreen.postButtonClick}: selection hint, {@code tryMoveItems}, the
+     * {@code select_trade} packet), a loom pattern button ({@code clickMenuButton} +
+     * {@code container_button_click}), a name typed in the anvil ({@code AnvilScreen.onNameChanged}).
+     */
+    private static void action(AbstractContainerMenu h, LocalPlayer player, int containerId, int[] g, String name) {
+        switch (g[2]) {
+            case ACTION_SELECT_TRADE -> {
+                var m = (net.minecraft.world.inventory.MerchantMenu) h;
+                m.setSelectionHint(g[0]);
+                m.tryMoveItems(g[0]);
+                Harness.connection.send(new net.minecraft.network.protocol.game.ServerboundSelectTradePacket(g[0]));
+            }
+            case ACTION_BUTTON -> {
+                if (h.clickMenuButton(player, g[0])) {
+                    Harness.client.gameMode.handleInventoryButtonClick(containerId, g[0]);
+                }
+            }
+            default -> {
+                var anvil = (net.minecraft.world.inventory.AnvilMenu) h;
+                var slot = anvil.getSlot(0);
+                if (slot.hasItem()) {
+                    String n = name;
+                    if (!slot.getItem().has(DataComponents.CUSTOM_NAME) && n.equals(slot.getItem().getHoverName().getString())) {
+                        n = "";
+                    }
+                    sentName = n;
+                    if (anvil.setItemName(n)) {
+                        Harness.connection.send(new net.minecraft.network.protocol.game.ServerboundRenameItemPacket(n));
+                    }
+                }
+            }
+        }
+    }
+
+    /** Random villager offers sent as the server sends them (merchant_offers); returns the packet hex. */
+    private static String offers(Rng r, int containerId) {
+        net.minecraft.world.item.trading.MerchantOffers list = new net.minecraft.world.item.trading.MerchantOffers();
+        String[] costs = {"emerald", "paper", "book", "stone", "coal", "iron_ingot"};
+        int n = r.range(0, 6);
+        for (int k = 0; k < n; k++) {
+            Item a = BuiltInRegistries.ITEM.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(r.pick(costs)));
+            var costA = new net.minecraft.world.item.trading.ItemCost(a, r.range(1, 20));
+            java.util.Optional<net.minecraft.world.item.trading.ItemCost> costB = r.chance(0.4)
+                    ? java.util.Optional.of(new net.minecraft.world.item.trading.ItemCost(
+                            BuiltInRegistries.ITEM.getValue(net.minecraft.resources.Identifier.withDefaultNamespace(r.pick(costs))), r.range(1, 10)))
+                    : java.util.Optional.empty();
+            ItemStack result = stack(r, ITEMS);
+            if (result.getCount() > result.getMaxStackSize()) {
+                result.setCount(result.getMaxStackSize());
+            }
+            var offer = new net.minecraft.world.item.trading.MerchantOffer(costA, costB, result, r.range(0, 4), r.range(1, 6), r.range(0, 10),
+                    r.chance(0.5) ? 0.05F : 0.2F, r.chance(0.5) ? 0 : r.range(-5, 10));
+            if (r.chance(0.3)) {
+                offer.setSpecialPriceDiff(r.range(-5, 5));
+            }
+            list.add(offer);
+        }
+        var p = new net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket(containerId, list, r.range(1, 5), r.range(0, 100), r.chance(0.5), r.chance(0.5));
+        RegistryFriendlyByteBuf buf = Harness.buf();
+        net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket.STREAM_CODEC.encode(buf, p);
+        byte[] bytes = new byte[buf.readableBytes()];
+        buf.getBytes(buf.readerIndex(), bytes);
+        RegistryFriendlyByteBuf in = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(bytes), Harness.listener.registryAccess());
+        Harness.listener.handleMerchantOffers(net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket.STREAM_CODEC.decode(in));
+        return ByteBufUtil.hexDump(bytes);
     }
 
     private static void data(int containerId, int id, int value) {
@@ -648,6 +858,15 @@ final class ClickDump {
         }
         b.append("],\"state_id\":").append(h.getStateId());
         b.append(",\"drag\":").append(Reflect.getInt(AbstractContainerMenu.class, h, "quickcraftStatus"));
+        @SuppressWarnings("unchecked")
+        List<net.minecraft.world.inventory.DataSlot> ds = (List<net.minecraft.world.inventory.DataSlot>) Reflect.get(AbstractContainerMenu.class, h, "dataSlots");
+        if (!ds.isEmpty()) {
+            b.append(",\"slots_data\":[");
+            for (int k = 0; k < ds.size(); k++) {
+                b.append(k > 0 ? "," : "").append(ds.get(k).get());
+            }
+            b.append(']');
+        }
     }
 
     private static void slots(StringBuilder b, AbstractContainerMenu h) {
@@ -773,6 +992,16 @@ final class ClickDump {
             if (in.readableBytes() != 0 || back.slotNum() != p.slotNum() || !ItemStack.matches(back.itemStack(), p.itemStack())) {
                 throw new IllegalStateException("hand-written set_creative_mode_slot differs: " + p + " / " + back);
             }
+        } else if (q instanceof net.minecraft.network.protocol.game.ServerboundSelectTradePacket p) {
+            buf.writeVarInt(3);
+            buf.writeVarInt(p.getItem());
+        } else if (q instanceof net.minecraft.network.protocol.game.ServerboundContainerButtonClickPacket p) {
+            buf.writeVarInt(4);
+            buf.writeVarInt(p.containerId());
+            buf.writeVarInt(p.buttonId());
+        } else if (q instanceof net.minecraft.network.protocol.game.ServerboundRenameItemPacket p) {
+            buf.writeVarInt(5);
+            buf.writeUtf(p.getName());
         } else {
             buf.writeVarInt(2);
             buf.writeUtf(q.type().toString());

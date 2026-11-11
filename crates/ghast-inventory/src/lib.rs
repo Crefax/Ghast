@@ -57,6 +57,8 @@
 #![warn(missing_docs, unnameable_types)]
 
 mod crafting;
+#[cfg(feature = "v26_1")]
+mod data26;
 mod inventory;
 mod item;
 mod packets;
