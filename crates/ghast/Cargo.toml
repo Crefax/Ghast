@@ -81,6 +81,10 @@ name = "inventory_probe"
 name = "server_switch"
 
 [[example]]
+name = "online_chat"
+required-features = ["microsoft"]
+
+[[example]]
 name = "goto"
 required-features = ["ext", "pathfinder"]
 
