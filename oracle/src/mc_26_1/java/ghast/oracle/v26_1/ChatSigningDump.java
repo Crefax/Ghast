@@ -32,7 +32,6 @@ import net.minecraft.world.entity.player.ProfilePublicKey;
 import net.minecraft.world.flag.FeatureFlags;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -225,15 +224,42 @@ final class ChatSigningDump {
         Map<CommandNode<CommandSourceStack>, CommandNode<CommandSourceStack>> converted = new HashMap<>();
         RootCommandNode<CommandSourceStack> root = new RootCommandNode<>();
         converted.put(commands.getDispatcher().getRoot(), root);
-        Method fill = Commands.class.getDeclaredMethod("fillUsableCommands", CommandNode.class, CommandNode.class, Object.class, Map.class);
-        fill.setAccessible(true);
-        fill.invoke(null, commands.getDispatcher().getRoot(), root, op, converted);
+        fill(commands.getDispatcher().getRoot(), root, op, converted);
         Field inspector = Commands.class.getDeclaredField("COMMAND_NODE_INSPECTOR");
         inspector.setAccessible(true);
         FriendlyByteBuf b = buf();
         ClientboundCommandsPacket.STREAM_CODEC.encode(b,
                 new ClientboundCommandsPacket(root, (ClientboundCommandsPacket.NodeInspector) inspector.get(null)));
         return bytes(b);
+    }
+
+    /**
+     * {@code Commands.fillUsableCommands}, with each node's children in name order: some subtrees
+     * (the game rules) come from hash-ordered registries, so their order differs between runs. The
+     * order does not change what a parse reads (literals are looked up by name).
+     */
+    private static <S> void fill(CommandNode<S> source, CommandNode<S> target, S filter,
+            Map<CommandNode<S>, CommandNode<S>> converted) {
+        List<CommandNode<S>> children = new ArrayList<>(source.getChildren());
+        children.sort(java.util.Comparator.comparing(CommandNode::getName));
+        for (CommandNode<S> child : children) {
+            if (child.canUse(filter)) {
+                var builder = child.createBuilder();
+                if (builder.getRedirect() != null) {
+                    CommandNode<S> to = converted.get(builder.getRedirect());
+                    if (to == null) {
+                        throw new IllegalStateException("redirect of " + child.getName() + " before its target");
+                    }
+                    builder.redirect(to);
+                }
+                CommandNode<S> node = builder.build();
+                converted.put(child, node);
+                target.addChild(node);
+                if (!child.getChildren().isEmpty()) {
+                    fill(child, node, filter, converted);
+                }
+            }
+        }
     }
 
     /** {@code ClientPacketListener.handleCommands}. */
