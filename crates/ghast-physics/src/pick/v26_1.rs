@@ -144,18 +144,47 @@ pub fn pick_target<W: BlockView<State = BlockState>>(
     held_block: Option<Block>,
     entities: &[PickEntity],
 ) -> Target {
-    let mut max = if block_range >= entity_range {
+    let max = if block_range >= entity_range {
         block_range
     } else {
         entity_range
     };
-    let mut max_sq = max * max;
     let to = [
         eye[0] + view[0] * max,
         eye[1] + view[1] * max,
         eye[2] + view[2] * max,
     ];
     let block = clip(world, eye, to, held_block);
+    target(
+        block,
+        player_bb,
+        eye,
+        view,
+        block_range,
+        entity_range,
+        entities,
+    )
+}
+
+/// [`pick_target`] from an already computed block ray: `block` = [`clip`] from `eye` along `view`
+/// to `max(block_range, entity_range)` (unfiltered). The entity search, the entity-vs-block
+/// decision and the final range filter, as `LocalPlayer.pick`.
+#[must_use]
+pub fn target(
+    block: BlockHit,
+    player_bb: &Aabb,
+    eye: [f64; 3],
+    view: [f64; 3],
+    block_range: f64,
+    entity_range: f64,
+    entities: &[PickEntity],
+) -> Target {
+    let mut max = if block_range >= entity_range {
+        block_range
+    } else {
+        entity_range
+    };
+    let mut max_sq = max * max;
     let block_sq = length_sqr(block.location, eye);
     if block.is_block() {
         max_sq = block_sq;
