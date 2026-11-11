@@ -56,7 +56,9 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
   `LoginInbound::CookieRequest`; `ChatMessage` has a private field (build it with
   `ChatMessage::from_json` / `from_text`); `BlockQuery` / `HeldItem` gained crate-private fields;
   `WorldView` gained a defaulted `crosshair` method. The sealed `ClientVersion` trait changed
-  (not implementable outside the crate).
+  (not implementable outside the crate). `hands::pick_entity` is gone (the crosshair is one
+  block-and-entity pick now, `TickContext::target` / `target_entity`, built on
+  `ghast_physics::pick::<version>::pick_target`), and so is `Capabilities::entity_pick_border`.
 - **`#[non_exhaustive]`** so that these types can grow in patch releases. A `match` on one of
   the enums needs a `_ =>` arm; the structs are read as before but cannot be built with a
   struct literal outside their crate:
@@ -100,7 +102,12 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
   targetable; 1.12.2 — stairs (each part box), flowers (model offset), connected redstone wire
   and the moving piston; 1.16.5 — every non-cube block now uses vanilla's outline and
   interaction shapes instead of a union box (full cubes unchanged). `ghast_physics::pick` also
-  picks entities with vanilla's entity loop (all four versions, oracle-proven).
+  picks entities with vanilla's entity loop (all four versions, oracle-proven), and the client
+  uses one pick for block and entity like `GameRenderer.updateTargetedEntity`: an entity hit
+  beyond 3 blocks but before the block is now a miss (it used to dig the block behind it), and
+  entity boxes grow by their type's targeting margin (`Entity::targeting_margin`). The pick is
+  computed only on ticks with a mouse button down or when a behaviour asks for the target, at
+  the same point and from the same state as before, so packets do not change.
 - **Disconnect**: quitting half-closes the socket and drains it like vanilla, so servers log
   "Disconnected" instead of "Connection reset by peer".
 
@@ -132,11 +139,27 @@ dig + place, chest clicks).
 - **ghast-client**: 26.1 sessions end to end (configuration, chunk batch acks, player input,
   tick end, block sequences), the oracle-verified pick with vanilla's eye lerp and interaction
   range attributes, entity tracking with entity picks and attacks. The level-load gate
-  (`player_loaded`) is `ghast_physics::modern::LoadGate`, replayed against the oracle's 25 joins;
+  (`player_loaded`) is `ghast_physics::modern::LoadGate`, replayed against the oracle's 27 joins (incl. joining dead);
   it opens once the player's column and the eight around it have been loaded for two ticks
   (vanilla's first section compile needs them). Opening it on the player's own column, as an
   earlier build did, drew Grim flags when logging in above the ground.
 - Not yet on 26.1: path finding, the viewer, signed chat, online mode (untested).
+
+### Added in the other crates
+
+- **ghast-entity**: `v26_1::Tracker` (feature `v26_1`): every 26.1 entity packet parsed by hand,
+  the client's entity tick (interpolation steps, head lerps, body rotation, deferred resizes,
+  chunk ticking), passengers, tab list; replayed against the real `ClientPacketListener` at
+  0 diffs. `Tracker::mark_column_loaded` / `mark_column_unloaded` for a tracker started late,
+  `Entity::targeting_margin`. Entities of the older versions stay 232 bytes with 26.1 compiled
+  in.
+- **ghast-data**: per-version `dig` modules (`v1_8`, `v1_12`, `v1_16_5`, `v26_1`): destroy
+  progress from the jar's block and tool tables; selection / outline / interaction shapes for
+  the crosshair (`v1_8::Block::selection`, 26.1 `outline_shape`, `interaction_shape`, …); 26.1
+  posed entity dimensions; the `display-names` feature.
+- **ghast-physics**: `pick` (crosshair rays and entity picks for every version), `modern` (the
+  26.1 player core, `modern::LoadGate` for the level-load gate, `modern::no_block_collision`),
+  one feature per version.
 
 ### Shared infrastructure
 

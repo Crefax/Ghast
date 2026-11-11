@@ -168,6 +168,8 @@ strip = true
    `ChatMessage` with `from_json` / `from_text`. More enums and output structs are
    `#[non_exhaustive]` (e.g. `Click`, `ClickOutcome`, `Applied`, `Events`): add `_ =>` arms to
    matches and read the structs' fields instead of destructuring them fully.
+   `hands::pick_entity` is gone: use `TickContext::target` / `target_entity` (one crosshair
+   pick for block and entity).
 5. **Protocol.** Packet types are aliases of shared definitions; code that names, builds or
    matches them is unchanged. `ghast_protocol::Version` is sealed (it cannot be implemented
    outside ghast-protocol).
