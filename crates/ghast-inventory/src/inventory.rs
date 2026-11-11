@@ -550,6 +550,9 @@ pub struct Inventory {
     /// refused from 1280 (`canDropItems`).
     #[cfg(feature = "v26_1")]
     drop_throttle: i32,
+    /// 26.1 `update_recipes` body, not parsed yet (parsed when a menu needs its item sets).
+    #[cfg(feature = "v26_1")]
+    recipes_raw: Option<bytes::Bytes>,
 }
 
 impl Inventory {
@@ -588,13 +591,15 @@ impl Inventory {
             #[cfg(feature = "v26_1")]
             s26: Default::default(),
             #[cfg(feature = "v26_1")]
-            creative_last: vec![None; 46],
+            creative_last: Vec::new(),
             #[cfg(feature = "v26_1")]
             creative_screen: false,
             #[cfg(feature = "v26_1")]
             creative_echo: Vec::new(),
             #[cfg(feature = "v26_1")]
             drop_throttle: 0,
+            #[cfg(feature = "v26_1")]
+            recipes_raw: None,
         }
     }
 
@@ -630,6 +635,8 @@ impl Inventory {
         let reg26 = std::mem::take(&mut self.reg26);
         #[cfg(feature = "v26_1")]
         let w26 = std::mem::take(&mut self.w26);
+        #[cfg(feature = "v26_1")]
+        let recipes_raw = self.recipes_raw.take();
         *self = Inventory {
             timeout: self.timeout,
             settle: self.settle,
@@ -638,6 +645,8 @@ impl Inventory {
             reg26,
             #[cfg(feature = "v26_1")]
             w26,
+            #[cfg(feature = "v26_1")]
+            recipes_raw,
             ..Inventory::empty(self.version)
         };
         self.events.player_changed = true;
@@ -1030,6 +1039,14 @@ impl Inventory {
     #[cfg(feature = "v26_1")]
     fn click_26(&mut self, slot: i16, button: u8, mode: u8) -> Outgoing {
         let kind = self.kind_26();
+        if matches!(
+            kind,
+            crate::sim26::Kind::Furnace(_)
+                | crate::sim26::Kind::Smithing
+                | crate::sim26::Kind::Stonecutter
+        ) {
+            self.ensure_recipes_26_1();
+        }
         let w = usize::from(matches!(self.screen, ScreenState::Window(_)));
         let mut m = self.m.clone();
         let mut scr = self.s26[w].clone();
@@ -1113,6 +1130,17 @@ impl Inventory {
         self.w26.creative = creative;
     }
 
+    /// 26.1: keeps an `update_recipes` body for later parsing.
+    #[cfg(feature = "v26_1")]
+    pub(crate) fn set_recipes_raw_26_1(&mut self, body: bytes::Bytes) {
+        self.recipes_raw = Some(body);
+    }
+
+    #[cfg(feature = "v26_1")]
+    pub(crate) fn take_recipes_raw_26_1(&mut self) -> Option<bytes::Bytes> {
+        self.recipes_raw.take()
+    }
+
     /// 26.1: the packets the creative inventory screen sent in answer to server packets since
     /// the last call (vanilla echoes every window 0 slot the server sets while the screen is
     /// open); send them right away.
@@ -1134,6 +1162,10 @@ impl Inventory {
     #[cfg(feature = "v26_1")]
     fn creative_broadcast(&mut self, out: &mut Vec<CreativePacket>) {
         let lay = Layout::new(Version::V26_1, Screen::Player);
+        if self.creative_last.is_empty() {
+            // allocated on the first broadcast: a bot that never opens it pays nothing
+            self.creative_last = vec![None; 46];
+        }
         for i in 0..46 {
             let Some(l) = lay.loc(i) else { break };
             let cur = self.m.at(l);
@@ -1272,6 +1304,7 @@ impl Inventory {
         sets: impl IntoIterator<Item = (&'a str, &'a [i32])>,
         stonecutter_inputs: Option<Vec<i32>>,
     ) {
+        self.recipes_raw = None;
         let w = &mut self.w26;
         for v in [
             &mut w.furnace_input,

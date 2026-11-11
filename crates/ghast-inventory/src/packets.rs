@@ -438,6 +438,17 @@ mod v26_1 {
             }
         }
 
+        /// Parses the `update_recipes` bytes kept by [`Inventory::apply_raw_v26_1`] (once; a
+        /// packet that does not decode leaves the item sets empty, like a client that got none).
+        pub(crate) fn ensure_recipes_26_1(&mut self) {
+            if let Some(body) = self.take_recipes_raw_26_1()
+                && let Ok(d) =
+                    RawPacket::new(cb::id::DECLARE_RECIPES, body).decode_as::<cb::DeclareRecipes>()
+            {
+                self.declare_recipes_26_1(&d);
+            }
+        }
+
         fn declare_recipes_26_1(&mut self, d: &cb::DeclareRecipes) {
             use ghast_protocol::types::holder::HolderSet;
             let mut inputs = Some(Vec::new());
@@ -512,8 +523,10 @@ mod v26_1 {
                     let c = raw.decode_as::<cb::CraftProgressBar>()?;
                     self.on_window_property(c.window_id, c.property, c.value);
                 }
+                // large and sent at every join: kept as bytes, parsed when a menu first needs
+                // its item sets (`ensure_recipes_26_1`)
                 cb::id::DECLARE_RECIPES => {
-                    self.declare_recipes_26_1(&raw.decode_as::<cb::DeclareRecipes>()?);
+                    self.set_recipes_raw_26_1(bytes::Bytes::copy_from_slice(&raw.body));
                 }
                 cb::id::ABILITIES => {
                     let a = raw.decode_as::<cb::Abilities>()?;
