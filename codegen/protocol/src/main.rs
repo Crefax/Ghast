@@ -233,6 +233,60 @@ pub const PATCHES: &[Patch] = &[Patch {
     expect: "\"varint\"",
     replace: "\"varlong\"",
     why: "ClientboundSetBorderLerpSizePacket reads the lerp time with readVarLong",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/damage_type",
+    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "damageType", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "damageTypeId", "otherwise": {"name": "data", "type": "DamageTypeData"}}], "false": "string"}}]}]]"#,
+    replace: r#""varint""#,
+    why: "DamageType.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/damage_resistant",
+    expect: r#""string""#,
+    replace: r#"["container", [{"name": "types", "type": "IDSet"}]]"#,
+    why: "DamageResistant.STREAM_CODEC is ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/provides_banner_patterns",
+    expect: r#""string""#,
+    replace: r#""IDSet""#,
+    why: "PROVIDES_BANNER_PATTERNS is networkSynchronized(ByteBufCodecs.holderSet(BANNER_PATTERN)) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/provides_trim_material",
+    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "material", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}], "false": "string"}}]}]]"#,
+    replace: r#"["registryEntryHolder", {"baseName": "materialId", "otherwise": {"name": "data", "type": "ArmorTrimMaterial"}}]"#,
+    why: "TrimMaterial.STREAM_CODEC is ByteBufCodecs.holder(TRIM_MATERIAL, direct) with no leading bool (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/jukebox_playable",
+    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "song", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}], "false": "string"}}]}]]"#,
+    replace: r#"["registryEntryHolder", {"baseName": "songId", "otherwise": {"name": "data", "type": "JukeboxSongData"}}]"#,
+    why: "JukeboxPlayable.STREAM_CODEC is JukeboxSong.STREAM_CODEC = ByteBufCodecs.holder(JUKEBOX_SONG, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/instrument",
+    expect: r#"["container", [{"name": "hasHolder", "type": "bool"}, {"name": "data", "type": ["switch", {"compareTo": "hasHolder", "fields": {"true": ["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}], "false": "string"}}]}]]"#,
+    replace: r#"["registryEntryHolder", {"baseName": "instrumentId", "otherwise": {"name": "data", "type": "InstrumentData"}}]"#,
+    why: "InstrumentComponent.STREAM_CODEC is Instrument.STREAM_CODEC = ByteBufCodecs.holder(INSTRUMENT, direct), no leading bool (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1variant",
+    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+    replace: r#""varint""#,
+    why: "ChickenVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/chicken~1sound_variant",
+    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+    replace: r#""varint""#,
+    why: "ChickenSoundVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/zombie_nautilus~1variant",
+    expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
+    replace: r#""varint""#,
+    why: "ZombieNautilusVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
 }];
 
 /// Applies the [`PATCHES`] of one minecraft-data version.

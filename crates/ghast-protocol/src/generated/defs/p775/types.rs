@@ -6461,28 +6461,6 @@ pub struct SlotComponentDataUseEffects {
 }
 
 #[cfg(feature = "v26_1")]
-/// Switch on `hasHolder`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlotComponentDataDamageTypeDamageType {
-    /// Case(s) `true`.
-    True(Holder<crate::defs::p775::types::DamageTypeData>),
-    /// Case(s) `false`.
-    False(ByteString),
-    /// Any other value.
-    Other,
-}
-
-#[cfg(feature = "v26_1")]
-/// Nested container.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SlotComponentDataDamageType {
-    /// `hasHolder`
-    pub has_holder: bool,
-    /// `damageType`
-    pub damage_type: crate::defs::p775::types::SlotComponentDataDamageTypeDamageType,
-}
-
-#[cfg(feature = "v26_1")]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataRarity(pub i32);
@@ -6894,6 +6872,14 @@ pub struct SlotComponentDataUseCooldown {
 #[cfg(feature = "v26_1")]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
+pub struct SlotComponentDataDamageResistant {
+    /// `types`
+    pub types: HolderSet,
+}
+
+#[cfg(feature = "v26_1")]
+/// Nested container.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataToolRules {
     /// `blocks`
     pub blocks: HolderSet,
@@ -7292,72 +7278,6 @@ pub struct SlotComponentDataBlockEntityData {
 }
 
 #[cfg(feature = "v26_1")]
-/// Switch on `hasHolder`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlotComponentDataInstrumentData {
-    /// Case(s) `true`.
-    True(Holder<crate::defs::p775::types::InstrumentData>),
-    /// Case(s) `false`.
-    False(ByteString),
-    /// Any other value.
-    Other,
-}
-
-#[cfg(feature = "v26_1")]
-/// Nested container.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SlotComponentDataInstrument {
-    /// `hasHolder`
-    pub has_holder: bool,
-    /// `data`
-    pub data: crate::defs::p775::types::SlotComponentDataInstrumentData,
-}
-
-#[cfg(feature = "v26_1")]
-/// Switch on `hasHolder`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlotComponentDataProvidesTrimMaterialMaterial {
-    /// Case(s) `true`.
-    True(Holder<crate::defs::p775::types::ArmorTrimMaterial>),
-    /// Case(s) `false`.
-    False(ByteString),
-    /// Any other value.
-    Other,
-}
-
-#[cfg(feature = "v26_1")]
-/// Nested container.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SlotComponentDataProvidesTrimMaterial {
-    /// `hasHolder`
-    pub has_holder: bool,
-    /// `material`
-    pub material: crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial,
-}
-
-#[cfg(feature = "v26_1")]
-/// Switch on `hasHolder`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlotComponentDataJukeboxPlayableSong {
-    /// Case(s) `true`.
-    True(Holder<crate::defs::p775::types::JukeboxSongData>),
-    /// Case(s) `false`.
-    False(ByteString),
-    /// Any other value.
-    Other,
-}
-
-#[cfg(feature = "v26_1")]
-/// Nested container.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SlotComponentDataJukeboxPlayable {
-    /// `hasHolder`
-    pub has_holder: bool,
-    /// `song`
-    pub song: crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong,
-}
-
-#[cfg(feature = "v26_1")]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataLodestoneTracker {
@@ -7460,7 +7380,7 @@ pub enum SlotComponentData {
     /// Case(s) `minimum_attack_charge`.
     MinimumAttackCharge(f32),
     /// Case(s) `damage_type`.
-    DamageType(crate::defs::p775::types::SlotComponentDataDamageType),
+    DamageType(i32),
     /// Case(s) `item_name`.
     ItemName(AnonNbt),
     /// Case(s) `item_model`.
@@ -7502,7 +7422,7 @@ pub enum SlotComponentData {
     /// Case(s) `use_cooldown`.
     UseCooldown(crate::defs::p775::types::SlotComponentDataUseCooldown),
     /// Case(s) `damage_resistant`.
-    DamageResistant(ByteString),
+    DamageResistant(crate::defs::p775::types::SlotComponentDataDamageResistant),
     /// Case(s) `tool`.
     Tool(crate::defs::p775::types::SlotComponentDataTool),
     /// Case(s) `weapon`.
@@ -7566,15 +7486,15 @@ pub enum SlotComponentData {
     /// Case(s) `bucket_entity_data`.
     BucketEntityData(AnonNbt),
     /// Case(s) `instrument`.
-    Instrument(crate::defs::p775::types::SlotComponentDataInstrument),
+    Instrument(Holder<crate::defs::p775::types::InstrumentData>),
     /// Case(s) `provides_trim_material`.
-    ProvidesTrimMaterial(crate::defs::p775::types::SlotComponentDataProvidesTrimMaterial),
+    ProvidesTrimMaterial(Holder<crate::defs::p775::types::ArmorTrimMaterial>),
     /// Case(s) `ominous_bottle_amplifier`.
     OminousBottleAmplifier(i32),
     /// Case(s) `jukebox_playable`.
-    JukeboxPlayable(crate::defs::p775::types::SlotComponentDataJukeboxPlayable),
+    JukeboxPlayable(Holder<crate::defs::p775::types::JukeboxSongData>),
     /// Case(s) `provides_banner_patterns`.
-    ProvidesBannerPatterns(ByteString),
+    ProvidesBannerPatterns(HolderSet),
     /// Case(s) `recipes`.
     Recipes(AnonNbt),
     /// Case(s) `lodestone_tracker`.
@@ -7638,11 +7558,11 @@ pub enum SlotComponentData {
     /// Case(s) `cow/sound_variant`.
     CowSoundVariant(i32),
     /// Case(s) `chicken/variant`.
-    ChickenVariant(Holder<ByteString>),
+    ChickenVariant(i32),
     /// Case(s) `chicken/sound_variant`.
-    ChickenSoundVariant(Holder<ByteString>),
+    ChickenSoundVariant(i32),
     /// Case(s) `zombie_nautilus/variant`.
-    ZombieNautilusVariant(Holder<ByteString>),
+    ZombieNautilusVariant(i32),
     /// Case(s) `frog/variant`.
     FrogVariant(i32),
     /// Case(s) `horse/variant`.
@@ -7707,48 +7627,22 @@ impl Decode for SlotComponent {
             } else if (v1.0 == 7) {
                 crate::defs::p775::types::SlotComponentData::MinimumAttackCharge(r.read_f32()?)
             } else if (v1.0 == 8) {
-                crate::defs::p775::types::SlotComponentData::DamageType({
-                    let v6 = r.read_bool()?;
-                    let v7 = (if v6 {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::True({
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                Holder::Inline(
-                                    <crate::defs::p775::types::DamageTypeData as Decode>::decode(
-                                        r,
-                                    )?,
-                                )
-                            } else {
-                                Holder::Id(id.wrapping_sub(1))
-                            }
-                        })
-                    } else if (!v6) {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::False(
-                            r.read_string()?,
-                        )
-                    } else {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataDamageType {
-                        has_holder: v6,
-                        damage_type: v7,
-                    }
-                })
+                crate::defs::p775::types::SlotComponentData::DamageType(r.read_varint()?)
             } else if (v1.0 == 9) {
                 crate::defs::p775::types::SlotComponentData::ItemName(AnonNbt::read(r)?)
             } else if (v1.0 == 10) {
                 crate::defs::p775::types::SlotComponentData::ItemModel(r.read_string()?)
             } else if (v1.0 == 11) {
                 crate::defs::p775::types::SlotComponentData::Lore({
-                    let v8 = {
+                    let v6 = {
                         let c = r.read_varint()?;
                         r.check_count(i64::from(c), 1)?
                     };
-                    let mut v9 = Vec::with_capacity(v8.min(crate::codec::PREALLOC_LIMIT));
-                    for _ in 0..v8 {
-                        v9.push(AnonNbt::read(r)?);
+                    let mut v7 = Vec::with_capacity(v6.min(crate::codec::PREALLOC_LIMIT));
+                    for _ in 0..v6 {
+                        v7.push(AnonNbt::read(r)?);
                     }
-                    v9
+                    v7
                 })
             } else if (v1.0 == 12) {
                 crate::defs::p775::types::SlotComponentData::Rarity(
@@ -7756,156 +7650,156 @@ impl Decode for SlotComponent {
                 )
             } else if (v1.0 == 13) {
                 crate::defs::p775::types::SlotComponentData::Enchantments({
-                    let v10 = {
-                        let v11 = {
+                    let v8 = {
+                        let v9 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v12 = Vec::with_capacity(v11.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v11 {
-                            v12.push({ let v13 = r.read_varint()?;let v14 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataEnchantmentsEnchantments { id: v13, level: v14 } });
+                        let mut v10 = Vec::with_capacity(v9.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v9 {
+                            v10.push({ let v11 = r.read_varint()?;let v12 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataEnchantmentsEnchantments { id: v11, level: v12 } });
                         }
-                        v12
+                        v10
                     };
-                    crate::defs::p775::types::SlotComponentDataEnchantments { enchantments: v10 }
+                    crate::defs::p775::types::SlotComponentDataEnchantments { enchantments: v8 }
                 })
             } else if (v1.0 == 42) {
                 crate::defs::p775::types::SlotComponentData::StoredEnchantments({
-                    let v15 = {
-                        let v16 = {
+                    let v13 = {
+                        let v14 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v17 = Vec::with_capacity(v16.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v16 {
-                            v17.push({ let v18 = r.read_varint()?;let v19 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataStoredEnchantmentsEnchantments { id: v18, level: v19 } });
+                        let mut v15 = Vec::with_capacity(v14.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v14 {
+                            v15.push({ let v16 = r.read_varint()?;let v17 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataStoredEnchantmentsEnchantments { id: v16, level: v17 } });
                         }
-                        v17
+                        v15
                     };
                     crate::defs::p775::types::SlotComponentDataStoredEnchantments {
-                        enchantments: v15,
+                        enchantments: v13,
                     }
                 })
             } else if (v1.0 == 14) {
                 crate::defs::p775::types::SlotComponentData::CanPlaceOn({
-                    let v20 = {
-                        let v21 = {
+                    let v18 = {
+                        let v19 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        let mut v22 = Vec::with_capacity(v21.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v21 {
-                            v22.push(
+                        let mut v20 = Vec::with_capacity(v19.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v19 {
+                            v20.push(
                                 <crate::defs::p775::types::ItemBlockPredicate as Decode>::decode(
                                     r,
                                 )?,
                             );
                         }
-                        v22
+                        v20
                     };
-                    crate::defs::p775::types::SlotComponentDataCanPlaceOn { predicates: v20 }
+                    crate::defs::p775::types::SlotComponentDataCanPlaceOn { predicates: v18 }
                 })
             } else if (v1.0 == 15) {
                 crate::defs::p775::types::SlotComponentData::CanBreak({
-                    let v23 = {
-                        let v24 = {
+                    let v21 = {
+                        let v22 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        let mut v25 = Vec::with_capacity(v24.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v24 {
-                            v25.push(
+                        let mut v23 = Vec::with_capacity(v22.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v22 {
+                            v23.push(
                                 <crate::defs::p775::types::ItemBlockPredicate as Decode>::decode(
                                     r,
                                 )?,
                             );
                         }
-                        v25
+                        v23
                     };
-                    crate::defs::p775::types::SlotComponentDataCanBreak { predicates: v23 }
+                    crate::defs::p775::types::SlotComponentDataCanBreak { predicates: v21 }
                 })
             } else if (v1.0 == 16) {
                 crate::defs::p775::types::SlotComponentData::AttributeModifiers({
-                    let v26 = {
+                    let v24 = {
                         let c = r.read_varint()?;
                         r.check_count(i64::from(c), 13)?
                     };
-                    let mut v27 = Vec::with_capacity(v26.min(crate::codec::PREALLOC_LIMIT));
-                    for _ in 0..v26 {
-                        v27.push({ let v28 = r.read_varint()?;let v29 = r.read_string()?;let v30 = r.read_f64()?;let v31 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(r.read_varint()?);let v32 = crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(r.read_varint()?);let v33 = { let v34 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(r.read_varint()?);let v35 = if (v34.0 == 2) { Some(AnonNbt::read(r)?) } else { None }; crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplay { r#type: v34, component: v35 } }; crate::defs::p775::types::SlotComponentDataAttributeModifiers { type_id: v28, name: v29, value: v30, operation: v31, slot: v32, display: v33 } });
+                    let mut v25 = Vec::with_capacity(v24.min(crate::codec::PREALLOC_LIMIT));
+                    for _ in 0..v24 {
+                        v25.push({ let v26 = r.read_varint()?;let v27 = r.read_string()?;let v28 = r.read_f64()?;let v29 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(r.read_varint()?);let v30 = crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(r.read_varint()?);let v31 = { let v32 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(r.read_varint()?);let v33 = if (v32.0 == 2) { Some(AnonNbt::read(r)?) } else { None }; crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplay { r#type: v32, component: v33 } }; crate::defs::p775::types::SlotComponentDataAttributeModifiers { type_id: v26, name: v27, value: v28, operation: v29, slot: v30, display: v31 } });
                     }
-                    v27
+                    v25
                 })
             } else if (v1.0 == 17) {
                 crate::defs::p775::types::SlotComponentData::CustomModelData({
-                    let v36 = {
-                        let v37 = {
+                    let v34 = {
+                        let v35 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        let mut v38 = Vec::with_capacity(v37.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v37 {
-                            v38.push(r.read_f32()?);
+                        let mut v36 = Vec::with_capacity(v35.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v35 {
+                            v36.push(r.read_f32()?);
                         }
-                        v38
+                        v36
                     };
-                    let v39 = {
-                        let v40 = {
+                    let v37 = {
+                        let v38 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v41 = Vec::with_capacity(v40.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v40 {
-                            v41.push(r.read_bool()?);
+                        let mut v39 = Vec::with_capacity(v38.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v38 {
+                            v39.push(r.read_bool()?);
                         }
-                        v41
+                        v39
                     };
-                    let v42 = {
-                        let v43 = {
+                    let v40 = {
+                        let v41 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v44 = Vec::with_capacity(v43.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v43 {
-                            v44.push(r.read_string()?);
+                        let mut v42 = Vec::with_capacity(v41.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v41 {
+                            v42.push(r.read_string()?);
                         }
-                        v44
+                        v42
                     };
-                    let v45 = {
-                        let v46 = {
+                    let v43 = {
+                        let v44 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        let mut v47 = Vec::with_capacity(v46.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v46 {
-                            v47.push(r.read_i32()?);
+                        let mut v45 = Vec::with_capacity(v44.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v44 {
+                            v45.push(r.read_i32()?);
                         }
-                        v47
+                        v45
                     };
                     crate::defs::p775::types::SlotComponentDataCustomModelData {
-                        floats: v36,
-                        flags: v39,
-                        strings: v42,
-                        colors: v45,
+                        floats: v34,
+                        flags: v37,
+                        strings: v40,
+                        colors: v43,
                     }
                 })
             } else if (v1.0 == 18) {
                 crate::defs::p775::types::SlotComponentData::TooltipDisplay({
-                    let v48 = r.read_bool()?;
-                    let v49 = {
-                        let v50 = {
+                    let v46 = r.read_bool()?;
+                    let v47 = {
+                        let v48 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v51 = Vec::with_capacity(v50.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v50 {
-                            v51.push(r.read_varint()?);
+                        let mut v49 = Vec::with_capacity(v48.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v48 {
+                            v49.push(r.read_varint()?);
                         }
-                        v51
+                        v49
                     };
                     crate::defs::p775::types::SlotComponentDataTooltipDisplay {
-                        hide_tooltip: v48,
-                        hidden_components: v49,
+                        hide_tooltip: v46,
+                        hidden_components: v47,
                     }
                 })
             } else if (v1.0 == 19) {
@@ -7920,35 +7814,35 @@ impl Decode for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::IntangibleProjectile(AnonNbt::read(r)?)
             } else if (v1.0 == 37) {
                 crate::defs::p775::types::SlotComponentData::BlocksAttacks({
-                    let v52 = r.read_f32()?;
-                    let v53 = r.read_f32()?;
-                    let v54 = {
-                        let v55 = {
+                    let v50 = r.read_f32()?;
+                    let v51 = r.read_f32()?;
+                    let v52 = {
+                        let v53 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 13)?
                         };
-                        let mut v56 = Vec::with_capacity(v55.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v55 {
-                            v56.push({ let v57 = r.read_f32()?;let v58 = if r.read_bool()? { Some(<HolderSet as Decode>::decode(r)?) } else { None };let v59 = r.read_f32()?;let v60 = r.read_f32()?; crate::defs::p775::types::SlotComponentDataBlocksAttacksDamageReductions { horizontal_blocking_angle: v57, r#type: v58, base: v59, factor: v60 } });
+                        let mut v54 = Vec::with_capacity(v53.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v53 {
+                            v54.push({ let v55 = r.read_f32()?;let v56 = if r.read_bool()? { Some(<HolderSet as Decode>::decode(r)?) } else { None };let v57 = r.read_f32()?;let v58 = r.read_f32()?; crate::defs::p775::types::SlotComponentDataBlocksAttacksDamageReductions { horizontal_blocking_angle: v55, r#type: v56, base: v57, factor: v58 } });
                         }
-                        v56
+                        v54
                     };
-                    let v61 = {
+                    let v59 = {
+                        let v60 = r.read_f32()?;
+                        let v61 = r.read_f32()?;
                         let v62 = r.read_f32()?;
-                        let v63 = r.read_f32()?;
-                        let v64 = r.read_f32()?;
                         crate::defs::p775::types::SlotComponentDataBlocksAttacksItemDamage {
-                            threshold: v62,
-                            base: v63,
-                            factor: v64,
+                            threshold: v60,
+                            base: v61,
+                            factor: v62,
                         }
                     };
-                    let v65 = if r.read_bool()? {
+                    let v63 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v66 = if r.read_bool()? {
+                    let v64 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
@@ -7964,7 +7858,7 @@ impl Decode for SlotComponent {
                     } else {
                         None
                     };
-                    let v67 = if r.read_bool()? {
+                    let v65 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
@@ -7981,33 +7875,33 @@ impl Decode for SlotComponent {
                         None
                     };
                     crate::defs::p775::types::SlotComponentDataBlocksAttacks {
-                        block_delay_seconds: v52,
-                        disable_cooldown_scale: v53,
-                        damage_reductions: v54,
-                        item_damage: v61,
-                        bypassed_by: v65,
-                        block_sound: v66,
-                        disable_sound: v67,
+                        block_delay_seconds: v50,
+                        disable_cooldown_scale: v51,
+                        damage_reductions: v52,
+                        item_damage: v59,
+                        bypassed_by: v63,
+                        block_sound: v64,
+                        disable_sound: v65,
                     }
                 })
             } else if (v1.0 == 23) {
                 crate::defs::p775::types::SlotComponentData::Food({
-                    let v68 = r.read_varint()?;
-                    let v69 = r.read_f32()?;
-                    let v70 = r.read_bool()?;
+                    let v66 = r.read_varint()?;
+                    let v67 = r.read_f32()?;
+                    let v68 = r.read_bool()?;
                     crate::defs::p775::types::SlotComponentDataFood {
-                        nutrition: v68,
-                        saturation_modifier: v69,
-                        can_always_eat: v70,
+                        nutrition: v66,
+                        saturation_modifier: v67,
+                        can_always_eat: v68,
                     }
                 })
             } else if (v1.0 == 24) {
                 crate::defs::p775::types::SlotComponentData::Consumable({
-                    let v71 = r.read_f32()?;
-                    let v72 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
+                    let v69 = r.read_f32()?;
+                    let v70 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
                         r.read_varint()?,
                     );
-                    let v73 = {
+                    let v71 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             Holder::Inline(
@@ -8017,26 +7911,26 @@ impl Decode for SlotComponent {
                             Holder::Id(id.wrapping_sub(1))
                         }
                     };
-                    let v74 = r.read_bool()?;
-                    let v75 = {
-                        let v76 = {
+                    let v72 = r.read_bool()?;
+                    let v73 = {
+                        let v74 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v77 = Vec::with_capacity(v76.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v76 {
-                            v77.push(
+                        let mut v75 = Vec::with_capacity(v74.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v74 {
+                            v75.push(
                                 <crate::defs::p775::types::ItemConsumeEffect as Decode>::decode(r)?,
                             );
                         }
-                        v77
+                        v75
                     };
                     crate::defs::p775::types::SlotComponentDataConsumable {
-                        consume_seconds: v71,
-                        animation: v72,
-                        sound: v73,
-                        makes_particles: v74,
-                        effects: v75,
+                        consume_seconds: v69,
+                        animation: v70,
+                        sound: v71,
+                        makes_particles: v72,
+                        effects: v73,
                     }
                 })
             } else if (v1.0 == 25) {
@@ -8045,92 +7939,95 @@ impl Decode for SlotComponent {
                 )
             } else if (v1.0 == 26) {
                 crate::defs::p775::types::SlotComponentData::UseCooldown({
-                    let v78 = r.read_f32()?;
-                    let v79 = if r.read_bool()? {
+                    let v76 = r.read_f32()?;
+                    let v77 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
                     crate::defs::p775::types::SlotComponentDataUseCooldown {
-                        seconds: v78,
-                        cooldown_group: v79,
+                        seconds: v76,
+                        cooldown_group: v77,
                     }
                 })
             } else if (v1.0 == 27) {
-                crate::defs::p775::types::SlotComponentData::DamageResistant(r.read_string()?)
+                crate::defs::p775::types::SlotComponentData::DamageResistant({
+                    let v78 = <HolderSet as Decode>::decode(r)?;
+                    crate::defs::p775::types::SlotComponentDataDamageResistant { types: v78 }
+                })
             } else if (v1.0 == 28) {
                 crate::defs::p775::types::SlotComponentData::Tool({
-                    let v80 = {
-                        let v81 = {
+                    let v79 = {
+                        let v80 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 3)?
                         };
-                        let mut v82 = Vec::with_capacity(v81.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v81 {
-                            v82.push({
-                                let v83 = <HolderSet as Decode>::decode(r)?;
-                                let v84 = if r.read_bool()? {
+                        let mut v81 = Vec::with_capacity(v80.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v80 {
+                            v81.push({
+                                let v82 = <HolderSet as Decode>::decode(r)?;
+                                let v83 = if r.read_bool()? {
                                     Some(r.read_f32()?)
                                 } else {
                                     None
                                 };
-                                let v85 = if r.read_bool()? {
+                                let v84 = if r.read_bool()? {
                                     Some(r.read_bool()?)
                                 } else {
                                     None
                                 };
                                 crate::defs::p775::types::SlotComponentDataToolRules {
-                                    blocks: v83,
-                                    speed: v84,
-                                    correct_drop_for_blocks: v85,
+                                    blocks: v82,
+                                    speed: v83,
+                                    correct_drop_for_blocks: v84,
                                 }
                             });
                         }
-                        v82
+                        v81
                     };
-                    let v86 = r.read_f32()?;
-                    let v87 = r.read_varint()?;
-                    let v88 = r.read_bool()?;
+                    let v85 = r.read_f32()?;
+                    let v86 = r.read_varint()?;
+                    let v87 = r.read_bool()?;
                     crate::defs::p775::types::SlotComponentDataTool {
-                        rules: v80,
-                        default_mining_speed: v86,
-                        damage_per_block: v87,
-                        can_destroy_blocks_in_creative: v88,
+                        rules: v79,
+                        default_mining_speed: v85,
+                        damage_per_block: v86,
+                        can_destroy_blocks_in_creative: v87,
                     }
                 })
             } else if (v1.0 == 29) {
                 crate::defs::p775::types::SlotComponentData::Weapon({
-                    let v89 = r.read_varint()?;
-                    let v90 = r.read_f32()?;
+                    let v88 = r.read_varint()?;
+                    let v89 = r.read_f32()?;
                     crate::defs::p775::types::SlotComponentDataWeapon {
-                        item_damage_per_attack: v89,
-                        disable_blocking_for_seconds: v90,
+                        item_damage_per_attack: v88,
+                        disable_blocking_for_seconds: v89,
                     }
                 })
             } else if (v1.0 == 30) {
                 crate::defs::p775::types::SlotComponentData::AttackRange({
+                    let v90 = r.read_f32()?;
                     let v91 = r.read_f32()?;
                     let v92 = r.read_f32()?;
                     let v93 = r.read_f32()?;
                     let v94 = r.read_f32()?;
                     let v95 = r.read_f32()?;
-                    let v96 = r.read_f32()?;
                     crate::defs::p775::types::SlotComponentDataAttackRange {
-                        min_range: v91,
-                        max_range: v92,
-                        min_creative_range: v93,
-                        max_creative_range: v94,
-                        hitbox_margin: v95,
-                        mob_factor: v96,
+                        min_range: v90,
+                        max_range: v91,
+                        min_creative_range: v92,
+                        max_creative_range: v93,
+                        hitbox_margin: v94,
+                        mob_factor: v95,
                     }
                 })
             } else if (v1.0 == 31) {
                 crate::defs::p775::types::SlotComponentData::Enchantable(r.read_varint()?)
             } else if (v1.0 == 32) {
                 crate::defs::p775::types::SlotComponentData::Equippable({
-                    let v97 =
+                    let v96 =
                         crate::defs::p775::types::SlotComponentDataEquippableSlot(r.read_varint()?);
-                    let v98 = {
+                    let v97 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             Holder::Inline(
@@ -8140,27 +8037,27 @@ impl Decode for SlotComponent {
                             Holder::Id(id.wrapping_sub(1))
                         }
                     };
+                    let v98 = if r.read_bool()? {
+                        Some(r.read_string()?)
+                    } else {
+                        None
+                    };
                     let v99 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
                     let v100 = if r.read_bool()? {
-                        Some(r.read_string()?)
-                    } else {
-                        None
-                    };
-                    let v101 = if r.read_bool()? {
                         Some(<HolderSet as Decode>::decode(r)?)
                     } else {
                         None
                     };
+                    let v101 = r.read_bool()?;
                     let v102 = r.read_bool()?;
                     let v103 = r.read_bool()?;
                     let v104 = r.read_bool()?;
                     let v105 = r.read_bool()?;
-                    let v106 = r.read_bool()?;
-                    let v107 = {
+                    let v106 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             Holder::Inline(
@@ -8171,23 +8068,23 @@ impl Decode for SlotComponent {
                         }
                     };
                     crate::defs::p775::types::SlotComponentDataEquippable {
-                        slot: v97,
-                        sound: v98,
-                        model: v99,
-                        camera_overlay: v100,
-                        allowed_entities: v101,
-                        dispensable: v102,
-                        swappable: v103,
-                        damageable: v104,
-                        equip_on_interact: v105,
-                        shearable: v106,
-                        shearing_sound: v107,
+                        slot: v96,
+                        sound: v97,
+                        model: v98,
+                        camera_overlay: v99,
+                        allowed_entities: v100,
+                        dispensable: v101,
+                        swappable: v102,
+                        damageable: v103,
+                        equip_on_interact: v104,
+                        shearable: v105,
+                        shearing_sound: v106,
                     }
                 })
             } else if (v1.0 == 33) {
                 crate::defs::p775::types::SlotComponentData::Repairable({
-                    let v108 = <HolderSet as Decode>::decode(r)?;
-                    crate::defs::p775::types::SlotComponentDataRepairable { items: v108 }
+                    let v107 = <HolderSet as Decode>::decode(r)?;
+                    crate::defs::p775::types::SlotComponentDataRepairable { items: v107 }
                 })
             } else if (v1.0 == 34) {
                 crate::defs::p775::types::SlotComponentData::Glider
@@ -8195,25 +8092,41 @@ impl Decode for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::TooltipStyle(r.read_string()?)
             } else if (v1.0 == 36) {
                 crate::defs::p775::types::SlotComponentData::DeathProtection({
-                    let v109 = {
-                        let v110 = {
+                    let v108 = {
+                        let v109 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v111 = Vec::with_capacity(v110.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v110 {
-                            v111.push(
+                        let mut v110 = Vec::with_capacity(v109.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v109 {
+                            v110.push(
                                 <crate::defs::p775::types::ItemConsumeEffect as Decode>::decode(r)?,
                             );
                         }
-                        v111
+                        v110
                     };
-                    crate::defs::p775::types::SlotComponentDataDeathProtection { effects: v109 }
+                    crate::defs::p775::types::SlotComponentDataDeathProtection { effects: v108 }
                 })
             } else if (v1.0 == 38) {
                 crate::defs::p775::types::SlotComponentData::PiercingWeapon({
+                    let v111 = r.read_bool()?;
                     let v112 = r.read_bool()?;
-                    let v113 = r.read_bool()?;
+                    let v113 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                Holder::Inline(
+                                    <crate::defs::p775::types::ItemSoundEvent as Decode>::decode(
+                                        r,
+                                    )?,
+                                )
+                            } else {
+                                Holder::Id(id.wrapping_sub(1))
+                            }
+                        })
+                    } else {
+                        None
+                    };
                     let v114 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
@@ -8230,33 +8143,26 @@ impl Decode for SlotComponent {
                     } else {
                         None
                     };
-                    let v115 = if r.read_bool()? {
-                        Some({
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                Holder::Inline(
-                                    <crate::defs::p775::types::ItemSoundEvent as Decode>::decode(
-                                        r,
-                                    )?,
-                                )
-                            } else {
-                                Holder::Id(id.wrapping_sub(1))
-                            }
-                        })
-                    } else {
-                        None
-                    };
                     crate::defs::p775::types::SlotComponentDataPiercingWeapon {
-                        deals_knockback: v112,
-                        dismounts: v113,
-                        sound: v114,
-                        hit_sound: v115,
+                        deals_knockback: v111,
+                        dismounts: v112,
+                        sound: v113,
+                        hit_sound: v114,
                     }
                 })
             } else if (v1.0 == 39) {
                 crate::defs::p775::types::SlotComponentData::KineticWeapon({
+                    let v115 = r.read_varint()?;
                     let v116 = r.read_varint()?;
-                    let v117 = r.read_varint()?;
+                    let v117 = if r.read_bool()? {
+                        Some(
+                            <crate::defs::p775::types::KineticWeaponCondition as Decode>::decode(
+                                r,
+                            )?,
+                        )
+                    } else {
+                        None
+                    };
                     let v118 = if r.read_bool()? {
                         Some(
                             <crate::defs::p775::types::KineticWeaponCondition as Decode>::decode(
@@ -8275,17 +8181,24 @@ impl Decode for SlotComponent {
                     } else {
                         None
                     };
-                    let v120 = if r.read_bool()? {
-                        Some(
-                            <crate::defs::p775::types::KineticWeaponCondition as Decode>::decode(
-                                r,
-                            )?,
-                        )
+                    let v120 = r.read_f32()?;
+                    let v121 = r.read_f32()?;
+                    let v122 = if r.read_bool()? {
+                        Some({
+                            let id = r.read_varint()?;
+                            if id == 0 {
+                                Holder::Inline(
+                                    <crate::defs::p775::types::ItemSoundEvent as Decode>::decode(
+                                        r,
+                                    )?,
+                                )
+                            } else {
+                                Holder::Id(id.wrapping_sub(1))
+                            }
+                        })
                     } else {
                         None
                     };
-                    let v121 = r.read_f32()?;
-                    let v122 = r.read_f32()?;
                     let v123 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
@@ -8302,43 +8215,27 @@ impl Decode for SlotComponent {
                     } else {
                         None
                     };
-                    let v124 = if r.read_bool()? {
-                        Some({
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                Holder::Inline(
-                                    <crate::defs::p775::types::ItemSoundEvent as Decode>::decode(
-                                        r,
-                                    )?,
-                                )
-                            } else {
-                                Holder::Id(id.wrapping_sub(1))
-                            }
-                        })
-                    } else {
-                        None
-                    };
                     crate::defs::p775::types::SlotComponentDataKineticWeapon {
-                        contact_cooldown_ticks: v116,
-                        delay_ticks: v117,
-                        dismount_conditions: v118,
-                        knockback_conditions: v119,
-                        damage_conditions: v120,
-                        forward_movement: v121,
-                        damage_multiplier: v122,
-                        sound: v123,
-                        hit_sound: v124,
+                        contact_cooldown_ticks: v115,
+                        delay_ticks: v116,
+                        dismount_conditions: v117,
+                        knockback_conditions: v118,
+                        damage_conditions: v119,
+                        forward_movement: v120,
+                        damage_multiplier: v121,
+                        sound: v122,
+                        hit_sound: v123,
                     }
                 })
             } else if (v1.0 == 40) {
                 crate::defs::p775::types::SlotComponentData::SwingAnimation({
-                    let v125 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
+                    let v124 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
                         r.read_varint()?,
                     );
-                    let v126 = r.read_varint()?;
+                    let v125 = r.read_varint()?;
                     crate::defs::p775::types::SlotComponentDataSwingAnimation {
-                        r#type: v125,
-                        duration: v126,
+                        r#type: v124,
+                        duration: v125,
                     }
                 })
             } else if (v1.0 == 41) {
@@ -8361,149 +8258,149 @@ impl Decode for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::PotionDurationScale(r.read_f32()?)
             } else if (v1.0 == 49) {
                 crate::defs::p775::types::SlotComponentData::ChargedProjectiles({
-                    let v127 = {
-                        let v128 = {
+                    let v126 = {
+                        let v127 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        let mut v129 = Vec::with_capacity(v128.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v128 {
-                            v129.push(
+                        let mut v128 = Vec::with_capacity(v127.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v127 {
+                            v128.push(
                                 <crate::defs::p775::types::ItemStackTemplate as Decode>::decode(r)?,
                             );
                         }
-                        v129
+                        v128
                     };
                     crate::defs::p775::types::SlotComponentDataChargedProjectiles {
-                        projectiles: v127,
+                        projectiles: v126,
                     }
                 })
             } else if (v1.0 == 50) {
                 crate::defs::p775::types::SlotComponentData::BundleContents({
-                    let v130 = {
-                        let v131 = {
+                    let v129 = {
+                        let v130 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        let mut v132 = Vec::with_capacity(v131.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v131 {
-                            v132.push(
+                        let mut v131 = Vec::with_capacity(v130.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v130 {
+                            v131.push(
                                 <crate::defs::p775::types::ItemStackTemplate as Decode>::decode(r)?,
                             );
                         }
-                        v132
+                        v131
                     };
-                    crate::defs::p775::types::SlotComponentDataBundleContents { contents: v130 }
+                    crate::defs::p775::types::SlotComponentDataBundleContents { contents: v129 }
                 })
             } else if (v1.0 == 51) {
                 crate::defs::p775::types::SlotComponentData::PotionContents({
-                    let v133 = if r.read_bool()? {
+                    let v132 = if r.read_bool()? {
                         Some(r.read_varint()?)
                     } else {
                         None
                     };
-                    let v134 = if r.read_bool()? {
+                    let v133 = if r.read_bool()? {
                         Some(r.read_i32()?)
                     } else {
                         None
                     };
-                    let v135 = {
-                        let v136 = {
+                    let v134 = {
+                        let v135 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 7)?
                         };
-                        let mut v137 = Vec::with_capacity(v136.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v136 {
-                            v137.push(
+                        let mut v136 = Vec::with_capacity(v135.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v135 {
+                            v136.push(
                                 <crate::defs::p775::types::ItemPotionEffect as Decode>::decode(r)?,
                             );
                         }
-                        v137
+                        v136
                     };
-                    let v138 = if r.read_bool()? {
+                    let v137 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
                     crate::defs::p775::types::SlotComponentDataPotionContents {
-                        potion_id: v133,
-                        custom_color: v134,
-                        custom_effects: v135,
-                        custom_name: v138,
+                        potion_id: v132,
+                        custom_color: v133,
+                        custom_effects: v134,
+                        custom_name: v137,
                     }
                 })
             } else if (v1.0 == 53) {
                 crate::defs::p775::types::SlotComponentData::SuspiciousStewEffects({
-                    let v139 = {
-                        let v140 = {
+                    let v138 = {
+                        let v139 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v141 = Vec::with_capacity(v140.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v140 {
-                            v141.push({ let v142 = r.read_varint()?;let v143 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataSuspiciousStewEffectsEffects { effect: v142, duration: v143 } });
+                        let mut v140 = Vec::with_capacity(v139.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v139 {
+                            v140.push({ let v141 = r.read_varint()?;let v142 = r.read_varint()?; crate::defs::p775::types::SlotComponentDataSuspiciousStewEffectsEffects { effect: v141, duration: v142 } });
                         }
-                        v141
+                        v140
                     };
                     crate::defs::p775::types::SlotComponentDataSuspiciousStewEffects {
-                        effects: v139,
+                        effects: v138,
                     }
                 })
             } else if (v1.0 == 54) {
                 crate::defs::p775::types::SlotComponentData::WritableBookContent({
-                    let v144 = {
-                        let v145 = {
+                    let v143 = {
+                        let v144 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v146 = Vec::with_capacity(v145.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v145 {
-                            v146.push(<crate::defs::p775::types::ItemBookPage as Decode>::decode(
+                        let mut v145 = Vec::with_capacity(v144.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v144 {
+                            v145.push(<crate::defs::p775::types::ItemBookPage as Decode>::decode(
                                 r,
                             )?);
                         }
-                        v146
+                        v145
                     };
-                    crate::defs::p775::types::SlotComponentDataWritableBookContent { pages: v144 }
+                    crate::defs::p775::types::SlotComponentDataWritableBookContent { pages: v143 }
                 })
             } else if (v1.0 == 55) {
                 crate::defs::p775::types::SlotComponentData::WrittenBookContent({
-                    let v147 = r.read_string()?;
-                    let v148 = if r.read_bool()? {
+                    let v146 = r.read_string()?;
+                    let v147 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v149 = r.read_string()?;
-                    let v150 = r.read_varint()?;
-                    let v151 = {
-                        let v152 = {
+                    let v148 = r.read_string()?;
+                    let v149 = r.read_varint()?;
+                    let v150 = {
+                        let v151 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v153 = Vec::with_capacity(v152.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v152 {
-                            v153.push(
+                        let mut v152 = Vec::with_capacity(v151.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v151 {
+                            v152.push(
                                 <crate::defs::p775::types::ItemWrittenBookPage as Decode>::decode(
                                     r,
                                 )?,
                             );
                         }
-                        v153
+                        v152
                     };
-                    let v154 = r.read_bool()?;
+                    let v153 = r.read_bool()?;
                     crate::defs::p775::types::SlotComponentDataWrittenBookContent {
-                        raw_title: v147,
-                        filtered_title: v148,
-                        author: v149,
-                        generation: v150,
-                        pages: v151,
-                        resolved: v154,
+                        raw_title: v146,
+                        filtered_title: v147,
+                        author: v148,
+                        generation: v149,
+                        pages: v150,
+                        resolved: v153,
                     }
                 })
             } else if (v1.0 == 56) {
                 crate::defs::p775::types::SlotComponentData::Trim({
-                    let v155 = {
+                    let v154 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             Holder::Inline(
@@ -8513,7 +8410,7 @@ impl Decode for SlotComponent {
                             Holder::Id(id.wrapping_sub(1))
                         }
                     };
-                    let v156 = {
+                    let v155 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             Holder::Inline(
@@ -8524,73 +8421,52 @@ impl Decode for SlotComponent {
                         }
                     };
                     crate::defs::p775::types::SlotComponentDataTrim {
-                        material: v155,
-                        pattern: v156,
+                        material: v154,
+                        pattern: v155,
                     }
                 })
             } else if (v1.0 == 57) {
                 crate::defs::p775::types::SlotComponentData::DebugStickState(AnonNbt::read(r)?)
             } else if (v1.0 == 58) {
                 crate::defs::p775::types::SlotComponentData::EntityData({
-                    let v157 = r.read_varint()?;
-                    let v158 = AnonNbt::read(r)?;
+                    let v156 = r.read_varint()?;
+                    let v157 = AnonNbt::read(r)?;
                     crate::defs::p775::types::SlotComponentDataEntityData {
-                        r#type: v157,
-                        data: v158,
+                        r#type: v156,
+                        data: v157,
                     }
                 })
             } else if (v1.0 == 60) {
                 crate::defs::p775::types::SlotComponentData::BlockEntityData({
-                    let v159 = r.read_varint()?;
-                    let v160 = AnonNbt::read(r)?;
+                    let v158 = r.read_varint()?;
+                    let v159 = AnonNbt::read(r)?;
                     crate::defs::p775::types::SlotComponentDataBlockEntityData {
-                        r#type: v159,
-                        data: v160,
+                        r#type: v158,
+                        data: v159,
                     }
                 })
             } else if (v1.0 == 59) {
                 crate::defs::p775::types::SlotComponentData::BucketEntityData(AnonNbt::read(r)?)
             } else if (v1.0 == 61) {
                 crate::defs::p775::types::SlotComponentData::Instrument({
-                    let v161 = r.read_bool()?;
-                    let v162 = (if v161 {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::True({
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                Holder::Inline(
-                                    <crate::defs::p775::types::InstrumentData as Decode>::decode(
-                                        r,
-                                    )?,
-                                )
-                            } else {
-                                Holder::Id(id.wrapping_sub(1))
-                            }
-                        })
-                    } else if (!v161) {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::False(
-                            r.read_string()?,
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        Holder::Inline(
+                            <crate::defs::p775::types::InstrumentData as Decode>::decode(r)?,
                         )
                     } else {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataInstrument {
-                        has_holder: v161,
-                        data: v162,
+                        Holder::Id(id.wrapping_sub(1))
                     }
                 })
             } else if (v1.0 == 62) {
                 crate::defs::p775::types::SlotComponentData::ProvidesTrimMaterial({
-                    let v163 = r.read_bool()?;
-                    let v164 = (if v163 {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::True({ let id = r.read_varint()?; if id == 0 { Holder::Inline(<crate::defs::p775::types::ArmorTrimMaterial as Decode>::decode(r)?) } else { Holder::Id(id.wrapping_sub(1)) } })
-                    } else if (!v163) {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::False(r.read_string()?)
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        Holder::Inline(
+                            <crate::defs::p775::types::ArmorTrimMaterial as Decode>::decode(r)?,
+                        )
                     } else {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataProvidesTrimMaterial {
-                        has_holder: v163,
-                        material: v164,
+                        Holder::Id(id.wrapping_sub(1))
                     }
                 })
             } else if (v1.0 == 63) {
@@ -8599,49 +8475,32 @@ impl Decode for SlotComponent {
                 )
             } else if (v1.0 == 64) {
                 crate::defs::p775::types::SlotComponentData::JukeboxPlayable({
-                    let v165 = r.read_bool()?;
-                    let v166 = (if v165 {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::True({
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                Holder::Inline(
-                                    <crate::defs::p775::types::JukeboxSongData as Decode>::decode(
-                                        r,
-                                    )?,
-                                )
-                            } else {
-                                Holder::Id(id.wrapping_sub(1))
-                            }
-                        })
-                    } else if (!v165) {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::False(
-                            r.read_string()?,
+                    let id = r.read_varint()?;
+                    if id == 0 {
+                        Holder::Inline(
+                            <crate::defs::p775::types::JukeboxSongData as Decode>::decode(r)?,
                         )
                     } else {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataJukeboxPlayable {
-                        has_holder: v165,
-                        song: v166,
+                        Holder::Id(id.wrapping_sub(1))
                     }
                 })
             } else if (v1.0 == 65) {
                 crate::defs::p775::types::SlotComponentData::ProvidesBannerPatterns(
-                    r.read_string()?,
+                    <HolderSet as Decode>::decode(r)?,
                 )
             } else if (v1.0 == 66) {
                 crate::defs::p775::types::SlotComponentData::Recipes(AnonNbt::read(r)?)
             } else if (v1.0 == 67) {
                 crate::defs::p775::types::SlotComponentData::LodestoneTracker({
-                    let v167 = if r.read_bool()? {
+                    let v160 = if r.read_bool()? {
                         Some(<crate::defs::p775::types::GlobalPos as Decode>::decode(r)?)
                     } else {
                         None
                     };
-                    let v168 = r.read_bool()?;
+                    let v161 = r.read_bool()?;
                     crate::defs::p775::types::SlotComponentDataLodestoneTracker {
-                        global_position: v167,
-                        tracked: v168,
+                        global_position: v160,
+                        tracked: v161,
                     }
                 })
             } else if (v1.0 == 68) {
@@ -8650,21 +8509,21 @@ impl Decode for SlotComponent {
                 )
             } else if (v1.0 == 69) {
                 crate::defs::p775::types::SlotComponentData::Fireworks({
-                    let v169 = r.read_varint()?;
-                    let v170 = {
-                        let v171 = {
+                    let v162 = r.read_varint()?;
+                    let v163 = {
+                        let v164 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        let mut v172 = Vec::with_capacity(v171.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v171 {
-                            v172.push(<crate::defs::p775::types::ItemFireworkExplosion as Decode>::decode(r)?);
+                        let mut v165 = Vec::with_capacity(v164.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v164 {
+                            v165.push(<crate::defs::p775::types::ItemFireworkExplosion as Decode>::decode(r)?);
                         }
-                        v172
+                        v165
                     };
                     crate::defs::p775::types::SlotComponentDataFireworks {
-                        flight_duration: v169,
-                        explosions: v170,
+                        flight_duration: v162,
+                        explosions: v163,
                     }
                 })
             } else if (v1.0 == 70) {
@@ -8675,22 +8534,22 @@ impl Decode for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::NoteBlockSound(r.read_string()?)
             } else if (v1.0 == 72) {
                 crate::defs::p775::types::SlotComponentData::BannerPatterns({
-                    let v173 = {
-                        let v174 = {
+                    let v166 = {
+                        let v167 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v175 = Vec::with_capacity(v174.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v174 {
-                            v175.push(
+                        let mut v168 = Vec::with_capacity(v167.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v167 {
+                            v168.push(
                                 <crate::defs::p775::types::BannerPatternLayer as Decode>::decode(
                                     r,
                                 )?,
                             );
                         }
-                        v175
+                        v168
                     };
-                    crate::defs::p775::types::SlotComponentDataBannerPatterns { layers: v173 }
+                    crate::defs::p775::types::SlotComponentDataBannerPatterns { layers: v166 }
                 })
             } else if (v1.0 == 73) {
                 crate::defs::p775::types::SlotComponentData::BaseColor(
@@ -8698,79 +8557,79 @@ impl Decode for SlotComponent {
                 )
             } else if (v1.0 == 74) {
                 crate::defs::p775::types::SlotComponentData::PotDecorations({
-                    let v176 = {
-                        let v177 = {
+                    let v169 = {
+                        let v170 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v178 = Vec::with_capacity(v177.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v177 {
-                            v178.push(r.read_varint()?);
+                        let mut v171 = Vec::with_capacity(v170.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v170 {
+                            v171.push(r.read_varint()?);
                         }
-                        v178
+                        v171
                     };
-                    crate::defs::p775::types::SlotComponentDataPotDecorations { decorations: v176 }
+                    crate::defs::p775::types::SlotComponentDataPotDecorations { decorations: v169 }
                 })
             } else if (v1.0 == 75) {
                 crate::defs::p775::types::SlotComponentData::Container({
-                    let v179 = {
-                        let v180 = {
+                    let v172 = {
+                        let v173 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        let mut v181 = Vec::with_capacity(v180.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v180 {
-                            v181.push(if r.read_bool()? { Some(<crate::defs::p775::types::ItemStackTemplate as Decode>::decode(r)?) } else { None });
+                        let mut v174 = Vec::with_capacity(v173.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v173 {
+                            v174.push(if r.read_bool()? { Some(<crate::defs::p775::types::ItemStackTemplate as Decode>::decode(r)?) } else { None });
                         }
-                        v181
+                        v174
                     };
-                    crate::defs::p775::types::SlotComponentDataContainer { contents: v179 }
+                    crate::defs::p775::types::SlotComponentDataContainer { contents: v172 }
                 })
             } else if (v1.0 == 76) {
                 crate::defs::p775::types::SlotComponentData::BlockState({
-                    let v182 = {
-                        let v183 = {
+                    let v175 = {
+                        let v176 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        let mut v184 = Vec::with_capacity(v183.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v183 {
-                            v184.push({
-                                let v185 = r.read_string()?;
-                                let v186 = r.read_string()?;
+                        let mut v177 = Vec::with_capacity(v176.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v176 {
+                            v177.push({
+                                let v178 = r.read_string()?;
+                                let v179 = r.read_string()?;
                                 crate::defs::p775::types::SlotComponentDataBlockStateProperties {
-                                    name: v185,
-                                    value: v186,
+                                    name: v178,
+                                    value: v179,
                                 }
                             });
                         }
-                        v184
+                        v177
                     };
-                    crate::defs::p775::types::SlotComponentDataBlockState { properties: v182 }
+                    crate::defs::p775::types::SlotComponentDataBlockState { properties: v175 }
                 })
             } else if (v1.0 == 77) {
                 crate::defs::p775::types::SlotComponentData::Bees({
-                    let v187 = {
-                        let v188 = {
+                    let v180 = {
+                        let v181 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 3)?
                         };
-                        let mut v189 = Vec::with_capacity(v188.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v188 {
-                            v189.push({
-                                let v190 = AnonNbt::read(r)?;
-                                let v191 = r.read_varint()?;
-                                let v192 = r.read_varint()?;
+                        let mut v182 = Vec::with_capacity(v181.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v181 {
+                            v182.push({
+                                let v183 = AnonNbt::read(r)?;
+                                let v184 = r.read_varint()?;
+                                let v185 = r.read_varint()?;
                                 crate::defs::p775::types::SlotComponentDataBeesBees {
-                                    nbt_data: v190,
-                                    ticks_in_hive: v191,
-                                    min_ticks_in_hive: v192,
+                                    nbt_data: v183,
+                                    ticks_in_hive: v184,
+                                    min_ticks_in_hive: v185,
                                 }
                             });
                         }
-                        v189
+                        v182
                     };
-                    crate::defs::p775::types::SlotComponentDataBees { bees: v187 }
+                    crate::defs::p775::types::SlotComponentDataBees { bees: v180 }
                 })
             } else if (v1.0 == 78) {
                 crate::defs::p775::types::SlotComponentData::Lock(AnonNbt::read(r)?)
@@ -8826,32 +8685,11 @@ impl Decode for SlotComponent {
             } else if (v1.0 == 96) {
                 crate::defs::p775::types::SlotComponentData::CowSoundVariant(r.read_varint()?)
             } else if (v1.0 == 97) {
-                crate::defs::p775::types::SlotComponentData::ChickenVariant({
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        Holder::Inline(r.read_string()?)
-                    } else {
-                        Holder::Id(id.wrapping_sub(1))
-                    }
-                })
+                crate::defs::p775::types::SlotComponentData::ChickenVariant(r.read_varint()?)
             } else if (v1.0 == 98) {
-                crate::defs::p775::types::SlotComponentData::ChickenSoundVariant({
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        Holder::Inline(r.read_string()?)
-                    } else {
-                        Holder::Id(id.wrapping_sub(1))
-                    }
-                })
+                crate::defs::p775::types::SlotComponentData::ChickenSoundVariant(r.read_varint()?)
             } else if (v1.0 == 99) {
-                crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant({
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        Holder::Inline(r.read_string()?)
-                    } else {
-                        Holder::Id(id.wrapping_sub(1))
-                    }
-                })
+                crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant(r.read_varint()?)
             } else if (v1.0 == 100) {
                 crate::defs::p775::types::SlotComponentData::FrogVariant(r.read_varint()?)
             } else if (v1.0 == 101) {
@@ -8953,124 +8791,88 @@ impl Encode for SlotComponent {
                 if !((*self).r#type.0 == 8) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v8).has_holder);
-                match &(*v8).damage_type {
-                    crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::True(v9) => {
-                        if !((*v8).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.damageType",
-                            ));
-                        }
-                        match &(*v9) {
-                            Holder::Id(v11) => {
-                                if *v11 == -1 {
-                                    return Err(EncodeError::OutOfRange("holder id"));
-                                }
-                                w.put_varint(v11.wrapping_add(1));
-                            }
-                            Holder::Inline(v10) => {
-                                w.put_varint(0);
-                                (*v10).encode(w)?;
-                            }
-                        }
-                    }
-                    crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::False(v12) => {
-                        if !(!(*v8).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.damageType",
-                            ));
-                        }
-                        w.put_string(&(*v12))?;
-                    }
-                    crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::Other => {
-                        if !(!((*v8).has_holder || (!(*v8).has_holder))) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.damageType",
-                            ));
-                        }
-                    }
-                }
+                w.put_varint((*v8));
             }
-            crate::defs::p775::types::SlotComponentData::ItemName(v13) => {
+            crate::defs::p775::types::SlotComponentData::ItemName(v9) => {
                 if !((*self).r#type.0 == 9) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v13).write(w);
+                (*v9).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::ItemModel(v14) => {
+            crate::defs::p775::types::SlotComponentData::ItemModel(v10) => {
                 if !((*self).r#type.0 == 10) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v14))?;
+                w.put_string(&(*v10))?;
             }
-            crate::defs::p775::types::SlotComponentData::Lore(v15) => {
+            crate::defs::p775::types::SlotComponentData::Lore(v11) => {
                 if !((*self).r#type.0 == 11) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v15).len())?;
-                for v16 in (*v15).iter() {
-                    (*v16).write(w);
+                w.put_len_varint((*v11).len())?;
+                for v12 in (*v11).iter() {
+                    (*v12).write(w);
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Rarity(v17) => {
+            crate::defs::p775::types::SlotComponentData::Rarity(v13) => {
                 if !((*self).r#type.0 == 12) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v17).0);
+                w.put_varint((*v13).0);
             }
-            crate::defs::p775::types::SlotComponentData::Enchantments(v18) => {
+            crate::defs::p775::types::SlotComponentData::Enchantments(v14) => {
                 if !((*self).r#type.0 == 13) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v18).enchantments.len())?;
-                for v19 in (*v18).enchantments.iter() {
-                    w.put_varint((*v19).id);
-                    w.put_varint((*v19).level);
+                w.put_len_varint((*v14).enchantments.len())?;
+                for v15 in (*v14).enchantments.iter() {
+                    w.put_varint((*v15).id);
+                    w.put_varint((*v15).level);
                 }
             }
-            crate::defs::p775::types::SlotComponentData::StoredEnchantments(v20) => {
+            crate::defs::p775::types::SlotComponentData::StoredEnchantments(v16) => {
                 if !((*self).r#type.0 == 42) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v20).enchantments.len())?;
-                for v21 in (*v20).enchantments.iter() {
-                    w.put_varint((*v21).id);
-                    w.put_varint((*v21).level);
+                w.put_len_varint((*v16).enchantments.len())?;
+                for v17 in (*v16).enchantments.iter() {
+                    w.put_varint((*v17).id);
+                    w.put_varint((*v17).level);
                 }
             }
-            crate::defs::p775::types::SlotComponentData::CanPlaceOn(v22) => {
+            crate::defs::p775::types::SlotComponentData::CanPlaceOn(v18) => {
                 if !((*self).r#type.0 == 14) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v22).predicates.len())?;
-                for v23 in (*v22).predicates.iter() {
-                    (*v23).encode(w)?;
+                w.put_len_varint((*v18).predicates.len())?;
+                for v19 in (*v18).predicates.iter() {
+                    (*v19).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::CanBreak(v24) => {
+            crate::defs::p775::types::SlotComponentData::CanBreak(v20) => {
                 if !((*self).r#type.0 == 15) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v24).predicates.len())?;
-                for v25 in (*v24).predicates.iter() {
-                    (*v25).encode(w)?;
+                w.put_len_varint((*v20).predicates.len())?;
+                for v21 in (*v20).predicates.iter() {
+                    (*v21).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::AttributeModifiers(v26) => {
+            crate::defs::p775::types::SlotComponentData::AttributeModifiers(v22) => {
                 if !((*self).r#type.0 == 16) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v26).len())?;
-                for v27 in (*v26).iter() {
-                    w.put_varint((*v27).type_id);
-                    w.put_string(&(*v27).name)?;
-                    w.put_f64((*v27).value);
-                    w.put_varint((*v27).operation.0);
-                    w.put_varint((*v27).slot.0);
-                    w.put_varint((*v27).display.r#type.0);
-                    match (&(*v27).display.component, ((*v27).display.r#type.0 == 2)) {
-                        (Some(v28), true) => {
-                            (*v28).write(w);
+                w.put_len_varint((*v22).len())?;
+                for v23 in (*v22).iter() {
+                    w.put_varint((*v23).type_id);
+                    w.put_string(&(*v23).name)?;
+                    w.put_f64((*v23).value);
+                    w.put_varint((*v23).operation.0);
+                    w.put_varint((*v23).slot.0);
+                    w.put_varint((*v23).display.r#type.0);
+                    match (&(*v23).display.component, ((*v23).display.r#type.0 == 2)) {
+                        (Some(v24), true) => {
+                            (*v24).write(w);
                         }
                         (None, false) => {}
                         _ => {
@@ -9081,1077 +8883,1004 @@ impl Encode for SlotComponent {
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::CustomModelData(v29) => {
+            crate::defs::p775::types::SlotComponentData::CustomModelData(v25) => {
                 if !((*self).r#type.0 == 17) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v29).floats.len())?;
-                for v30 in (*v29).floats.iter() {
-                    w.put_f32((*v30));
+                w.put_len_varint((*v25).floats.len())?;
+                for v26 in (*v25).floats.iter() {
+                    w.put_f32((*v26));
                 }
-                w.put_len_varint((*v29).flags.len())?;
-                for v31 in (*v29).flags.iter() {
-                    w.put_bool((*v31));
+                w.put_len_varint((*v25).flags.len())?;
+                for v27 in (*v25).flags.iter() {
+                    w.put_bool((*v27));
                 }
-                w.put_len_varint((*v29).strings.len())?;
-                for v32 in (*v29).strings.iter() {
-                    w.put_string(&(*v32))?;
+                w.put_len_varint((*v25).strings.len())?;
+                for v28 in (*v25).strings.iter() {
+                    w.put_string(&(*v28))?;
                 }
-                w.put_len_varint((*v29).colors.len())?;
-                for v33 in (*v29).colors.iter() {
-                    w.put_i32((*v33));
+                w.put_len_varint((*v25).colors.len())?;
+                for v29 in (*v25).colors.iter() {
+                    w.put_i32((*v29));
                 }
             }
-            crate::defs::p775::types::SlotComponentData::TooltipDisplay(v34) => {
+            crate::defs::p775::types::SlotComponentData::TooltipDisplay(v30) => {
                 if !((*self).r#type.0 == 18) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v34).hide_tooltip);
-                w.put_len_varint((*v34).hidden_components.len())?;
-                for v35 in (*v34).hidden_components.iter() {
-                    w.put_varint((*v35));
+                w.put_bool((*v30).hide_tooltip);
+                w.put_len_varint((*v30).hidden_components.len())?;
+                for v31 in (*v30).hidden_components.iter() {
+                    w.put_varint((*v31));
                 }
             }
-            crate::defs::p775::types::SlotComponentData::RepairCost(v36) => {
+            crate::defs::p775::types::SlotComponentData::RepairCost(v32) => {
                 if !((*self).r#type.0 == 19) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v36));
+                w.put_varint((*v32));
             }
             crate::defs::p775::types::SlotComponentData::CreativeSlotLock => {
                 if !((*self).r#type.0 == 20) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
             }
-            crate::defs::p775::types::SlotComponentData::EnchantmentGlintOverride(v37) => {
+            crate::defs::p775::types::SlotComponentData::EnchantmentGlintOverride(v33) => {
                 if !((*self).r#type.0 == 21) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v37));
+                w.put_bool((*v33));
             }
-            crate::defs::p775::types::SlotComponentData::IntangibleProjectile(v38) => {
+            crate::defs::p775::types::SlotComponentData::IntangibleProjectile(v34) => {
                 if !((*self).r#type.0 == 22) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v38).write(w);
+                (*v34).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::BlocksAttacks(v39) => {
+            crate::defs::p775::types::SlotComponentData::BlocksAttacks(v35) => {
                 if !((*self).r#type.0 == 37) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_f32((*v39).block_delay_seconds);
-                w.put_f32((*v39).disable_cooldown_scale);
-                w.put_len_varint((*v39).damage_reductions.len())?;
-                for v40 in (*v39).damage_reductions.iter() {
-                    w.put_f32((*v40).horizontal_blocking_angle);
-                    match &(*v40).r#type {
-                        Some(v41) => {
+                w.put_f32((*v35).block_delay_seconds);
+                w.put_f32((*v35).disable_cooldown_scale);
+                w.put_len_varint((*v35).damage_reductions.len())?;
+                for v36 in (*v35).damage_reductions.iter() {
+                    w.put_f32((*v36).horizontal_blocking_angle);
+                    match &(*v36).r#type {
+                        Some(v37) => {
                             w.put_u8(1);
-                            (*v41).encode(w)?;
+                            (*v37).encode(w)?;
                         }
                         None => w.put_u8(0),
                     }
-                    w.put_f32((*v40).base);
-                    w.put_f32((*v40).factor);
+                    w.put_f32((*v36).base);
+                    w.put_f32((*v36).factor);
                 }
-                w.put_f32((*v39).item_damage.threshold);
-                w.put_f32((*v39).item_damage.base);
-                w.put_f32((*v39).item_damage.factor);
-                match &(*v39).bypassed_by {
-                    Some(v42) => {
+                w.put_f32((*v35).item_damage.threshold);
+                w.put_f32((*v35).item_damage.base);
+                w.put_f32((*v35).item_damage.factor);
+                match &(*v35).bypassed_by {
+                    Some(v38) => {
                         w.put_u8(1);
-                        w.put_string(&(*v42))?;
+                        w.put_string(&(*v38))?;
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v39).block_sound {
-                    Some(v43) => {
+                match &(*v35).block_sound {
+                    Some(v39) => {
                         w.put_u8(1);
-                        match &(*v43) {
-                            Holder::Id(v45) => {
-                                if *v45 == -1 {
+                        match &(*v39) {
+                            Holder::Id(v41) => {
+                                if *v41 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v45.wrapping_add(1));
+                                w.put_varint(v41.wrapping_add(1));
                             }
-                            Holder::Inline(v44) => {
+                            Holder::Inline(v40) => {
                                 w.put_varint(0);
-                                (*v44).encode(w)?;
+                                (*v40).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v39).disable_sound {
-                    Some(v46) => {
+                match &(*v35).disable_sound {
+                    Some(v42) => {
                         w.put_u8(1);
-                        match &(*v46) {
-                            Holder::Id(v48) => {
-                                if *v48 == -1 {
+                        match &(*v42) {
+                            Holder::Id(v44) => {
+                                if *v44 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v48.wrapping_add(1));
+                                w.put_varint(v44.wrapping_add(1));
                             }
-                            Holder::Inline(v47) => {
+                            Holder::Inline(v43) => {
                                 w.put_varint(0);
-                                (*v47).encode(w)?;
+                                (*v43).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Food(v49) => {
+            crate::defs::p775::types::SlotComponentData::Food(v45) => {
                 if !((*self).r#type.0 == 23) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v49).nutrition);
-                w.put_f32((*v49).saturation_modifier);
-                w.put_bool((*v49).can_always_eat);
+                w.put_varint((*v45).nutrition);
+                w.put_f32((*v45).saturation_modifier);
+                w.put_bool((*v45).can_always_eat);
             }
-            crate::defs::p775::types::SlotComponentData::Consumable(v50) => {
+            crate::defs::p775::types::SlotComponentData::Consumable(v46) => {
                 if !((*self).r#type.0 == 24) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_f32((*v50).consume_seconds);
-                w.put_varint((*v50).animation.0);
-                match &(*v50).sound {
-                    Holder::Id(v52) => {
-                        if *v52 == -1 {
+                w.put_f32((*v46).consume_seconds);
+                w.put_varint((*v46).animation.0);
+                match &(*v46).sound {
+                    Holder::Id(v48) => {
+                        if *v48 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v52.wrapping_add(1));
+                        w.put_varint(v48.wrapping_add(1));
                     }
-                    Holder::Inline(v51) => {
+                    Holder::Inline(v47) => {
                         w.put_varint(0);
-                        (*v51).encode(w)?;
+                        (*v47).encode(w)?;
                     }
                 }
-                w.put_bool((*v50).makes_particles);
-                w.put_len_varint((*v50).effects.len())?;
-                for v53 in (*v50).effects.iter() {
-                    (*v53).encode(w)?;
+                w.put_bool((*v46).makes_particles);
+                w.put_len_varint((*v46).effects.len())?;
+                for v49 in (*v46).effects.iter() {
+                    (*v49).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::UseRemainder(v54) => {
+            crate::defs::p775::types::SlotComponentData::UseRemainder(v50) => {
                 if !((*self).r#type.0 == 25) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v54).encode(w)?;
+                (*v50).encode(w)?;
             }
-            crate::defs::p775::types::SlotComponentData::UseCooldown(v55) => {
+            crate::defs::p775::types::SlotComponentData::UseCooldown(v51) => {
                 if !((*self).r#type.0 == 26) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_f32((*v55).seconds);
-                match &(*v55).cooldown_group {
-                    Some(v56) => {
+                w.put_f32((*v51).seconds);
+                match &(*v51).cooldown_group {
+                    Some(v52) => {
                         w.put_u8(1);
-                        w.put_string(&(*v56))?;
+                        w.put_string(&(*v52))?;
                     }
                     None => w.put_u8(0),
                 }
             }
-            crate::defs::p775::types::SlotComponentData::DamageResistant(v57) => {
+            crate::defs::p775::types::SlotComponentData::DamageResistant(v53) => {
                 if !((*self).r#type.0 == 27) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v57))?;
+                (*v53).types.encode(w)?;
             }
-            crate::defs::p775::types::SlotComponentData::Tool(v58) => {
+            crate::defs::p775::types::SlotComponentData::Tool(v54) => {
                 if !((*self).r#type.0 == 28) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v58).rules.len())?;
-                for v59 in (*v58).rules.iter() {
-                    (*v59).blocks.encode(w)?;
-                    match &(*v59).speed {
-                        Some(v60) => {
+                w.put_len_varint((*v54).rules.len())?;
+                for v55 in (*v54).rules.iter() {
+                    (*v55).blocks.encode(w)?;
+                    match &(*v55).speed {
+                        Some(v56) => {
                             w.put_u8(1);
-                            w.put_f32((*v60));
+                            w.put_f32((*v56));
                         }
                         None => w.put_u8(0),
                     }
-                    match &(*v59).correct_drop_for_blocks {
-                        Some(v61) => {
+                    match &(*v55).correct_drop_for_blocks {
+                        Some(v57) => {
                             w.put_u8(1);
-                            w.put_bool((*v61));
+                            w.put_bool((*v57));
                         }
                         None => w.put_u8(0),
                     }
                 }
-                w.put_f32((*v58).default_mining_speed);
-                w.put_varint((*v58).damage_per_block);
-                w.put_bool((*v58).can_destroy_blocks_in_creative);
+                w.put_f32((*v54).default_mining_speed);
+                w.put_varint((*v54).damage_per_block);
+                w.put_bool((*v54).can_destroy_blocks_in_creative);
             }
-            crate::defs::p775::types::SlotComponentData::Weapon(v62) => {
+            crate::defs::p775::types::SlotComponentData::Weapon(v58) => {
                 if !((*self).r#type.0 == 29) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v62).item_damage_per_attack);
-                w.put_f32((*v62).disable_blocking_for_seconds);
+                w.put_varint((*v58).item_damage_per_attack);
+                w.put_f32((*v58).disable_blocking_for_seconds);
             }
-            crate::defs::p775::types::SlotComponentData::AttackRange(v63) => {
+            crate::defs::p775::types::SlotComponentData::AttackRange(v59) => {
                 if !((*self).r#type.0 == 30) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_f32((*v63).min_range);
-                w.put_f32((*v63).max_range);
-                w.put_f32((*v63).min_creative_range);
-                w.put_f32((*v63).max_creative_range);
-                w.put_f32((*v63).hitbox_margin);
-                w.put_f32((*v63).mob_factor);
+                w.put_f32((*v59).min_range);
+                w.put_f32((*v59).max_range);
+                w.put_f32((*v59).min_creative_range);
+                w.put_f32((*v59).max_creative_range);
+                w.put_f32((*v59).hitbox_margin);
+                w.put_f32((*v59).mob_factor);
             }
-            crate::defs::p775::types::SlotComponentData::Enchantable(v64) => {
+            crate::defs::p775::types::SlotComponentData::Enchantable(v60) => {
                 if !((*self).r#type.0 == 31) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v64));
+                w.put_varint((*v60));
             }
-            crate::defs::p775::types::SlotComponentData::Equippable(v65) => {
+            crate::defs::p775::types::SlotComponentData::Equippable(v61) => {
                 if !((*self).r#type.0 == 32) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v65).slot.0);
-                match &(*v65).sound {
-                    Holder::Id(v67) => {
-                        if *v67 == -1 {
+                w.put_varint((*v61).slot.0);
+                match &(*v61).sound {
+                    Holder::Id(v63) => {
+                        if *v63 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v67.wrapping_add(1));
+                        w.put_varint(v63.wrapping_add(1));
                     }
-                    Holder::Inline(v66) => {
+                    Holder::Inline(v62) => {
                         w.put_varint(0);
+                        (*v62).encode(w)?;
+                    }
+                }
+                match &(*v61).model {
+                    Some(v64) => {
+                        w.put_u8(1);
+                        w.put_string(&(*v64))?;
+                    }
+                    None => w.put_u8(0),
+                }
+                match &(*v61).camera_overlay {
+                    Some(v65) => {
+                        w.put_u8(1);
+                        w.put_string(&(*v65))?;
+                    }
+                    None => w.put_u8(0),
+                }
+                match &(*v61).allowed_entities {
+                    Some(v66) => {
+                        w.put_u8(1);
                         (*v66).encode(w)?;
                     }
-                }
-                match &(*v65).model {
-                    Some(v68) => {
-                        w.put_u8(1);
-                        w.put_string(&(*v68))?;
-                    }
                     None => w.put_u8(0),
                 }
-                match &(*v65).camera_overlay {
-                    Some(v69) => {
-                        w.put_u8(1);
-                        w.put_string(&(*v69))?;
-                    }
-                    None => w.put_u8(0),
-                }
-                match &(*v65).allowed_entities {
-                    Some(v70) => {
-                        w.put_u8(1);
-                        (*v70).encode(w)?;
-                    }
-                    None => w.put_u8(0),
-                }
-                w.put_bool((*v65).dispensable);
-                w.put_bool((*v65).swappable);
-                w.put_bool((*v65).damageable);
-                w.put_bool((*v65).equip_on_interact);
-                w.put_bool((*v65).shearable);
-                match &(*v65).shearing_sound {
-                    Holder::Id(v72) => {
-                        if *v72 == -1 {
+                w.put_bool((*v61).dispensable);
+                w.put_bool((*v61).swappable);
+                w.put_bool((*v61).damageable);
+                w.put_bool((*v61).equip_on_interact);
+                w.put_bool((*v61).shearable);
+                match &(*v61).shearing_sound {
+                    Holder::Id(v68) => {
+                        if *v68 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v72.wrapping_add(1));
+                        w.put_varint(v68.wrapping_add(1));
                     }
-                    Holder::Inline(v71) => {
+                    Holder::Inline(v67) => {
                         w.put_varint(0);
-                        (*v71).encode(w)?;
+                        (*v67).encode(w)?;
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Repairable(v73) => {
+            crate::defs::p775::types::SlotComponentData::Repairable(v69) => {
                 if !((*self).r#type.0 == 33) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v73).items.encode(w)?;
+                (*v69).items.encode(w)?;
             }
             crate::defs::p775::types::SlotComponentData::Glider => {
                 if !((*self).r#type.0 == 34) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
             }
-            crate::defs::p775::types::SlotComponentData::TooltipStyle(v74) => {
+            crate::defs::p775::types::SlotComponentData::TooltipStyle(v70) => {
                 if !((*self).r#type.0 == 35) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v74))?;
+                w.put_string(&(*v70))?;
             }
-            crate::defs::p775::types::SlotComponentData::DeathProtection(v75) => {
+            crate::defs::p775::types::SlotComponentData::DeathProtection(v71) => {
                 if !((*self).r#type.0 == 36) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v75).effects.len())?;
-                for v76 in (*v75).effects.iter() {
-                    (*v76).encode(w)?;
+                w.put_len_varint((*v71).effects.len())?;
+                for v72 in (*v71).effects.iter() {
+                    (*v72).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::PiercingWeapon(v77) => {
+            crate::defs::p775::types::SlotComponentData::PiercingWeapon(v73) => {
                 if !((*self).r#type.0 == 38) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v77).deals_knockback);
-                w.put_bool((*v77).dismounts);
-                match &(*v77).sound {
-                    Some(v78) => {
+                w.put_bool((*v73).deals_knockback);
+                w.put_bool((*v73).dismounts);
+                match &(*v73).sound {
+                    Some(v74) => {
                         w.put_u8(1);
-                        match &(*v78) {
-                            Holder::Id(v80) => {
-                                if *v80 == -1 {
+                        match &(*v74) {
+                            Holder::Id(v76) => {
+                                if *v76 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v80.wrapping_add(1));
+                                w.put_varint(v76.wrapping_add(1));
                             }
-                            Holder::Inline(v79) => {
+                            Holder::Inline(v75) => {
                                 w.put_varint(0);
-                                (*v79).encode(w)?;
+                                (*v75).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v77).hit_sound {
-                    Some(v81) => {
+                match &(*v73).hit_sound {
+                    Some(v77) => {
                         w.put_u8(1);
-                        match &(*v81) {
-                            Holder::Id(v83) => {
-                                if *v83 == -1 {
+                        match &(*v77) {
+                            Holder::Id(v79) => {
+                                if *v79 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v83.wrapping_add(1));
+                                w.put_varint(v79.wrapping_add(1));
                             }
-                            Holder::Inline(v82) => {
+                            Holder::Inline(v78) => {
                                 w.put_varint(0);
-                                (*v82).encode(w)?;
+                                (*v78).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
             }
-            crate::defs::p775::types::SlotComponentData::KineticWeapon(v84) => {
+            crate::defs::p775::types::SlotComponentData::KineticWeapon(v80) => {
                 if !((*self).r#type.0 == 39) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v84).contact_cooldown_ticks);
-                w.put_varint((*v84).delay_ticks);
-                match &(*v84).dismount_conditions {
-                    Some(v85) => {
+                w.put_varint((*v80).contact_cooldown_ticks);
+                w.put_varint((*v80).delay_ticks);
+                match &(*v80).dismount_conditions {
+                    Some(v81) => {
                         w.put_u8(1);
-                        (*v85).encode(w)?;
+                        (*v81).encode(w)?;
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v84).knockback_conditions {
-                    Some(v86) => {
+                match &(*v80).knockback_conditions {
+                    Some(v82) => {
                         w.put_u8(1);
-                        (*v86).encode(w)?;
+                        (*v82).encode(w)?;
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v84).damage_conditions {
-                    Some(v87) => {
+                match &(*v80).damage_conditions {
+                    Some(v83) => {
                         w.put_u8(1);
-                        (*v87).encode(w)?;
+                        (*v83).encode(w)?;
                     }
                     None => w.put_u8(0),
                 }
-                w.put_f32((*v84).forward_movement);
-                w.put_f32((*v84).damage_multiplier);
-                match &(*v84).sound {
-                    Some(v88) => {
+                w.put_f32((*v80).forward_movement);
+                w.put_f32((*v80).damage_multiplier);
+                match &(*v80).sound {
+                    Some(v84) => {
                         w.put_u8(1);
-                        match &(*v88) {
-                            Holder::Id(v90) => {
-                                if *v90 == -1 {
+                        match &(*v84) {
+                            Holder::Id(v86) => {
+                                if *v86 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v90.wrapping_add(1));
+                                w.put_varint(v86.wrapping_add(1));
                             }
-                            Holder::Inline(v89) => {
+                            Holder::Inline(v85) => {
                                 w.put_varint(0);
-                                (*v89).encode(w)?;
+                                (*v85).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v84).hit_sound {
-                    Some(v91) => {
+                match &(*v80).hit_sound {
+                    Some(v87) => {
                         w.put_u8(1);
-                        match &(*v91) {
-                            Holder::Id(v93) => {
-                                if *v93 == -1 {
+                        match &(*v87) {
+                            Holder::Id(v89) => {
+                                if *v89 == -1 {
                                     return Err(EncodeError::OutOfRange("holder id"));
                                 }
-                                w.put_varint(v93.wrapping_add(1));
+                                w.put_varint(v89.wrapping_add(1));
                             }
-                            Holder::Inline(v92) => {
+                            Holder::Inline(v88) => {
                                 w.put_varint(0);
-                                (*v92).encode(w)?;
+                                (*v88).encode(w)?;
                             }
                         }
                     }
                     None => w.put_u8(0),
                 }
             }
-            crate::defs::p775::types::SlotComponentData::SwingAnimation(v94) => {
+            crate::defs::p775::types::SlotComponentData::SwingAnimation(v90) => {
                 if !((*self).r#type.0 == 40) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v94).r#type.0);
-                w.put_varint((*v94).duration);
+                w.put_varint((*v90).r#type.0);
+                w.put_varint((*v90).duration);
             }
-            crate::defs::p775::types::SlotComponentData::AdditionalTradeCost(v95) => {
+            crate::defs::p775::types::SlotComponentData::AdditionalTradeCost(v91) => {
                 if !((*self).r#type.0 == 41) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v91));
+            }
+            crate::defs::p775::types::SlotComponentData::Dye(v92) => {
+                if !((*self).r#type.0 == 43) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v92).0);
+            }
+            crate::defs::p775::types::SlotComponentData::DyedColor(v93) => {
+                if !((*self).r#type.0 == 44) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_i32((*v93));
+            }
+            crate::defs::p775::types::SlotComponentData::MapColor(v94) => {
+                if !((*self).r#type.0 == 45) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_i32((*v94));
+            }
+            crate::defs::p775::types::SlotComponentData::MapId(v95) => {
+                if !((*self).r#type.0 == 46) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v95));
             }
-            crate::defs::p775::types::SlotComponentData::Dye(v96) => {
-                if !((*self).r#type.0 == 43) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v96).0);
-            }
-            crate::defs::p775::types::SlotComponentData::DyedColor(v97) => {
-                if !((*self).r#type.0 == 44) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_i32((*v97));
-            }
-            crate::defs::p775::types::SlotComponentData::MapColor(v98) => {
-                if !((*self).r#type.0 == 45) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_i32((*v98));
-            }
-            crate::defs::p775::types::SlotComponentData::MapId(v99) => {
-                if !((*self).r#type.0 == 46) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v99));
-            }
-            crate::defs::p775::types::SlotComponentData::MapDecorations(v100) => {
+            crate::defs::p775::types::SlotComponentData::MapDecorations(v96) => {
                 if !((*self).r#type.0 == 47) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v100).write(w);
+                (*v96).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::MapPostProcessing(v101) => {
+            crate::defs::p775::types::SlotComponentData::MapPostProcessing(v97) => {
                 if !((*self).r#type.0 == 48) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v101));
+                w.put_varint((*v97));
             }
-            crate::defs::p775::types::SlotComponentData::PotionDurationScale(v102) => {
+            crate::defs::p775::types::SlotComponentData::PotionDurationScale(v98) => {
                 if !((*self).r#type.0 == 52) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_f32((*v102));
+                w.put_f32((*v98));
             }
-            crate::defs::p775::types::SlotComponentData::ChargedProjectiles(v103) => {
+            crate::defs::p775::types::SlotComponentData::ChargedProjectiles(v99) => {
                 if !((*self).r#type.0 == 49) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v103).projectiles.len())?;
-                for v104 in (*v103).projectiles.iter() {
-                    (*v104).encode(w)?;
+                w.put_len_varint((*v99).projectiles.len())?;
+                for v100 in (*v99).projectiles.iter() {
+                    (*v100).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::BundleContents(v105) => {
+            crate::defs::p775::types::SlotComponentData::BundleContents(v101) => {
                 if !((*self).r#type.0 == 50) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v105).contents.len())?;
-                for v106 in (*v105).contents.iter() {
-                    (*v106).encode(w)?;
+                w.put_len_varint((*v101).contents.len())?;
+                for v102 in (*v101).contents.iter() {
+                    (*v102).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::PotionContents(v107) => {
+            crate::defs::p775::types::SlotComponentData::PotionContents(v103) => {
                 if !((*self).r#type.0 == 51) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                match &(*v107).potion_id {
-                    Some(v108) => {
+                match &(*v103).potion_id {
+                    Some(v104) => {
                         w.put_u8(1);
-                        w.put_varint((*v108));
+                        w.put_varint((*v104));
                     }
                     None => w.put_u8(0),
                 }
-                match &(*v107).custom_color {
-                    Some(v109) => {
+                match &(*v103).custom_color {
+                    Some(v105) => {
                         w.put_u8(1);
-                        w.put_i32((*v109));
+                        w.put_i32((*v105));
                     }
                     None => w.put_u8(0),
                 }
-                w.put_len_varint((*v107).custom_effects.len())?;
-                for v110 in (*v107).custom_effects.iter() {
-                    (*v110).encode(w)?;
+                w.put_len_varint((*v103).custom_effects.len())?;
+                for v106 in (*v103).custom_effects.iter() {
+                    (*v106).encode(w)?;
                 }
-                match &(*v107).custom_name {
-                    Some(v111) => {
+                match &(*v103).custom_name {
+                    Some(v107) => {
                         w.put_u8(1);
-                        w.put_string(&(*v111))?;
+                        w.put_string(&(*v107))?;
                     }
                     None => w.put_u8(0),
                 }
             }
-            crate::defs::p775::types::SlotComponentData::SuspiciousStewEffects(v112) => {
+            crate::defs::p775::types::SlotComponentData::SuspiciousStewEffects(v108) => {
                 if !((*self).r#type.0 == 53) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v112).effects.len())?;
-                for v113 in (*v112).effects.iter() {
-                    w.put_varint((*v113).effect);
-                    w.put_varint((*v113).duration);
+                w.put_len_varint((*v108).effects.len())?;
+                for v109 in (*v108).effects.iter() {
+                    w.put_varint((*v109).effect);
+                    w.put_varint((*v109).duration);
                 }
             }
-            crate::defs::p775::types::SlotComponentData::WritableBookContent(v114) => {
+            crate::defs::p775::types::SlotComponentData::WritableBookContent(v110) => {
                 if !((*self).r#type.0 == 54) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v114).pages.len())?;
-                for v115 in (*v114).pages.iter() {
-                    (*v115).encode(w)?;
+                w.put_len_varint((*v110).pages.len())?;
+                for v111 in (*v110).pages.iter() {
+                    (*v111).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::WrittenBookContent(v116) => {
+            crate::defs::p775::types::SlotComponentData::WrittenBookContent(v112) => {
                 if !((*self).r#type.0 == 55) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v116).raw_title)?;
-                match &(*v116).filtered_title {
-                    Some(v117) => {
+                w.put_string(&(*v112).raw_title)?;
+                match &(*v112).filtered_title {
+                    Some(v113) => {
                         w.put_u8(1);
-                        w.put_string(&(*v117))?;
+                        w.put_string(&(*v113))?;
                     }
                     None => w.put_u8(0),
                 }
-                w.put_string(&(*v116).author)?;
-                w.put_varint((*v116).generation);
-                w.put_len_varint((*v116).pages.len())?;
-                for v118 in (*v116).pages.iter() {
-                    (*v118).encode(w)?;
+                w.put_string(&(*v112).author)?;
+                w.put_varint((*v112).generation);
+                w.put_len_varint((*v112).pages.len())?;
+                for v114 in (*v112).pages.iter() {
+                    (*v114).encode(w)?;
                 }
-                w.put_bool((*v116).resolved);
+                w.put_bool((*v112).resolved);
             }
-            crate::defs::p775::types::SlotComponentData::Trim(v119) => {
+            crate::defs::p775::types::SlotComponentData::Trim(v115) => {
                 if !((*self).r#type.0 == 56) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                match &(*v119).material {
-                    Holder::Id(v121) => {
-                        if *v121 == -1 {
+                match &(*v115).material {
+                    Holder::Id(v117) => {
+                        if *v117 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v121.wrapping_add(1));
+                        w.put_varint(v117.wrapping_add(1));
                     }
-                    Holder::Inline(v120) => {
+                    Holder::Inline(v116) => {
                         w.put_varint(0);
-                        (*v120).encode(w)?;
+                        (*v116).encode(w)?;
                     }
                 }
-                match &(*v119).pattern {
-                    Holder::Id(v123) => {
-                        if *v123 == -1 {
+                match &(*v115).pattern {
+                    Holder::Id(v119) => {
+                        if *v119 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v123.wrapping_add(1));
+                        w.put_varint(v119.wrapping_add(1));
                     }
-                    Holder::Inline(v122) => {
+                    Holder::Inline(v118) => {
                         w.put_varint(0);
-                        (*v122).encode(w)?;
+                        (*v118).encode(w)?;
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::DebugStickState(v124) => {
+            crate::defs::p775::types::SlotComponentData::DebugStickState(v120) => {
                 if !((*self).r#type.0 == 57) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v124).write(w);
+                (*v120).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::EntityData(v125) => {
+            crate::defs::p775::types::SlotComponentData::EntityData(v121) => {
                 if !((*self).r#type.0 == 58) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v125).r#type);
-                (*v125).data.write(w);
+                w.put_varint((*v121).r#type);
+                (*v121).data.write(w);
             }
-            crate::defs::p775::types::SlotComponentData::BlockEntityData(v126) => {
+            crate::defs::p775::types::SlotComponentData::BlockEntityData(v122) => {
                 if !((*self).r#type.0 == 60) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v126).r#type);
-                (*v126).data.write(w);
+                w.put_varint((*v122).r#type);
+                (*v122).data.write(w);
             }
-            crate::defs::p775::types::SlotComponentData::BucketEntityData(v127) => {
+            crate::defs::p775::types::SlotComponentData::BucketEntityData(v123) => {
                 if !((*self).r#type.0 == 59) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v127).write(w);
+                (*v123).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::Instrument(v128) => {
+            crate::defs::p775::types::SlotComponentData::Instrument(v124) => {
                 if !((*self).r#type.0 == 61) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v128).has_holder);
-                match &(*v128).data {
-                    crate::defs::p775::types::SlotComponentDataInstrumentData::True(v129) => {
-                        if !((*v128).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.data",
-                            ));
+                match &(*v124) {
+                    Holder::Id(v126) => {
+                        if *v126 == -1 {
+                            return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        match &(*v129) {
-                            Holder::Id(v131) => {
-                                if *v131 == -1 {
-                                    return Err(EncodeError::OutOfRange("holder id"));
-                                }
-                                w.put_varint(v131.wrapping_add(1));
-                            }
-                            Holder::Inline(v130) => {
-                                w.put_varint(0);
-                                (*v130).encode(w)?;
-                            }
-                        }
+                        w.put_varint(v126.wrapping_add(1));
                     }
-                    crate::defs::p775::types::SlotComponentDataInstrumentData::False(v132) => {
-                        if !(!(*v128).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.data",
-                            ));
-                        }
-                        w.put_string(&(*v132))?;
-                    }
-                    crate::defs::p775::types::SlotComponentDataInstrumentData::Other => {
-                        if !(!((*v128).has_holder || (!(*v128).has_holder))) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.data",
-                            ));
-                        }
+                    Holder::Inline(v125) => {
+                        w.put_varint(0);
+                        (*v125).encode(w)?;
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::ProvidesTrimMaterial(v133) => {
+            crate::defs::p775::types::SlotComponentData::ProvidesTrimMaterial(v127) => {
                 if !((*self).r#type.0 == 62) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v133).has_holder);
-                match &(*v133).material { crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::True(v134) => { if !((*v133).has_holder) { return Err(EncodeError::SwitchMismatch("types.SlotComponent.data.material")); } match &(*v134) { Holder::Id(v136) => { if *v136 == -1 { return Err(EncodeError::OutOfRange("holder id")); } w.put_varint(v136.wrapping_add(1)); } Holder::Inline(v135) => { w.put_varint(0); (*v135).encode(w)?; } } }crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::False(v137) => { if !((!(*v133).has_holder)) { return Err(EncodeError::SwitchMismatch("types.SlotComponent.data.material")); } w.put_string(&(*v137))?; }crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::Other => { if !(!((*v133).has_holder || (!(*v133).has_holder))) { return Err(EncodeError::SwitchMismatch("types.SlotComponent.data.material")); } } }
+                match &(*v127) {
+                    Holder::Id(v129) => {
+                        if *v129 == -1 {
+                            return Err(EncodeError::OutOfRange("holder id"));
+                        }
+                        w.put_varint(v129.wrapping_add(1));
+                    }
+                    Holder::Inline(v128) => {
+                        w.put_varint(0);
+                        (*v128).encode(w)?;
+                    }
+                }
             }
-            crate::defs::p775::types::SlotComponentData::OminousBottleAmplifier(v138) => {
+            crate::defs::p775::types::SlotComponentData::OminousBottleAmplifier(v130) => {
                 if !((*self).r#type.0 == 63) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v138));
+                w.put_varint((*v130));
             }
-            crate::defs::p775::types::SlotComponentData::JukeboxPlayable(v139) => {
+            crate::defs::p775::types::SlotComponentData::JukeboxPlayable(v131) => {
                 if !((*self).r#type.0 == 64) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_bool((*v139).has_holder);
-                match &(*v139).song {
-                    crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::True(v140) => {
-                        if !((*v139).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.song",
-                            ));
+                match &(*v131) {
+                    Holder::Id(v133) => {
+                        if *v133 == -1 {
+                            return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        match &(*v140) {
-                            Holder::Id(v142) => {
-                                if *v142 == -1 {
-                                    return Err(EncodeError::OutOfRange("holder id"));
-                                }
-                                w.put_varint(v142.wrapping_add(1));
-                            }
-                            Holder::Inline(v141) => {
-                                w.put_varint(0);
-                                (*v141).encode(w)?;
-                            }
-                        }
+                        w.put_varint(v133.wrapping_add(1));
                     }
-                    crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::False(v143) => {
-                        if !(!(*v139).has_holder) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.song",
-                            ));
-                        }
-                        w.put_string(&(*v143))?;
-                    }
-                    crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::Other => {
-                        if !(!((*v139).has_holder || (!(*v139).has_holder))) {
-                            return Err(EncodeError::SwitchMismatch(
-                                "types.SlotComponent.data.song",
-                            ));
-                        }
+                    Holder::Inline(v132) => {
+                        w.put_varint(0);
+                        (*v132).encode(w)?;
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::ProvidesBannerPatterns(v144) => {
+            crate::defs::p775::types::SlotComponentData::ProvidesBannerPatterns(v134) => {
                 if !((*self).r#type.0 == 65) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v144))?;
+                (*v134).encode(w)?;
             }
-            crate::defs::p775::types::SlotComponentData::Recipes(v145) => {
+            crate::defs::p775::types::SlotComponentData::Recipes(v135) => {
                 if !((*self).r#type.0 == 66) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v145).write(w);
+                (*v135).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::LodestoneTracker(v146) => {
+            crate::defs::p775::types::SlotComponentData::LodestoneTracker(v136) => {
                 if !((*self).r#type.0 == 67) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                match &(*v146).global_position {
-                    Some(v147) => {
+                match &(*v136).global_position {
+                    Some(v137) => {
                         w.put_u8(1);
-                        (*v147).encode(w)?;
+                        (*v137).encode(w)?;
                     }
                     None => w.put_u8(0),
                 }
-                w.put_bool((*v146).tracked);
+                w.put_bool((*v136).tracked);
             }
-            crate::defs::p775::types::SlotComponentData::FireworkExplosion(v148) => {
+            crate::defs::p775::types::SlotComponentData::FireworkExplosion(v138) => {
                 if !((*self).r#type.0 == 68) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v148).encode(w)?;
+                (*v138).encode(w)?;
             }
-            crate::defs::p775::types::SlotComponentData::Fireworks(v149) => {
+            crate::defs::p775::types::SlotComponentData::Fireworks(v139) => {
                 if !((*self).r#type.0 == 69) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v149).flight_duration);
-                w.put_len_varint((*v149).explosions.len())?;
-                for v150 in (*v149).explosions.iter() {
-                    (*v150).encode(w)?;
+                w.put_varint((*v139).flight_duration);
+                w.put_len_varint((*v139).explosions.len())?;
+                for v140 in (*v139).explosions.iter() {
+                    (*v140).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Profile(v151) => {
+            crate::defs::p775::types::SlotComponentData::Profile(v141) => {
                 if !((*self).r#type.0 == 70) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v151).encode(w)?;
+                (*v141).encode(w)?;
             }
-            crate::defs::p775::types::SlotComponentData::NoteBlockSound(v152) => {
+            crate::defs::p775::types::SlotComponentData::NoteBlockSound(v142) => {
                 if !((*self).r#type.0 == 71) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_string(&(*v152))?;
+                w.put_string(&(*v142))?;
             }
-            crate::defs::p775::types::SlotComponentData::BannerPatterns(v153) => {
+            crate::defs::p775::types::SlotComponentData::BannerPatterns(v143) => {
                 if !((*self).r#type.0 == 72) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v153).layers.len())?;
-                for v154 in (*v153).layers.iter() {
-                    (*v154).encode(w)?;
+                w.put_len_varint((*v143).layers.len())?;
+                for v144 in (*v143).layers.iter() {
+                    (*v144).encode(w)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::BaseColor(v155) => {
+            crate::defs::p775::types::SlotComponentData::BaseColor(v145) => {
                 if !((*self).r#type.0 == 73) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v155).0);
+                w.put_varint((*v145).0);
             }
-            crate::defs::p775::types::SlotComponentData::PotDecorations(v156) => {
+            crate::defs::p775::types::SlotComponentData::PotDecorations(v146) => {
                 if !((*self).r#type.0 == 74) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v156).decorations.len())?;
-                for v157 in (*v156).decorations.iter() {
-                    w.put_varint((*v157));
+                w.put_len_varint((*v146).decorations.len())?;
+                for v147 in (*v146).decorations.iter() {
+                    w.put_varint((*v147));
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Container(v158) => {
+            crate::defs::p775::types::SlotComponentData::Container(v148) => {
                 if !((*self).r#type.0 == 75) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v158).contents.len())?;
-                for v159 in (*v158).contents.iter() {
-                    match &(*v159) {
-                        Some(v160) => {
+                w.put_len_varint((*v148).contents.len())?;
+                for v149 in (*v148).contents.iter() {
+                    match &(*v149) {
+                        Some(v150) => {
                             w.put_u8(1);
-                            (*v160).encode(w)?;
+                            (*v150).encode(w)?;
                         }
                         None => w.put_u8(0),
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::BlockState(v161) => {
+            crate::defs::p775::types::SlotComponentData::BlockState(v151) => {
                 if !((*self).r#type.0 == 76) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v161).properties.len())?;
-                for v162 in (*v161).properties.iter() {
-                    w.put_string(&(*v162).name)?;
-                    w.put_string(&(*v162).value)?;
+                w.put_len_varint((*v151).properties.len())?;
+                for v152 in (*v151).properties.iter() {
+                    w.put_string(&(*v152).name)?;
+                    w.put_string(&(*v152).value)?;
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Bees(v163) => {
+            crate::defs::p775::types::SlotComponentData::Bees(v153) => {
                 if !((*self).r#type.0 == 77) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_len_varint((*v163).bees.len())?;
-                for v164 in (*v163).bees.iter() {
-                    (*v164).nbt_data.write(w);
-                    w.put_varint((*v164).ticks_in_hive);
-                    w.put_varint((*v164).min_ticks_in_hive);
+                w.put_len_varint((*v153).bees.len())?;
+                for v154 in (*v153).bees.iter() {
+                    (*v154).nbt_data.write(w);
+                    w.put_varint((*v154).ticks_in_hive);
+                    w.put_varint((*v154).min_ticks_in_hive);
                 }
             }
-            crate::defs::p775::types::SlotComponentData::Lock(v165) => {
+            crate::defs::p775::types::SlotComponentData::Lock(v155) => {
                 if !((*self).r#type.0 == 78) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v165).write(w);
+                (*v155).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::ContainerLoot(v166) => {
+            crate::defs::p775::types::SlotComponentData::ContainerLoot(v156) => {
                 if !((*self).r#type.0 == 79) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                (*v166).write(w);
+                (*v156).write(w);
             }
-            crate::defs::p775::types::SlotComponentData::BreakSound(v167) => {
+            crate::defs::p775::types::SlotComponentData::BreakSound(v157) => {
                 if !((*self).r#type.0 == 80) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                match &(*v167) {
-                    Holder::Id(v169) => {
-                        if *v169 == -1 {
+                match &(*v157) {
+                    Holder::Id(v159) => {
+                        if *v159 == -1 {
                             return Err(EncodeError::OutOfRange("holder id"));
                         }
-                        w.put_varint(v169.wrapping_add(1));
+                        w.put_varint(v159.wrapping_add(1));
                     }
-                    Holder::Inline(v168) => {
+                    Holder::Inline(v158) => {
                         w.put_varint(0);
-                        (*v168).encode(w)?;
+                        (*v158).encode(w)?;
                     }
                 }
             }
-            crate::defs::p775::types::SlotComponentData::VillagerVariant(v170) => {
+            crate::defs::p775::types::SlotComponentData::VillagerVariant(v160) => {
                 if !((*self).r#type.0 == 81) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v160));
+            }
+            crate::defs::p775::types::SlotComponentData::WolfVariant(v161) => {
+                if !((*self).r#type.0 == 82) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v161));
+            }
+            crate::defs::p775::types::SlotComponentData::WolfSoundVariant(v162) => {
+                if !((*self).r#type.0 == 83) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v162));
+            }
+            crate::defs::p775::types::SlotComponentData::WolfCollar(v163) => {
+                if !((*self).r#type.0 == 84) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v163).0);
+            }
+            crate::defs::p775::types::SlotComponentData::FoxVariant(v164) => {
+                if !((*self).r#type.0 == 85) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v164));
+            }
+            crate::defs::p775::types::SlotComponentData::SalmonSize(v165) => {
+                if !((*self).r#type.0 == 86) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v165));
+            }
+            crate::defs::p775::types::SlotComponentData::ParrotVariant(v166) => {
+                if !((*self).r#type.0 == 87) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v166));
+            }
+            crate::defs::p775::types::SlotComponentData::TropicalFishPattern(v167) => {
+                if !((*self).r#type.0 == 88) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v167));
+            }
+            crate::defs::p775::types::SlotComponentData::TropicalFishBaseColor(v168) => {
+                if !((*self).r#type.0 == 89) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v168).0);
+            }
+            crate::defs::p775::types::SlotComponentData::TropicalFishPatternColor(v169) => {
+                if !((*self).r#type.0 == 90) {
+                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                }
+                w.put_varint((*v169).0);
+            }
+            crate::defs::p775::types::SlotComponentData::MooshroomVariant(v170) => {
+                if !((*self).r#type.0 == 91) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v170));
             }
-            crate::defs::p775::types::SlotComponentData::WolfVariant(v171) => {
-                if !((*self).r#type.0 == 82) {
+            crate::defs::p775::types::SlotComponentData::RabbitVariant(v171) => {
+                if !((*self).r#type.0 == 92) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v171));
             }
-            crate::defs::p775::types::SlotComponentData::WolfSoundVariant(v172) => {
-                if !((*self).r#type.0 == 83) {
+            crate::defs::p775::types::SlotComponentData::PigVariant(v172) => {
+                if !((*self).r#type.0 == 93) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v172));
             }
-            crate::defs::p775::types::SlotComponentData::WolfCollar(v173) => {
-                if !((*self).r#type.0 == 84) {
+            crate::defs::p775::types::SlotComponentData::PigSoundVariant(v173) => {
+                if !((*self).r#type.0 == 94) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v173).0);
+                w.put_varint((*v173));
             }
-            crate::defs::p775::types::SlotComponentData::FoxVariant(v174) => {
-                if !((*self).r#type.0 == 85) {
+            crate::defs::p775::types::SlotComponentData::CowVariant(v174) => {
+                if !((*self).r#type.0 == 95) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v174));
             }
-            crate::defs::p775::types::SlotComponentData::SalmonSize(v175) => {
-                if !((*self).r#type.0 == 86) {
+            crate::defs::p775::types::SlotComponentData::CowSoundVariant(v175) => {
+                if !((*self).r#type.0 == 96) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v175));
             }
-            crate::defs::p775::types::SlotComponentData::ParrotVariant(v176) => {
-                if !((*self).r#type.0 == 87) {
+            crate::defs::p775::types::SlotComponentData::ChickenVariant(v176) => {
+                if !((*self).r#type.0 == 97) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v176));
             }
-            crate::defs::p775::types::SlotComponentData::TropicalFishPattern(v177) => {
-                if !((*self).r#type.0 == 88) {
+            crate::defs::p775::types::SlotComponentData::ChickenSoundVariant(v177) => {
+                if !((*self).r#type.0 == 98) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v177));
             }
-            crate::defs::p775::types::SlotComponentData::TropicalFishBaseColor(v178) => {
-                if !((*self).r#type.0 == 89) {
+            crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant(v178) => {
+                if !((*self).r#type.0 == 99) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v178).0);
+                w.put_varint((*v178));
             }
-            crate::defs::p775::types::SlotComponentData::TropicalFishPatternColor(v179) => {
-                if !((*self).r#type.0 == 90) {
+            crate::defs::p775::types::SlotComponentData::FrogVariant(v179) => {
+                if !((*self).r#type.0 == 100) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v179).0);
+                w.put_varint((*v179));
             }
-            crate::defs::p775::types::SlotComponentData::MooshroomVariant(v180) => {
-                if !((*self).r#type.0 == 91) {
+            crate::defs::p775::types::SlotComponentData::HorseVariant(v180) => {
+                if !((*self).r#type.0 == 101) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v180));
             }
-            crate::defs::p775::types::SlotComponentData::RabbitVariant(v181) => {
-                if !((*self).r#type.0 == 92) {
+            crate::defs::p775::types::SlotComponentData::PaintingVariant(v181) => {
+                if !((*self).r#type.0 == 102) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v181));
-            }
-            crate::defs::p775::types::SlotComponentData::PigVariant(v182) => {
-                if !((*self).r#type.0 == 93) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
+                match &(*v181) {
+                    Holder::Id(v183) => {
+                        if *v183 == -1 {
+                            return Err(EncodeError::OutOfRange("holder id"));
+                        }
+                        w.put_varint(v183.wrapping_add(1));
+                    }
+                    Holder::Inline(v182) => {
+                        w.put_varint(0);
+                        (*v182).encode(w)?;
+                    }
                 }
-                w.put_varint((*v182));
             }
-            crate::defs::p775::types::SlotComponentData::PigSoundVariant(v183) => {
-                if !((*self).r#type.0 == 94) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v183));
-            }
-            crate::defs::p775::types::SlotComponentData::CowVariant(v184) => {
-                if !((*self).r#type.0 == 95) {
+            crate::defs::p775::types::SlotComponentData::LlamaVariant(v184) => {
+                if !((*self).r#type.0 == 103) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v184));
             }
-            crate::defs::p775::types::SlotComponentData::CowSoundVariant(v185) => {
-                if !((*self).r#type.0 == 96) {
+            crate::defs::p775::types::SlotComponentData::AxolotlVariant(v185) => {
+                if !((*self).r#type.0 == 104) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
                 w.put_varint((*v185));
             }
-            crate::defs::p775::types::SlotComponentData::ChickenVariant(v186) => {
-                if !((*self).r#type.0 == 97) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                match &(*v186) {
-                    Holder::Id(v188) => {
-                        if *v188 == -1 {
-                            return Err(EncodeError::OutOfRange("holder id"));
-                        }
-                        w.put_varint(v188.wrapping_add(1));
-                    }
-                    Holder::Inline(v187) => {
-                        w.put_varint(0);
-                        w.put_string(&(*v187))?;
-                    }
-                }
-            }
-            crate::defs::p775::types::SlotComponentData::ChickenSoundVariant(v189) => {
-                if !((*self).r#type.0 == 98) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                match &(*v189) {
-                    Holder::Id(v191) => {
-                        if *v191 == -1 {
-                            return Err(EncodeError::OutOfRange("holder id"));
-                        }
-                        w.put_varint(v191.wrapping_add(1));
-                    }
-                    Holder::Inline(v190) => {
-                        w.put_varint(0);
-                        w.put_string(&(*v190))?;
-                    }
-                }
-            }
-            crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant(v192) => {
-                if !((*self).r#type.0 == 99) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                match &(*v192) {
-                    Holder::Id(v194) => {
-                        if *v194 == -1 {
-                            return Err(EncodeError::OutOfRange("holder id"));
-                        }
-                        w.put_varint(v194.wrapping_add(1));
-                    }
-                    Holder::Inline(v193) => {
-                        w.put_varint(0);
-                        w.put_string(&(*v193))?;
-                    }
-                }
-            }
-            crate::defs::p775::types::SlotComponentData::FrogVariant(v195) => {
-                if !((*self).r#type.0 == 100) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v195));
-            }
-            crate::defs::p775::types::SlotComponentData::HorseVariant(v196) => {
-                if !((*self).r#type.0 == 101) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v196));
-            }
-            crate::defs::p775::types::SlotComponentData::PaintingVariant(v197) => {
-                if !((*self).r#type.0 == 102) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                match &(*v197) {
-                    Holder::Id(v199) => {
-                        if *v199 == -1 {
-                            return Err(EncodeError::OutOfRange("holder id"));
-                        }
-                        w.put_varint(v199.wrapping_add(1));
-                    }
-                    Holder::Inline(v198) => {
-                        w.put_varint(0);
-                        (*v198).encode(w)?;
-                    }
-                }
-            }
-            crate::defs::p775::types::SlotComponentData::LlamaVariant(v200) => {
-                if !((*self).r#type.0 == 103) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v200));
-            }
-            crate::defs::p775::types::SlotComponentData::AxolotlVariant(v201) => {
-                if !((*self).r#type.0 == 104) {
-                    return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
-                }
-                w.put_varint((*v201));
-            }
-            crate::defs::p775::types::SlotComponentData::CatVariant(v202) => {
+            crate::defs::p775::types::SlotComponentData::CatVariant(v186) => {
                 if !((*self).r#type.0 == 105) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v202));
+                w.put_varint((*v186));
             }
-            crate::defs::p775::types::SlotComponentData::CatSoundVariant(v203) => {
+            crate::defs::p775::types::SlotComponentData::CatSoundVariant(v187) => {
                 if !((*self).r#type.0 == 106) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v203));
+                w.put_varint((*v187));
             }
-            crate::defs::p775::types::SlotComponentData::CatCollar(v204) => {
+            crate::defs::p775::types::SlotComponentData::CatCollar(v188) => {
                 if !((*self).r#type.0 == 107) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v204).0);
+                w.put_varint((*v188).0);
             }
-            crate::defs::p775::types::SlotComponentData::SheepColor(v205) => {
+            crate::defs::p775::types::SlotComponentData::SheepColor(v189) => {
                 if !((*self).r#type.0 == 108) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v205).0);
+                w.put_varint((*v189).0);
             }
-            crate::defs::p775::types::SlotComponentData::ShulkerColor(v206) => {
+            crate::defs::p775::types::SlotComponentData::ShulkerColor(v190) => {
                 if !((*self).r#type.0 == 109) {
                     return Err(EncodeError::SwitchMismatch("types.SlotComponent.data"));
                 }
-                w.put_varint((*v206).0);
+                w.put_varint((*v190).0);
             }
             crate::defs::p775::types::SlotComponentData::Other => {
                 if !(!(((*self).r#type.0 == 0)
@@ -10321,45 +10050,21 @@ impl Generate for SlotComponent {
             } else if (v1.0 == 7) {
                 crate::defs::p775::types::SlotComponentData::MinimumAttackCharge(g.f32())
             } else if (v1.0 == 8) {
-                crate::defs::p775::types::SlotComponentData::DamageType({
-                    let v6 = g.bool();
-                    let v7 = (if v6 {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::True(
-                            if g.bool() {
-                                Holder::Id(
-                                    match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                                        -1 => 0,
-                                        v => v,
-                                    },
-                                )
-                            } else {
-                                Holder::Inline(<crate::defs::p775::types::DamageTypeData as Generate>::generate(g))
-                            },
-                        )
-                    } else if (!v6) {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::False(
-                            g.string(),
-                        )
-                    } else {
-                        crate::defs::p775::types::SlotComponentDataDamageTypeDamageType::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataDamageType {
-                        has_holder: v6,
-                        damage_type: v7,
-                    }
-                })
+                crate::defs::p775::types::SlotComponentData::DamageType(
+                    (g.int_in(-2147483648, 2147483647, &[]) as i32),
+                )
             } else if (v1.0 == 9) {
                 crate::defs::p775::types::SlotComponentData::ItemName(g.anon_nbt())
             } else if (v1.0 == 10) {
                 crate::defs::p775::types::SlotComponentData::ItemModel(g.string())
             } else if (v1.0 == 11) {
                 crate::defs::p775::types::SlotComponentData::Lore({
-                    let v8 = g.count();
-                    let mut v9 = Vec::with_capacity(v8.min(crate::codec::PREALLOC_LIMIT));
-                    for _ in 0..v8 {
-                        v9.push(g.anon_nbt());
+                    let v6 = g.count();
+                    let mut v7 = Vec::with_capacity(v6.min(crate::codec::PREALLOC_LIMIT));
+                    for _ in 0..v6 {
+                        v7.push(g.anon_nbt());
                     }
-                    v9
+                    v7
                 })
             } else if (v1.0 == 12) {
                 crate::defs::p775::types::SlotComponentData::Rarity(
@@ -10371,118 +10076,118 @@ impl Generate for SlotComponent {
                 )
             } else if (v1.0 == 13) {
                 crate::defs::p775::types::SlotComponentData::Enchantments({
-                    let v10 = {
-                        let v11 = g.count();
-                        let mut v12 = Vec::with_capacity(v11.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v11 {
-                            v12.push({ let v13 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v14 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataEnchantmentsEnchantments { id: v13, level: v14 } });
+                    let v8 = {
+                        let v9 = g.count();
+                        let mut v10 = Vec::with_capacity(v9.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v9 {
+                            v10.push({ let v11 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v12 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataEnchantmentsEnchantments { id: v11, level: v12 } });
                         }
-                        v12
+                        v10
                     };
-                    crate::defs::p775::types::SlotComponentDataEnchantments { enchantments: v10 }
+                    crate::defs::p775::types::SlotComponentDataEnchantments { enchantments: v8 }
                 })
             } else if (v1.0 == 42) {
                 crate::defs::p775::types::SlotComponentData::StoredEnchantments({
-                    let v15 = {
-                        let v16 = g.count();
-                        let mut v17 = Vec::with_capacity(v16.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v16 {
-                            v17.push({ let v18 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v19 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataStoredEnchantmentsEnchantments { id: v18, level: v19 } });
+                    let v13 = {
+                        let v14 = g.count();
+                        let mut v15 = Vec::with_capacity(v14.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v14 {
+                            v15.push({ let v16 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v17 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataStoredEnchantmentsEnchantments { id: v16, level: v17 } });
                         }
-                        v17
+                        v15
                     };
                     crate::defs::p775::types::SlotComponentDataStoredEnchantments {
-                        enchantments: v15,
+                        enchantments: v13,
                     }
                 })
             } else if (v1.0 == 14) {
                 crate::defs::p775::types::SlotComponentData::CanPlaceOn({
-                    let v20 = {
-                        let v21 = g.count();
-                        let mut v22 = Vec::with_capacity(v21.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v21 {
-                            v22.push(<crate::defs::p775::types::ItemBlockPredicate as Generate>::generate(g));
+                    let v18 = {
+                        let v19 = g.count();
+                        let mut v20 = Vec::with_capacity(v19.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v19 {
+                            v20.push(<crate::defs::p775::types::ItemBlockPredicate as Generate>::generate(g));
                         }
-                        v22
+                        v20
                     };
-                    crate::defs::p775::types::SlotComponentDataCanPlaceOn { predicates: v20 }
+                    crate::defs::p775::types::SlotComponentDataCanPlaceOn { predicates: v18 }
                 })
             } else if (v1.0 == 15) {
                 crate::defs::p775::types::SlotComponentData::CanBreak({
-                    let v23 = {
-                        let v24 = g.count();
-                        let mut v25 = Vec::with_capacity(v24.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v24 {
-                            v25.push(<crate::defs::p775::types::ItemBlockPredicate as Generate>::generate(g));
+                    let v21 = {
+                        let v22 = g.count();
+                        let mut v23 = Vec::with_capacity(v22.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v22 {
+                            v23.push(<crate::defs::p775::types::ItemBlockPredicate as Generate>::generate(g));
                         }
-                        v25
+                        v23
                     };
-                    crate::defs::p775::types::SlotComponentDataCanBreak { predicates: v23 }
+                    crate::defs::p775::types::SlotComponentDataCanBreak { predicates: v21 }
                 })
             } else if (v1.0 == 16) {
                 crate::defs::p775::types::SlotComponentData::AttributeModifiers({
-                    let v26 = g.count();
-                    let mut v27 = Vec::with_capacity(v26.min(crate::codec::PREALLOC_LIMIT));
-                    for _ in 0..v26 {
-                        v27.push({ let v28 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v29 = g.string();let v30 = g.f64();let v31 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32);let v32 = crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(g.int_in(-2147483648, 2147483647, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) as i32);let v33 = { let v34 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32);let v35 = if (v34.0 == 2) { Some(g.anon_nbt()) } else { None }; crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplay { r#type: v34, component: v35 } }; crate::defs::p775::types::SlotComponentDataAttributeModifiers { type_id: v28, name: v29, value: v30, operation: v31, slot: v32, display: v33 } });
+                    let v24 = g.count();
+                    let mut v25 = Vec::with_capacity(v24.min(crate::codec::PREALLOC_LIMIT));
+                    for _ in 0..v24 {
+                        v25.push({ let v26 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v27 = g.string();let v28 = g.f64();let v29 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32);let v30 = crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(g.int_in(-2147483648, 2147483647, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) as i32);let v31 = { let v32 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32);let v33 = if (v32.0 == 2) { Some(g.anon_nbt()) } else { None }; crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplay { r#type: v32, component: v33 } }; crate::defs::p775::types::SlotComponentDataAttributeModifiers { type_id: v26, name: v27, value: v28, operation: v29, slot: v30, display: v31 } });
                     }
-                    v27
+                    v25
                 })
             } else if (v1.0 == 17) {
                 crate::defs::p775::types::SlotComponentData::CustomModelData({
-                    let v36 = {
-                        let v37 = g.count();
-                        let mut v38 = Vec::with_capacity(v37.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v37 {
-                            v38.push(g.f32());
+                    let v34 = {
+                        let v35 = g.count();
+                        let mut v36 = Vec::with_capacity(v35.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v35 {
+                            v36.push(g.f32());
                         }
-                        v38
+                        v36
                     };
-                    let v39 = {
-                        let v40 = g.count();
-                        let mut v41 = Vec::with_capacity(v40.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v40 {
-                            v41.push(g.bool());
+                    let v37 = {
+                        let v38 = g.count();
+                        let mut v39 = Vec::with_capacity(v38.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v38 {
+                            v39.push(g.bool());
                         }
-                        v41
+                        v39
                     };
-                    let v42 = {
-                        let v43 = g.count();
-                        let mut v44 = Vec::with_capacity(v43.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v43 {
-                            v44.push(g.string());
+                    let v40 = {
+                        let v41 = g.count();
+                        let mut v42 = Vec::with_capacity(v41.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v41 {
+                            v42.push(g.string());
                         }
-                        v44
+                        v42
                     };
-                    let v45 = {
-                        let v46 = g.count();
-                        let mut v47 = Vec::with_capacity(v46.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v46 {
-                            v47.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
+                    let v43 = {
+                        let v44 = g.count();
+                        let mut v45 = Vec::with_capacity(v44.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v44 {
+                            v45.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
                         }
-                        v47
+                        v45
                     };
                     crate::defs::p775::types::SlotComponentDataCustomModelData {
-                        floats: v36,
-                        flags: v39,
-                        strings: v42,
-                        colors: v45,
+                        floats: v34,
+                        flags: v37,
+                        strings: v40,
+                        colors: v43,
                     }
                 })
             } else if (v1.0 == 18) {
                 crate::defs::p775::types::SlotComponentData::TooltipDisplay({
-                    let v48 = g.bool();
-                    let v49 = {
-                        let v50 = g.count();
-                        let mut v51 = Vec::with_capacity(v50.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v50 {
-                            v51.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
+                    let v46 = g.bool();
+                    let v47 = {
+                        let v48 = g.count();
+                        let mut v49 = Vec::with_capacity(v48.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v48 {
+                            v49.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
                         }
-                        v51
+                        v49
                     };
                     crate::defs::p775::types::SlotComponentDataTooltipDisplay {
-                        hide_tooltip: v48,
-                        hidden_components: v49,
+                        hide_tooltip: v46,
+                        hidden_components: v47,
                     }
                 })
             } else if (v1.0 == 19) {
@@ -10497,28 +10202,28 @@ impl Generate for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::IntangibleProjectile(g.anon_nbt())
             } else if (v1.0 == 37) {
                 crate::defs::p775::types::SlotComponentData::BlocksAttacks({
-                    let v52 = g.f32();
-                    let v53 = g.f32();
-                    let v54 = {
-                        let v55 = g.count();
-                        let mut v56 = Vec::with_capacity(v55.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v55 {
-                            v56.push({ let v57 = g.f32();let v58 = if g.bool() { Some(<HolderSet as Generate>::generate(g)) } else { None };let v59 = g.f32();let v60 = g.f32(); crate::defs::p775::types::SlotComponentDataBlocksAttacksDamageReductions { horizontal_blocking_angle: v57, r#type: v58, base: v59, factor: v60 } });
+                    let v50 = g.f32();
+                    let v51 = g.f32();
+                    let v52 = {
+                        let v53 = g.count();
+                        let mut v54 = Vec::with_capacity(v53.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v53 {
+                            v54.push({ let v55 = g.f32();let v56 = if g.bool() { Some(<HolderSet as Generate>::generate(g)) } else { None };let v57 = g.f32();let v58 = g.f32(); crate::defs::p775::types::SlotComponentDataBlocksAttacksDamageReductions { horizontal_blocking_angle: v55, r#type: v56, base: v57, factor: v58 } });
                         }
-                        v56
+                        v54
                     };
-                    let v61 = {
+                    let v59 = {
+                        let v60 = g.f32();
+                        let v61 = g.f32();
                         let v62 = g.f32();
-                        let v63 = g.f32();
-                        let v64 = g.f32();
                         crate::defs::p775::types::SlotComponentDataBlocksAttacksItemDamage {
-                            threshold: v62,
-                            base: v63,
-                            factor: v64,
+                            threshold: v60,
+                            base: v61,
+                            factor: v62,
                         }
                     };
-                    let v65 = if g.bool() { Some(g.string()) } else { None };
-                    let v66 = if g.bool() {
+                    let v63 = if g.bool() { Some(g.string()) } else { None };
+                    let v64 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                                 -1 => 0,
@@ -10532,7 +10237,7 @@ impl Generate for SlotComponent {
                     } else {
                         None
                     };
-                    let v67 = if g.bool() {
+                    let v65 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                                 -1 => 0,
@@ -10547,34 +10252,34 @@ impl Generate for SlotComponent {
                         None
                     };
                     crate::defs::p775::types::SlotComponentDataBlocksAttacks {
-                        block_delay_seconds: v52,
-                        disable_cooldown_scale: v53,
-                        damage_reductions: v54,
-                        item_damage: v61,
-                        bypassed_by: v65,
-                        block_sound: v66,
-                        disable_sound: v67,
+                        block_delay_seconds: v50,
+                        disable_cooldown_scale: v51,
+                        damage_reductions: v52,
+                        item_damage: v59,
+                        bypassed_by: v63,
+                        block_sound: v64,
+                        disable_sound: v65,
                     }
                 })
             } else if (v1.0 == 23) {
                 crate::defs::p775::types::SlotComponentData::Food({
-                    let v68 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v69 = g.f32();
-                    let v70 = g.bool();
+                    let v66 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v67 = g.f32();
+                    let v68 = g.bool();
                     crate::defs::p775::types::SlotComponentDataFood {
-                        nutrition: v68,
-                        saturation_modifier: v69,
-                        can_always_eat: v70,
+                        nutrition: v66,
+                        saturation_modifier: v67,
+                        can_always_eat: v68,
                     }
                 })
             } else if (v1.0 == 24) {
                 crate::defs::p775::types::SlotComponentData::Consumable({
-                    let v71 = g.f32();
-                    let v72 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
+                    let v69 = g.f32();
+                    let v70 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
                         g.int_in(-2147483648, 2147483647, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
                             as i32,
                     );
-                    let v73 = if g.bool() {
+                    let v71 = if g.bool() {
                         Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                             -1 => 0,
                             v => v,
@@ -10584,25 +10289,25 @@ impl Generate for SlotComponent {
                             <crate::defs::p775::types::ItemSoundEvent as Generate>::generate(g),
                         )
                     };
-                    let v74 = g.bool();
-                    let v75 = {
-                        let v76 = g.count();
-                        let mut v77 = Vec::with_capacity(v76.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v76 {
-                            v77.push(
+                    let v72 = g.bool();
+                    let v73 = {
+                        let v74 = g.count();
+                        let mut v75 = Vec::with_capacity(v74.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v74 {
+                            v75.push(
                                 <crate::defs::p775::types::ItemConsumeEffect as Generate>::generate(
                                     g,
                                 ),
                             );
                         }
-                        v77
+                        v75
                     };
                     crate::defs::p775::types::SlotComponentDataConsumable {
-                        consume_seconds: v71,
-                        animation: v72,
-                        sound: v73,
-                        makes_particles: v74,
-                        effects: v75,
+                        consume_seconds: v69,
+                        animation: v70,
+                        sound: v71,
+                        makes_particles: v72,
+                        effects: v73,
                     }
                 })
             } else if (v1.0 == 25) {
@@ -10611,68 +10316,71 @@ impl Generate for SlotComponent {
                 )
             } else if (v1.0 == 26) {
                 crate::defs::p775::types::SlotComponentData::UseCooldown({
-                    let v78 = g.f32();
-                    let v79 = if g.bool() { Some(g.string()) } else { None };
+                    let v76 = g.f32();
+                    let v77 = if g.bool() { Some(g.string()) } else { None };
                     crate::defs::p775::types::SlotComponentDataUseCooldown {
-                        seconds: v78,
-                        cooldown_group: v79,
+                        seconds: v76,
+                        cooldown_group: v77,
                     }
                 })
             } else if (v1.0 == 27) {
-                crate::defs::p775::types::SlotComponentData::DamageResistant(g.string())
+                crate::defs::p775::types::SlotComponentData::DamageResistant({
+                    let v78 = <HolderSet as Generate>::generate(g);
+                    crate::defs::p775::types::SlotComponentDataDamageResistant { types: v78 }
+                })
             } else if (v1.0 == 28) {
                 crate::defs::p775::types::SlotComponentData::Tool({
-                    let v80 = {
-                        let v81 = g.count();
-                        let mut v82 = Vec::with_capacity(v81.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v81 {
-                            v82.push({
-                                let v83 = <HolderSet as Generate>::generate(g);
-                                let v84 = if g.bool() { Some(g.f32()) } else { None };
-                                let v85 = if g.bool() { Some(g.bool()) } else { None };
+                    let v79 = {
+                        let v80 = g.count();
+                        let mut v81 = Vec::with_capacity(v80.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v80 {
+                            v81.push({
+                                let v82 = <HolderSet as Generate>::generate(g);
+                                let v83 = if g.bool() { Some(g.f32()) } else { None };
+                                let v84 = if g.bool() { Some(g.bool()) } else { None };
                                 crate::defs::p775::types::SlotComponentDataToolRules {
-                                    blocks: v83,
-                                    speed: v84,
-                                    correct_drop_for_blocks: v85,
+                                    blocks: v82,
+                                    speed: v83,
+                                    correct_drop_for_blocks: v84,
                                 }
                             });
                         }
-                        v82
+                        v81
                     };
-                    let v86 = g.f32();
-                    let v87 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v88 = g.bool();
+                    let v85 = g.f32();
+                    let v86 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v87 = g.bool();
                     crate::defs::p775::types::SlotComponentDataTool {
-                        rules: v80,
-                        default_mining_speed: v86,
-                        damage_per_block: v87,
-                        can_destroy_blocks_in_creative: v88,
+                        rules: v79,
+                        default_mining_speed: v85,
+                        damage_per_block: v86,
+                        can_destroy_blocks_in_creative: v87,
                     }
                 })
             } else if (v1.0 == 29) {
                 crate::defs::p775::types::SlotComponentData::Weapon({
-                    let v89 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v90 = g.f32();
+                    let v88 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v89 = g.f32();
                     crate::defs::p775::types::SlotComponentDataWeapon {
-                        item_damage_per_attack: v89,
-                        disable_blocking_for_seconds: v90,
+                        item_damage_per_attack: v88,
+                        disable_blocking_for_seconds: v89,
                     }
                 })
             } else if (v1.0 == 30) {
                 crate::defs::p775::types::SlotComponentData::AttackRange({
+                    let v90 = g.f32();
                     let v91 = g.f32();
                     let v92 = g.f32();
                     let v93 = g.f32();
                     let v94 = g.f32();
                     let v95 = g.f32();
-                    let v96 = g.f32();
                     crate::defs::p775::types::SlotComponentDataAttackRange {
-                        min_range: v91,
-                        max_range: v92,
-                        min_creative_range: v93,
-                        max_creative_range: v94,
-                        hitbox_margin: v95,
-                        mob_factor: v96,
+                        min_range: v90,
+                        max_range: v91,
+                        min_creative_range: v92,
+                        max_creative_range: v93,
+                        hitbox_margin: v94,
+                        mob_factor: v95,
                     }
                 })
             } else if (v1.0 == 31) {
@@ -10681,13 +10389,13 @@ impl Generate for SlotComponent {
                 )
             } else if (v1.0 == 32) {
                 crate::defs::p775::types::SlotComponentData::Equippable({
-                    let v97 = crate::defs::p775::types::SlotComponentDataEquippableSlot(g.int_in(
+                    let v96 = crate::defs::p775::types::SlotComponentDataEquippableSlot(g.int_in(
                         -2147483648,
                         2147483647,
                         &[0, 1, 2, 3, 4, 5, 6, 7],
                     )
                         as i32);
-                    let v98 = if g.bool() {
+                    let v97 = if g.bool() {
                         Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                             -1 => 0,
                             v => v,
@@ -10697,19 +10405,19 @@ impl Generate for SlotComponent {
                             <crate::defs::p775::types::ItemSoundEvent as Generate>::generate(g),
                         )
                     };
+                    let v98 = if g.bool() { Some(g.string()) } else { None };
                     let v99 = if g.bool() { Some(g.string()) } else { None };
-                    let v100 = if g.bool() { Some(g.string()) } else { None };
-                    let v101 = if g.bool() {
+                    let v100 = if g.bool() {
                         Some(<HolderSet as Generate>::generate(g))
                     } else {
                         None
                     };
+                    let v101 = g.bool();
                     let v102 = g.bool();
                     let v103 = g.bool();
                     let v104 = g.bool();
                     let v105 = g.bool();
-                    let v106 = g.bool();
-                    let v107 = if g.bool() {
+                    let v106 = if g.bool() {
                         Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                             -1 => 0,
                             v => v,
@@ -10720,23 +10428,23 @@ impl Generate for SlotComponent {
                         )
                     };
                     crate::defs::p775::types::SlotComponentDataEquippable {
-                        slot: v97,
-                        sound: v98,
-                        model: v99,
-                        camera_overlay: v100,
-                        allowed_entities: v101,
-                        dispensable: v102,
-                        swappable: v103,
-                        damageable: v104,
-                        equip_on_interact: v105,
-                        shearable: v106,
-                        shearing_sound: v107,
+                        slot: v96,
+                        sound: v97,
+                        model: v98,
+                        camera_overlay: v99,
+                        allowed_entities: v100,
+                        dispensable: v101,
+                        swappable: v102,
+                        damageable: v103,
+                        equip_on_interact: v104,
+                        shearable: v105,
+                        shearing_sound: v106,
                     }
                 })
             } else if (v1.0 == 33) {
                 crate::defs::p775::types::SlotComponentData::Repairable({
-                    let v108 = <HolderSet as Generate>::generate(g);
-                    crate::defs::p775::types::SlotComponentDataRepairable { items: v108 }
+                    let v107 = <HolderSet as Generate>::generate(g);
+                    crate::defs::p775::types::SlotComponentDataRepairable { items: v107 }
                 })
             } else if (v1.0 == 34) {
                 crate::defs::p775::types::SlotComponentData::Glider
@@ -10744,24 +10452,38 @@ impl Generate for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::TooltipStyle(g.string())
             } else if (v1.0 == 36) {
                 crate::defs::p775::types::SlotComponentData::DeathProtection({
-                    let v109 = {
-                        let v110 = g.count();
-                        let mut v111 = Vec::with_capacity(v110.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v110 {
-                            v111.push(
+                    let v108 = {
+                        let v109 = g.count();
+                        let mut v110 = Vec::with_capacity(v109.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v109 {
+                            v110.push(
                                 <crate::defs::p775::types::ItemConsumeEffect as Generate>::generate(
                                     g,
                                 ),
                             );
                         }
-                        v111
+                        v110
                     };
-                    crate::defs::p775::types::SlotComponentDataDeathProtection { effects: v109 }
+                    crate::defs::p775::types::SlotComponentDataDeathProtection { effects: v108 }
                 })
             } else if (v1.0 == 38) {
                 crate::defs::p775::types::SlotComponentData::PiercingWeapon({
+                    let v111 = g.bool();
                     let v112 = g.bool();
-                    let v113 = g.bool();
+                    let v113 = if g.bool() {
+                        Some(if g.bool() {
+                            Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
+                                -1 => 0,
+                                v => v,
+                            })
+                        } else {
+                            Holder::Inline(
+                                <crate::defs::p775::types::ItemSoundEvent as Generate>::generate(g),
+                            )
+                        })
+                    } else {
+                        None
+                    };
                     let v114 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
@@ -10776,7 +10498,35 @@ impl Generate for SlotComponent {
                     } else {
                         None
                     };
-                    let v115 = if g.bool() {
+                    crate::defs::p775::types::SlotComponentDataPiercingWeapon {
+                        deals_knockback: v111,
+                        dismounts: v112,
+                        sound: v113,
+                        hit_sound: v114,
+                    }
+                })
+            } else if (v1.0 == 39) {
+                crate::defs::p775::types::SlotComponentData::KineticWeapon({
+                    let v115 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v116 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v117 = if g.bool() {
+                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
+                    } else {
+                        None
+                    };
+                    let v118 = if g.bool() {
+                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
+                    } else {
+                        None
+                    };
+                    let v119 = if g.bool() {
+                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
+                    } else {
+                        None
+                    };
+                    let v120 = g.f32();
+                    let v121 = g.f32();
+                    let v122 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                                 -1 => 0,
@@ -10790,34 +10540,6 @@ impl Generate for SlotComponent {
                     } else {
                         None
                     };
-                    crate::defs::p775::types::SlotComponentDataPiercingWeapon {
-                        deals_knockback: v112,
-                        dismounts: v113,
-                        sound: v114,
-                        hit_sound: v115,
-                    }
-                })
-            } else if (v1.0 == 39) {
-                crate::defs::p775::types::SlotComponentData::KineticWeapon({
-                    let v116 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v117 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v118 = if g.bool() {
-                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
-                    } else {
-                        None
-                    };
-                    let v119 = if g.bool() {
-                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
-                    } else {
-                        None
-                    };
-                    let v120 = if g.bool() {
-                        Some(<crate::defs::p775::types::KineticWeaponCondition as Generate>::generate(g))
-                    } else {
-                        None
-                    };
-                    let v121 = g.f32();
-                    let v122 = g.f32();
                     let v123 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
@@ -10832,41 +10554,27 @@ impl Generate for SlotComponent {
                     } else {
                         None
                     };
-                    let v124 = if g.bool() {
-                        Some(if g.bool() {
-                            Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                                -1 => 0,
-                                v => v,
-                            })
-                        } else {
-                            Holder::Inline(
-                                <crate::defs::p775::types::ItemSoundEvent as Generate>::generate(g),
-                            )
-                        })
-                    } else {
-                        None
-                    };
                     crate::defs::p775::types::SlotComponentDataKineticWeapon {
-                        contact_cooldown_ticks: v116,
-                        delay_ticks: v117,
-                        dismount_conditions: v118,
-                        knockback_conditions: v119,
-                        damage_conditions: v120,
-                        forward_movement: v121,
-                        damage_multiplier: v122,
-                        sound: v123,
-                        hit_sound: v124,
+                        contact_cooldown_ticks: v115,
+                        delay_ticks: v116,
+                        dismount_conditions: v117,
+                        knockback_conditions: v118,
+                        damage_conditions: v119,
+                        forward_movement: v120,
+                        damage_multiplier: v121,
+                        sound: v122,
+                        hit_sound: v123,
                     }
                 })
             } else if (v1.0 == 40) {
                 crate::defs::p775::types::SlotComponentData::SwingAnimation({
-                    let v125 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
+                    let v124 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
                         g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32,
                     );
-                    let v126 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v125 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
                     crate::defs::p775::types::SlotComponentDataSwingAnimation {
-                        r#type: v125,
-                        duration: v126,
+                        r#type: v124,
+                        duration: v125,
                     }
                 })
             } else if (v1.0 == 41) {
@@ -10903,125 +10611,125 @@ impl Generate for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::PotionDurationScale(g.f32())
             } else if (v1.0 == 49) {
                 crate::defs::p775::types::SlotComponentData::ChargedProjectiles({
-                    let v127 = {
-                        let v128 = g.count();
-                        let mut v129 = Vec::with_capacity(v128.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v128 {
-                            v129.push(
+                    let v126 = {
+                        let v127 = g.count();
+                        let mut v128 = Vec::with_capacity(v127.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v127 {
+                            v128.push(
                                 <crate::defs::p775::types::ItemStackTemplate as Generate>::generate(
                                     g,
                                 ),
                             );
                         }
-                        v129
+                        v128
                     };
                     crate::defs::p775::types::SlotComponentDataChargedProjectiles {
-                        projectiles: v127,
+                        projectiles: v126,
                     }
                 })
             } else if (v1.0 == 50) {
                 crate::defs::p775::types::SlotComponentData::BundleContents({
-                    let v130 = {
-                        let v131 = g.count();
-                        let mut v132 = Vec::with_capacity(v131.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v131 {
-                            v132.push(
+                    let v129 = {
+                        let v130 = g.count();
+                        let mut v131 = Vec::with_capacity(v130.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v130 {
+                            v131.push(
                                 <crate::defs::p775::types::ItemStackTemplate as Generate>::generate(
                                     g,
                                 ),
                             );
                         }
-                        v132
+                        v131
                     };
-                    crate::defs::p775::types::SlotComponentDataBundleContents { contents: v130 }
+                    crate::defs::p775::types::SlotComponentDataBundleContents { contents: v129 }
                 })
             } else if (v1.0 == 51) {
                 crate::defs::p775::types::SlotComponentData::PotionContents({
+                    let v132 = if g.bool() {
+                        Some((g.int_in(-2147483648, 2147483647, &[]) as i32))
+                    } else {
+                        None
+                    };
                     let v133 = if g.bool() {
                         Some((g.int_in(-2147483648, 2147483647, &[]) as i32))
                     } else {
                         None
                     };
-                    let v134 = if g.bool() {
-                        Some((g.int_in(-2147483648, 2147483647, &[]) as i32))
-                    } else {
-                        None
-                    };
-                    let v135 = {
-                        let v136 = g.count();
-                        let mut v137 = Vec::with_capacity(v136.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v136 {
-                            v137.push(
+                    let v134 = {
+                        let v135 = g.count();
+                        let mut v136 = Vec::with_capacity(v135.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v135 {
+                            v136.push(
                                 <crate::defs::p775::types::ItemPotionEffect as Generate>::generate(
                                     g,
                                 ),
                             );
                         }
-                        v137
+                        v136
                     };
-                    let v138 = if g.bool() { Some(g.string()) } else { None };
+                    let v137 = if g.bool() { Some(g.string()) } else { None };
                     crate::defs::p775::types::SlotComponentDataPotionContents {
-                        potion_id: v133,
-                        custom_color: v134,
-                        custom_effects: v135,
-                        custom_name: v138,
+                        potion_id: v132,
+                        custom_color: v133,
+                        custom_effects: v134,
+                        custom_name: v137,
                     }
                 })
             } else if (v1.0 == 53) {
                 crate::defs::p775::types::SlotComponentData::SuspiciousStewEffects({
-                    let v139 = {
-                        let v140 = g.count();
-                        let mut v141 = Vec::with_capacity(v140.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v140 {
-                            v141.push({ let v142 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v143 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataSuspiciousStewEffectsEffects { effect: v142, duration: v143 } });
+                    let v138 = {
+                        let v139 = g.count();
+                        let mut v140 = Vec::with_capacity(v139.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v139 {
+                            v140.push({ let v141 = (g.int_in(-2147483648, 2147483647, &[]) as i32);let v142 = (g.int_in(-2147483648, 2147483647, &[]) as i32); crate::defs::p775::types::SlotComponentDataSuspiciousStewEffectsEffects { effect: v141, duration: v142 } });
                         }
-                        v141
+                        v140
                     };
                     crate::defs::p775::types::SlotComponentDataSuspiciousStewEffects {
-                        effects: v139,
+                        effects: v138,
                     }
                 })
             } else if (v1.0 == 54) {
                 crate::defs::p775::types::SlotComponentData::WritableBookContent({
-                    let v144 = {
-                        let v145 = g.count();
-                        let mut v146 = Vec::with_capacity(v145.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v145 {
-                            v146.push(
+                    let v143 = {
+                        let v144 = g.count();
+                        let mut v145 = Vec::with_capacity(v144.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v144 {
+                            v145.push(
                                 <crate::defs::p775::types::ItemBookPage as Generate>::generate(g),
                             );
                         }
-                        v146
+                        v145
                     };
-                    crate::defs::p775::types::SlotComponentDataWritableBookContent { pages: v144 }
+                    crate::defs::p775::types::SlotComponentDataWritableBookContent { pages: v143 }
                 })
             } else if (v1.0 == 55) {
                 crate::defs::p775::types::SlotComponentData::WrittenBookContent({
-                    let v147 = g.string();
-                    let v148 = if g.bool() { Some(g.string()) } else { None };
-                    let v149 = g.string();
-                    let v150 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v151 = {
-                        let v152 = g.count();
-                        let mut v153 = Vec::with_capacity(v152.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v152 {
-                            v153.push(<crate::defs::p775::types::ItemWrittenBookPage as Generate>::generate(g));
+                    let v146 = g.string();
+                    let v147 = if g.bool() { Some(g.string()) } else { None };
+                    let v148 = g.string();
+                    let v149 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v150 = {
+                        let v151 = g.count();
+                        let mut v152 = Vec::with_capacity(v151.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v151 {
+                            v152.push(<crate::defs::p775::types::ItemWrittenBookPage as Generate>::generate(g));
                         }
-                        v153
+                        v152
                     };
-                    let v154 = g.bool();
+                    let v153 = g.bool();
                     crate::defs::p775::types::SlotComponentDataWrittenBookContent {
-                        raw_title: v147,
-                        filtered_title: v148,
-                        author: v149,
-                        generation: v150,
-                        pages: v151,
-                        resolved: v154,
+                        raw_title: v146,
+                        filtered_title: v147,
+                        author: v148,
+                        generation: v149,
+                        pages: v150,
+                        resolved: v153,
                     }
                 })
             } else if (v1.0 == 56) {
                 crate::defs::p775::types::SlotComponentData::Trim({
-                    let v155 = if g.bool() {
+                    let v154 = if g.bool() {
                         Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                             -1 => 0,
                             v => v,
@@ -11031,7 +10739,7 @@ impl Generate for SlotComponent {
                             <crate::defs::p775::types::ArmorTrimMaterial as Generate>::generate(g),
                         )
                     };
-                    let v156 = if g.bool() {
+                    let v155 = if g.bool() {
                         Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
                             -1 => 0,
                             v => v,
@@ -11042,122 +10750,88 @@ impl Generate for SlotComponent {
                         )
                     };
                     crate::defs::p775::types::SlotComponentDataTrim {
-                        material: v155,
-                        pattern: v156,
+                        material: v154,
+                        pattern: v155,
                     }
                 })
             } else if (v1.0 == 57) {
                 crate::defs::p775::types::SlotComponentData::DebugStickState(g.anon_nbt())
             } else if (v1.0 == 58) {
                 crate::defs::p775::types::SlotComponentData::EntityData({
-                    let v157 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v158 = g.anon_nbt();
+                    let v156 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v157 = g.anon_nbt();
                     crate::defs::p775::types::SlotComponentDataEntityData {
-                        r#type: v157,
-                        data: v158,
+                        r#type: v156,
+                        data: v157,
                     }
                 })
             } else if (v1.0 == 60) {
                 crate::defs::p775::types::SlotComponentData::BlockEntityData({
-                    let v159 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v160 = g.anon_nbt();
+                    let v158 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v159 = g.anon_nbt();
                     crate::defs::p775::types::SlotComponentDataBlockEntityData {
-                        r#type: v159,
-                        data: v160,
+                        r#type: v158,
+                        data: v159,
                     }
                 })
             } else if (v1.0 == 59) {
                 crate::defs::p775::types::SlotComponentData::BucketEntityData(g.anon_nbt())
             } else if (v1.0 == 61) {
-                crate::defs::p775::types::SlotComponentData::Instrument({
-                    let v161 = g.bool();
-                    let v162 = (if v161 {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::True(
-                            if g.bool() {
-                                Holder::Id(
-                                    match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                                        -1 => 0,
-                                        v => v,
-                                    },
-                                )
-                            } else {
-                                Holder::Inline(<crate::defs::p775::types::InstrumentData as Generate>::generate(g))
-                            },
-                        )
-                    } else if (!v161) {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::False(g.string())
-                    } else {
-                        crate::defs::p775::types::SlotComponentDataInstrumentData::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataInstrument {
-                        has_holder: v161,
-                        data: v162,
-                    }
+                crate::defs::p775::types::SlotComponentData::Instrument(if g.bool() {
+                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
+                        -1 => 0,
+                        v => v,
+                    })
+                } else {
+                    Holder::Inline(
+                        <crate::defs::p775::types::InstrumentData as Generate>::generate(g),
+                    )
                 })
             } else if (v1.0 == 62) {
-                crate::defs::p775::types::SlotComponentData::ProvidesTrimMaterial({
-                    let v163 = g.bool();
-                    let v164 = (if v163 {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::True(if g.bool() { Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 { -1 => 0, v => v }) } else { Holder::Inline(<crate::defs::p775::types::ArmorTrimMaterial as Generate>::generate(g)) })
-                    } else if (!v163) {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::False(g.string())
-                    } else {
-                        crate::defs::p775::types::SlotComponentDataProvidesTrimMaterialMaterial::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataProvidesTrimMaterial {
-                        has_holder: v163,
-                        material: v164,
-                    }
+                crate::defs::p775::types::SlotComponentData::ProvidesTrimMaterial(if g.bool() {
+                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
+                        -1 => 0,
+                        v => v,
+                    })
+                } else {
+                    Holder::Inline(
+                        <crate::defs::p775::types::ArmorTrimMaterial as Generate>::generate(g),
+                    )
                 })
             } else if (v1.0 == 63) {
                 crate::defs::p775::types::SlotComponentData::OminousBottleAmplifier(
                     (g.int_in(-2147483648, 2147483647, &[]) as i32),
                 )
             } else if (v1.0 == 64) {
-                crate::defs::p775::types::SlotComponentData::JukeboxPlayable({
-                    let v165 = g.bool();
-                    let v166 = (if v165 {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::True(
-                            if g.bool() {
-                                Holder::Id(
-                                    match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                                        -1 => 0,
-                                        v => v,
-                                    },
-                                )
-                            } else {
-                                Holder::Inline(<crate::defs::p775::types::JukeboxSongData as Generate>::generate(g))
-                            },
-                        )
-                    } else if (!v165) {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::False(
-                            g.string(),
-                        )
-                    } else {
-                        crate::defs::p775::types::SlotComponentDataJukeboxPlayableSong::Other
-                    });
-                    crate::defs::p775::types::SlotComponentDataJukeboxPlayable {
-                        has_holder: v165,
-                        song: v166,
-                    }
+                crate::defs::p775::types::SlotComponentData::JukeboxPlayable(if g.bool() {
+                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
+                        -1 => 0,
+                        v => v,
+                    })
+                } else {
+                    Holder::Inline(
+                        <crate::defs::p775::types::JukeboxSongData as Generate>::generate(g),
+                    )
                 })
             } else if (v1.0 == 65) {
-                crate::defs::p775::types::SlotComponentData::ProvidesBannerPatterns(g.string())
+                crate::defs::p775::types::SlotComponentData::ProvidesBannerPatterns(
+                    <HolderSet as Generate>::generate(g),
+                )
             } else if (v1.0 == 66) {
                 crate::defs::p775::types::SlotComponentData::Recipes(g.anon_nbt())
             } else if (v1.0 == 67) {
                 crate::defs::p775::types::SlotComponentData::LodestoneTracker({
-                    let v167 = if g.bool() {
+                    let v160 = if g.bool() {
                         Some(<crate::defs::p775::types::GlobalPos as Generate>::generate(
                             g,
                         ))
                     } else {
                         None
                     };
-                    let v168 = g.bool();
+                    let v161 = g.bool();
                     crate::defs::p775::types::SlotComponentDataLodestoneTracker {
-                        global_position: v167,
-                        tracked: v168,
+                        global_position: v160,
+                        tracked: v161,
                     }
                 })
             } else if (v1.0 == 68) {
@@ -11166,18 +10840,18 @@ impl Generate for SlotComponent {
                 )
             } else if (v1.0 == 69) {
                 crate::defs::p775::types::SlotComponentData::Fireworks({
-                    let v169 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                    let v170 = {
-                        let v171 = g.count();
-                        let mut v172 = Vec::with_capacity(v171.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v171 {
-                            v172.push(<crate::defs::p775::types::ItemFireworkExplosion as Generate>::generate(g));
+                    let v162 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v163 = {
+                        let v164 = g.count();
+                        let mut v165 = Vec::with_capacity(v164.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v164 {
+                            v165.push(<crate::defs::p775::types::ItemFireworkExplosion as Generate>::generate(g));
                         }
-                        v172
+                        v165
                     };
                     crate::defs::p775::types::SlotComponentDataFireworks {
-                        flight_duration: v169,
-                        explosions: v170,
+                        flight_duration: v162,
+                        explosions: v163,
                     }
                 })
             } else if (v1.0 == 70) {
@@ -11188,15 +10862,15 @@ impl Generate for SlotComponent {
                 crate::defs::p775::types::SlotComponentData::NoteBlockSound(g.string())
             } else if (v1.0 == 72) {
                 crate::defs::p775::types::SlotComponentData::BannerPatterns({
-                    let v173 = {
-                        let v174 = g.count();
-                        let mut v175 = Vec::with_capacity(v174.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v174 {
-                            v175.push(<crate::defs::p775::types::BannerPatternLayer as Generate>::generate(g));
+                    let v166 = {
+                        let v167 = g.count();
+                        let mut v168 = Vec::with_capacity(v167.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v167 {
+                            v168.push(<crate::defs::p775::types::BannerPatternLayer as Generate>::generate(g));
                         }
-                        v175
+                        v168
                     };
-                    crate::defs::p775::types::SlotComponentDataBannerPatterns { layers: v173 }
+                    crate::defs::p775::types::SlotComponentDataBannerPatterns { layers: v166 }
                 })
             } else if (v1.0 == 73) {
                 crate::defs::p775::types::SlotComponentData::BaseColor(
@@ -11208,67 +10882,67 @@ impl Generate for SlotComponent {
                 )
             } else if (v1.0 == 74) {
                 crate::defs::p775::types::SlotComponentData::PotDecorations({
-                    let v176 = {
-                        let v177 = g.count();
-                        let mut v178 = Vec::with_capacity(v177.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v177 {
-                            v178.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
+                    let v169 = {
+                        let v170 = g.count();
+                        let mut v171 = Vec::with_capacity(v170.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v170 {
+                            v171.push((g.int_in(-2147483648, 2147483647, &[]) as i32));
                         }
-                        v178
+                        v171
                     };
-                    crate::defs::p775::types::SlotComponentDataPotDecorations { decorations: v176 }
+                    crate::defs::p775::types::SlotComponentDataPotDecorations { decorations: v169 }
                 })
             } else if (v1.0 == 75) {
                 crate::defs::p775::types::SlotComponentData::Container({
-                    let v179 = {
-                        let v180 = g.count();
-                        let mut v181 = Vec::with_capacity(v180.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v180 {
-                            v181.push(if g.bool() { Some(<crate::defs::p775::types::ItemStackTemplate as Generate>::generate(g)) } else { None });
+                    let v172 = {
+                        let v173 = g.count();
+                        let mut v174 = Vec::with_capacity(v173.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v173 {
+                            v174.push(if g.bool() { Some(<crate::defs::p775::types::ItemStackTemplate as Generate>::generate(g)) } else { None });
                         }
-                        v181
+                        v174
                     };
-                    crate::defs::p775::types::SlotComponentDataContainer { contents: v179 }
+                    crate::defs::p775::types::SlotComponentDataContainer { contents: v172 }
                 })
             } else if (v1.0 == 76) {
                 crate::defs::p775::types::SlotComponentData::BlockState({
-                    let v182 = {
-                        let v183 = g.count();
-                        let mut v184 = Vec::with_capacity(v183.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v183 {
-                            v184.push({
-                                let v185 = g.string();
-                                let v186 = g.string();
+                    let v175 = {
+                        let v176 = g.count();
+                        let mut v177 = Vec::with_capacity(v176.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v176 {
+                            v177.push({
+                                let v178 = g.string();
+                                let v179 = g.string();
                                 crate::defs::p775::types::SlotComponentDataBlockStateProperties {
-                                    name: v185,
-                                    value: v186,
+                                    name: v178,
+                                    value: v179,
                                 }
                             });
                         }
-                        v184
+                        v177
                     };
-                    crate::defs::p775::types::SlotComponentDataBlockState { properties: v182 }
+                    crate::defs::p775::types::SlotComponentDataBlockState { properties: v175 }
                 })
             } else if (v1.0 == 77) {
                 crate::defs::p775::types::SlotComponentData::Bees({
-                    let v187 = {
-                        let v188 = g.count();
-                        let mut v189 = Vec::with_capacity(v188.min(crate::codec::PREALLOC_LIMIT));
-                        for _ in 0..v188 {
-                            v189.push({
-                                let v190 = g.anon_nbt();
-                                let v191 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
-                                let v192 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                    let v180 = {
+                        let v181 = g.count();
+                        let mut v182 = Vec::with_capacity(v181.min(crate::codec::PREALLOC_LIMIT));
+                        for _ in 0..v181 {
+                            v182.push({
+                                let v183 = g.anon_nbt();
+                                let v184 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                                let v185 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
                                 crate::defs::p775::types::SlotComponentDataBeesBees {
-                                    nbt_data: v190,
-                                    ticks_in_hive: v191,
-                                    min_ticks_in_hive: v192,
+                                    nbt_data: v183,
+                                    ticks_in_hive: v184,
+                                    min_ticks_in_hive: v185,
                                 }
                             });
                         }
-                        v189
+                        v182
                     };
-                    crate::defs::p775::types::SlotComponentDataBees { bees: v187 }
+                    crate::defs::p775::types::SlotComponentDataBees { bees: v180 }
                 })
             } else if (v1.0 == 78) {
                 crate::defs::p775::types::SlotComponentData::Lock(g.anon_nbt())
@@ -11362,32 +11036,17 @@ impl Generate for SlotComponent {
                     (g.int_in(-2147483648, 2147483647, &[]) as i32),
                 )
             } else if (v1.0 == 97) {
-                crate::defs::p775::types::SlotComponentData::ChickenVariant(if g.bool() {
-                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                        -1 => 0,
-                        v => v,
-                    })
-                } else {
-                    Holder::Inline(g.string())
-                })
+                crate::defs::p775::types::SlotComponentData::ChickenVariant(
+                    (g.int_in(-2147483648, 2147483647, &[]) as i32),
+                )
             } else if (v1.0 == 98) {
-                crate::defs::p775::types::SlotComponentData::ChickenSoundVariant(if g.bool() {
-                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                        -1 => 0,
-                        v => v,
-                    })
-                } else {
-                    Holder::Inline(g.string())
-                })
+                crate::defs::p775::types::SlotComponentData::ChickenSoundVariant(
+                    (g.int_in(-2147483648, 2147483647, &[]) as i32),
+                )
             } else if (v1.0 == 99) {
-                crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant(if g.bool() {
-                    Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
-                        -1 => 0,
-                        v => v,
-                    })
-                } else {
-                    Holder::Inline(g.string())
-                })
+                crate::defs::p775::types::SlotComponentData::ZombieNautilusVariant(
+                    (g.int_in(-2147483648, 2147483647, &[]) as i32),
+                )
             } else if (v1.0 == 100) {
                 crate::defs::p775::types::SlotComponentData::FrogVariant(
                     (g.int_in(-2147483648, 2147483647, &[]) as i32),
@@ -11483,45 +11142,18 @@ impl SlotComponent {
             } else if (v1.0 == 7) {
                 let _ = r.read_f32()?;
             } else if (v1.0 == 8) {
-                let _ = {
-                    let v6 = r.read_bool()?;
-                    let v7 = (if v6 {
-                        let _ = {
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                let _ = {
-                                    let v8 = r.read_string()?;
-                                    let v9 = crate::defs::p775::types::DamageTypeDataScaling(
-                                        r.read_varint()?,
-                                    );
-                                    let v10 = r.read_f32()?;
-                                    let v11 = crate::defs::p775::types::DamageTypeDataEffects(
-                                        r.read_varint()?,
-                                    );
-                                    let v12 =
-                                        crate::defs::p775::types::DamageTypeDataDeathMessageType(
-                                            r.read_varint()?,
-                                        );
-                                };
-                            }
-                        };
-                    } else if (!v6) {
-                        let _ = r.read_string()?;
-                    } else {
-                        let _ = ();
-                    });
-                };
+                let _ = r.read_varint()?;
             } else if (v1.0 == 9) {
                 let _ = AnonNbt::read(r)?;
             } else if (v1.0 == 10) {
                 let _ = r.read_string()?;
             } else if (v1.0 == 11) {
                 let _ = {
-                    let v13 = {
+                    let v6 = {
                         let c = r.read_varint()?;
                         r.check_count(i64::from(c), 1)?
                     };
-                    for _ in 0..v13 {
+                    for _ in 0..v6 {
                         let _ = AnonNbt::read(r)?;
                     }
                 };
@@ -11529,68 +11161,68 @@ impl SlotComponent {
                 let _ = crate::defs::p775::types::SlotComponentDataRarity(r.read_varint()?);
             } else if (v1.0 == 13) {
                 let _ = {
-                    let v14 = {
-                        let v15 = {
+                    let v7 = {
+                        let v8 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v15 {
+                        for _ in 0..v8 {
                             let _ = {
-                                let v16 = r.read_varint()?;
-                                let v17 = r.read_varint()?;
+                                let v9 = r.read_varint()?;
+                                let v10 = r.read_varint()?;
                             };
                         }
                     };
                 };
             } else if (v1.0 == 42) {
                 let _ = {
-                    let v18 = {
-                        let v19 = {
+                    let v11 = {
+                        let v12 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v19 {
+                        for _ in 0..v12 {
                             let _ = {
-                                let v20 = r.read_varint()?;
-                                let v21 = r.read_varint()?;
+                                let v13 = r.read_varint()?;
+                                let v14 = r.read_varint()?;
                             };
                         }
                     };
                 };
             } else if (v1.0 == 14) {
                 let _ = {
-                    let v22 = {
-                        let v23 = {
+                    let v15 = {
+                        let v16 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        for _ in 0..v23 {
+                        for _ in 0..v16 {
                             let _ = {
-                                let v24 = if r.read_bool()? {
+                                let v17 = if r.read_bool()? {
                                     Some({
                                         HolderSet::skip(r)?;
                                     })
                                 } else {
                                     None
                                 };
-                                let v25 = if r.read_bool()? {
+                                let v18 = if r.read_bool()? {
                                     Some({
-                                        let v26 = {
+                                        let v19 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 2)?
                                         };
-                                        for _ in 0..v26 {
+                                        for _ in 0..v19 {
                                             let _ = {
-                                                let v27 = r.read_string()?;
-                                                let v28 = r.read_bool()?;
-                                                let v29 = (if v28 {
+                                                let v20 = r.read_string()?;
+                                                let v21 = r.read_bool()?;
+                                                let v22 = (if v21 {
                                                     let _ = {
-                                                        let v30 = r.read_string()?;
+                                                        let v23 = r.read_string()?;
                                                     };
-                                                } else if (!v28) {
+                                                } else if (!v21) {
                                                     let _ = {
-                                                        let v31 = r.read_string()?;
-                                                        let v32 = r.read_string()?;
+                                                        let v24 = r.read_string()?;
+                                                        let v25 = r.read_string()?;
                                                     };
                                                 } else {
                                                     let _ = ();
@@ -11601,25 +11233,25 @@ impl SlotComponent {
                                 } else {
                                     None
                                 };
-                                let v33 = AnonNbt::read_optional(r)?;
-                                let v34 = {
-                                    let v35 = {
-                                        let v36 = {
+                                let v26 = AnonNbt::read_optional(r)?;
+                                let v27 = {
+                                    let v28 = {
+                                        let v29 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 1)?
                                         };
-                                        for _ in 0..v36 {
+                                        for _ in 0..v29 {
                                             let _ = {
                                                 crate::defs::p775::types::SlotComponent::skip(r)?;
                                             };
                                         }
                                     };
-                                    let v37 = {
-                                        let v38 = {
+                                    let v30 = {
+                                        let v31 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 1)?
                                         };
-                                        for _ in 0..v38 {
+                                        for _ in 0..v31 {
                                             let _ = r.read_varint()?;
                                         }
                                     };
@@ -11630,38 +11262,38 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 15) {
                 let _ = {
-                    let v39 = {
-                        let v40 = {
+                    let v32 = {
+                        let v33 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        for _ in 0..v40 {
+                        for _ in 0..v33 {
                             let _ = {
-                                let v41 = if r.read_bool()? {
+                                let v34 = if r.read_bool()? {
                                     Some({
                                         HolderSet::skip(r)?;
                                     })
                                 } else {
                                     None
                                 };
-                                let v42 = if r.read_bool()? {
+                                let v35 = if r.read_bool()? {
                                     Some({
-                                        let v43 = {
+                                        let v36 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 2)?
                                         };
-                                        for _ in 0..v43 {
+                                        for _ in 0..v36 {
                                             let _ = {
-                                                let v44 = r.read_string()?;
-                                                let v45 = r.read_bool()?;
-                                                let v46 = (if v45 {
+                                                let v37 = r.read_string()?;
+                                                let v38 = r.read_bool()?;
+                                                let v39 = (if v38 {
                                                     let _ = {
-                                                        let v47 = r.read_string()?;
+                                                        let v40 = r.read_string()?;
                                                     };
-                                                } else if (!v45) {
+                                                } else if (!v38) {
                                                     let _ = {
-                                                        let v48 = r.read_string()?;
-                                                        let v49 = r.read_string()?;
+                                                        let v41 = r.read_string()?;
+                                                        let v42 = r.read_string()?;
                                                     };
                                                 } else {
                                                     let _ = ();
@@ -11672,25 +11304,25 @@ impl SlotComponent {
                                 } else {
                                     None
                                 };
-                                let v50 = AnonNbt::read_optional(r)?;
-                                let v51 = {
-                                    let v52 = {
-                                        let v53 = {
+                                let v43 = AnonNbt::read_optional(r)?;
+                                let v44 = {
+                                    let v45 = {
+                                        let v46 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 1)?
                                         };
-                                        for _ in 0..v53 {
+                                        for _ in 0..v46 {
                                             let _ = {
                                                 crate::defs::p775::types::SlotComponent::skip(r)?;
                                             };
                                         }
                                     };
-                                    let v54 = {
-                                        let v55 = {
+                                    let v47 = {
+                                        let v48 = {
                                             let c = r.read_varint()?;
                                             r.check_count(i64::from(c), 1)?
                                         };
-                                        for _ in 0..v55 {
+                                        for _ in 0..v48 {
                                             let _ = r.read_varint()?;
                                         }
                                     };
@@ -11701,23 +11333,23 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 16) {
                 let _ = {
-                    let v56 = {
+                    let v49 = {
                         let c = r.read_varint()?;
                         r.check_count(i64::from(c), 13)?
                     };
-                    for _ in 0..v56 {
+                    for _ in 0..v49 {
                         let _ = {
-                            let v57 = r.read_varint()?;
-                            let v58 = r.read_string()?;
-                            let v59 = r.read_f64()?;
-                            let v60 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(r.read_varint()?);
-                            let v61 =
+                            let v50 = r.read_varint()?;
+                            let v51 = r.read_string()?;
+                            let v52 = r.read_f64()?;
+                            let v53 = crate::defs::p775::types::SlotComponentDataAttributeModifiersOperation(r.read_varint()?);
+                            let v54 =
                                 crate::defs::p775::types::SlotComponentDataAttributeModifiersSlot(
                                     r.read_varint()?,
                                 );
-                            let v62 = {
-                                let v63 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(r.read_varint()?);
-                                let v64 = if (v63.0 == 2) {
+                            let v55 = {
+                                let v56 = crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplayType(r.read_varint()?);
+                                let v57 = if (v56.0 == 2) {
                                     Some(AnonNbt::read(r)?)
                                 } else {
                                     None
@@ -11728,52 +11360,52 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 17) {
                 let _ = {
-                    let v65 = {
-                        let v66 = {
+                    let v58 = {
+                        let v59 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v66 {
+                        for _ in 0..v59 {
                             let _ = r.read_f32()?;
                         }
                     };
-                    let v67 = {
-                        let v68 = {
+                    let v60 = {
+                        let v61 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v68 {
+                        for _ in 0..v61 {
                             let _ = r.read_bool()?;
                         }
                     };
-                    let v69 = {
-                        let v70 = {
+                    let v62 = {
+                        let v63 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v70 {
+                        for _ in 0..v63 {
                             let _ = r.read_string()?;
                         }
                     };
-                    let v71 = {
-                        let v72 = {
+                    let v64 = {
+                        let v65 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v72 {
+                        for _ in 0..v65 {
                             let _ = r.read_i32()?;
                         }
                     };
                 };
             } else if (v1.0 == 18) {
                 let _ = {
-                    let v73 = r.read_bool()?;
-                    let v74 = {
-                        let v75 = {
+                    let v66 = r.read_bool()?;
+                    let v67 = {
+                        let v68 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v75 {
+                        for _ in 0..v68 {
                             let _ = r.read_varint()?;
                         }
                     };
@@ -11788,45 +11420,45 @@ impl SlotComponent {
                 let _ = AnonNbt::read(r)?;
             } else if (v1.0 == 37) {
                 let _ = {
-                    let v76 = r.read_f32()?;
-                    let v77 = r.read_f32()?;
-                    let v78 = {
-                        let v79 = {
+                    let v69 = r.read_f32()?;
+                    let v70 = r.read_f32()?;
+                    let v71 = {
+                        let v72 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 13)?
                         };
-                        for _ in 0..v79 {
+                        for _ in 0..v72 {
                             let _ = {
-                                let v80 = r.read_f32()?;
-                                let v81 = if r.read_bool()? {
+                                let v73 = r.read_f32()?;
+                                let v74 = if r.read_bool()? {
                                     Some({
                                         HolderSet::skip(r)?;
                                     })
                                 } else {
                                     None
                                 };
-                                let v82 = r.read_f32()?;
-                                let v83 = r.read_f32()?;
+                                let v75 = r.read_f32()?;
+                                let v76 = r.read_f32()?;
                             };
                         }
                     };
-                    let v84 = {
-                        let v85 = r.read_f32()?;
-                        let v86 = r.read_f32()?;
-                        let v87 = r.read_f32()?;
+                    let v77 = {
+                        let v78 = r.read_f32()?;
+                        let v79 = r.read_f32()?;
+                        let v80 = r.read_f32()?;
                     };
-                    let v88 = if r.read_bool()? {
+                    let v81 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v89 = if r.read_bool()? {
+                    let v82 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v90 = r.read_string()?;
-                                    let v91 = if r.read_bool()? {
+                                    let v83 = r.read_string()?;
+                                    let v84 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -11837,13 +11469,13 @@ impl SlotComponent {
                     } else {
                         None
                     };
-                    let v92 = if r.read_bool()? {
+                    let v85 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v93 = r.read_string()?;
-                                    let v94 = if r.read_bool()? {
+                                    let v86 = r.read_string()?;
+                                    let v87 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -11857,22 +11489,22 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 23) {
                 let _ = {
-                    let v95 = r.read_varint()?;
-                    let v96 = r.read_f32()?;
-                    let v97 = r.read_bool()?;
+                    let v88 = r.read_varint()?;
+                    let v89 = r.read_f32()?;
+                    let v90 = r.read_bool()?;
                 };
             } else if (v1.0 == 24) {
                 let _ = {
-                    let v98 = r.read_f32()?;
-                    let v99 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
+                    let v91 = r.read_f32()?;
+                    let v92 = crate::defs::p775::types::SlotComponentDataConsumableAnimation(
                         r.read_varint()?,
                     );
-                    let v100 = {
+                    let v93 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             let _ = {
-                                let v101 = r.read_string()?;
-                                let v102 = if r.read_bool()? {
+                                let v94 = r.read_string()?;
+                                let v95 = if r.read_bool()? {
                                     Some(r.read_f32()?)
                                 } else {
                                     None
@@ -11880,34 +11512,34 @@ impl SlotComponent {
                             };
                         }
                     };
-                    let v103 = r.read_bool()?;
-                    let v104 = {
-                        let v105 = {
+                    let v96 = r.read_bool()?;
+                    let v97 = {
+                        let v98 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v105 {
+                        for _ in 0..v98 {
                             let _ = {
-                                let v106 = crate::defs::p775::types::ItemConsumeEffectType(
+                                let v99 = crate::defs::p775::types::ItemConsumeEffectType(
                                     r.read_varint()?,
                                 );
-                                let v107 = (if (v106.0 == 0) {
+                                let v100 = (if (v99.0 == 0) {
                                     let _ = {
-                                        let v108 = {
-                                            let v109 = {
+                                        let v101 = {
+                                            let v102 = {
                                                 let c = r.read_varint()?;
                                                 r.check_count(i64::from(c), 7)?
                                             };
-                                            for _ in 0..v109 {
+                                            for _ in 0..v102 {
                                                 let _ = {
-                                                    let v110 = r.read_varint()?;
-                                                    let v111 = {
-                                                        let v112 = r.read_varint()?;
-                                                        let v113 = r.read_varint()?;
-                                                        let v114 = r.read_bool()?;
-                                                        let v115 = r.read_bool()?;
-                                                        let v116 = r.read_bool()?;
-                                                        let v117 = if r.read_bool()? {
+                                                    let v103 = r.read_varint()?;
+                                                    let v104 = {
+                                                        let v105 = r.read_varint()?;
+                                                        let v106 = r.read_varint()?;
+                                                        let v107 = r.read_bool()?;
+                                                        let v108 = r.read_bool()?;
+                                                        let v109 = r.read_bool()?;
+                                                        let v110 = if r.read_bool()? {
                                                             Some(Box::new({
                                                                 let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
                                                             }))
@@ -11918,28 +11550,28 @@ impl SlotComponent {
                                                 };
                                             }
                                         };
-                                        let v118 = r.read_f32()?;
+                                        let v111 = r.read_f32()?;
                                     };
-                                } else if (v106.0 == 1) {
+                                } else if (v99.0 == 1) {
                                     let _ = {
-                                        let v119 = {
+                                        let v112 = {
                                             HolderSet::skip(r)?;
                                         };
                                     };
-                                } else if (v106.0 == 2) {
+                                } else if (v99.0 == 2) {
                                     let _ = ();
-                                } else if (v106.0 == 3) {
+                                } else if (v99.0 == 3) {
                                     let _ = {
-                                        let v120 = r.read_f32()?;
+                                        let v113 = r.read_f32()?;
                                     };
-                                } else if (v106.0 == 4) {
+                                } else if (v99.0 == 4) {
                                     let _ = {
-                                        let v121 = {
+                                        let v114 = {
                                             let id = r.read_varint()?;
                                             if id == 0 {
                                                 let _ = {
-                                                    let v122 = r.read_string()?;
-                                                    let v123 = if r.read_bool()? {
+                                                    let v115 = r.read_string()?;
+                                                    let v116 = if r.read_bool()? {
                                                         Some(r.read_f32()?)
                                                     } else {
                                                         None
@@ -11957,23 +11589,23 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 25) {
                 let _ = {
-                    let v124 = r.read_varint()?;
-                    let v125 = r.read_varint()?;
-                    let v126 = r.read_varint()?;
-                    let v127 = r.read_varint()?;
-                    let v128 = {
-                        let v129 = r.check_count(i64::from(v126), 1)?;
-                        for _ in 0..v129 {
+                    let v117 = r.read_varint()?;
+                    let v118 = r.read_varint()?;
+                    let v119 = r.read_varint()?;
+                    let v120 = r.read_varint()?;
+                    let v121 = {
+                        let v122 = r.check_count(i64::from(v119), 1)?;
+                        for _ in 0..v122 {
                             let _ = {
                                 crate::defs::p775::types::SlotComponent::skip(r)?;
                             };
                         }
                     };
-                    let v130 = {
-                        let v131 = r.check_count(i64::from(v127), 1)?;
-                        for _ in 0..v131 {
+                    let v123 = {
+                        let v124 = r.check_count(i64::from(v120), 1)?;
+                        for _ in 0..v124 {
                             let _ = {
-                                let v132 =
+                                let v125 =
                                     crate::defs::p775::types::SlotComponentType(r.read_varint()?);
                             };
                         }
@@ -11981,33 +11613,37 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 26) {
                 let _ = {
-                    let v133 = r.read_f32()?;
-                    let v134 = if r.read_bool()? {
+                    let v126 = r.read_f32()?;
+                    let v127 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
                 };
             } else if (v1.0 == 27) {
-                let _ = r.read_string()?;
+                let _ = {
+                    let v128 = {
+                        HolderSet::skip(r)?;
+                    };
+                };
             } else if (v1.0 == 28) {
                 let _ = {
-                    let v135 = {
-                        let v136 = {
+                    let v129 = {
+                        let v130 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 3)?
                         };
-                        for _ in 0..v136 {
+                        for _ in 0..v130 {
                             let _ = {
-                                let v137 = {
+                                let v131 = {
                                     HolderSet::skip(r)?;
                                 };
-                                let v138 = if r.read_bool()? {
+                                let v132 = if r.read_bool()? {
                                     Some(r.read_f32()?)
                                 } else {
                                     None
                                 };
-                                let v139 = if r.read_bool()? {
+                                let v133 = if r.read_bool()? {
                                     Some(r.read_bool()?)
                                 } else {
                                     None
@@ -12015,36 +11651,36 @@ impl SlotComponent {
                             };
                         }
                     };
-                    let v140 = r.read_f32()?;
-                    let v141 = r.read_varint()?;
-                    let v142 = r.read_bool()?;
+                    let v134 = r.read_f32()?;
+                    let v135 = r.read_varint()?;
+                    let v136 = r.read_bool()?;
                 };
             } else if (v1.0 == 29) {
                 let _ = {
-                    let v143 = r.read_varint()?;
-                    let v144 = r.read_f32()?;
+                    let v137 = r.read_varint()?;
+                    let v138 = r.read_f32()?;
                 };
             } else if (v1.0 == 30) {
                 let _ = {
-                    let v145 = r.read_f32()?;
-                    let v146 = r.read_f32()?;
-                    let v147 = r.read_f32()?;
-                    let v148 = r.read_f32()?;
-                    let v149 = r.read_f32()?;
-                    let v150 = r.read_f32()?;
+                    let v139 = r.read_f32()?;
+                    let v140 = r.read_f32()?;
+                    let v141 = r.read_f32()?;
+                    let v142 = r.read_f32()?;
+                    let v143 = r.read_f32()?;
+                    let v144 = r.read_f32()?;
                 };
             } else if (v1.0 == 31) {
                 let _ = r.read_varint()?;
             } else if (v1.0 == 32) {
                 let _ = {
-                    let v151 =
+                    let v145 =
                         crate::defs::p775::types::SlotComponentDataEquippableSlot(r.read_varint()?);
-                    let v152 = {
+                    let v146 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             let _ = {
-                                let v153 = r.read_string()?;
-                                let v154 = if r.read_bool()? {
+                                let v147 = r.read_string()?;
+                                let v148 = if r.read_bool()? {
                                     Some(r.read_f32()?)
                                 } else {
                                     None
@@ -12052,34 +11688,34 @@ impl SlotComponent {
                             };
                         }
                     };
-                    let v155 = if r.read_bool()? {
+                    let v149 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v156 = if r.read_bool()? {
+                    let v150 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v157 = if r.read_bool()? {
+                    let v151 = if r.read_bool()? {
                         Some({
                             HolderSet::skip(r)?;
                         })
                     } else {
                         None
                     };
-                    let v158 = r.read_bool()?;
-                    let v159 = r.read_bool()?;
-                    let v160 = r.read_bool()?;
-                    let v161 = r.read_bool()?;
-                    let v162 = r.read_bool()?;
-                    let v163 = {
+                    let v152 = r.read_bool()?;
+                    let v153 = r.read_bool()?;
+                    let v154 = r.read_bool()?;
+                    let v155 = r.read_bool()?;
+                    let v156 = r.read_bool()?;
+                    let v157 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             let _ = {
-                                let v164 = r.read_string()?;
-                                let v165 = if r.read_bool()? {
+                                let v158 = r.read_string()?;
+                                let v159 = if r.read_bool()? {
                                     Some(r.read_f32()?)
                                 } else {
                                     None
@@ -12090,7 +11726,7 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 33) {
                 let _ = {
-                    let v166 = {
+                    let v160 = {
                         HolderSet::skip(r)?;
                     };
                 };
@@ -12100,33 +11736,33 @@ impl SlotComponent {
                 let _ = r.read_string()?;
             } else if (v1.0 == 36) {
                 let _ = {
-                    let v167 = {
-                        let v168 = {
+                    let v161 = {
+                        let v162 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v168 {
+                        for _ in 0..v162 {
                             let _ = {
-                                let v169 = crate::defs::p775::types::ItemConsumeEffectType(
+                                let v163 = crate::defs::p775::types::ItemConsumeEffectType(
                                     r.read_varint()?,
                                 );
-                                let v170 = (if (v169.0 == 0) {
+                                let v164 = (if (v163.0 == 0) {
                                     let _ = {
-                                        let v171 = {
-                                            let v172 = {
+                                        let v165 = {
+                                            let v166 = {
                                                 let c = r.read_varint()?;
                                                 r.check_count(i64::from(c), 7)?
                                             };
-                                            for _ in 0..v172 {
+                                            for _ in 0..v166 {
                                                 let _ = {
-                                                    let v173 = r.read_varint()?;
-                                                    let v174 = {
-                                                        let v175 = r.read_varint()?;
-                                                        let v176 = r.read_varint()?;
-                                                        let v177 = r.read_bool()?;
-                                                        let v178 = r.read_bool()?;
-                                                        let v179 = r.read_bool()?;
-                                                        let v180 = if r.read_bool()? {
+                                                    let v167 = r.read_varint()?;
+                                                    let v168 = {
+                                                        let v169 = r.read_varint()?;
+                                                        let v170 = r.read_varint()?;
+                                                        let v171 = r.read_bool()?;
+                                                        let v172 = r.read_bool()?;
+                                                        let v173 = r.read_bool()?;
+                                                        let v174 = if r.read_bool()? {
                                                             Some(Box::new({
                                                                 let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
                                                             }))
@@ -12137,28 +11773,28 @@ impl SlotComponent {
                                                 };
                                             }
                                         };
-                                        let v181 = r.read_f32()?;
+                                        let v175 = r.read_f32()?;
                                     };
-                                } else if (v169.0 == 1) {
+                                } else if (v163.0 == 1) {
                                     let _ = {
-                                        let v182 = {
+                                        let v176 = {
                                             HolderSet::skip(r)?;
                                         };
                                     };
-                                } else if (v169.0 == 2) {
+                                } else if (v163.0 == 2) {
                                     let _ = ();
-                                } else if (v169.0 == 3) {
+                                } else if (v163.0 == 3) {
                                     let _ = {
-                                        let v183 = r.read_f32()?;
+                                        let v177 = r.read_f32()?;
                                     };
-                                } else if (v169.0 == 4) {
+                                } else if (v163.0 == 4) {
                                     let _ = {
-                                        let v184 = {
+                                        let v178 = {
                                             let id = r.read_varint()?;
                                             if id == 0 {
                                                 let _ = {
-                                                    let v185 = r.read_string()?;
-                                                    let v186 = if r.read_bool()? {
+                                                    let v179 = r.read_string()?;
+                                                    let v180 = if r.read_bool()? {
                                                         Some(r.read_f32()?)
                                                     } else {
                                                         None
@@ -12176,15 +11812,15 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 38) {
                 let _ = {
-                    let v187 = r.read_bool()?;
-                    let v188 = r.read_bool()?;
-                    let v189 = if r.read_bool()? {
+                    let v181 = r.read_bool()?;
+                    let v182 = r.read_bool()?;
+                    let v183 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v190 = r.read_string()?;
-                                    let v191 = if r.read_bool()? {
+                                    let v184 = r.read_string()?;
+                                    let v185 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -12195,13 +11831,13 @@ impl SlotComponent {
                     } else {
                         None
                     };
-                    let v192 = if r.read_bool()? {
+                    let v186 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v193 = r.read_string()?;
-                                    let v194 = if r.read_bool()? {
+                                    let v187 = r.read_string()?;
+                                    let v188 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -12215,44 +11851,44 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 39) {
                 let _ = {
-                    let v195 = r.read_varint()?;
-                    let v196 = r.read_varint()?;
-                    let v197 = if r.read_bool()? {
+                    let v189 = r.read_varint()?;
+                    let v190 = r.read_varint()?;
+                    let v191 = if r.read_bool()? {
                         Some({
-                            let v198 = r.read_varint()?;
-                            let v199 = r.read_f32()?;
-                            let v200 = r.read_f32()?;
+                            let v192 = r.read_varint()?;
+                            let v193 = r.read_f32()?;
+                            let v194 = r.read_f32()?;
                         })
                     } else {
                         None
                     };
-                    let v201 = if r.read_bool()? {
+                    let v195 = if r.read_bool()? {
                         Some({
-                            let v202 = r.read_varint()?;
-                            let v203 = r.read_f32()?;
-                            let v204 = r.read_f32()?;
+                            let v196 = r.read_varint()?;
+                            let v197 = r.read_f32()?;
+                            let v198 = r.read_f32()?;
                         })
                     } else {
                         None
                     };
+                    let v199 = if r.read_bool()? {
+                        Some({
+                            let v200 = r.read_varint()?;
+                            let v201 = r.read_f32()?;
+                            let v202 = r.read_f32()?;
+                        })
+                    } else {
+                        None
+                    };
+                    let v203 = r.read_f32()?;
+                    let v204 = r.read_f32()?;
                     let v205 = if r.read_bool()? {
-                        Some({
-                            let v206 = r.read_varint()?;
-                            let v207 = r.read_f32()?;
-                            let v208 = r.read_f32()?;
-                        })
-                    } else {
-                        None
-                    };
-                    let v209 = r.read_f32()?;
-                    let v210 = r.read_f32()?;
-                    let v211 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v212 = r.read_string()?;
-                                    let v213 = if r.read_bool()? {
+                                    let v206 = r.read_string()?;
+                                    let v207 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -12263,13 +11899,13 @@ impl SlotComponent {
                     } else {
                         None
                     };
-                    let v214 = if r.read_bool()? {
+                    let v208 = if r.read_bool()? {
                         Some({
                             let id = r.read_varint()?;
                             if id == 0 {
                                 let _ = {
-                                    let v215 = r.read_string()?;
-                                    let v216 = if r.read_bool()? {
+                                    let v209 = r.read_string()?;
+                                    let v210 = if r.read_bool()? {
                                         Some(r.read_f32()?)
                                     } else {
                                         None
@@ -12283,10 +11919,10 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 40) {
                 let _ = {
-                    let v217 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
+                    let v211 = crate::defs::p775::types::SlotComponentDataSwingAnimationType(
                         r.read_varint()?,
                     );
-                    let v218 = r.read_varint()?;
+                    let v212 = r.read_varint()?;
                 };
             } else if (v1.0 == 41) {
                 let _ = r.read_varint()?;
@@ -12306,30 +11942,30 @@ impl SlotComponent {
                 let _ = r.read_f32()?;
             } else if (v1.0 == 49) {
                 let _ = {
-                    let v219 = {
-                        let v220 = {
+                    let v213 = {
+                        let v214 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v220 {
+                        for _ in 0..v214 {
                             let _ = {
-                                let v221 = r.read_varint()?;
-                                let v222 = r.read_varint()?;
-                                let v223 = r.read_varint()?;
-                                let v224 = r.read_varint()?;
-                                let v225 = {
-                                    let v226 = r.check_count(i64::from(v223), 1)?;
-                                    for _ in 0..v226 {
+                                let v215 = r.read_varint()?;
+                                let v216 = r.read_varint()?;
+                                let v217 = r.read_varint()?;
+                                let v218 = r.read_varint()?;
+                                let v219 = {
+                                    let v220 = r.check_count(i64::from(v217), 1)?;
+                                    for _ in 0..v220 {
                                         let _ = {
                                             crate::defs::p775::types::SlotComponent::skip(r)?;
                                         };
                                     }
                                 };
-                                let v227 = {
-                                    let v228 = r.check_count(i64::from(v224), 1)?;
-                                    for _ in 0..v228 {
+                                let v221 = {
+                                    let v222 = r.check_count(i64::from(v218), 1)?;
+                                    for _ in 0..v222 {
                                         let _ = {
-                                            let v229 = crate::defs::p775::types::SlotComponentType(
+                                            let v223 = crate::defs::p775::types::SlotComponentType(
                                                 r.read_varint()?,
                                             );
                                         };
@@ -12341,30 +11977,30 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 50) {
                 let _ = {
-                    let v230 = {
-                        let v231 = {
+                    let v224 = {
+                        let v225 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v231 {
+                        for _ in 0..v225 {
                             let _ = {
-                                let v232 = r.read_varint()?;
-                                let v233 = r.read_varint()?;
-                                let v234 = r.read_varint()?;
-                                let v235 = r.read_varint()?;
-                                let v236 = {
-                                    let v237 = r.check_count(i64::from(v234), 1)?;
-                                    for _ in 0..v237 {
+                                let v226 = r.read_varint()?;
+                                let v227 = r.read_varint()?;
+                                let v228 = r.read_varint()?;
+                                let v229 = r.read_varint()?;
+                                let v230 = {
+                                    let v231 = r.check_count(i64::from(v228), 1)?;
+                                    for _ in 0..v231 {
                                         let _ = {
                                             crate::defs::p775::types::SlotComponent::skip(r)?;
                                         };
                                     }
                                 };
-                                let v238 = {
-                                    let v239 = r.check_count(i64::from(v235), 1)?;
-                                    for _ in 0..v239 {
+                                let v232 = {
+                                    let v233 = r.check_count(i64::from(v229), 1)?;
+                                    for _ in 0..v233 {
                                         let _ = {
-                                            let v240 = crate::defs::p775::types::SlotComponentType(
+                                            let v234 = crate::defs::p775::types::SlotComponentType(
                                                 r.read_varint()?,
                                             );
                                         };
@@ -12376,31 +12012,31 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 51) {
                 let _ = {
-                    let v241 = if r.read_bool()? {
+                    let v235 = if r.read_bool()? {
                         Some(r.read_varint()?)
                     } else {
                         None
                     };
-                    let v242 = if r.read_bool()? {
+                    let v236 = if r.read_bool()? {
                         Some(r.read_i32()?)
                     } else {
                         None
                     };
-                    let v243 = {
-                        let v244 = {
+                    let v237 = {
+                        let v238 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 7)?
                         };
-                        for _ in 0..v244 {
+                        for _ in 0..v238 {
                             let _ = {
-                                let v245 = r.read_varint()?;
-                                let v246 = {
-                                    let v247 = r.read_varint()?;
-                                    let v248 = r.read_varint()?;
-                                    let v249 = r.read_bool()?;
-                                    let v250 = r.read_bool()?;
-                                    let v251 = r.read_bool()?;
-                                    let v252 = if r.read_bool()? {
+                                let v239 = r.read_varint()?;
+                                let v240 = {
+                                    let v241 = r.read_varint()?;
+                                    let v242 = r.read_varint()?;
+                                    let v243 = r.read_bool()?;
+                                    let v244 = r.read_bool()?;
+                                    let v245 = r.read_bool()?;
+                                    let v246 = if r.read_bool()? {
                                         Some(Box::new({
                                             let _ = <crate::defs::p775::types::ItemEffectDetail as Decode>::decode(r)?;
                                         }))
@@ -12411,7 +12047,7 @@ impl SlotComponent {
                             };
                         }
                     };
-                    let v253 = if r.read_bool()? {
+                    let v247 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
@@ -12419,30 +12055,30 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 53) {
                 let _ = {
-                    let v254 = {
-                        let v255 = {
+                    let v248 = {
+                        let v249 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v255 {
+                        for _ in 0..v249 {
                             let _ = {
-                                let v256 = r.read_varint()?;
-                                let v257 = r.read_varint()?;
+                                let v250 = r.read_varint()?;
+                                let v251 = r.read_varint()?;
                             };
                         }
                     };
                 };
             } else if (v1.0 == 54) {
                 let _ = {
-                    let v258 = {
-                        let v259 = {
+                    let v252 = {
+                        let v253 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v259 {
+                        for _ in 0..v253 {
                             let _ = {
-                                let v260 = r.read_string()?;
-                                let v261 = if r.read_bool()? {
+                                let v254 = r.read_string()?;
+                                let v255 = if r.read_bool()? {
                                     Some(r.read_string()?)
                                 } else {
                                     None
@@ -12453,58 +12089,58 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 55) {
                 let _ = {
-                    let v262 = r.read_string()?;
-                    let v263 = if r.read_bool()? {
+                    let v256 = r.read_string()?;
+                    let v257 = if r.read_bool()? {
                         Some(r.read_string()?)
                     } else {
                         None
                     };
-                    let v264 = r.read_string()?;
-                    let v265 = r.read_varint()?;
-                    let v266 = {
-                        let v267 = {
+                    let v258 = r.read_string()?;
+                    let v259 = r.read_varint()?;
+                    let v260 = {
+                        let v261 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v267 {
+                        for _ in 0..v261 {
                             let _ = {
-                                let v268 = AnonNbt::read(r)?;
-                                let v269 = AnonNbt::read_optional(r)?;
+                                let v262 = AnonNbt::read(r)?;
+                                let v263 = AnonNbt::read_optional(r)?;
                             };
                         }
                     };
-                    let v270 = r.read_bool()?;
+                    let v264 = r.read_bool()?;
                 };
             } else if (v1.0 == 56) {
                 let _ = {
-                    let v271 = {
+                    let v265 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             let _ = {
-                                let v272 = r.read_string()?;
-                                let v273 = {
-                                    let v274 = {
+                                let v266 = r.read_string()?;
+                                let v267 = {
+                                    let v268 = {
                                         let c = r.read_varint()?;
                                         r.check_count(i64::from(c), 2)?
                                     };
-                                    for _ in 0..v274 {
+                                    for _ in 0..v268 {
                                         let _ = {
-                                            let v275 = r.read_string()?;
-                                            let v276 = r.read_string()?;
+                                            let v269 = r.read_string()?;
+                                            let v270 = r.read_string()?;
                                         };
                                     }
                                 };
-                                let v277 = AnonNbt::read(r)?;
+                                let v271 = AnonNbt::read(r)?;
                             };
                         }
                     };
-                    let v278 = {
+                    let v272 = {
                         let id = r.read_varint()?;
                         if id == 0 {
                             let _ = {
-                                let v279 = r.read_string()?;
-                                let v280 = AnonNbt::read(r)?;
-                                let v281 = r.read_bool()?;
+                                let v273 = r.read_string()?;
+                                let v274 = AnonNbt::read(r)?;
+                                let v275 = r.read_bool()?;
                             };
                         }
                     };
@@ -12513,218 +12149,193 @@ impl SlotComponent {
                 let _ = AnonNbt::read(r)?;
             } else if (v1.0 == 58) {
                 let _ = {
-                    let v282 = r.read_varint()?;
-                    let v283 = AnonNbt::read(r)?;
+                    let v276 = r.read_varint()?;
+                    let v277 = AnonNbt::read(r)?;
                 };
             } else if (v1.0 == 60) {
                 let _ = {
-                    let v284 = r.read_varint()?;
-                    let v285 = AnonNbt::read(r)?;
+                    let v278 = r.read_varint()?;
+                    let v279 = AnonNbt::read(r)?;
                 };
             } else if (v1.0 == 59) {
                 let _ = AnonNbt::read(r)?;
             } else if (v1.0 == 61) {
                 let _ = {
-                    let v286 = r.read_bool()?;
-                    let v287 = (if v286 {
+                    let id = r.read_varint()?;
+                    if id == 0 {
                         let _ = {
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                let _ = {
-                                    let v288 = {
-                                        let id = r.read_varint()?;
-                                        if id == 0 {
-                                            let _ = {
-                                                let v289 = r.read_string()?;
-                                                let v290 = if r.read_bool()? {
-                                                    Some(r.read_f32()?)
-                                                } else {
-                                                    None
-                                                };
-                                            };
-                                        }
+                            let v280 = {
+                                let id = r.read_varint()?;
+                                if id == 0 {
+                                    let _ = {
+                                        let v281 = r.read_string()?;
+                                        let v282 = if r.read_bool()? {
+                                            Some(r.read_f32()?)
+                                        } else {
+                                            None
+                                        };
                                     };
-                                    let v291 = r.read_f32()?;
-                                    let v292 = r.read_f32()?;
-                                    let v293 = AnonNbt::read(r)?;
-                                };
-                            }
+                                }
+                            };
+                            let v283 = r.read_f32()?;
+                            let v284 = r.read_f32()?;
+                            let v285 = AnonNbt::read(r)?;
                         };
-                    } else if (!v286) {
-                        let _ = r.read_string()?;
-                    } else {
-                        let _ = ();
-                    });
+                    }
                 };
             } else if (v1.0 == 62) {
                 let _ = {
-                    let v294 = r.read_bool()?;
-                    let v295 = (if v294 {
+                    let id = r.read_varint()?;
+                    if id == 0 {
                         let _ = {
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                let _ = {
-                                    let v296 = r.read_string()?;
-                                    let v297 = {
-                                        let v298 = {
-                                            let c = r.read_varint()?;
-                                            r.check_count(i64::from(c), 2)?
-                                        };
-                                        for _ in 0..v298 {
-                                            let _ = {
-                                                let v299 = r.read_string()?;
-                                                let v300 = r.read_string()?;
-                                            };
-                                        }
-                                    };
-                                    let v301 = AnonNbt::read(r)?;
+                            let v286 = r.read_string()?;
+                            let v287 = {
+                                let v288 = {
+                                    let c = r.read_varint()?;
+                                    r.check_count(i64::from(c), 2)?
                                 };
-                            }
+                                for _ in 0..v288 {
+                                    let _ = {
+                                        let v289 = r.read_string()?;
+                                        let v290 = r.read_string()?;
+                                    };
+                                }
+                            };
+                            let v291 = AnonNbt::read(r)?;
                         };
-                    } else if (!v294) {
-                        let _ = r.read_string()?;
-                    } else {
-                        let _ = ();
-                    });
+                    }
                 };
             } else if (v1.0 == 63) {
                 let _ = r.read_varint()?;
             } else if (v1.0 == 64) {
                 let _ = {
-                    let v302 = r.read_bool()?;
-                    let v303 = (if v302 {
+                    let id = r.read_varint()?;
+                    if id == 0 {
                         let _ = {
-                            let id = r.read_varint()?;
-                            if id == 0 {
-                                let _ = {
-                                    let v304 = {
-                                        let id = r.read_varint()?;
-                                        if id == 0 {
-                                            let _ = {
-                                                let v305 = r.read_string()?;
-                                                let v306 = if r.read_bool()? {
-                                                    Some(r.read_f32()?)
-                                                } else {
-                                                    None
-                                                };
-                                            };
-                                        }
+                            let v292 = {
+                                let id = r.read_varint()?;
+                                if id == 0 {
+                                    let _ = {
+                                        let v293 = r.read_string()?;
+                                        let v294 = if r.read_bool()? {
+                                            Some(r.read_f32()?)
+                                        } else {
+                                            None
+                                        };
                                     };
-                                    let v307 = AnonNbt::read(r)?;
-                                    let v308 = r.read_f32()?;
-                                    let v309 = r.read_varint()?;
-                                };
-                            }
+                                }
+                            };
+                            let v295 = AnonNbt::read(r)?;
+                            let v296 = r.read_f32()?;
+                            let v297 = r.read_varint()?;
                         };
-                    } else if (!v302) {
-                        let _ = r.read_string()?;
-                    } else {
-                        let _ = ();
-                    });
+                    }
                 };
             } else if (v1.0 == 65) {
-                let _ = r.read_string()?;
+                let _ = {
+                    HolderSet::skip(r)?;
+                };
             } else if (v1.0 == 66) {
                 let _ = AnonNbt::read(r)?;
             } else if (v1.0 == 67) {
                 let _ = {
-                    let v310 = if r.read_bool()? {
+                    let v298 = if r.read_bool()? {
                         Some({
-                            let v311 = r.read_string()?;
-                            let v312 = BlockPos::read(r, PositionLayout::Xzy)?;
+                            let v299 = r.read_string()?;
+                            let v300 = BlockPos::read(r, PositionLayout::Xzy)?;
                         })
                     } else {
                         None
                     };
-                    let v313 = r.read_bool()?;
+                    let v301 = r.read_bool()?;
                 };
             } else if (v1.0 == 68) {
                 let _ = {
-                    let v314 =
+                    let v302 =
                         crate::defs::p775::types::ItemFireworkExplosionShape(r.read_varint()?);
-                    let v315 = {
-                        let v316 = {
+                    let v303 = {
+                        let v304 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v316 {
+                        for _ in 0..v304 {
                             let _ = r.read_i32()?;
                         }
                     };
-                    let v317 = {
-                        let v318 = {
+                    let v305 = {
+                        let v306 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 4)?
                         };
-                        for _ in 0..v318 {
+                        for _ in 0..v306 {
                             let _ = r.read_i32()?;
                         }
                     };
-                    let v319 = r.read_bool()?;
-                    let v320 = r.read_bool()?;
+                    let v307 = r.read_bool()?;
+                    let v308 = r.read_bool()?;
                 };
             } else if (v1.0 == 69) {
                 let _ = {
-                    let v321 = r.read_varint()?;
-                    let v322 = {
-                        let v323 = {
+                    let v309 = r.read_varint()?;
+                    let v310 = {
+                        let v311 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 5)?
                         };
-                        for _ in 0..v323 {
+                        for _ in 0..v311 {
                             let _ = {
-                                let v324 = crate::defs::p775::types::ItemFireworkExplosionShape(
+                                let v312 = crate::defs::p775::types::ItemFireworkExplosionShape(
                                     r.read_varint()?,
                                 );
-                                let v325 = {
-                                    let v326 = {
+                                let v313 = {
+                                    let v314 = {
                                         let c = r.read_varint()?;
                                         r.check_count(i64::from(c), 4)?
                                     };
-                                    for _ in 0..v326 {
+                                    for _ in 0..v314 {
                                         let _ = r.read_i32()?;
                                     }
                                 };
-                                let v327 = {
-                                    let v328 = {
+                                let v315 = {
+                                    let v316 = {
                                         let c = r.read_varint()?;
                                         r.check_count(i64::from(c), 4)?
                                     };
-                                    for _ in 0..v328 {
+                                    for _ in 0..v316 {
                                         let _ = r.read_i32()?;
                                     }
                                 };
-                                let v329 = r.read_bool()?;
-                                let v330 = r.read_bool()?;
+                                let v317 = r.read_bool()?;
+                                let v318 = r.read_bool()?;
                             };
                         }
                     };
                 };
             } else if (v1.0 == 70) {
                 let _ = {
-                    let v331 = crate::defs::p775::types::ResolvableProfileType(r.read_varint()?);
-                    let v332 = (if (v331.0 == 0) {
+                    let v319 = crate::defs::p775::types::ResolvableProfileType(r.read_varint()?);
+                    let v320 = (if (v319.0 == 0) {
                         let _ = {
-                            let v333 = if r.read_bool()? {
+                            let v321 = if r.read_bool()? {
                                 Some(r.read_string()?)
                             } else {
                                 None
                             };
-                            let v334 = if r.read_bool()? {
+                            let v322 = if r.read_bool()? {
                                 Some(r.read_uuid()?)
                             } else {
                                 None
                             };
-                            let v335 = {
-                                let v336 = {
+                            let v323 = {
+                                let v324 = {
                                     let c = r.read_varint()?;
                                     r.check_count(i64::from(c), 3)?
                                 };
-                                for _ in 0..v336 {
+                                for _ in 0..v324 {
                                     let _ = {
-                                        let v337 = r.read_string()?;
-                                        let v338 = r.read_string()?;
-                                        let v339 = if r.read_bool()? {
+                                        let v325 = r.read_string()?;
+                                        let v326 = r.read_string()?;
+                                        let v327 = if r.read_bool()? {
                                             Some(r.read_string()?)
                                         } else {
                                             None
@@ -12733,20 +12344,20 @@ impl SlotComponent {
                                 }
                             };
                         };
-                    } else if (v331.0 == 1) {
+                    } else if (v319.0 == 1) {
                         let _ = {
-                            let v340 = r.read_uuid()?;
-                            let v341 = r.read_string()?;
-                            let v342 = {
-                                let v343 = {
+                            let v328 = r.read_uuid()?;
+                            let v329 = r.read_string()?;
+                            let v330 = {
+                                let v331 = {
                                     let c = r.read_varint()?;
                                     r.check_count(i64::from(c), 3)?
                                 };
-                                for _ in 0..v343 {
+                                for _ in 0..v331 {
                                     let _ = {
-                                        let v344 = r.read_string()?;
-                                        let v345 = r.read_string()?;
-                                        let v346 = if r.read_bool()? {
+                                        let v332 = r.read_string()?;
+                                        let v333 = r.read_string()?;
+                                        let v334 = if r.read_bool()? {
                                             Some(r.read_string()?)
                                         } else {
                                             None
@@ -12758,23 +12369,23 @@ impl SlotComponent {
                     } else {
                         let _ = ();
                     });
-                    let v347 = {
-                        let v348 = if r.read_bool()? {
+                    let v335 = {
+                        let v336 = if r.read_bool()? {
                             Some(r.read_string()?)
                         } else {
                             None
                         };
-                        let v349 = if r.read_bool()? {
+                        let v337 = if r.read_bool()? {
                             Some(r.read_string()?)
                         } else {
                             None
                         };
-                        let v350 = if r.read_bool()? {
+                        let v338 = if r.read_bool()? {
                             Some(r.read_string()?)
                         } else {
                             None
                         };
-                        let v351 = if r.read_bool()? {
+                        let v339 = if r.read_bool()? {
                             Some(crate::defs::p775::types::PlayerSkinPatchModel(
                                 r.read_varint()?,
                             ))
@@ -12787,23 +12398,23 @@ impl SlotComponent {
                 let _ = r.read_string()?;
             } else if (v1.0 == 72) {
                 let _ = {
-                    let v352 = {
-                        let v353 = {
+                    let v340 = {
+                        let v341 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v353 {
+                        for _ in 0..v341 {
                             let _ = {
-                                let v354 = {
+                                let v342 = {
                                     let id = r.read_varint()?;
                                     if id == 0 {
                                         let _ = {
-                                            let v355 = r.read_string()?;
-                                            let v356 = r.read_string()?;
+                                            let v343 = r.read_string()?;
+                                            let v344 = r.read_string()?;
                                         };
                                     }
                                 };
-                                let v357 = r.read_varint()?;
+                                let v345 = r.read_varint()?;
                             };
                         }
                     };
@@ -12812,43 +12423,43 @@ impl SlotComponent {
                 let _ = crate::defs::p775::types::DyeColor(r.read_varint()?);
             } else if (v1.0 == 74) {
                 let _ = {
-                    let v358 = {
-                        let v359 = {
+                    let v346 = {
+                        let v347 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v359 {
+                        for _ in 0..v347 {
                             let _ = r.read_varint()?;
                         }
                     };
                 };
             } else if (v1.0 == 75) {
                 let _ = {
-                    let v360 = {
-                        let v361 = {
+                    let v348 = {
+                        let v349 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 1)?
                         };
-                        for _ in 0..v361 {
+                        for _ in 0..v349 {
                             let _ = if r.read_bool()? {
                                 Some({
-                                    let v362 = r.read_varint()?;
-                                    let v363 = r.read_varint()?;
-                                    let v364 = r.read_varint()?;
-                                    let v365 = r.read_varint()?;
-                                    let v366 = {
-                                        let v367 = r.check_count(i64::from(v364), 1)?;
-                                        for _ in 0..v367 {
+                                    let v350 = r.read_varint()?;
+                                    let v351 = r.read_varint()?;
+                                    let v352 = r.read_varint()?;
+                                    let v353 = r.read_varint()?;
+                                    let v354 = {
+                                        let v355 = r.check_count(i64::from(v352), 1)?;
+                                        for _ in 0..v355 {
                                             let _ = {
                                                 crate::defs::p775::types::SlotComponent::skip(r)?;
                                             };
                                         }
                                     };
-                                    let v368 = {
-                                        let v369 = r.check_count(i64::from(v365), 1)?;
-                                        for _ in 0..v369 {
+                                    let v356 = {
+                                        let v357 = r.check_count(i64::from(v353), 1)?;
+                                        for _ in 0..v357 {
                                             let _ = {
-                                                let v370 =
+                                                let v358 =
                                                     crate::defs::p775::types::SlotComponentType(
                                                         r.read_varint()?,
                                                     );
@@ -12864,31 +12475,31 @@ impl SlotComponent {
                 };
             } else if (v1.0 == 76) {
                 let _ = {
-                    let v371 = {
-                        let v372 = {
+                    let v359 = {
+                        let v360 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 2)?
                         };
-                        for _ in 0..v372 {
+                        for _ in 0..v360 {
                             let _ = {
-                                let v373 = r.read_string()?;
-                                let v374 = r.read_string()?;
+                                let v361 = r.read_string()?;
+                                let v362 = r.read_string()?;
                             };
                         }
                     };
                 };
             } else if (v1.0 == 77) {
                 let _ = {
-                    let v375 = {
-                        let v376 = {
+                    let v363 = {
+                        let v364 = {
                             let c = r.read_varint()?;
                             r.check_count(i64::from(c), 3)?
                         };
-                        for _ in 0..v376 {
+                        for _ in 0..v364 {
                             let _ = {
-                                let v377 = AnonNbt::read(r)?;
-                                let v378 = r.read_varint()?;
-                                let v379 = r.read_varint()?;
+                                let v365 = AnonNbt::read(r)?;
+                                let v366 = r.read_varint()?;
+                                let v367 = r.read_varint()?;
                             };
                         }
                     };
@@ -12902,8 +12513,8 @@ impl SlotComponent {
                     let id = r.read_varint()?;
                     if id == 0 {
                         let _ = {
-                            let v380 = r.read_string()?;
-                            let v381 = if r.read_bool()? {
+                            let v368 = r.read_string()?;
+                            let v369 = if r.read_bool()? {
                                 Some(r.read_f32()?)
                             } else {
                                 None
@@ -12944,26 +12555,11 @@ impl SlotComponent {
             } else if (v1.0 == 96) {
                 let _ = r.read_varint()?;
             } else if (v1.0 == 97) {
-                let _ = {
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        let _ = r.read_string()?;
-                    }
-                };
+                let _ = r.read_varint()?;
             } else if (v1.0 == 98) {
-                let _ = {
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        let _ = r.read_string()?;
-                    }
-                };
+                let _ = r.read_varint()?;
             } else if (v1.0 == 99) {
-                let _ = {
-                    let id = r.read_varint()?;
-                    if id == 0 {
-                        let _ = r.read_string()?;
-                    }
-                };
+                let _ = r.read_varint()?;
             } else if (v1.0 == 100) {
                 let _ = r.read_varint()?;
             } else if (v1.0 == 101) {
@@ -12973,15 +12569,15 @@ impl SlotComponent {
                     let id = r.read_varint()?;
                     if id == 0 {
                         let _ = {
-                            let v382 = r.read_i32()?;
-                            let v383 = r.read_i32()?;
-                            let v384 = r.read_string()?;
-                            let v385 = if r.read_bool()? {
+                            let v370 = r.read_i32()?;
+                            let v371 = r.read_i32()?;
+                            let v372 = r.read_string()?;
+                            let v373 = if r.read_bool()? {
                                 Some(AnonNbt::read(r)?)
                             } else {
                                 None
                             };
-                            let v386 = if r.read_bool()? {
+                            let v374 = if r.read_bool()? {
                                 Some(AnonNbt::read(r)?)
                             } else {
                                 None
