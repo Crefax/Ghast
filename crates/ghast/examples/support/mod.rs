@@ -26,6 +26,8 @@ pub struct Options {
     pub grim_compat_up: bool,
     /// `--view-distance`: the client's view distance setting.
     pub view_distance: Option<i8>,
+    /// `--entities`: track entities (examples that do not need them otherwise).
+    pub entities: bool,
 }
 
 pub const USAGE: &str = "options:
@@ -42,6 +44,7 @@ pub const USAGE: &str = "options:
   --record <file>       record movement in the oracle replay format (1.8.9)
   --grim-compat         send the position on sub-0.03 step-ups (not vanilla)
   --view-distance <n>   client view distance in chunks (default 8)
+  --entities            track entities (afk: for measurements)
   -v, --verbose         debug logging";
 
 impl Options {
@@ -73,6 +76,7 @@ impl Options {
             grim_compat: false,
             grim_compat_up: false,
             view_distance: None,
+            entities: false,
         };
         let mut args = args.peekable();
         while let Some(a) = args.next() {
@@ -100,6 +104,7 @@ impl Options {
                 "--record" => o.record = Some(val()?),
                 "--grim-compat" => o.grim_compat = true,
                 "--grim-compat-up" => o.grim_compat_up = true,
+                "--entities" => o.entities = true,
                 "--seed" => o.seed = val()?.parse().map_err(|e| format!("--seed: {e}"))?,
                 "--view-distance" => {
                     o.view_distance = Some(

@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 use ghast::{Behavior, Interests, SessionEnd, TickContext};
 
 struct Afk {
+    /// `--entities`: also track entities.
+    entities: bool,
     started: Instant,
     limit: Option<Duration>,
     dead_ticks: u32,
@@ -23,7 +25,11 @@ impl Behavior for Afk {
     }
 
     fn interests(&self) -> Interests {
-        Interests::CHAT
+        if self.entities {
+            Interests::CHAT | Interests::ENTITIES
+        } else {
+            Interests::CHAT
+        }
     }
 
     fn start(&mut self, ctx: &mut TickContext<'_>) {
@@ -64,6 +70,9 @@ impl Behavior for Afk {
                 p.z,
                 ctx.health().health
             );
+            if let Some(e) = ctx.entities() {
+                log::info!("afk: {} entities tracked", e.len());
+            }
         }
         if self.limit.is_some_and(|l| self.started.elapsed() >= l) {
             ctx.disconnect("time limit reached");
@@ -90,6 +99,7 @@ async fn run(opts: support::Options) {
         }
     };
     let mut afk = Afk {
+        entities: opts.entities,
         started: Instant::now(),
         limit: opts.limit(),
         dead_ticks: 0,
