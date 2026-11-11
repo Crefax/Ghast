@@ -404,4 +404,32 @@ fn hashed_stacks_match_the_real_client() {
         none.len()
     );
     assert!(wrong.is_empty(), "wrong hashes: {wrong:?}");
+
+    // Coverage of every component type: proven by the vectors, hashed but not in the vectors,
+    // or not hashed (sent as an unknown hash; the server re-syncs that slot).
+    let mut table = String::new();
+    let mut classes = [0usize; 4];
+    for (t, n) in COMPONENT_NAMES.iter().enumerate() {
+        let c = per.get(&(t as i32)).copied().unwrap_or_default();
+        let class = match (
+            c[0] > 0,
+            c[2] > 0,
+            ghast_inventory::v26_1::hash_covers(t as i32),
+        ) {
+            (true, false, _) => 0,  // every vector value hashed exactly
+            (true, true, _) => 1,   // some values outside the schema
+            (false, _, true) => 2,  // schema row, no vector value
+            (false, _, false) => 3, // no schema row
+        };
+        classes[class] += 1;
+        let label = [
+            "vector-exact",
+            "vector-partial",
+            "schema-unproven",
+            "not-hashed",
+        ][class];
+        table.push_str(&format!("{t}\t{n}\t{label}\t{}\t{}\n", c[0], c[2]));
+    }
+    eprintln!("coverage (id, name, class, exact values, unhashed values):\n{table}{classes:?}");
+    assert_eq!(classes.iter().sum::<usize>(), COMPONENT_NAMES.len());
 }
