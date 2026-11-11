@@ -48,6 +48,38 @@ pub(crate) struct Model {
     pub container_fresh: bool,
     /// Selected hotbar slot.
     pub selected: u8,
+    /// 1.8: the last `recompute_1_8` of window 0's grid (see [`CraftMemo`]).
+    pub craft_memo: Option<std::sync::Arc<CraftMemo>>,
+    /// 1.8: the same for the open crafting table.
+    pub table_memo: Option<std::sync::Arc<CraftMemo>>,
+}
+
+/// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
+fn craft_1_8(grid: &[Option<Stack>], width: usize) -> (Option<Stack>, bool) {
+    let g = Grid {
+        stacks: grid,
+        width,
+    };
+    if grid.iter().all(Option::is_none) {
+        // no recipe matches an empty grid (`empty_grid_crafts_nothing`)
+        debug_assert_eq!(crafting::result_1_8(&g), Craft::Known(None));
+        return (None, true);
+    }
+    match crafting::result_1_8(&g) {
+        Craft::Known(s) => (s, true),
+        Craft::Unknown => (None, false),
+    }
+}
+
+/// 1.8: a grid and the result `recompute_1_8` computed for it. The result is a pure function of
+/// the grid, so while the grid still equals the memo the recipe scan is skipped and the memo's
+/// result is written again (the player window's `window_items` recomputes on every packet,
+/// like vanilla's `onCraftMatrixChanged`).
+#[derive(Debug, Clone)]
+pub(crate) struct CraftMemo {
+    grid: Vec<Option<Stack>>,
+    result: Option<Stack>,
+    known: bool,
 }
 
 impl Default for Model {
@@ -63,6 +95,8 @@ impl Default for Model {
             craft_fresh: true,
             container_fresh: true,
             selected: 0,
+            craft_memo: None,
+            table_memo: None,
         }
     }
 }
@@ -1327,31 +1361,50 @@ impl Sim<'_> {
 /// 1.8: the client's own result for the screen's crafting grid (`RecipeDispatcher`), written
 /// into the result slot; unknown when a recipe ghast does not model may decide it.
 pub(crate) fn recompute_1_8(m: &mut Model, lay: Layout) {
-    let (grid, width, result): (Vec<Option<Stack>>, usize, Loc) = match lay.screen {
-        Screen::Player => (m.craft.to_vec(), 2, Loc::CraftResult),
-        Screen::Container(WindowKind::Crafting) => (
-            m.container
-                .get(1..10)
-                .map(<[_]>::to_vec)
-                .unwrap_or_default(),
-            3,
-            Loc::Container(0),
-        ),
+    let width = match lay.screen {
+        Screen::Player => 2,
+        Screen::Container(WindowKind::Crafting) => 3,
         Screen::Container(_) => return,
+    };
+    let (grid, memo): (&[Option<Stack>], _) = match lay.screen {
+        Screen::Player => (&m.craft[..], &m.craft_memo),
+        _ => match m.container.get(1..10) {
+            Some(g) => (g, &m.table_memo),
+            None => return,
+        },
     };
     if grid.len() != width * width {
         return;
     }
-    let (value, known) = match crafting::result_1_8(&Grid {
-        stacks: &grid,
-        width,
-    }) {
-        Craft::Known(s) => (s, true),
-        Craft::Unknown => (None, false),
+    let (value, known, memo) = match memo {
+        Some(memo) if memo.grid[..] == *grid => {
+            debug_assert_eq!(craft_1_8(grid, width), (memo.result.clone(), memo.known));
+            (memo.result.clone(), memo.known, None)
+        }
+        _ => {
+            let (value, known) = craft_1_8(grid, width);
+            let memo = std::sync::Arc::new(CraftMemo {
+                grid: grid.to_vec(),
+                result: value.clone(),
+                known,
+            });
+            (value, known, Some(memo))
+        }
     };
-    *m.at_mut(result) = value;
-    match result {
-        Loc::CraftResult => m.craft_result_known = known,
-        _ => m.container_result_known = known,
+    match lay.screen {
+        Screen::Player => {
+            m.craft_result = value;
+            m.craft_result_known = known;
+            if memo.is_some() {
+                m.craft_memo = memo;
+            }
+        }
+        _ => {
+            m.container[0] = value;
+            m.container_result_known = known;
+            if memo.is_some() {
+                m.table_memo = memo;
+            }
+        }
     }
 }

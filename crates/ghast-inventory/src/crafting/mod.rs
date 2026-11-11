@@ -999,6 +999,16 @@ mod tests {
         }
     }
 
+    /// `recompute_1_8` skips the recipe scan for an empty grid on this fact.
+    #[test]
+    fn empty_grid_crafts_nothing() {
+        assert_eq!(
+            result_1_8(&grid(&[None, None, None, None])),
+            Craft::Known(None)
+        );
+        assert_eq!(result_1_8(&grid(&vec![None; 9])), Craft::Known(None));
+    }
+
     #[test]
     fn planks_and_sticks() {
         let log = Some(Stack::new(17, 3, 2));
