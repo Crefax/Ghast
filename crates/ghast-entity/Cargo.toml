@@ -1,6 +1,6 @@
 [package]
 name = "ghast-entity"
-description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9, 1.12.2 and 1.16.5 entity packets, vanilla-exact server positions, O(1) lookup"
+description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9, 1.12.2, 1.16.5 and 26.1 entity packets, vanilla-exact positions, O(1) lookup"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,11 +14,12 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-entity"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
 # One tracker per version (with its protocol and data tables); any subset builds.
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
 
 [dependencies]
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false }
@@ -27,15 +28,17 @@ bytes = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "testgen"] }
-ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
+ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "testgen"] }
+ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "v26_1"] }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]
 name = "entity"
 harness = false
-required-features = ["v1_8", "v1_12", "v1_16_5"]
+required-features = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -51,6 +54,14 @@ required-features = ["v1_12"]
 [[test]]
 name = "v1_16_5"
 required-features = ["v1_16_5"]
+
+[[test]]
+name = "v26_1"
+required-features = ["v26_1"]
+
+[[test]]
+name = "oracle_26_1"
+required-features = ["v26_1"]
 
 [[test]]
 name = "robustness"

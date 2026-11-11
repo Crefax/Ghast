@@ -87,6 +87,10 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                         ping,
                         display_name,
                         textures,
+                        display_name_nbt: None,
+                        listed: true,
+                        list_order: 0,
+                        generation: 0,
                     },
                 );
             }

@@ -1,7 +1,7 @@
 # ghast-entity
 
 Entity tracking for the ghast Minecraft Java Edition client library, 1.8.9 (protocol 47),
-1.12.2 (protocol 340) and 1.16.5 (protocol 754). It keeps what the vanilla client knows about every entity the server
+1.12.2 (protocol 340), 1.16.5 (protocol 754) and 26.1 – 26.1.2 (protocol 775). It keeps what the vanilla client knows about every entity the server
 announced, parsed by hand straight from the packet bodies.
 
 ```rust
@@ -18,7 +18,7 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
 
 ## API
 
-- `v1_8::Tracker`, `v1_12::Tracker`, `v1_16_5::Tracker`:
+- `v1_8::Tracker`, `v1_12::Tracker`, `v1_16_5::Tracker`, `v26_1::Tracker`:
   - setup and packets: `new(Config)`, `apply(&RawPacket)` / `apply_body(id, &Bytes)` returning
     `Result<Applied, DecodeError>`;
   - packet filter: `wants(id)`, `packet_ids()`;
@@ -106,7 +106,52 @@ Variants vanilla applies on the next client tick are applied immediately, and th
 quirk after a resize is not modelled. Hanging entities (paintings, item frames, leash knots) have
 no box here: vanilla builds it from facing and motive. Variants need `Config::metadata`.
 
-Not tracked yet: `update_attributes`, `entity_status` state (only an event), and the 1.16
+## 26.1: positions as the client holds them, proven against the real client
+
+The 26.1 client has no separate server position: an entity is where `Entity.position()` says,
+and position packets either set an interpolation target (living entities, boats, minecarts,
+experience orbs, fishing bobbers: 3 steps) or move the entity at once (everything else; the
+type facts come from the jar via ghast-data). `v26_1::Tracker::tick()` runs the client's entity
+tick: interpolation (`InterpolationHandler`, doubles, the target follows position changes made
+between steps unless the moved box collides: `tick_with(no_collision)` takes vanilla's
+`Level.noCollision`), head-rotation lerps, the mob `BodyRotationControl` (body and head yaw),
+sleeping (xRot 0), deferred scale-attribute resizes, players leaving the ground as spectators or
+passengers, empty item entities being discarded. Entities in unloaded chunk columns do not tick
+(the tracker reads the chunk coordinates of `map_chunk` / `unload_chunk`); players always do.
+
+Call order per client tick (vanilla's `Minecraft.tick`): apply the tick's packets, pick with
+`Entity::position()` / `bounding_box()` (+ `v26_1::pick_radius`, `Tracker::pickable`), then
+`tick()`. Packet coordinates (`VecDeltaCodec` base, `Math.round(x * 4096)` + delta) are
+`v26_1::server_position`.
+
+Also modelled: spawn rotations (`absSnapTo` for living entities), syncs over 64 blocks and of
+non-ticking entities snapping, teleports relative to the interpolation target, `Math.round`
+half-up, the duplicate-UUID refusal of the entity lookup (and the id it leaves in the tick list),
+players needing a tab list entry to spawn, `putIfAbsent` tab entries and the tab entry a player
+entity keeps after removal, sleeping positions moving the entity onto the bed, the fox's own
+sleeping flag, slime resizes turning the body, item pickups shrinking the stack. Sizes: baby,
+slime / magma cube size, armor stand small / marker, every pose (sleeping, player poses, camel
+sitting, digging warden, ...) and the `minecraft:scale` attribute (modifiers in packet order;
+vanilla sums several per operation in hash order), with fixed dimensions not scaled.
+
+**Proof:** the oracle's `EntityTrackDump` sends random entity packets as wire bytes through the
+real `ClientPacketListener` and records every entity at pick time (position, rotation, head and
+body yaw, box, on-ground, pickable, ticking, riding links, item counts, tab list).
+`tests/oracle_26_1.rs` replays `tests/golden/26.1/entity_tracking.jsonl.gz` (24 cases x 72
+ticks) with metadata tracking on and off at 0 diffs; a 500 x 100-tick run
+(`ORACLE_TRACKING=oracle/cache/26.1/tracking/...`): 0 diffs over 8.66 M compared fields.
+`tests/v26_1.rs` runs the vanilla 26.1.2 capture (39 spawns) through the tracker.
+
+Not modelled on 26.1: client-side physics of non-interpolated entities between packets (items,
+projectiles and experience orbs move on their own), passenger positions (placed on the vehicle
+every tick), controlled vehicles other than boats, body / head turning of camels, creakings,
+happy ghasts, phantoms, shulkers, armadillos (own body controls) and players' body yaw,
+velocity decay (`velocity()` is the last value sent), boxes of hanging entities, shulkers,
+interactions and wind charges (`bounding_box()` is `None`), phantom size, pufferfish puff state,
+display interpolation durations. Equipment items carry id and count only (no components);
+item entity stacks keep their components (`v26_1::item_stack`).
+
+Not tracked yet (1.8 – 1.16): `update_attributes`, `entity_status` state (only an event), and the 1.16
 `entity_sound_effect` / `camera`.
 
 **Found in passing:** minecraft-data (and so the generated `ghast_protocol::v1_8` `spawn_entity`)
@@ -136,7 +181,14 @@ entities (35 % rel move, 20 % move+look, 15 % look, 10 % head rotation, 7 % velo
 | 1.8 tracker, everything on | 25 ns (40 M packets/s) |
 | 1.8 generated full decode alone (no tracking), for comparison | 29 ns |
 | 1.16.5 tracker, everything on | 26-29 ns (shared machine) |
+| 26.1 tracker, everything on (same mix, 26.1 formats; syncs instead of teleports) | 45 ns |
+| 1.16.5 / 26.1 relative move alone | 25 ns / 39 ns |
+| 26.1 `tick()`, 300 interpolating zombies / 300 settled | 44 ns / 10 ns per entity |
 | `wants()` filter check | 0.8 ns |
+
+Memory: `size_of::<Entity>()` is 232 bytes without the `v26_1` feature and 400 with it (the
+26.1 client state: codec base, interpolation target and previous step, head / body turn,
+cached dimensions); the hash map slot adds the key.
 
 ## Tests
 

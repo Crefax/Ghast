@@ -117,8 +117,29 @@ pub enum MetaValue {
     VillagerData([i32; 3]),
     /// 1.16 optional VarInt (0 = none, else value + 1).
     OptVarInt(i32),
-    /// 1.16 pose.
+    /// 1.16 / 26.1 pose.
     Pose(i32),
+    /// 26.1 long (VarLong).
+    Long(i64),
+    /// 26.1 text component (the raw network NBT, copied).
+    Component(Bytes),
+    /// 26.1 optional text component (raw network NBT).
+    OptComponent(Option<Bytes>),
+    /// 26.1 item stack (`None` = empty; component patch copied out of the packet).
+    #[cfg(feature = "v26_1")]
+    Stack(Option<ghast_protocol::types::slot::v775::ItemStack>),
+    /// 26.1 registry or enum value: `(serializer id, value)` (cat / cow / wolf / frog / pig /
+    /// chicken / zombie nautilus variants and sound variants, sniffer / armadillo / copper golem
+    /// states, humanoid arm).
+    Enum(u8, i32),
+    /// 26.1 vector (three floats).
+    Vector3([f32; 3]),
+    /// 26.1 quaternion (four floats).
+    Quaternion([f32; 4]),
+    /// 26.1 value kept as its raw wire bytes, copied: `(serializer id, bytes)` (optional block
+    /// state, particle, particle list, optional global position, painting variant, resolvable
+    /// profile).
+    Raw(u8, Bytes),
 }
 
 /// The metadata of one entity: `(index, value)` pairs, at most one per index, in arrival order.
@@ -210,6 +231,8 @@ pub(crate) enum Era {
     V1_12,
     /// 1.16.5.
     V1_16,
+    /// 26.1.
+    V26,
 }
 
 /// 1.16 registry ids used by [`Entity::class`].
@@ -248,6 +271,9 @@ pub struct Entity {
     pub(crate) meta: Metadata,
     pub(crate) equipment: Option<Box<[Option<Item>; EQUIPMENT_SLOTS]>>,
     pub(crate) effects: Vec<Effect>,
+    /// 26.1 client state (codec base, interpolation, size keys).
+    #[cfg(feature = "v26_1")]
+    pub(crate) m: crate::v26_1::State,
 }
 
 impl Entity {
@@ -274,6 +300,8 @@ impl Entity {
             meta: Metadata::default(),
             equipment: None,
             effects: Vec::new(),
+            #[cfg(feature = "v26_1")]
+            m: crate::v26_1::State::default(),
         }
     }
 
@@ -298,6 +326,10 @@ impl Entity {
     /// Version-independent class.
     #[must_use]
     pub fn class(&self) -> EntityClass {
+        #[cfg(feature = "v26_1")]
+        if self.era == Era::V26 {
+            return crate::v26_1::class(self);
+        }
         match self.ty {
             EntityType::Player => EntityClass::Player,
             EntityType::LegacyObject(2) | EntityType::Registry(ITEM_1_16) => EntityClass::Item,
@@ -311,9 +343,13 @@ impl Entity {
     }
 
     /// The stack of an item entity (from metadata; `None` before the server sent it or when
-    /// metadata is not tracked; 1.16 always keeps it for item entities).
+    /// metadata is not tracked; 1.16 always keeps it for item entities). Always `None` on 26.1,
+    /// whose stacks carry data components: see `v26_1::item_stack` / `v26_1::item_count`.
     #[must_use]
     pub fn item(&self) -> Option<&Item> {
+        if self.era == Era::V26 {
+            return None;
+        }
         let index = match self.ty {
             EntityType::LegacyObject(2) if self.era == Era::V1_12 => 6,
             EntityType::LegacyObject(2) => 10,
@@ -340,6 +376,11 @@ impl Entity {
             Era::V1_12 => crate::v1_12::dimensions(self, vs),
             #[cfg(feature = "v1_16_5")]
             Era::V1_16 => crate::v1_16_5::dimensions(self, vs),
+            #[cfg(feature = "v26_1")]
+            Era::V26 => {
+                let _ = vs;
+                crate::v26_1::dimensions(self)
+            }
             // A tracker only stamps eras of versions compiled in.
             #[allow(unreachable_patterns)]
             _ => None,
@@ -380,6 +421,12 @@ impl Entity {
     /// move the tracked 1/4096 position; 1.16: the packet coordinates, rel moves applied in
     /// 1/4096 fixed point). The rendered position interpolates towards this over 3 ticks in
     /// vanilla; a bot does not need that.
+    ///
+    /// **26.1** is different: this is the entity's *current* position as the client holds it
+    /// (`Entity.position()`): position packets of interpolated entities (living entities, boats,
+    /// minecarts) set a target the entity reaches over 3 calls of `v26_1::Tracker::tick`, others
+    /// move at once. That is the position vanilla's crosshair pick reads at tick time (with
+    /// [`Entity::bounding_box`]); the packet coordinates are `v26_1::server_position`.
     #[must_use]
     pub fn position(&self) -> [f64; 3] {
         self.pos

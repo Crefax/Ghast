@@ -150,11 +150,20 @@ pub struct PlayerInfo {
     pub game_mode: i32,
     /// Latency in ms.
     pub ping: i32,
-    /// Display name (raw chat JSON), if set.
+    /// Display name (raw chat JSON), if set (1.8 – 1.16; see
+    /// [`PlayerInfo::display_name_nbt`] for 26.1).
     pub display_name: Option<Box<str>>,
     /// The base64 `"textures"` profile property as sent (only with [`Config::skins`]; its
     /// signature is not kept). Decoded it is JSON with the skin and cape URLs.
     pub textures: Option<Box<str>>,
+    /// 26.1: the display name as its raw network NBT text component, if set.
+    pub display_name_nbt: Option<bytes::Bytes>,
+    /// Shown in the tab list (26.1 `UPDATE_LISTED`; always `true` before 26.1).
+    pub listed: bool,
+    /// 26.1 tab list order (`UPDATE_LIST_ORDER`; 0 before).
+    pub list_order: i32,
+    /// Which tab list object this is (26.1 player entities keep the one they first saw).
+    pub(crate) generation: u64,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -180,12 +189,17 @@ impl Hasher for IdHasher {
     }
 
     #[inline]
+    fn write_u64(&mut self, v: u64) {
+        self.0 = v;
+    }
+
+    #[inline]
     fn write_u128(&mut self, v: u128) {
         self.0 = (v as u64) ^ ((v >> 64) as u64);
     }
 }
 
-type Fast<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
+pub(crate) type Fast<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
 /// The tracked entities and tab list (queries are the same for every version).
 #[derive(Clone, Debug, Default)]
@@ -200,6 +214,8 @@ pub struct Entities {
     pub(crate) any_leash: bool,
     /// The tracker's protocol family (selects the vanilla size table).
     pub(crate) era: crate::entity::Era,
+    /// Last tab list object generation handed out.
+    pub(crate) generations: u64,
 }
 
 impl Entities {
@@ -342,6 +358,8 @@ impl Entities {
             Era::V1_12 => crate::v1_12::vanilla_size(e),
             #[cfg(feature = "v1_16_5")]
             Era::V1_16 => crate::v1_16_5::vanilla_size(e),
+            #[cfg(feature = "v26_1")]
+            Era::V26 => crate::v26_1::vanilla_size(e),
             #[allow(unreachable_patterns)]
             _ => None,
         };
@@ -510,6 +528,14 @@ mod tests {
             s.spawn(Entity::new(id, EntityType::Registry(6)));
         }
         s
+    }
+
+    /// Bytes per tracked entity (the map slot adds the 4-byte key, padded).
+    #[test]
+    fn entity_size() {
+        let n = std::mem::size_of::<Entity>();
+        eprintln!("size_of::<Entity>() = {n}");
+        assert!(n <= if cfg!(feature = "v26_1") { 400 } else { 264 }, "{n}");
     }
 
     #[test]

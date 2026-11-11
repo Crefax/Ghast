@@ -1,7 +1,8 @@
-//! Entity tracking for the ghast Minecraft Java Edition client library (1.8.9, 1.12.2 and
-//! 1.16.5).
+//! Entity tracking for the ghast Minecraft Java Edition client library (1.8.9, 1.12.2, 1.16.5
+//! and 26.1).
 //!
-//! [`v1_8::Tracker`] / [`v1_12::Tracker`] / [`v1_16_5::Tracker`] take raw clientbound play packets
+//! [`v1_8::Tracker`] / [`v1_12::Tracker`] / [`v1_16_5::Tracker`] / `v26_1::Tracker` take raw
+//! clientbound play packets
 //! ([`ghast_protocol::RawPacket`]) and keep every entity the server announced, keyed by id:
 //! type, UUID, **server position** (exactly as the vanilla client tracks it from the packets,
 //! with each version's fixed-point rules), rotation, last velocity, on-ground, riding / leash
@@ -26,12 +27,22 @@
 #![warn(missing_docs, unnameable_types)]
 // A build with only some versions leaves helpers of the others unused.
 #![cfg_attr(
-    not(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    not(all(
+        feature = "v1_8",
+        feature = "v1_12",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
     allow(dead_code)
 )]
-// A build with no version at all (a 26.1-only client) keeps only the shared store.
+// A build with no version at all keeps only the shared store.
 #![cfg_attr(
-    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
     allow(unused_imports, unused_variables)
 )]
 
@@ -44,6 +55,8 @@ pub mod v1_12;
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
+#[cfg(feature = "v26_1")]
+pub mod v26_1;
 
 pub use entity::{
     EQUIPMENT_SLOTS, Effect, Entity, EntityClass, EntityType, Item, MetaValue, Metadata,
