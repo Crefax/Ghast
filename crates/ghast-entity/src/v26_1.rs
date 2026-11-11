@@ -484,6 +484,26 @@ impl Tracker {
         self.chunks.contains_key(&chunk_of(p))
     }
 
+    /// A chunk column became loaded (what a `map_chunk` packet does here; for a tracker started
+    /// while chunks are already loaded): its entities tick again.
+    pub fn mark_column_loaded(&mut self, x: i32, z: i32) {
+        let k = chunk_key(x, z);
+        self.chunks.insert(k, ());
+        if !self.ghosts.is_empty() {
+            // startTicking: the column's entities take their ids' tick list slots.
+            for e in self.store.map.values() {
+                if chunk_of(e.pos) == k {
+                    self.ghosts.remove(&e.id);
+                }
+            }
+        }
+    }
+
+    /// A chunk column was unloaded (`unload_chunk`): its entities stop ticking.
+    pub fn mark_column_unloaded(&mut self, x: i32, z: i32) {
+        self.chunks.remove(&chunk_key(x, z));
+    }
+
     /// `ClientLevel.isTickingEntity`: players always tick, other entities while their chunk
     /// column is loaded.
     #[must_use]
@@ -787,16 +807,7 @@ impl Tracker {
             }
             id::MAP_CHUNK => {
                 let (x, z) = (r.read_i32()?, r.read_i32()?);
-                let k = chunk_key(x, z);
-                self.chunks.insert(k, ());
-                if !self.ghosts.is_empty() {
-                    // startTicking: the chunk's entities take their ids' tick list slots.
-                    for e in s.map.values() {
-                        if chunk_of(e.pos) == k {
-                            self.ghosts.remove(&e.id);
-                        }
-                    }
-                }
+                self.mark_column_loaded(x, z);
                 return Ok(Applied::Ignored);
             }
             id::UNLOAD_CHUNK => {

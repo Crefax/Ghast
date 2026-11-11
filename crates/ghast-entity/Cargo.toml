@@ -32,6 +32,7 @@ ghast-protocol = { path = "../ghast-protocol", default-features = false, feature
 ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "v26_1"] }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
+ghast-physics = { path = "../ghast-physics", default-features = false, features = ["v26_1"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 

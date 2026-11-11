@@ -87,10 +87,26 @@ fn player_uuid(k: u64) -> uuid::Uuid {
     uuid::Uuid::from_u64_pair(0x7072_6f66_696c_6500, k)
 }
 
-/// `Level.noCollision` in the dump's world: the 7 x 7 stone floor at y 60 (no collidable entities).
-fn no_collision(_: &Entity, b: [f64; 6]) -> bool {
-    let (x0, x1, z0, z1) = (-3.0, 4.0, -3.0, 4.0);
-    !(b[0] < x1 && b[3] > x0 && b[1] < 61.0 && b[4] > 60.0 && b[2] < z1 && b[5] > z0)
+/// The dump's world for `Level.noCollision`: the 7 x 7 stone floor at y 60 (no collidable
+/// entities), through ghast-physics' block collision query.
+fn world() -> ghast_physics::modern::MemoryWorld26 {
+    let mut w = ghast_physics::modern::memory_world_26_1();
+    w.load_chunks(-15, -15, 15, 15);
+    w.fill_raw([-3, 60, -3], [3, 60, 3], 1); // stone
+    w
+}
+
+fn no_collision(
+    w: &ghast_physics::modern::MemoryWorld26,
+) -> impl Fn(&Entity, [f64; 6]) -> bool + '_ {
+    use ghast_physics::modern::{CollisionContext, LevelInfo, V26_1, no_block_collision};
+    move |e, bb| {
+        let ctx = CollisionContext {
+            feet_y: e.position()[1],
+            ..CollisionContext::default()
+        };
+        no_block_collision::<V26_1, _>(w, &LevelInfo::default(), e.position(), bb, &ctx)
+    }
 }
 
 struct Case {
@@ -235,6 +251,7 @@ fn replay(path: &PathBuf) -> (usize, usize, usize) {
         .unwrap();
     let (mut ticks, mut fields, mut packets) = (0, 0, 0);
     let mut cases: Vec<Case> = Vec::new();
+    let w = world();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let v: Value = serde_json::from_str(line).unwrap();
         match v["type"].as_str().unwrap() {
@@ -286,7 +303,7 @@ fn replay(path: &PathBuf) -> (usize, usize, usize) {
                     }
                     let label = format!("{} tick {}", c.name, v["tick"]);
                     fields += check(&c.tracker, &v, &label);
-                    c.tracker.tick_with(no_collision);
+                    c.tracker.tick_with(no_collision(&w));
                 }
             }
             other => panic!("unknown line {other}"),
