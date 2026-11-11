@@ -373,9 +373,13 @@ final class Harness {
         }
 
         private void teleport(double x, double y, double z, float yaw, float pitch, int flags) {
+            teleport(x, y, z, Vec3.ZERO, yaw, pitch, flags);
+        }
+
+        private void teleport(double x, double y, double z, Vec3 delta, float yaw, float pitch, int flags) {
             Set<Relative> rel = Relative.unpack(flags);
             ClientboundPlayerPositionPacket p = new ClientboundPlayerPositionPacket(teleportId++,
-                    new PositionMoveRotation(new Vec3(x, y, z), Vec3.ZERO, yaw, pitch), rel);
+                    new PositionMoveRotation(new Vec3(x, y, z), delta, yaw, pitch), rel);
             listener.handleMovePlayer(roundTrip(ClientboundPlayerPositionPacket.STREAM_CODEC, p));
         }
 
@@ -527,7 +531,7 @@ final class Harness {
                 listener.handleSetEntityMotion(roundTrip(ClientboundSetEntityMotionPacket.STREAM_CODEC,
                         new ClientboundSetEntityMotionPacket(PLAYER_ENTITY_ID, new Vec3(v.x() / 8000.0, v.y() / 8000.0, v.z() / 8000.0))));
             } else if (e instanceof Scenario.Teleport tp) {
-                teleport(tp.x(), tp.y(), tp.z(), tp.yaw(), tp.pitch(), tp.flags());
+                teleport(tp.x(), tp.y(), tp.z(), new Vec3(tp.dx(), tp.dy(), tp.dz()), tp.yaw(), tp.pitch(), tp.flags());
             } else if (e instanceof Scenario.SpeedAttribute sa) {
                 AttributeInstance speed = new AttributeInstance(Attributes.MOVEMENT_SPEED, i -> {});
                 speed.setBaseValue(sa.base());

@@ -51,6 +51,13 @@ fn fuzz_extras_seed1_26_1() {
     check("fuzz_extras_seed1.jsonl.gz");
 }
 
+/// Position packets with delta movement under all relative-bit combinations, with entity motion
+/// around them (hand-written cases + the `withTeleports` fuzz stream).
+#[test]
+fn teleports_26_1() {
+    check("teleports.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

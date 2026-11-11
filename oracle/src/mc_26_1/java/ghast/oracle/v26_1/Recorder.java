@@ -177,6 +177,9 @@ final class Recorder {
             if (t.flags() != 0) {
                 j.field("flags", t.flags());
             }
+            if (t.hasDelta()) {
+                j.key("delta").beginArray().f64(t.dx()).f64(t.dy()).f64(t.dz()).endArray();
+            }
         } else if (e instanceof Scenario.SpeedAttribute sa) {
             j.field("type", "speed_attribute").fieldF64("base", sa.base());
             j.key("modifiers").beginArray();

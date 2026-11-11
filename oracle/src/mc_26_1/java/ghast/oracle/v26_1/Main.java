@@ -38,10 +38,12 @@ public final class Main {
                 boolean useItem = Boolean.parseBoolean(a.str("--use-item", "false"));
                 boolean edges = Boolean.parseBoolean(a.str("--edges", "false")) || "edges".equals(a.str("--palette", ""));
                 boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
+                boolean teleports = Boolean.parseBoolean(a.str("--teleports", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 Io.write(out, sink -> {
                     for (int i = 0; i < count; i++) {
                         run(edges ? Fuzz.edge(seed, i, ticks)
+                                : teleports ? Fuzz.withTeleports(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
@@ -68,6 +70,12 @@ public final class Main {
                 int rays = (int) a.lng("--rays", SelectionDump.RAY_RAYS);
                 Io.write(a.path("--out", golden.resolve("raytrace.jsonl.gz")), sink -> SelectionDump.rays(seed, worlds, rays, sink));
             }
+            case "teleports" -> Io.write(a.path("--out", golden.resolve("teleports.jsonl.gz")), sink -> {
+                runAll(Scenarios26.teleports(), sink);
+                for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
+                    run(Fuzz.withTeleports(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS), sink);
+                }
+            });
             case "list" -> {
                 for (Scenario sc : Scenarios.all()) {
                     System.out.println(sc.name + "\t" + sc.ticks.size() + "\t" + sc.description);
@@ -84,7 +92,7 @@ public final class Main {
                 ghast oracle (Minecraft %s)
                   golden   [--out DIR]                 write the committed golden set
                   scenarios [--out FILE] [--only NAME] run the hand-written scenarios
-                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--out FILE(.gz)]
+                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--teleports true] [--out FILE(.gz)]
                   replay --in FILE [--out FILE]        rerun scenarios read from golden-format JSON lines
                   boxes [--out FILE]                   collision shapes of every block state
                   boxes-far [--out FILE]               the same at far positions, absolute
@@ -115,6 +123,12 @@ public final class Main {
         Io.write(dir.resolve("fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"), sink -> {
             for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
                 run(Fuzz.withExtras(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS, i % 2 == 0), sink);
+            }
+        });
+        Io.write(dir.resolve("teleports.jsonl.gz"), sink -> {
+            runAll(Scenarios26.teleports(), sink);
+            for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
+                run(Fuzz.withTeleports(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS), sink);
             }
         });
         Io.write(dir.resolve("collision_shapes.jsonl.gz"), CollisionDump::lines);
@@ -186,7 +200,9 @@ public final class Main {
         for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
             all.add(Fuzz.edge(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
             all.add(Fuzz.withExtras(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS, i % 2 == 0));
+            all.add(Fuzz.withTeleports(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
         }
+        all.addAll(Scenarios26.teleports());
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -201,7 +217,8 @@ public final class Main {
         System.out.println((mismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of " + all.size() + " scenarios");
         ok &= mismatches == 0;
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"}) {
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
+                "teleports.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             Io.write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = Io.sha256(replayed).equals(Io.sha256(a.resolve(f)));

@@ -182,8 +182,10 @@ final class ScenarioReader {
                             ev.get("z").getAsInt()));
                     case "teleport" -> {
                         JsonArray p = ev.getAsJsonArray("pos");
+                        JsonArray d = ev.has("delta") ? ev.getAsJsonArray("delta") : null;
                         events.add(new Scenario.Teleport(f64(p.get(0)), f64(p.get(1)), f64(p.get(2)),
-                                f32(ev.get("yaw")), f32(ev.get("pitch")), ev.has("flags") ? ev.get("flags").getAsInt() : 0));
+                                f32(ev.get("yaw")), f32(ev.get("pitch")), ev.has("flags") ? ev.get("flags").getAsInt() : 0,
+                                d == null ? 0.0 : f64(d.get(0)), d == null ? 0.0 : f64(d.get(1)), d == null ? 0.0 : f64(d.get(2))));
                     }
                     case "abilities" -> events.add(new Scenario.Abilities(ev.get("invulnerable").getAsBoolean(),
                             ev.get("flying").getAsBoolean(), ev.get("allow_flying").getAsBoolean(),

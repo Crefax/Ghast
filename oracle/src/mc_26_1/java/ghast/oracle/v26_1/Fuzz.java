@@ -583,6 +583,57 @@ final class Fuzz {
         return sc;
     }
 
+    /**
+     * The plain case plus, from a separate random stream, position packets that carry a non-zero
+     * delta movement under every combination of the nine relative bits (x, y, z, yaw, pitch, delta
+     * x / y / z, rotate delta), and entity-motion packets right before or after them (same tick, in
+     * either packet order, or the neighbouring ticks). Cases get a {@code _tp} suffix.
+     */
+    static Scenario withTeleports(long seed, int index, int ticks) {
+        Scenario base = one(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_tp");
+        copyInto(base, sc);
+        Rng x = new Rng(seed * 0x2545F4914F6CDD1DL + index ^ 0x74656c65L);
+        int n = x.range(1, 5);
+        for (int i = 0; i < n && sc.ticks.size() > 2; i++) {
+            int at = x.range(1, sc.ticks.size() - 2);
+            int flags = x.nextInt(512);
+            if (x.chance(0.4)) {
+                flags |= 0x1E0 & x.nextInt(512); // more delta / rotate-delta bits
+            }
+            double[] d = new double[3];
+            for (int a = 0; a < 3; a++) {
+                double r = x.nextDouble();
+                d[a] = r < 0.15 ? 0.0 : r < 0.6 ? (x.nextDouble() - 0.5) * 0.6 : r < 0.9 ? (x.nextDouble() - 0.5) * 4 : (x.nextDouble() - 0.5) * 40;
+            }
+            double px = (flags & 1) != 0 ? (x.nextDouble() - 0.5) * 2 : sc.x + (x.nextDouble() - 0.5) * 4;
+            double py = (flags & 2) != 0 ? (x.nextDouble() - 0.3) * 2 : sc.y + x.nextDouble() * 2;
+            double pz = (flags & 4) != 0 ? (x.nextDouble() - 0.5) * 2 : sc.z + (x.nextDouble() - 0.5) * 4;
+            float yaw = (flags & 8) != 0 ? (float) ((x.nextDouble() - 0.5) * 360) : (float) (x.nextDouble() * 720 - 360);
+            float pitch = (flags & 16) != 0 ? (float) ((x.nextDouble() - 0.5) * 120) : (float) (x.nextDouble() * 180 - 90);
+            Scenario.Event tp = new Scenario.Teleport(px, py, pz, yaw, pitch, flags, d[0], d[1], d[2]);
+            Scenario.Event vel = new Scenario.Velocity(x.range(-30000, 30000), x.range(-30000, 30000), x.range(-30000, 30000));
+            double r = x.nextDouble();
+            if (r < 0.2) {
+                addEvent(sc, at, vel);
+                addEvent(sc, at, tp);
+            } else if (r < 0.4) {
+                addEvent(sc, at, tp);
+                addEvent(sc, at, vel);
+            } else if (r < 0.5) {
+                addEvent(sc, at - 1, vel);
+                addEvent(sc, at, tp);
+            } else if (r < 0.6) {
+                addEvent(sc, at, tp);
+                addEvent(sc, at + 1, vel);
+            } else {
+                addEvent(sc, at, tp);
+            }
+        }
+        sc.description += ", teleports with delta movement";
+        return sc;
+    }
+
     private static void copyInto(Scenario src, Scenario sc) {
         sc.description = src.description;
         sc.outside = src.outside;

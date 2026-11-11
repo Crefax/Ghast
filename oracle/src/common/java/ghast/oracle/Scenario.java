@@ -41,11 +41,22 @@ public final class Scenario {
 
     /**
      * Position/look packet. {@code flags} is the packet's relative-flags byte (bit 0 x, 1 y, 2 z, 3 yaw,
-     * 4 pitch): set bits make that value relative to the current one; 0 = absolute.
+     * 4 pitch; 26.1+ also 5..7 delta x / y / z, 8 rotate delta): set bits make that value relative to the
+     * current one; 0 = absolute. {@code dx, dy, dz}: the 26.1+ delta movement (velocity) the packet carries.
      */
-    public record Teleport(double x, double y, double z, float yaw, float pitch, int flags) implements Event {
+    public record Teleport(double x, double y, double z, float yaw, float pitch, int flags, double dx, double dy, double dz)
+            implements Event {
         public Teleport(double x, double y, double z, float yaw, float pitch) {
             this(x, y, z, yaw, pitch, 0);
+        }
+
+        public Teleport(double x, double y, double z, float yaw, float pitch, int flags) {
+            this(x, y, z, yaw, pitch, flags, 0.0, 0.0, 0.0);
+        }
+
+        /** 26.1+: the packet's delta movement is non-zero. */
+        public boolean hasDelta() {
+            return dx != 0.0 || dy != 0.0 || dz != 0.0;
         }
     }
 

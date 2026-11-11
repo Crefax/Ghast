@@ -548,9 +548,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     }
                     "teleport" => {
                         let flags = e.get("flags").and_then(Value::as_u64).unwrap_or(0) as u32;
+                        let delta = e.get("delta").map_or([0.0; 3], f3);
                         let reply = p.apply_teleport(
                             f3(&e["pos"]),
-                            [0.0; 3],
+                            delta,
                             f32_of(&e["yaw"]),
                             f32_of(&e["pitch"]),
                             flags,

@@ -79,4 +79,38 @@ final class Scenarios26 {
                 .desc("sprint almost parallel to a wall: a minor horizontal collision keeps the sprint")
                 .spawn(0.5, 64, 0.5, 85, 0).run(3, 0).run(40, FORWARD | SPRINT));
     }
+
+    /**
+     * Position packets with a non-zero delta movement (golden {@code teleports.jsonl.gz}, not part of
+     * {@link Scenarios#all()} so the scenario golden stays unchanged).
+     */
+    static List<Scenario> teleports() {
+        Harness.init();
+        List<Scenario> l = new java.util.ArrayList<>();
+        // ---- position packets with delta movement (26.1: PositionMoveRotation.deltaMovement) ----------
+        int[] deltaFlags = {0, 0x20, 0x40, 0x80, 0xE0, 0x100, 0x1E0, 0x118, 0x1FF, 0x07};
+        for (int f : deltaFlags) {
+            Scenario t = flat("teleport_delta_" + Integer.toHexString(f))
+                    .desc("position packet with delta movement (0.3, 0.42, -0.25), relative bits 0x" + Integer.toHexString(f)
+                            + ", while sprinting forward")
+                    .spawn(0.5, 64, 0.5, 30, 0).run(8, FORWARD | SPRINT);
+            boolean relPos = (f & 7) != 0;
+            t.event(FORWARD | SPRINT, new Scenario.Teleport(relPos ? 0.5 : 2.5, relPos ? 0.0 : 64.0, relPos ? -0.5 : 1.5,
+                    (f & 8) != 0 ? 45.0F : 120.0F, (f & 16) != 0 ? 10.0F : -20.0F, f, 0.3, 0.42, -0.25)).run(20, FORWARD | SPRINT);
+            l.add(t);
+        }
+        l.add(flat("teleport_delta_motion_before").desc("entity motion, then a position packet with delta (same tick)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(5, FORWARD)
+                .event(FORWARD, new Scenario.Velocity(4000, 3000, -2000), new Scenario.Teleport(0, 0, 0, 0, 0, 0x1FF, 0.1, 0.2, 0.3))
+                .run(20, FORWARD));
+        l.add(flat("teleport_delta_motion_after").desc("a position packet with delta, then entity motion (same tick)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(5, FORWARD)
+                .event(FORWARD, new Scenario.Teleport(1.5, 66, 0.5, 90, 0, 0x20, -0.2, 0.5, 0.0), new Scenario.Velocity(-4000, 2000, 1000))
+                .run(25, FORWARD));
+        l.add(flat("teleport_delta_rotate_falling").desc("rotate-delta teleport while falling with sideways speed")
+                .spawn(0.5, 70, 0.5, 0, 0).event(0, new Scenario.Velocity(6000, 0, 0)).run(4, 0)
+                .event(0, new Scenario.Teleport(0, 0, 0, 90, 0, 0x1F8, 0.0, 0.0, 0.0)).run(25, 0));
+
+        return l;
+    }
 }

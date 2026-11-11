@@ -870,6 +870,19 @@ MC=26.1 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 
 
 (`physics_s11` of the first 26.1 run holds 1600 cases, `physics_use_s21` 400.)
 
+### 26.1 teleports with delta movement (`teleports.jsonl.gz`)
+
+26.1's position packet (`PositionMoveRotation`) carries a delta movement next to the position and
+rotation, and nine relative bits (x, y, z, yaw, pitch, delta x / y / z, rotate delta). Teleport
+events record it as `delta: [x, y, z]` (omitted when zero, so older files are unchanged).
+`teleports.jsonl.gz` (`teleports`, in `golden`) holds 13 hand-written cases (delta under the bit
+sets 0, 0x20, 0x40, 0x80, 0xE0, 0x100, 0x1E0, 0x118, 0x1FF, 0x07; entity motion before / after the
+position packet in the same tick; rotate delta while falling) and 100 cases of
+`Fuzz.withTeleports` (`fuzz --teleports true`): the plain case plus 1–5 position packets with
+random bits (biased towards the delta bits) and deltas up to ±20, and entity-motion packets in the
+same tick (either order) or the neighbouring ticks. Replayed by `golden_26_1.rs`
+(`teleports_26_1`); cached `fuzz-teleports` seeds 51 and 52 (204k ticks) also at 0 diffs.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.
