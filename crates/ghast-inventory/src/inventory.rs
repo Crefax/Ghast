@@ -285,6 +285,7 @@ pub enum Outgoing {
 
 /// A 26.1 click as sent: what vanilla `MultiPlayerGameMode.handleContainerInput` writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ContainerClick {
     /// Container id (0 = player inventory).
     pub window_id: i32,

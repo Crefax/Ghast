@@ -78,6 +78,7 @@ impl EnchantmentId {
 
 /// One enchantment of a stack.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Enchantment {
     /// Which.
     pub id: EnchantmentId,

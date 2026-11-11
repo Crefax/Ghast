@@ -120,6 +120,7 @@ impl<const B: u32, const W: usize, const P: usize> Packed<B, W, P> {
 /// A chunk section of the modern worlds (see the module docs). Raw states are global palette
 /// ids, already validated by the decoder.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum Section {
     /// Every block has this state (an all-air section is `Uniform(0)`).
     Uniform(u16),

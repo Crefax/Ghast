@@ -26,6 +26,7 @@ pub enum Version {
 /// [`crate::Inventory::new`] for a [`Version`] whose crate feature (`v1_8`, `v1_12`, `v1_16_5`,
 /// `v26_1`) is off in this build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct VersionNotEnabled(pub Version);
 
 impl std::fmt::Display for VersionNotEnabled {

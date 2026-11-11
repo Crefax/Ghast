@@ -1,6 +1,6 @@
 //! API misuse returns errors instead of panicking (builds with any feature set).
 
-use ghast_inventory::{ContainerClick, Inventory, Outgoing, Version, VersionNotEnabled};
+use ghast_inventory::{Inventory, Version};
 
 #[test]
 fn new_fails_for_a_version_built_without_its_feature() {
@@ -17,26 +17,28 @@ fn new_fails_for_a_version_built_without_its_feature() {
             }
             Err(e) => {
                 assert!(!v.is_enabled());
-                assert_eq!(e, VersionNotEnabled(v));
+                assert_eq!(e.0, v);
             }
         }
     }
 }
 
 #[test]
+#[cfg(feature = "v26_1")]
 #[allow(unused_variables)]
 fn a_26_1_click_has_no_legacy_packet() {
-    let c = Outgoing::ContainerClick(ContainerClick {
-        window_id: 0,
-        state_id: 1,
-        slot: 36,
-        button: 0,
-        mode: 0,
-        changed: Vec::new(),
-        carried: None,
-        predicted: false,
-        action: 1,
-    });
+    use ghast_inventory::{Click, Outgoing};
+    let mut inv = Inventory::new(Version::V26_1).unwrap();
+    inv.tick();
+    assert_eq!(inv.open_inventory(), Ok(None));
+    inv.tick();
+    let c = inv
+        .click(Click::Pickup {
+            slot: 36,
+            right: false,
+        })
+        .unwrap();
+    assert!(matches!(c, Outgoing::ContainerClick(_)));
     #[cfg(feature = "v1_8")]
     assert!(c.to_v1_8().is_none());
     #[cfg(feature = "v1_12")]

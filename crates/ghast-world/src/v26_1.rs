@@ -180,6 +180,7 @@ impl DimensionType {
 
 /// What the world keeps from the configuration-phase registries.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Registries {
     /// `minecraft:dimension_type` in registry order (`None` = an entry without data that is
     /// not a vanilla dimension type, or invalid data).
@@ -190,6 +191,7 @@ pub struct Registries {
 
 /// The dimension the player is in.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Dimension {
     /// World name from `login` / `respawn` (e.g. `minecraft:overworld`).
     pub name: String,
@@ -210,6 +212,7 @@ pub struct Column {
 
 /// Biomes of one section as sent (registry ids of `minecraft:worldgen/biome`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum BiomeSection {
     /// One biome for the whole section.
     Single(u16),
