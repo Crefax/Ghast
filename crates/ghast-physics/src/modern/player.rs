@@ -635,6 +635,51 @@ pub fn on_climbable<R: Rules, W: BlockView<State = R::State>>(p: &PlayerState, w
     climbable::<R, W>(&world, p)
 }
 
+/// The entity-dependent part of a block collision query (vanilla `EntityCollisionContext`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CollisionContext {
+    /// `entity.getY()` (scaffolding / powder snow "above" tests).
+    pub feet_y: f64,
+    /// `isDescending()` (sneaking players).
+    pub descending: bool,
+    /// `fallDistance` (over 2.5, powder snow collides as its falling shape).
+    pub fall_distance: f64,
+    /// `PowderSnowBlock.canEntityWalkOnPowderSnow` (leather boots, or a type in
+    /// `#powder_snow_walkable_mobs`), or a falling block.
+    pub walks_on_powder_snow: bool,
+}
+
+/// The block and world-border part of `Level.noCollision(entity, box)`: `true` when `bb`
+/// (`[min_x, min_y, min_z, max_x, max_y, max_z]`) overlaps no block collision shape (unloaded
+/// columns have none) and, for an entity at `pos` close to the border, not the border either.
+/// Collidable entities (boats, minecarts, shulkers) are not checked. For
+/// `ghast_entity::v26_1::Tracker::tick_with`.
+#[must_use]
+pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
+    w: &W,
+    level: &LevelInfo,
+    pos: [f64; 3],
+    bb: [f64; 6],
+    ctx: &CollisionContext,
+) -> bool {
+    let border = Border::new(&w.world_border());
+    let world = World::<R, W> {
+        w,
+        border: &border,
+        min_y: level.min_y,
+        max_y: level.min_y + level.height - 1,
+        _r: core::marker::PhantomData,
+    };
+    let c = ShapeCtx {
+        feet_y: ctx.feet_y,
+        descending: ctx.descending,
+        fall_distance: ctx.fall_distance,
+        leather_boots: ctx.walks_on_powder_snow,
+    };
+    let q = crate::math::Aabb::new(bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]);
+    world.no_collision(pos, &q, &c)
+}
+
 fn climbable<R: Rules, W: BlockView<State = R::State>>(
     w: &World<'_, R, W>,
     p: &PlayerState,

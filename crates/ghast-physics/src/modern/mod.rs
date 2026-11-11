@@ -35,8 +35,8 @@ pub use attr::{
     java_string_hash, sprinting_id,
 };
 pub use player::{
-    AttributeKind, Attributes, ClientInput, ClientOptions, Dimensions, Effects, LevelInfo,
-    PlayerState, Pose, SentState, UseEffects, on_climbable, tick,
+    AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
+    LevelInfo, PlayerState, Pose, SentState, UseEffects, no_block_collision, on_climbable, tick,
 };
 pub use rules::{Rules, V26_1};
 
