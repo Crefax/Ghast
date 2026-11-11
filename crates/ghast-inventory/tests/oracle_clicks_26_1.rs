@@ -115,6 +115,9 @@ struct Stats {
     first_diffs: Vec<String>,
 }
 
+/// The `menu` of a mount screen case (`horse_screen_open`).
+const MOUNT: i32 = 1000;
+
 fn load(inv: &mut Inventory, c: &Value, window: i32, menu: i32, stage: &Value) {
     let carried = stack(&stage["carried"]);
     let state = stage["state_id"].as_i64().unwrap() as i32;
@@ -231,10 +234,21 @@ fn case(c: &Value, reg: &HashRegistries, recipes: &Bytes, sync: &[(bool, Bytes)]
     let window = c["window"].as_i64().unwrap() as i32;
     let name = if menu < 0 {
         "player".to_string()
+    } else if menu == MOUNT {
+        format!("mount:{}", c["mount"]["type"].as_str().unwrap())
     } else {
         MENUS[menu as usize].to_string()
     };
-    if menu >= 0 {
+    if menu == MOUNT {
+        let m = &c["mount"];
+        inv.on_mount_screen_26_1(
+            window,
+            m["columns"].as_i64().unwrap() as i32,
+            m["type_id"].as_i64().unwrap() as i32,
+            m["saddle"].as_bool().unwrap(),
+            m["body"].as_bool().unwrap(),
+        );
+    } else if menu >= 0 {
         inv.on_open_screen_26_1(window, menu, "".into());
     } else {
         inv.tick();

@@ -54,6 +54,9 @@ pub(crate) enum Kind {
     Smithing,
     Cartography,
     Stonecutter,
+    /// A horse / donkey / llama / camel / nautilus screen (`horse_screen_open`) with this many
+    /// inventory columns: saddle, body armor, `columns * 3` chest slots, the player's 36.
+    Mount(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -105,6 +108,7 @@ impl Kind {
             Kind::Enchanting | Kind::Stonecutter => 2,
             Kind::Loom | Kind::Smithing => 4,
             Kind::Shulker => 27,
+            Kind::Mount(c) => 2 + usize::from(c) * 3,
         }
     }
 
@@ -158,6 +162,8 @@ impl Kind {
         match (self, k) {
             (Kind::Crafting | Kind::Crafter, _) => None,
             (Kind::Beacon, _) => Some(1),
+            // the mount's equipment slot containers store as is
+            (Kind::Mount(_), 0 | 1) => None,
             (Kind::Anvil | Kind::Grindstone | Kind::Cartography, 2) => None,
             (Kind::Smithing, 3) | (Kind::Stonecutter, 1) => None,
             _ => Some(99),
@@ -207,6 +213,9 @@ enum Ty {
     MapResult,
     TradeIn,
     TradeResult,
+    /// Mount saddle / body armor (`ArmorSlot` over the entity's equipment).
+    MountSaddle,
+    MountBody,
 }
 
 fn ty(kind: Kind, i: usize) -> Ty {
@@ -305,6 +314,11 @@ fn ty(kind: Kind, i: usize) -> Ty {
                 Ty::TradeResult
             }
         }
+        Kind::Mount(_) => match k {
+            0 => Ty::MountSaddle,
+            1 => Ty::MountBody,
+            _ => Ty::Plain,
+        },
     }
 }
 
@@ -393,6 +407,10 @@ pub(crate) struct Screen26 {
     pub offers: Vec<Offer>,
     pub trade_hint: i32,
     pub trade_active: Option<usize>,
+    /// Mount: entity type registry id and `canUseSlot(SADDLE)` / `canUseSlot(BODY)`.
+    pub mount_type: i32,
+    pub mount_saddle: bool,
+    pub mount_body: bool,
 }
 
 /// One `ItemCost` of a villager offer.
@@ -909,13 +927,59 @@ impl Sim26<'_> {
             Ty::LoomPattern => loom_pattern(s),
             Ty::MapIn => has_component(s, c::MAP_ID, false),
             Ty::MapExtra => is_item(s, "paper") || is_item(s, "map") || is_item(s, "glass_pane"),
+            Ty::MountSaddle => self.mount_equips(s, Equip::Saddle, self.s.mount_saddle)?,
+            Ty::MountBody => self.mount_equips(s, Equip::Body, self.s.mount_body)?,
         })
+    }
+
+    /// `isEquippableInSlot(stack, slot)` for the mount: the `equippable` slot, the slot usable
+    /// and the mount allowed by `allowed_entities`.
+    fn mount_equips(&self, s: &Stack, slot: Equip, usable: bool) -> R<bool> {
+        let (e, allowed) = match v::patched(s, c::EQUIPPABLE) {
+            Some(Some(b)) => equip_allowed(&b).ok_or(Unpredictable)?,
+            Some(None) => return Ok(false),
+            None => {
+                let Some(d) = v::defaults(s.id) else {
+                    return Ok(false);
+                };
+                let allowed = if d.allowed.is_empty() {
+                    None
+                } else {
+                    Some(
+                        crate::data26::holders_from_names(d.allowed, |n| {
+                            let n = n.strip_prefix("minecraft:").unwrap_or(n);
+                            v::ENTITY_TYPES
+                                .iter()
+                                .position(|x| *x == n)
+                                .map(|i| i as i32)
+                        })
+                        .ok_or(Unpredictable)?,
+                    )
+                };
+                (d.equip, allowed)
+            }
+        };
+        if e != slot || !usable {
+            return Ok(false);
+        }
+        match allowed {
+            None => Ok(true),
+            Some(h) => self
+                .d
+                .contains(Reg::EntityType, &h, self.s.mount_type)
+                .ok_or(Unpredictable),
+        }
     }
 
     /// `Slot.getMaxStackSize()`.
     fn slot_max(&self, i: usize) -> i32 {
         match self.ty(i) {
-            Ty::Armor(_) | Ty::Potion | Ty::EnchantItem | Ty::Payment => 1,
+            Ty::Armor(_)
+            | Ty::Potion
+            | Ty::EnchantItem
+            | Ty::Payment
+            | Ty::MountSaddle
+            | Ty::MountBody => 1,
             _ => 99,
         }
     }
@@ -931,7 +995,7 @@ impl Sim26<'_> {
     /// `Slot.mayPickup`.
     fn may_pickup(&self, i: usize) -> R<bool> {
         Ok(match self.ty(i) {
-            Ty::Armor(_) => match self.get(i) {
+            Ty::Armor(_) | Ty::MountSaddle | Ty::MountBody => match self.get(i) {
                 Some(s) if !self.w.creative => !bound(s, self.w.binding_curse)?,
                 _ => true,
             },
@@ -2702,6 +2766,37 @@ impl Sim26<'_> {
                 }
             }
             Kind::Lectern => return Ok(None),
+            Kind::Mount(cols) => {
+                let pcs = 2 + usize::from(cols) * 3;
+                let len = self.len();
+                let moved = if i < pcs {
+                    self.move_to(i, pcs, len, true)?
+                } else if self.may_place(1, &clicked)? && self.get(1).is_none() {
+                    self.move_to(i, 1, 2, false)?
+                } else if self.may_place(0, &clicked)? && self.get(0).is_none() {
+                    self.move_to(i, 0, 1, false)?
+                } else if cols == 0 || !self.move_to(i, 2, pcs, false)? {
+                    let (pce, phe) = (pcs + 27, pcs + 36);
+                    if (pce..phe).contains(&i) {
+                        let _ = self.move_to(i, pcs, pce, false)?;
+                    } else if (pcs..pce).contains(&i) {
+                        let _ = self.move_to(i, pce, phe, false)?;
+                    }
+                    return Ok(None);
+                } else {
+                    true
+                };
+                if !moved {
+                    return Ok(None);
+                }
+                // no unchanged-count check, no onTake
+                if self.m.at(src).is_none() {
+                    self.set(i, None)?;
+                } else {
+                    self.changed(i)?;
+                }
+                return Ok(Some(clicked));
+            }
         };
         if !ok {
             return Ok(None);
@@ -2748,6 +2843,49 @@ impl Sim26<'_> {
             None => Err(Unpredictable),
         }
     }
+}
+
+/// A patched `equippable`: its slot and `allowed_entities`.
+fn equip_allowed(b: &Bytes) -> Option<(Equip, Option<Holders>)> {
+    let mut r = Reader::new(b);
+    let slot = r.read_varint().ok()?;
+    if r.read_varint().ok()? == 0 {
+        r.read_string().ok()?;
+        if r.read_bool().ok()? {
+            r.read_f32().ok()?;
+        }
+    }
+    for _ in 0..2 {
+        if r.read_bool().ok()? {
+            r.read_string().ok()?;
+        }
+    }
+    let allowed = if r.read_bool().ok()? {
+        let n = r.read_varint().ok()?;
+        if n == 0 {
+            Some(Holders::Tag(r.read_string().ok()?.to_string()))
+        } else {
+            let mut ids = Vec::new();
+            for _ in 0..n - 1 {
+                ids.push(r.read_varint().ok()?);
+            }
+            Some(Holders::Ids(ids))
+        }
+    } else {
+        None
+    };
+    let e = match slot {
+        0 => Equip::MainHand,
+        1 => Equip::Feet,
+        2 => Equip::Legs,
+        3 => Equip::Chest,
+        4 => Equip::Head,
+        5 => Equip::Offhand,
+        6 => Equip::Body,
+        7 => Equip::Saddle,
+        _ => return None,
+    };
+    Some((e, allowed))
 }
 
 /// `ItemCost.test`: the item and the predicate's components.

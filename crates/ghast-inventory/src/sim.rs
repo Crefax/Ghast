@@ -233,6 +233,8 @@ impl Layout {
             WindowKind::Anvil | WindowKind::Grindstone | WindowKind::Cartography => k == 2,
             WindowKind::Smithing => k == 3,
             WindowKind::Stonecutter => k == 1,
+            // a mount's saddle / body slots are the entity's equipment (stored as is)
+            WindowKind::Horse { .. } => k < 2,
             _ => false,
         }
     }

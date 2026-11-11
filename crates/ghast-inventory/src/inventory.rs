@@ -133,6 +133,10 @@ fn same_slot(a: &Option<Stack>, b: &Option<Stack>) -> bool {
     }
 }
 
+/// The `Window::menu` of a 26.1 mount screen (`horse_screen_open`; not a `minecraft:menu` id).
+#[cfg(feature = "v26_1")]
+const MOUNT_MENU: i32 = 1000;
+
 /// 26.1: ticks without a correcting container packet after which a click counts as accepted
 /// (see [`Inventory::set_click_settle_ticks`]).
 pub const DEFAULT_CLICK_SETTLE_TICKS: u32 = 4;
@@ -1045,6 +1049,9 @@ impl Inventory {
         match &self.screen {
             ScreenState::Window(w) => match (crate::sim26::Kind::from_menu(w.menu), w.kind) {
                 (Some(k), _) => k,
+                (None, WindowKind::Horse { slots }) if w.menu == MOUNT_MENU => {
+                    crate::sim26::Kind::Mount(slots.saturating_sub(2) / 3)
+                }
                 (None, WindowKind::Chest { rows }) => crate::sim26::Kind::Chest(rows),
                 (None, _) => crate::sim26::Kind::Chest(0),
             },
@@ -1069,7 +1076,10 @@ impl Inventory {
         }
         if matches!(
             kind,
-            crate::sim26::Kind::Anvil | crate::sim26::Kind::Grindstone | crate::sim26::Kind::Loom
+            crate::sim26::Kind::Anvil
+                | crate::sim26::Kind::Grindstone
+                | crate::sim26::Kind::Loom
+                | crate::sim26::Kind::Mount(_)
         ) {
             self.d26.ensure(&self.reg26.enchantments);
         }
@@ -1180,6 +1190,42 @@ impl Inventory {
     #[cfg(feature = "v26_1")]
     pub fn on_registry_data_26_1(&mut self, body: bytes::Bytes) {
         self.d26.set_registry_raw(body);
+    }
+
+    /// 26.1 `horse_screen_open` (`ClientboundMountScreenOpenPacket`): the mount's inventory
+    /// screen. The client builds it from the entity, so the caller passes what the screen reads
+    /// off it: the entity type (`minecraft:entity_type` registry id), the packet's inventory
+    /// columns and `canUseSlot(SADDLE)` / `canUseSlot(BODY)` (horses, donkeys, mules, camels:
+    /// saddle when alive, adult and tamed, body always; llamas: both always; nautili: both when
+    /// alive, adult and tame).
+    #[cfg(feature = "v26_1")]
+    pub fn on_mount_screen_26_1(
+        &mut self,
+        window_id: i32,
+        columns: i32,
+        entity_type: i32,
+        can_saddle: bool,
+        can_body: bool,
+    ) {
+        let cols = u8::try_from(columns.clamp(0, 50)).unwrap_or(0);
+        self.on_open_window(
+            window_id,
+            Some(WindowKind::Horse {
+                slots: 2 + cols * 3,
+            }),
+            "".into(),
+        );
+        if let ScreenState::Window(w) = &mut self.screen
+            && w.id == window_id
+        {
+            w.menu = MOUNT_MENU;
+        }
+        self.s26[1] = crate::sim26::Screen26 {
+            mount_type: entity_type,
+            mount_saddle: can_saddle,
+            mount_body: can_body,
+            ..Default::default()
+        };
     }
 
     /// 26.1 `merchant_offers`: the open villager screen's offers.

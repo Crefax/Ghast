@@ -51,6 +51,10 @@ required-features = ["v1_8", "v1_12", "v1_16_5"]
 name = "gen_items_26_1"
 
 [[example]]
+name = "gen_enchantments_26_1"
+required-features = ["v26_1"]
+
+[[example]]
 name = "live_clicks_26_1"
 required-features = ["v26_1"]
 

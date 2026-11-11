@@ -121,7 +121,7 @@ final class ClickDump {
         "iron_axe", "bow", "fishing_rod", "shears", "leather_helmet", "iron_chestplate", "diamond_leggings", "golden_boots",
         "turtle_helmet", "elytra", "carved_pumpkin", "player_head", "shield", "totem_of_undying", "saddle",
         "diamond_horse_armor", "white_carpet", "wolf_armor", "shulker_box", "red_shulker_box", "bundle", "red_bundle",
-        "beehive", "chest", "warped_fungus_on_a_stick", "golden_apple", "cake",
+        "beehive", "chest", "warped_fungus_on_a_stick", "golden_apple", "cake", "iron_nautilus_armor", "leather_horse_armor",
     };
     static final String[] ARMOR = {"leather_helmet", "iron_chestplate", "diamond_leggings", "golden_boots", "elytra", "carved_pumpkin",
         "turtle_helmet", "player_head"};
@@ -495,7 +495,7 @@ final class ClickDump {
         call(AbstractContainerMenu.class, w0, "resetQuickCraft", new Class<?>[0]);
         resetDropThrottle(player);
         GameType gm = r.chance(0.15) ? GameType.CREATIVE : GameType.SURVIVAL;
-        int menuId = r.chance(0.2) ? -1 : r.nextInt(menus().size());
+        int menuId = r.chance(0.2) ? -1 : r.chance(0.06) ? MOUNT : r.nextInt(menus().size());
         if (gm == GameType.CREATIVE && menuId == -1) {
             // window 0 in creative is the creative inventory screen (set_creative_mode_slot, not container_click)
             menuId = r.nextInt(menus().size());
@@ -533,7 +533,7 @@ final class ClickDump {
         int containerId = 0;
         if (menuId >= 0) {
             containerId = r.range(1, 100);
-            h = menus().get(menuId).create(containerId, player.getInventory());
+            h = menuId == MOUNT ? mount(r, run, containerId) : menus().get(menuId).create(containerId, player.getInventory());
             player.containerMenu = h;
             Reflect.set(net.minecraft.client.Minecraft.class, Harness.client, "screen", Reflect.allocate(ContainerScreen.class));
             List<ItemStack> items = new ArrayList<>();
@@ -578,6 +578,9 @@ final class ClickDump {
                 .append(",\"selected\":").append(player.getInventory().getSelectedSlot());
         if (menuId == 19) {
             b.append(",\"offers\":\"").append(offersHex).append('"');
+        }
+        if (menuId == MOUNT) {
+            b.append(",\"mount\":").append(mountJson);
         }
         if (menuId == 7 || menuId == 8 || menuId == 18 || menuId == 24) {
             b.append(",\"data\":[");
@@ -646,6 +649,10 @@ final class ClickDump {
         b.append("]}");
         player.containerMenu = w0;
         Reflect.set(net.minecraft.client.Minecraft.class, Harness.client, "screen", null);
+        if (mountEntity != null) {
+            mountEntity.discard();
+            mountEntity = null;
+        }
         return b.toString();
     }
 
@@ -686,6 +693,11 @@ final class ClickDump {
             };
             case 19 -> new String[] {"emerald", "paper", "book"};
             case 17 -> new String[] {"book", "enchanted_book"};
+            case MOUNT -> switch (k) {
+                case 0 -> new String[] {"saddle", "saddle", "stick"};
+                case 1 -> new String[] {"diamond_horse_armor", "leather_horse_armor", "white_carpet", "red_carpet", "iron_nautilus_armor", "wolf_armor"};
+                default -> new String[] {"chest", "oak_log", "saddle", "white_carpet"};
+            };
             default -> null;
         };
     }
@@ -698,6 +710,60 @@ final class ClickDump {
     private static void resetDropThrottle(LocalPlayer player) {
         Object t = Reflect.get(LocalPlayer.class, player, "dropSpamThrottler");
         Reflect.setInt(net.minecraft.util.TickThrottler.class, t, "count", 0);
+    }
+
+    /** The "menu" of a mount screen case (horse_screen_open; not a minecraft:menu id). */
+    static final int MOUNT = 1000;
+    private static String mountJson;
+    private static net.minecraft.world.entity.Entity mountEntity;
+
+    /**
+     * A mount screen as {@code ClientPacketListener.handleMountScreenOpen} builds it for a
+     * {@code horse_screen_open}: a client entity of a random mount type in the level (tamed or
+     * not, baby or not, with or without a chest), its {@code HorseInventoryMenu} /
+     * {@code NautilusInventoryMenu} over a {@code SimpleContainer} of the packet's columns.
+     */
+    private static AbstractContainerMenu mount(Rng r, Harness.Run run, int containerId) {
+        var types = new net.minecraft.world.entity.EntityType<?>[] {net.minecraft.world.entity.EntityType.HORSE,
+            net.minecraft.world.entity.EntityType.DONKEY, net.minecraft.world.entity.EntityType.MULE,
+            net.minecraft.world.entity.EntityType.LLAMA, net.minecraft.world.entity.EntityType.TRADER_LLAMA,
+            net.minecraft.world.entity.EntityType.CAMEL, net.minecraft.world.entity.EntityType.SKELETON_HORSE,
+            net.minecraft.world.entity.EntityType.ZOMBIE_HORSE, net.minecraft.world.entity.EntityType.NAUTILUS,
+            net.minecraft.world.entity.EntityType.ZOMBIE_NAUTILUS};
+        var type = r.pick(types);
+        var e = (net.minecraft.world.entity.LivingEntity) type.create(run.level, net.minecraft.world.entity.EntitySpawnReason.LOAD);
+        e.setId(5000);
+        e.setPos(run.player.getX() + 1, run.player.getY(), run.player.getZ());
+        if (e instanceof net.minecraft.world.entity.AgeableMob a) {
+            a.setBaby(r.chance(0.2));
+        }
+        boolean tame = r.chance(0.75);
+        int columns = 0;
+        if (e instanceof net.minecraft.world.entity.animal.equine.AbstractHorse horse) {
+            horse.setTamed(tame);
+            if (e instanceof net.minecraft.world.entity.animal.equine.AbstractChestedHorse ch && r.chance(0.6)) {
+                ch.setChest(true);
+                if (e instanceof net.minecraft.world.entity.animal.equine.Llama) {
+                    call(net.minecraft.world.entity.animal.equine.Llama.class, e, "setStrength", new Class<?>[] {int.class}, r.range(1, 5));
+                }
+            }
+            columns = horse.getInventoryColumns();
+        } else if (e instanceof net.minecraft.world.entity.animal.nautilus.AbstractNautilus n) {
+            n.setTame(tame, false);
+            columns = n.getInventoryColumns();
+        }
+        run.level.addEntity(e);
+        mountEntity = e;
+        var container = new net.minecraft.world.SimpleContainer(net.minecraft.world.inventory.AbstractMountInventoryMenu.getInventorySize(columns));
+        AbstractContainerMenu menu = e instanceof net.minecraft.world.entity.animal.equine.AbstractHorse horse
+                ? new net.minecraft.world.inventory.HorseInventoryMenu(containerId, run.player.getInventory(), container, horse, columns)
+                : new net.minecraft.world.inventory.NautilusInventoryMenu(containerId, run.player.getInventory(), container,
+                        (net.minecraft.world.entity.animal.nautilus.AbstractNautilus) e, columns);
+        mountJson = new Json().beginObject().field("type", BuiltInRegistries.ENTITY_TYPE.getKey(type).toString())
+                .field("type_id", BuiltInRegistries.ENTITY_TYPE.getId(type)).field("columns", columns)
+                .field("saddle", e.canUseSlot(net.minecraft.world.entity.EquipmentSlot.SADDLE))
+                .field("body", e.canUseSlot(net.minecraft.world.entity.EquipmentSlot.BODY)).endObject().toString();
+        return menu;
     }
 
     static final int ACTION_SELECT_TRADE = 100;

@@ -136,6 +136,8 @@ pub struct ItemDefaults {
     pub(crate) patterns: &'static str,
     /// `dye` color id (255 when absent).
     pub(crate) dye: u8,
+    /// `equippable.allowed_entities` (`#tag` or entity type names; empty when absent).
+    pub(crate) allowed: &'static str,
 }
 
 /// Default components of item `id`.

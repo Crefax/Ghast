@@ -215,11 +215,20 @@ fn main() {
         let dye = c["minecraft:dye"].as_str().map_or(255, |d| {
             DYES.iter().position(|x| *x == d).expect("dye") as u8
         });
+        let allowed = match &c["minecraft:equippable"]["allowed_entities"] {
+            Value::String(t) => t.clone(),
+            Value::Array(a) => a
+                .iter()
+                .map(|x| x.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join(","),
+            _ => String::new(),
+        };
         let blocks = c.get("minecraft:blocks_attacks").is_some();
         let kinetic = c.get("minecraft:kinetic_weapon").is_some();
         let _ = writeln!(
             out,
-            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable: {repairable:?}, patterns: {patterns:?}, dye: {dye} }},",
+            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable: {repairable:?}, patterns: {patterns:?}, dye: {dye}, allowed: {allowed:?} }},",
             use_speed.to_bits()
         );
     }
