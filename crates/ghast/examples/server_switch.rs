@@ -67,7 +67,13 @@ impl Switch {
         let p = ctx.pose().pos;
         // The lowest block below the player that the world holds (the dimension's floor).
         let (bx, bz) = (p.x.floor() as i32, p.z.floor() as i32);
-        let floor = (-512..0).find(|&y| ctx.world().raw_block(bx, y, bz).is_some_and(|b| b != 0));
+        // Below the world the lookup gives a constant (void) state: the floor is the first
+        // height whose state differs from it.
+        let void = ctx.world().raw_block(bx, -10_000, bz);
+        let floor = (-512..0).find(|&y| {
+            let b = ctx.world().raw_block(bx, y, bz);
+            b.is_some() && b != void
+        });
         log::info!(
             "switch {}: on {} ({}), at {:.2} {:.2} {:.2}, rss {rss} KiB, lowest block y {}",
             self.joins - 1,
