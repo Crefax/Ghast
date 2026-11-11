@@ -784,6 +784,10 @@ pub struct Hands {
     /// The hand and item id of the use in progress (`getUsedItemHand`, `useItem`).
     use_hand_off: bool,
     use_item: u16,
+    /// Player ticks the current use has lasted (`getTicksUsingItem`).
+    use_ticks: u32,
+    /// This tick's key handling released a use: (off hand, item id, ticks it lasted).
+    released: Option<(bool, u16, u32)>,
     left_was: bool,
     right_was: bool,
     /// Blocks broken (finish sent).
@@ -823,9 +827,24 @@ impl Hands {
 
     /// `startUsingItem`: remembers the hand and the item.
     fn start_using(&mut self, off_hand: bool, id: u16) {
+        self.use_ticks = 0;
         self.using = true;
         self.use_hand_off = off_hand;
         self.use_item = id;
+    }
+
+    /// The use this tick's key handling released, if any: (off hand, item id, player ticks it
+    /// lasted).
+    #[must_use]
+    pub(crate) fn released_use(&self) -> Option<(bool, u16, u32)> {
+        self.released
+    }
+
+    /// One player tick of the use in progress (`updatingUsingItem`).
+    pub(crate) fn count_use_tick(&mut self) {
+        if self.using {
+            self.use_ticks = self.use_ticks.saturating_add(1);
+        }
     }
 
     /// The server finished our item use (entity status 9) or the held slot changed.
@@ -884,9 +903,12 @@ impl Hands {
             self.right_click_delay -= 1;
         }
         let t = io.target;
+        self.released = None;
         if self.using {
             if !right {
-                // stopUsingItem
+                // releaseUsingItem: the item's releaseUsing (a riptide launch) runs on the client,
+                // then the packet.
+                self.released = Some((self.use_hand_off, self.use_item, self.use_ticks));
                 io.out.push(Outbound::Dig {
                     status: DigStatus::ReleaseUseItem,
                     pos: BlockPos::new(0, 0, 0),

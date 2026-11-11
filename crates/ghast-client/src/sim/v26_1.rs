@@ -37,6 +37,13 @@ pub(crate) struct Sim26 {
     ext: modern::PlayerExt,
     /// What the client knows about entities that drive `ext` (own id, rockets).
     own: OwnEntity,
+    /// `Level.rainLevel` from the weather game events (1 START_RAINING, 2 STOP_RAINING,
+    /// 7 RAIN_LEVEL_CHANGE); the level rains above 0.2.
+    rain_level: f32,
+    /// A launch made before this tick's movement (riptide): the tick must see the ext state.
+    ext_pending: bool,
+    /// `minecraft:enchantment` registry names in order (stack enchantments are indices).
+    enchantments: Vec<String>,
 }
 
 /// The entity packets the modern movement reads without entity tracking: the player's own
@@ -96,6 +103,8 @@ impl Mount {
 /// Entity data indices (26.1, read from the real classes): `Entity.DATA_SHARED_FLAGS_ID`,
 /// `FireworkRocketEntity.DATA_ATTACHED_TO_TARGET`, `Avatar.DATA_PLAYER_MAIN_HAND`.
 const DATA_SHARED_FLAGS: u8 = 0;
+/// `LivingEntity.DATA_LIVING_ENTITY_FLAGS` (bit value 4: the riptide spin).
+const DATA_LIVING_FLAGS: u8 = 8;
 const DATA_ATTACHED_TO_TARGET: u8 = 9;
 const DATA_PLAYER_MAIN_HAND: u8 = 15;
 /// `minecraft:firework_rocket` in the 26.1 entity type registry.
@@ -126,6 +135,33 @@ impl std::fmt::Debug for Sim26 {
             .field("world", &self.world)
             .field("pos", &self.player.pos)
             .finish_non_exhaustive()
+    }
+}
+
+/// `EnchantmentHelper.getTridentSpinAttackStrength` of a trident. PLACEHOLDER until
+/// ghast-inventory reads the enchantment's `trident_spin_attack_strength` effect from the synced
+/// registry: the vanilla value 1.5 + 0.75 per riptide level above I.
+fn trident_strength(enchantments: &[String], s: &ghast_inventory::Stack) -> f32 {
+    use ghast_inventory::{EnchantmentId, Version};
+    if s.item_name(Version::V26_1) != Some("trident") {
+        return 0.0;
+    }
+    let level = s
+        .enchantments(Version::V26_1)
+        .iter()
+        .find(|e| match &e.id {
+            EnchantmentId::Registry(i) => usize::try_from(*i)
+                .ok()
+                .and_then(|i| enchantments.get(i))
+                .is_some_and(|n| n == "minecraft:riptide"),
+            EnchantmentId::Name(n) => n == "minecraft:riptide",
+            _ => false,
+        })
+        .map_or(0, |e| e.level);
+    if level <= 0 {
+        0.0
+    } else {
+        1.5 + 0.75 * (level - 1) as f32
     }
 }
 
@@ -167,6 +203,9 @@ impl Sim26 {
                     match (&e.value, e.key) {
                         (V::Byte(b), DATA_SHARED_FLAGS) if id == self.own.id => {
                             self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                        }
+                        (V::Byte(b), DATA_LIVING_FLAGS) if id == self.own.id => {
+                            self.ext.apply_living_flags(*b as u8);
                         }
                         (V::HumanoidArm(a), DATA_PLAYER_MAIN_HAND) if id == self.own.id => {
                             // HumanoidArm: LEFT 0, RIGHT 1.
@@ -276,6 +315,48 @@ impl Sim26 {
         }
     }
 
+    /// `isInWaterOrRain` with the level's rain (biome precipitation is not known: every biome
+    /// counts as rainy).
+    fn wet(&self) -> bool {
+        let p = &self.player;
+        let view = self
+            .world
+            .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        modern::in_water_or_rain::<V26_1, _>(p, &view, self.rain_level > 0.2)
+    }
+
+    /// `releaseUsingItem` → `TridentItem.releaseUsing` with riptide: the launch, before the tick,
+    /// along the tick's look (the mouse turned before the key handling).
+    fn release_use(
+        &mut self,
+        inv: &ghast_inventory::Inventory,
+        (off, id, ticks): (bool, u16, u32),
+        look: (f32, f32),
+    ) {
+        let stack = if off { inv.offhand() } else { inv.held() };
+        let Some(s) = stack.filter(|s| i64::from(s.id()) == i64::from(id)) else {
+            return;
+        };
+        let strength = trident_strength(&self.enchantments, s);
+        if ticks < 10 || strength <= 0.0 || ghast_inventory::v26_1::next_damage_will_break(s) {
+            return;
+        }
+        let (yaw, pitch) = (self.player.yaw, self.player.pitch);
+        self.player.yaw = look.0;
+        self.player.pitch = look.1;
+        if !self.wet() {
+            self.player.yaw = yaw;
+            self.player.pitch = pitch;
+            return;
+        }
+        let p = &mut self.player;
+        let view = self
+            .world
+            .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        modern::riptide::<V26_1, _>(p, &mut self.ext, &view, strength);
+        self.ext_pending = true;
+    }
+
     pub(crate) fn new() -> Self {
         Sim26 {
             world: ghast_world::v26_1::World::new(config()),
@@ -290,6 +371,9 @@ impl Sim26 {
             use_effects: None,
             ext: modern::PlayerExt::default(),
             own: OwnEntity::default(),
+            rain_level: 0.0,
+            ext_pending: false,
+            enchantments: Vec::new(),
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -544,6 +628,9 @@ impl Sim for Sim26 {
     fn registry_data(&mut self, raw: &RawPacket) {
         match raw.decode_as::<ghast_protocol::v26_1::configuration::clientbound::RegistryData>() {
             Ok(p) => {
+                if &*p.id == "minecraft:enchantment" {
+                    self.enchantments = p.entries.iter().map(|e| e.key.to_string()).collect();
+                }
                 self.world.apply_registry_data(&p);
             }
             Err(e) => log::warn!("bad registry_data packet: {e}"),
@@ -559,23 +646,25 @@ impl Sim for Sim26 {
         }
         // FireworkRocketItem.use: SUCCESS (the server spawns the boosting rocket) only while
         // gliding; otherwise PASS.
+        // TridentItem.use: with riptide only in water or rain (else FAIL: no use state).
+        if trident_strength(&self.enchantments, stack) > 0.0 {
+            held.usable = held.usable && self.wet();
+        }
         held.swing_on_use = self.ext.fall_flying
             && ghast_inventory::v26_1::defaults(stack.id())
                 .is_some_and(|d| d.name == "firework_rocket");
         held
     }
 
-    fn pre_tick(
-        &mut self,
-        inv: &ghast_inventory::Inventory,
-        using: Option<(bool, u16)>,
-        controls: Controls,
-    ) -> bool {
-        if controls.jump || self.ext.rocket_count() > 0 {
-            self.ext_inputs(inv, controls);
+    fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &super::PreTick) -> bool {
+        if t.controls.jump || self.ext.rocket_count() > 0 {
+            self.ext_inputs(inv, t.controls);
+        }
+        if let Some(released) = t.released {
+            self.release_use(inv, released, t.look);
         }
         self.use_effects = None;
-        let Some((off, id)) = using else {
+        let Some((off, id)) = t.using else {
             return true;
         };
         // updatingUsingItem: the used hand must still hold the same item (useItem follows it).
@@ -590,6 +679,17 @@ impl Sim for Sim26 {
 
     fn gliding(&self) -> bool {
         self.ext.fall_flying
+    }
+
+    fn weather(&mut self, reason: u8, value: f32) {
+        // ClientPacketListener.handleGameEvent: START_RAINING sets the rain level to 0 (the
+        // server then raises it with RAIN_LEVEL_CHANGE), STOP_RAINING to 1, RAIN_LEVEL_CHANGE
+        // to the value.
+        self.rain_level = match reason {
+            1 => 0.0,
+            2 => 1.0,
+            _ => value,
+        };
     }
 
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
@@ -977,7 +1077,14 @@ impl Sim for Sim26 {
         let view = self
             .world
             .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
-        if self.ext.fall_flying || self.ext.glider || self.ext.rocket_count() > 0 {
+        if self.ext.fall_flying
+            || self.ext.glider
+            || self.ext.rocket_count() > 0
+            || self.ext.spin_attack
+            || self.ext.auto_spin_ticks > 0
+            || self.ext_pending
+        {
+            self.ext_pending = false;
             modern::tick_ext::<V26_1, _>(p, &mut self.ext, &input, &view, &mut self.packets);
         } else {
             // Nothing of the extension state can act (no glide, no glider to start one, no

@@ -202,6 +202,19 @@ impl BlockUpdates {
     }
 }
 
+/// What [`Sim::pre_tick`] gets each tick.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PreTick {
+    /// The use in progress: (off hand, item id).
+    pub(crate) using: Option<(bool, u16)>,
+    /// This tick's key handling released a use: (off hand, item id, player ticks it lasted).
+    pub(crate) released: Option<(bool, u16, u32)>,
+    /// The tick's movement keys.
+    pub(crate) controls: Controls,
+    /// The tick's look (after the mouse turn): a riptide launches along it.
+    pub(crate) look: (f32, f32),
+}
+
 /// World + movement of one version.
 pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// Applies a world packet (chunks, block changes, join / respawn / view changes).
@@ -222,13 +235,8 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// item id). Returns `false` when that hand no longer holds the item (`updatingUsingItem`:
     /// the use stops). New mechanics read their per-tick inputs here too.
     #[inline(always)]
-    fn pre_tick(
-        &mut self,
-        inv: &ghast_inventory::Inventory,
-        using: Option<(bool, u16)>,
-        controls: Controls,
-    ) -> bool {
-        let _ = (inv, using, controls);
+    fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &PreTick) -> bool {
+        let _ = (inv, t);
         true
     }
     /// Test hook: puts the 26.1 player (and its extension state) in place, level loaded.
@@ -254,6 +262,10 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     #[inline(always)]
     fn gliding(&self) -> bool {
         false
+    }
+    /// A weather game event: 1 start raining, 2 stop raining, 7 rain level `value`.
+    fn weather(&mut self, reason: u8, value: f32) {
+        let _ = (reason, value);
     }
     /// A mount's screen facts (26.1): entity type id, `canUseSlot(SADDLE)`, `canUseSlot(BODY)`.
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
@@ -1146,16 +1158,14 @@ impl Sim for Box<dyn Sim> {
     fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
         (**self).item_use_facts(stack, held)
     }
-    fn pre_tick(
-        &mut self,
-        inv: &ghast_inventory::Inventory,
-        using: Option<(bool, u16)>,
-        controls: Controls,
-    ) -> bool {
-        (**self).pre_tick(inv, using, controls)
+    fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &PreTick) -> bool {
+        (**self).pre_tick(inv, t)
     }
     fn gliding(&self) -> bool {
         (**self).gliding()
+    }
+    fn weather(&mut self, reason: u8, value: f32) {
+        (**self).weather(reason, value);
     }
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
         (**self).mount_info(entity_id)

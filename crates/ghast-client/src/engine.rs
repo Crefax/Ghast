@@ -944,6 +944,8 @@ impl<S: Sim> Engine<S> {
                 }
             }
             Inbound::GameState { reason, value } => match reason {
+                // Weather (the 26.1 riptide reads the rain).
+                1 | 2 | 7 => sim.weather(reason, value),
                 3 => {
                     c.game_mode = GameMode::from_wire(value as u8);
                     sim.spectator(c.game_mode == GameMode::Spectator);
@@ -1374,12 +1376,19 @@ impl<S: Sim> Engine<S> {
         let first = c.out.len();
         // 26.1 per-tick inputs: updatingUsingItem, the glider (the other versions' sims do
         // nothing here).
-        if !self.sim.pre_tick(&c.inv, c.hands.use_item(), c.controls) {
+        let pre = crate::sim::PreTick {
+            using: c.hands.use_item(),
+            released: c.hands.released_use(),
+            controls: c.controls,
+            look: (c.pose.yaw, c.pose.pitch),
+        };
+        if !self.sim.pre_tick(&c.inv, &pre) {
             c.hands.stop_using();
         }
         let using = c.hands.using_item();
         self.sim
             .step(&mut c.pose, c.controls, using, c.entity_id, &mut c.out);
+        c.hands.count_use_tick();
         for o in &c.out[first..] {
             let Outbound::Move(m) = o else { continue };
             match *m {
@@ -3054,6 +3063,7 @@ mod tests {
                 );
                 e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
                 e.note_inbound(t0);
+                let sent_look = (e.core.sent.yaw, e.core.sent.pitch);
                 e.tick(&mut b, t0);
                 let out = std::mem::take(e.outbound());
                 // use_item carries the rotation of the tick's movement packet (the wire layer's
@@ -3066,6 +3076,7 @@ mod tests {
                 {
                     use crate::version::{ClientVersion, V26_1, Wire26_1};
                     let mut wire = Wire26_1::default();
+                    wire.set_last_look(sent_look.0, sent_look.1);
                     V26_1::prepare_play(&out, &mut wire);
                     let mut enc = ghast_protocol::FrameEncoder::new();
                     for o in out.iter().filter(|o| matches!(o, Outbound::UseItem { .. })) {
@@ -3102,11 +3113,519 @@ mod tests {
         assert!(uses >= 2, "{uses}");
     }
 
+    /// The oracle's riptide cases (`tests/golden/26.1/riptide.jsonl.gz`) through the whole engine:
+    /// the trident with its riptide enchantment in the main hand (the enchantment registry
+    /// synced as in configuration), the rain as weather game events, the server's living flags
+    /// as `set_entity_data`, the use key from the behaviour; every movement, `entity_action`,
+    /// `player_input`, `use_item` and `player_action` packet must equal the real client's.
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn riptide_matches_the_oracle_26_1() {
+        use crate::phys_golden::v261::{ext_of, player_of};
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        use ghast_protocol::v26_1::types::{
+            EntityMetadataEntry, EntityMetadataEntryType as T, EntityMetadataEntryValue as V,
+        };
+        use serde_json::Value;
+        use std::io::BufRead;
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/golden/26.1/riptide.jsonl.gz"
+        );
+        let f = std::fs::File::open(path).unwrap();
+        let lines: Vec<Value> = std::io::BufReader::new(flate2::read::GzDecoder::new(f))
+            .lines()
+            .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+            .collect();
+        let f64v =
+            |v: &Value| f64::from_bits(u64::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        let f32v =
+            |v: &Value| f32::from_bits(u32::from_str_radix(v[1].as_str().unwrap(), 16).unwrap());
+        // Packet body as the generated encoder writes it.
+        fn body<P: ghast_protocol::Packet + ghast_protocol::Encode>(p: &P) -> bytes::Bytes {
+            let mut enc = ghast_protocol::FrameEncoder::new();
+            enc.write_packet(p).unwrap();
+            let out = enc.out_mut().split().freeze();
+            let mut r = &out[..];
+            let skip_varint = |r: &mut &[u8]| {
+                while r[0] & 0x80 != 0 {
+                    *r = &r[1..];
+                }
+                *r = &r[1..];
+            };
+            skip_varint(&mut r); // length
+            skip_varint(&mut r); // id
+            bytes::Bytes::copy_from_slice(r)
+        }
+        let metadata = |id: i32, key: u8, ty: T, value: V| RawPacket {
+            id: cb::id::ENTITY_METADATA,
+            body: body(&cb::EntityMetadata {
+                entity_id: id,
+                metadata: vec![EntityMetadataEntry {
+                    key,
+                    r#type: ty,
+                    value,
+                }],
+            }),
+        };
+        let key_name = |o: &Outbound| -> Option<Value> {
+            Some(match *o {
+                Outbound::Move(MovePacket::Position {
+                    pos,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "position",
+                        [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()],
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::PositionLook {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "position_look",
+                        [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()],
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Look {
+                    yaw,
+                    pitch,
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!([
+                        "look",
+                        yaw.to_bits(),
+                        pitch.to_bits(),
+                        on_ground,
+                        horizontal_collision
+                    ])
+                }
+                Outbound::Move(MovePacket::Flying {
+                    on_ground,
+                    horizontal_collision,
+                }) => {
+                    serde_json::json!(["flying", on_ground, horizontal_collision])
+                }
+                Outbound::EntityAction { action, .. } => serde_json::json!([
+                    "entity_action",
+                    match action {
+                        EntityAction::StartSprinting => "start_sprinting",
+                        EntityAction::StopSprinting => "stop_sprinting",
+                        EntityAction::StartFallFlying => "start_fall_flying",
+                        _ => "other",
+                    }
+                ]),
+                Outbound::Dig {
+                    status: crate::common::DigStatus::ReleaseUseItem,
+                    ..
+                } => serde_json::json!(["block_dig", 5]),
+                Outbound::UseItem { off_hand, .. } => {
+                    serde_json::json!(["use_item", i32::from(off_hand)])
+                }
+                Outbound::Swing => serde_json::json!(["arm_animation", 0]),
+                Outbound::SwingOffHand => serde_json::json!(["arm_animation", 1]),
+                Outbound::PlayerInput(c) => serde_json::json!([
+                    "player_input",
+                    [
+                        c.forward, c.back, c.left, c.right, c.jump, c.sneak, c.sprint
+                    ]
+                ]),
+                _ => return None,
+            })
+        };
+        let golden = |p: &Value| -> Option<Value> {
+            let v3 = |v: &Value| {
+                [
+                    f64v(&v[0]).to_bits(),
+                    f64v(&v[1]).to_bits(),
+                    f64v(&v[2]).to_bits(),
+                ]
+            };
+            let (og, hc) = (&p["on_ground"], &p["horizontal_collision"]);
+            Some(match p["name"].as_str().unwrap() {
+                "position" => serde_json::json!(["position", v3(&p["pos"]), og, hc]),
+                "position_look" => serde_json::json!([
+                    "position_look",
+                    v3(&p["pos"]),
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "look" => serde_json::json!([
+                    "look",
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og,
+                    hc
+                ]),
+                "flying" => serde_json::json!(["flying", og, hc]),
+                "entity_action" => serde_json::json!(["entity_action", p["action_name"]]),
+                "use_item" => serde_json::json!(["use_item", p["hand"]]),
+                "block_dig" => serde_json::json!(["block_dig", p["status"]]),
+                "arm_animation" => serde_json::json!(["arm_animation", p["hand"]]),
+                "player_input" => {
+                    let i = &p["input"];
+                    serde_json::json!([
+                        "player_input",
+                        [
+                            i["forward"],
+                            i["backward"],
+                            i["left"],
+                            i["right"],
+                            i["jump"],
+                            i["shift"],
+                            i["sprint"]
+                        ]
+                    ])
+                }
+                _ => return None,
+            })
+        };
+        /// Holds the golden keys for the tick.
+        struct Keys(Controls, bool);
+        impl Behavior for Keys {
+            fn name(&self) -> &str {
+                "elytra-replay"
+            }
+            fn tick(&mut self, ctx: &mut TickContext<'_>) {
+                ctx.set_controls(self.0);
+                ctx.set_buttons(crate::Buttons {
+                    left: false,
+                    right: self.1,
+                });
+            }
+        }
+        let elytra = ghast_inventory::v26_1::item_id("elytra").unwrap();
+        // Hand-written cases with the events and setup this replay drives.
+        let wanted = [
+            "riptide_water",
+            "riptide_short_hold",
+            "riptide_dry",
+            "riptide_rain",
+            "riptide_rain_roof",
+            "riptide_wall",
+            "riptide_level1",
+            "riptide_level2",
+            "riptide_level3",
+            "riptide_spin_pose",
+            "riptide_then_glide",
+        ];
+        let (mut cases, mut ticks_done, mut packets, mut uses) = (0, 0, 0, 0);
+        let mut i = 0;
+        while i < lines.len() {
+            let sc = &lines[i];
+            let name = sc["name"].as_str().unwrap().to_owned();
+            let mut ticks = Vec::new();
+            i += 1;
+            while i < lines.len() && lines[i]["type"] == "tick" {
+                ticks.push(&lines[i]);
+                i += 1;
+            }
+            if !wanted.contains(&name.as_str()) {
+                continue;
+            }
+            cases += 1;
+            let setup = &sc["setup"];
+            let mut o = opts(GameVersion::V26_1);
+            o.inventory = ghast_inventory::Version::V26_1;
+            let ext = setup.get("ext");
+            if ext
+                .and_then(|x| x.get("left_handed"))
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                o.settings.main_hand = 0;
+            }
+            let mut e: Engine<Box<dyn Sim>> =
+                Engine::new(o, Box::new(crate::sim::Sim26::test_overworld()));
+            e.handle(Inbound::JoinGame(JoinGame {
+                entity_id: 7,
+                game_mode: GameMode::Survival,
+                dimension: "0".into(),
+                hardcore: false,
+                dimension_nbt: None,
+                respawn_screen: true,
+            }));
+            // Our entity id for the own-entity packets (the login packet's).
+            e.sim.test_set_own_id(7);
+            for r in sc["loaded_chunks"].as_array().unwrap() {
+                let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
+                for x in r[0]..=r[2] {
+                    for z in r[1]..=r[3] {
+                        load(&mut e, x, z);
+                    }
+                }
+            }
+            // The stone layer y 63 is the test chunks' own; the other fills as block changes.
+            for fill in sc["fills"].as_array().unwrap() {
+                let v: Vec<i64> = (0..7).map(|k| fill[k].as_i64().unwrap()).collect();
+                let state = sc["states"][v[6].to_string()].as_str().unwrap();
+                if state == "minecraft:stone" && v[1] == 63 && v[4] == 63 {
+                    continue;
+                }
+                let id = ghast_data::v26_1::BlockState::parse(
+                    state.strip_prefix("minecraft:").unwrap_or(state),
+                )
+                .or_else(|| ghast_data::v26_1::BlockState::parse(state))
+                .unwrap()
+                .id();
+                for x in v[0]..=v[3] {
+                    for y in v[1]..=v[4] {
+                        for z in v[2]..=v[5] {
+                            let pos =
+                                ((x & 0x3FF_FFFF) << 38) | ((z & 0x3FF_FFFF) << 12) | (y & 0xFFF);
+                            let mut b = pos.to_be_bytes().to_vec();
+                            let mut st = u32::from(id);
+                            loop {
+                                let byte = (st & 0x7f) as u8;
+                                st >>= 7;
+                                if st == 0 {
+                                    b.push(byte);
+                                    break;
+                                }
+                                b.push(byte | 0x80);
+                            }
+                            e.sim
+                                .world_packet(&RawPacket {
+                                    id: cb::id::BLOCK_CHANGE,
+                                    body: bytes::Bytes::from(b),
+                                })
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+            // The enchantment registry as configuration syncs it (names only: vanilla data).
+            {
+                use ghast_protocol::v26_1::configuration::clientbound as cc;
+                let reg = cc::RegistryData {
+                    id: "minecraft:enchantment".into(),
+                    entries: ["minecraft:riptide"]
+                        .iter()
+                        .map(|k| cc::RegistryDataEntries {
+                            key: (*k).into(),
+                            value: None,
+                        })
+                        .collect(),
+                };
+                let raw = RawPacket {
+                    id: cc::id::REGISTRY_DATA,
+                    body: body(&reg),
+                };
+                e.sim.registry_data(&raw);
+            }
+            if ext.and_then(|x| x.get("raining")).and_then(Value::as_bool) == Some(true) {
+                e.handle(Inbound::GameState {
+                    reason: 1,
+                    value: 0.0,
+                });
+                e.handle(Inbound::GameState {
+                    reason: 7,
+                    value: 1.0,
+                });
+            }
+            let mut living = 0u8;
+            if let Some(h) = ext.and_then(|x| x.get("hand")).and_then(Value::as_str) {
+                let id = ghast_inventory::v26_1::item_id(h).unwrap();
+                let mut stack = ghast_inventory::Stack::new(id, 1, 0);
+                if let Some(level) = ext.and_then(|x| x.get("riptide")).and_then(Value::as_u64) {
+                    // enchantments: one entry, registry index 0 (riptide), the level.
+                    let patch = ghast_protocol::types::slot::v775::ComponentPatch::from_parts(
+                        &[(
+                            ghast_inventory::v26_1::component::ENCHANTMENTS,
+                            &[1, 0, level as u8],
+                        )],
+                        &[],
+                    );
+                    stack = stack.with_data(ghast_inventory::ItemData::Components(Box::new(patch)));
+                }
+                e.inventory_mut().on_set_slot(0, 36, Some(stack));
+            }
+            if ext.and_then(|x| x.get("chest")).and_then(Value::as_str) == Some("elytra") {
+                assert!(ext.unwrap().get("chest_damage").is_none(), "{name}");
+                e.inventory_mut().on_set_slot(
+                    0,
+                    6,
+                    Some(ghast_inventory::Stack::new(elytra, 1, 0)),
+                );
+            }
+            e.handle(Inbound::Teleport(Teleport {
+                x: f64v(&setup["pos"][0]),
+                y: f64v(&setup["pos"][1]),
+                z: f64v(&setup["pos"][2]),
+                yaw: f32v(&setup["yaw"]),
+                pitch: f32v(&setup["pitch"]),
+                teleport_id: None,
+                ..Default::default()
+            }));
+            let p = player_of(sc, ticks[0]);
+            e.sim.test_set_modern(p, ext_of(sc, ticks[0]));
+            e.core.pose.pos = Vec3::new(p.pos[0], p.pos[1], p.pos[2]);
+            e.core.pose.yaw = p.yaw;
+            e.core.pose.pitch = p.pitch;
+            e.core.level_load_started = true;
+            e.core.client_loaded = true;
+            e.core.ready = true;
+            e.outbound().clear();
+            let t0 = Instant::now();
+            for (k, rec) in ticks.iter().enumerate().skip(1) {
+                let input = &rec["input"];
+                for ev in input["events"].as_array().into_iter().flatten() {
+                    match ev["type"].as_str().unwrap() {
+                        "shared_flags" => {
+                            let cur = e.sim.test_shared_flags();
+                            let set = ev["set"].as_u64().unwrap() as u8;
+                            let clear = ev["clear"].as_u64().unwrap() as u8;
+                            let next = (cur & !clear) | set;
+                            e.sim
+                                .world_packet(&metadata(7, 0, T::BYTE, V::Byte(next as i8)))
+                                .unwrap();
+                        }
+                        "firework" => {
+                            let id = ev["id"].as_i64().unwrap() as i32;
+                            let pos = e.core.pose.pos;
+                            let spawn = RawPacket {
+                                id: cb::id::SPAWN_ENTITY,
+                                body: body(&cb::SpawnEntity {
+                                    entity_id: id,
+                                    object_uuid: uuid::Uuid::from_u64_pair(0x6669_7265, id as u64),
+                                    r#type: 53,
+                                    x: pos.x,
+                                    y: pos.y,
+                                    z: pos.z,
+                                    velocity: ghast_protocol::types::LpVec3::ZERO,
+                                    pitch: 0,
+                                    yaw: 0,
+                                    head_pitch: 0,
+                                    object_data: 0,
+                                }),
+                            };
+                            e.sim.world_packet(&spawn).unwrap();
+                            e.sim
+                                .world_packet(&metadata(
+                                    id,
+                                    9,
+                                    T::OPTIONAL_UNSIGNED_INT,
+                                    V::OptionalUnsignedInt(8),
+                                ))
+                                .unwrap();
+                        }
+                        "remove_entity" => {
+                            let raw = RawPacket {
+                                id: cb::id::ENTITY_DESTROY,
+                                body: body(&cb::EntityDestroy {
+                                    entity_ids: vec![ev["id"].as_i64().unwrap() as i32],
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "living_flags" => {
+                            let set = ev["set"].as_u64().unwrap() as u8;
+                            let clear = ev["clear"].as_u64().unwrap() as u8;
+                            living = (living & !clear) | set;
+                            e.sim
+                                .world_packet(&metadata(7, 8, T::BYTE, V::Byte(living as i8)))
+                                .unwrap();
+                        }
+                        "equipment" => {
+                            assert_eq!(ev["slot"], "chest");
+                            let item = (ev["item"] == "elytra")
+                                .then(|| ghast_inventory::Stack::new(elytra, 1, 0));
+                            e.inventory_mut().on_set_slot(0, 6, item);
+                        }
+                        other => panic!("{name}: event {other}"),
+                    }
+                }
+                let keys = input["keys"].as_str().unwrap();
+                let has = |k: &str| keys.split(',').any(|n| n == k);
+                let mut b = Keys(
+                    Controls {
+                        forward: has("forward"),
+                        back: has("back"),
+                        left: has("left"),
+                        right: has("right"),
+                        jump: has("jump"),
+                        sneak: has("sneak"),
+                        sprint: has("sprint"),
+                    },
+                    has("use"),
+                );
+                e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
+                e.note_inbound(t0);
+                let sent_look = (e.core.sent.yaw, e.core.sent.pitch);
+                e.tick(&mut b, t0);
+                let out = std::mem::take(e.outbound());
+                // use_item carries the rotation of the tick's movement packet (the wire layer's
+                // prepare_play), the rotation the real client sends.
+                if let Some(u) = rec["packets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == "use_item")
+                {
+                    use crate::version::{ClientVersion, V26_1, Wire26_1};
+                    let mut wire = Wire26_1::default();
+                    wire.set_last_look(sent_look.0, sent_look.1);
+                    V26_1::prepare_play(&out, &mut wire);
+                    let mut enc = ghast_protocol::FrameEncoder::new();
+                    for o in out.iter().filter(|o| matches!(o, Outbound::UseItem { .. })) {
+                        V26_1::write_play(&mut enc, o, &mut wire).unwrap();
+                    }
+                    let frame = enc.out_mut().split().freeze();
+                    // ... then yaw and pitch (f32 big-endian) end the packet.
+                    let n = frame.len();
+                    let yaw = f32::from_be_bytes(frame[n - 8..n - 4].try_into().unwrap());
+                    let pitch = f32::from_be_bytes(frame[n - 4..].try_into().unwrap());
+                    assert_eq!(
+                        (yaw.to_bits(), pitch.to_bits()),
+                        (f32v(&u["yaw"]).to_bits(), f32v(&u["pitch"]).to_bits()),
+                        "{name} tick {k}: use_item rotation"
+                    );
+                    uses += 1;
+                }
+                let got: Vec<Value> = out.iter().filter_map(&key_name).collect();
+                let want: Vec<Value> = rec["packets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(&golden)
+                    .collect();
+                assert_eq!(got, want, "{name} tick {k}");
+                packets += want.len();
+                ticks_done += 1;
+            }
+        }
+        eprintln!(
+            "riptide through the engine: {cases} cases, {ticks_done} ticks, {packets} packets identical ({uses} use_item rotations)"
+        );
+        assert_eq!(cases, wanted.len());
+        assert!(uses >= 10, "{uses}");
+    }
+
     /// 26.1 item use from the stack's components (`item_use`): which items have a use state,
     /// the effects fed to the movement while using, the stop when the item changes.
     #[test]
     fn item_use_facts_26_1() {
         use ghast_inventory::{Inventory, Stack, Version};
+        let pre_tick = |using| crate::sim::PreTick {
+            using,
+            released: None,
+            controls: Controls::NONE,
+            look: (0.0, 0.0),
+        };
         let id = |n| ghast_inventory::v26_1::item_id(n).unwrap();
         let mut inv = Inventory::new(Version::V26_1).unwrap();
         let mut sim = crate::sim::Sim26::test_overworld();
@@ -3123,14 +3642,14 @@ mod tests {
         let shield = u16::try_from(id("shield")).unwrap();
         assert!(facts(&inv, &sim).usable && !facts(&inv, &sim).food);
         // While using: the stack's use_effects (vanilla default: no sprint, x0.2) ...
-        assert!(sim.pre_tick(&inv, Some((false, shield)), Controls::NONE));
+        assert!(sim.pre_tick(&inv, &pre_tick(Some((false, shield)))));
         assert_eq!(sim.use_effects_now(), Some((false, 0.2)));
-        assert!(sim.pre_tick(&inv, None, Controls::NONE));
+        assert!(sim.pre_tick(&inv, &pre_tick(None)));
         assert_eq!(sim.use_effects_now(), None);
         // ... and the use stops when the hand no longer holds that item.
         inv.on_set_slot(0, 36, Some(Stack::new(id("stick"), 1, 0)));
-        assert!(!sim.pre_tick(&inv, Some((false, shield)), Controls::NONE));
-        assert!(!sim.pre_tick(&inv, Some((true, shield)), Controls::NONE));
+        assert!(!sim.pre_tick(&inv, &pre_tick(Some((false, shield)))));
+        assert!(!sim.pre_tick(&inv, &pre_tick(Some((true, shield)))));
     }
 
     /// 26.1: the same through the 26.1 tracker and `pick::v26_1::pick_target` (entity range 3,

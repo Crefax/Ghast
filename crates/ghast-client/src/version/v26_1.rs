@@ -150,6 +150,12 @@ fn java_array_hash(b: &[u8]) -> i32 {
 }
 
 impl Wire26_1 {
+    /// Test hook: the look of the last movement packet.
+    #[cfg(test)]
+    pub(crate) fn set_last_look(&mut self, yaw: f32, pitch: f32) {
+        self.last_look = (yaw, pitch);
+    }
+
     /// The next prediction sequence number (`startPredicting`).
     fn next_sequence(&mut self) -> i32 {
         self.sequence = self.sequence.wrapping_add(1);
