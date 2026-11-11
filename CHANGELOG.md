@@ -6,6 +6,152 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.0 — unreleased
+
+Minecraft 26.1 (protocol 775) is the fourth supported version, built on a shared
+infrastructure that is meant to carry every later version: one generated definition per packet
+layout shared across versions, a version table, capability rows in the client instead of
+version checks, and one cargo feature per version in every crate. Block-breaking time and the
+crosshair pick now come from tables and code proven against each version's real client, which
+changes packet timing on several blocks (see *Behaviour changes*). The item model is shared:
+a stack carries legacy NBT or 26.1 data components behind one type.
+
+### Breaking changes / migration
+
+See *Migrating from 0.3* in the README for a short checklist; the full list:
+
+- **Cargo features per version** in `ghast`, `ghast-client`, `ghast-protocol`, `ghast-data`,
+  `ghast-world`, `ghast-physics`, `ghast-entity` and `ghast-inventory` (default: every
+  version). With `default-features = false`, enable the versions you use: `v1_8`, `v1_12_2`,
+  `v1_16_5`, `v26_1` on `ghast` / `ghast-client` / `ghast-protocol`; `v1_8`, `v1_12`,
+  `v1_16_5`, `v26_1` on the data / world / physics / entity / inventory crates. A
+  `GameVersion` whose feature is off returns `ClientError::VersionNotEnabled`.
+- **`display-names` feature** (default on) in `ghast-data`, `ghast-client` and `ghast`: the
+  English display-name fields of the data records exist only with it. Registry names are
+  always there. Builds with `default-features = false` that read display names must enable it.
+- **ghast-inventory `Stack`**: the fields are private. Read them with `id()`, `count()`,
+  `damage()`, `data()` / `nbt()`; build stacks with `Stack::new(id, count, damage)` and
+  `with_nbt`, `with_damage`, `with_count`, `with_data`. The NBT field became
+  `data: ItemData` (`ItemData::None`, `ItemData::Nbt(RawNbt)`, and with `v26_1`
+  `ItemData::Components(..)`); `stack.nbt()` still returns `Option<&RawNbt>`.
+  `stacks_equal` / `nbt_eq` are unchanged.
+- **`Inventory::new` returns `Result<Inventory, VersionNotEnabled>`** (it panicked for a
+  version whose feature is off): `Inventory::new(v)?` or `.expect(..)`.
+- **`Outgoing::to_v1_8` returns `Option`** like `to_v1_12_2` / `to_v1_16_5`; `None` for the new
+  26.1 `Outgoing::ContainerClick`.
+- **ghast-protocol packet types are type aliases** of shared generic definitions
+  (`v1_8::play::serverbound::WindowClick` = `defs::p47::play::serverbound::WindowClick<47>`).
+  Struct literals, patterns, `decode_as::<cb::X>()` and `write_packet(&sb::X { .. })` work
+  unchanged; docs and error messages show the `defs::…` path. A nested or named type that is
+  identical in two versions is now one Rust type, so a downstream trait implemented for both
+  would conflict.
+- **`ghast_protocol::Version`** has new required items (`INFO`, `ConfigurationClientbound`,
+  `ConfigurationServerbound`); `State::Configuration` is new, so `State::Play as u8` changed
+  (do not rely on such casts).
+- **ghast-client**: `MovePacket` gained `horizontal_collision` in every variant and is
+  `#[non_exhaustive]`; `Teleport` gained `relative` and `delta` (and `Default`);
+  `Inbound::Respawn` gained `keep`; new `Inbound` / `Outbound` variants and the new
+  `ConfigInbound`, `ConfigOutbound`, `KnownPack`, `AttributeUpdate`,
+  `LoginInbound::CookieRequest`; `ChatMessage` has a private field (build it with
+  `ChatMessage::from_json` / `from_text`); `BlockQuery` / `HeldItem` gained crate-private fields;
+  `WorldView` gained a defaulted `crosshair` method. The sealed `ClientVersion` trait changed
+  (not implementable outside the crate).
+- **`#[non_exhaustive]` on new public types**: `ghast_inventory::{ContainerClick, Enchantment,
+  VersionNotEnabled, ItemText, EnchantmentId}`, `ghast_world::v26_1::{Registries, Dimension,
+  BiomeSection, DimensionType}`, `ghast_world::paletted::Section`,
+  `ghast_client::version::Capabilities`, `ghast_protocol::versions::ProtocolVersion`.
+- New variants in already open enums: `GameVersion::V26_1`, `ghast_inventory::Version::V26_1`,
+  `ghast_protocol::State::Configuration`, `Outgoing::ContainerClick`.
+
+### Behaviour changes
+
+- **Block-breaking time is oracle-proven on every version.** The client computes per-tick
+  destroy progress with each version's own tables and code, taken from the vanilla jar and
+  replayed bit for bit against the real client (`ghast_data::{v1_8, v1_12, v1_16_5,
+  v26_1}::dig`); 0.3 used minecraft-data's hardness / tool tables, which are wrong for some
+  blocks. Changed break times (empty hand, diamond tools, shears):
+  - 1.8.9 (25 block / tool pairs): mushroom blocks are no longer instant (6 ticks); cactus with
+    an axe or sword is slower; snow layers (20 → 10 ticks) and lily pads (instant) are faster.
+  - 1.12.2 (187 pairs): were too fast in 0.3 — shulker boxes without a pickaxe (60 → 200
+    ticks), double stone slabs and non-oak fence gates (were instant), mushroom blocks, cactus
+    with an axe, leaves with an axe, hardened clay with a shovel, grass paths; the moving piston
+    is unbreakable. Were too slow — a pickaxe on purpur, end bricks, magma, red nether brick,
+    bone blocks, observers, shulker boxes and hardened clay; ladders and chorus with an axe;
+    leaves with shears; snow layers.
+  - 1.16.5 (233 pairs): were too fast in 0.3 — stone-type stairs and slabs, the blackstone
+    family, bells and stonecutters without a pickaxe (45 → 150 ticks by hand), wooden slabs and
+    pressure plates with a pickaxe, the conduit (12 → 90), leaves with an axe. Were too slow —
+    a pickaxe on shulker boxes, purpur, bone blocks, blue ice and blackstone (45–84 → 6–11
+    ticks); conduit power is now applied.
+  A break that used to finish too early could trip an anticheat's fast-break check; these now
+  match vanilla.
+- **Crosshair picks are oracle-proven on every version** (`ghast_physics::pick`): the block
+  and the face / cursor position sent with `use_item_on` / `block_dig` follow vanilla's ray
+  shapes. Changed against 0.3: 1.8.9 — the moving piston (`piston_extension`) is no longer
+  targetable; 1.12.2 — stairs (each part box), flowers (model offset), connected redstone wire
+  and the moving piston; 1.16.5 — every non-cube block now uses vanilla's outline and
+  interaction shapes instead of a union box (full cubes unchanged). `ghast_physics::pick` also
+  picks entities with vanilla's entity loop (all four versions, oracle-proven).
+- **Disconnect**: quitting half-closes the socket and drains it like vanilla, so servers log
+  "Disconnected" instead of "Connection reset by peer".
+
+### Minecraft 26.1 (protocol 775)
+
+26.1, 26.1.1 and 26.1.2 (same protocol, identical oracle records): `GameVersion::V26_1`,
+`--version 26.1.2`. Lab: Paper 26.1.2 + Grim 2.3.74, 0 flags (AFK, movement course, chat,
+dig + place, chest clicks).
+
+- **ghast-protocol**: `v26_1` (feature `v26_1`), all five states including configuration
+  (known packs, registry data, resource packs, cookies; reconfiguration not tested live),
+  257 packets; data
+  components in slots, read lazily (`types::slot::v775`: zero-copy component patch, structural
+  skip); `nbt::AnonNbt`, `types::{Holder, HolderSet, LpVec3, chunk}`; the version table
+  `ghast_protocol::versions`. Checked against a live server capture (every packet decodes
+  strictly and re-encodes identically) and Mojang's packet report.
+- **ghast-data**: `v26_1`: block states, voxel shapes, movement records, items, dig facts and
+  entity sizes from the 26.1 jar; property maps checked against Mojang's block report.
+- **ghast-world**: `v26_1::World`: dimension heights from the configuration registries,
+  power-of-two packed sections (about the wire size in memory), chunk batches with vanilla's
+  batch-size calculator, block entities, the world border; decoded worlds checked block by
+  block against a second decoder and against a live server.
+- **ghast-physics**: one modern physics core with the 26.1 rule set (attributes, powder snow,
+  supporting block, teleports with delta movement), 0 diffs against the 26.1 oracle.
+- **ghast-inventory**: windows and clicks with hashed stacks (vanilla `HashedStack`), every
+  component kind a client can receive hashed like the real client (4000 oracle stacks
+  byte-identical; a live session of 129 stacks drew no correction); click results by settle
+  ticks / corrections (26.1 has no confirm); item accessors over Mojang's item defaults.
+- **ghast-client**: 26.1 sessions end to end (configuration, chunk batch acks, player input,
+  tick end, block sequences), the oracle-verified pick with vanilla's eye lerp and interaction
+  range attributes.
+- Not yet on 26.1: entities, path finding, the viewer, signed chat, online mode (untested).
+
+### Shared infrastructure
+
+- **ghast-protocol codegen** emits each packet layout once and shares it between versions with
+  the same layout (−20 % generated code before 26.1); a JSON-pointer patch layer corrects
+  minecraft-data where it disagrees with vanilla (each patch asserts the value it replaces, so
+  a stale patch fails the build).
+- **ghast-client** reads a capability row per version (`GameVersion::caps()`) instead of
+  comparing versions; engine cost per tick unchanged.
+- **Item model** (`ghast_inventory::ItemData`): one `Stack` for NBT and components; accessors
+  (`item_name`, `max_stack_size`, `max_damage`, `damage_value`, `unbreakable`, `custom_name`,
+  `lore`, `enchantments`, `potion`, …) answer per version.
+
+### Performance
+
+- 1.8 / 1.12 `window_items` compares each slot before converting it (−17 % instructions on a
+  90-slot shop window), and the 1.8 crafting-grid result is memoised per grid (a player-window
+  `window_items` 142k → 9k instructions).
+- The client no longer links decoders and encoders of packets it never handles (−5 % binary).
+- `afk` example, stripped, release profile: 5.3 MB with every version; 1.9 MB with 1.8.9 only,
+  1.9 MB 1.12.2, 2.6 MB 1.16.5, 3.3 MB 26.1.
+
+### Verification (at release time)
+
+- Cached oracle fuzz: 16.9 M ticks, 0 diffs (1.8.9 4.16 M, 1.12.2 4.16 M, 1.16.5 4.40 M,
+  26.1 4.20 M); crosshair: 400 000 cached rays (1.16.5, 26.1) and 240 000 cached picks (1.8.9,
+  1.12.2) bit-identical; click vectors for 1.8.9 / 1.12.2 / 1.16.5 with 0 diffs.
+
 ## 0.3.0 — 2026-11-07
 
 Minecraft 1.12.2 is the third supported version (the same bot runs on 1.8.9, 1.12.2 and
