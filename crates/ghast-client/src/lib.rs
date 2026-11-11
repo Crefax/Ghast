@@ -62,7 +62,13 @@
 mod client;
 pub mod common;
 mod engine;
-#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 mod engine_bench;
 mod error;
 pub mod hands;

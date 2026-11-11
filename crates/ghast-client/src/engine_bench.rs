@@ -18,13 +18,25 @@ use crate::sim::Sim;
 use crate::version::GameVersion;
 
 /// Walks a square, turns, sneaks now and then, holds the left button some of the time.
-struct Walker;
+/// `active` (GHAST_BENCH_ACTIVE=1, identity checks): looks down at the ground, digs with the
+/// left button, right-clicks with an empty hand and asks for the target every tick.
+struct Walker {
+    active: bool,
+}
 
 impl Behavior for Walker {
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
         let t = ctx.tick();
         let leg = (t / 40) % 4;
-        ctx.set_aim(leg as f32 * 90.0 + (t % 7) as f32, (t % 11) as f32);
+        let pitch = if self.active { 50.0 } else { 0.0 };
+        ctx.set_aim(leg as f32 * 90.0 + (t % 7) as f32, pitch + (t % 11) as f32);
+        if self.active {
+            std::hint::black_box((ctx.target(), ctx.target_entity()));
+            ctx.set_buttons(Buttons {
+                left: t % 50 < 30,
+                right: t % 50 >= 40,
+            });
+        }
         ctx.set_controls(Controls {
             forward: true,
             sprint: t % 80 < 40,
@@ -32,10 +44,12 @@ impl Behavior for Walker {
             jump: t.is_multiple_of(33),
             ..Controls::NONE
         });
-        ctx.set_buttons(Buttons {
-            left: t % 50 < 10,
-            right: false,
-        });
+        if !self.active {
+            ctx.set_buttons(Buttons {
+                left: t % 50 < 10,
+                right: false,
+            });
+        }
         for m in &ctx.events().chat {
             std::hint::black_box(m.position);
         }
@@ -55,6 +69,7 @@ fn opts(caps_version: GameVersion) -> CoreOptions {
         inventory: match caps_version {
             GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
             GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
+            GameVersion::V26_1 => ghast_inventory::Version::V26_1,
             _ => ghast_inventory::Version::V1_16_5,
         },
     }
@@ -66,6 +81,7 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         let raw = match version {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
+            GameVersion::V26_1 => crate::sim::test_chunks::v26_1(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),
         };
         e.sim.world_packet(&raw).unwrap();
@@ -94,6 +110,11 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         ..Default::default()
     };
     e.handle(Inbound::Teleport(home));
+    // 1.21.4+: the level's chunks are coming (game event 13).
+    e.handle(Inbound::GameState {
+        reason: 13,
+        value: 0.0,
+    });
     let chat = ChatMessage {
         rendered: None,
         json: ghast_protocol::types::ByteString::from_static(r#"{"text":"hello"}"#),
@@ -101,8 +122,13 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         sender: None,
     };
     let t0 = Instant::now();
-    let mut b = Walker;
+    let mut b = Walker {
+        active: std::env::var_os("GHAST_BENCH_ACTIVE").is_some(),
+    };
     let mut sent = 0u64;
+    // GHAST_BENCH_DIGEST=1: print a digest of every outbound packet (identity checks).
+    let digest = std::env::var_os("GHAST_BENCH_DIGEST").is_some();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
     for i in 0..ticks {
         let now = t0 + Duration::from_millis(50 * i);
         e.note_inbound(now);
@@ -126,7 +152,18 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         }
         e.tick(&mut b, now);
         sent += e.outbound().len() as u64;
+        if digest {
+            use std::hash::Hash;
+            for o in e.outbound().iter() {
+                format!("{o:?}").hash(&mut h);
+            }
+            i.hash(&mut h);
+        }
         e.outbound().clear();
+    }
+    if digest {
+        use std::hash::Hasher;
+        println!("{} digest {:016x}", version.name(), h.finish());
     }
     sent
 }
@@ -149,6 +186,13 @@ fn engine_bench() {
     }
     if want(GameVersion::V1_16_5) {
         total += run(GameVersion::V1_16_5, crate::sim::Sim16::new(), ticks);
+    }
+    if want(GameVersion::V26_1) {
+        total += run(
+            GameVersion::V26_1,
+            crate::sim::Sim26::test_overworld(),
+            ticks,
+        );
     }
     println!("engine_bench: {ticks} ticks, {total} packets");
 }

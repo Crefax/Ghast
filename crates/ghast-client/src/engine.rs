@@ -1140,6 +1140,7 @@ impl<S: Sim> Engine<S> {
                     core: c,
                     world: &self.sim,
                     held,
+                    crosshair: std::cell::OnceCell::new(),
                 };
                 if !started {
                     b.start(&mut ctx);
@@ -1182,20 +1183,27 @@ impl<S: Sim> Engine<S> {
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
             let held_id = c.inv.held().and_then(|s| u16::try_from(s.id()).ok());
+            let (left, right) = (c.buttons.left && !gui, c.buttons.right && !gui);
             // GameRenderer.updateTargetedEntity before the key handling: one oracle-proven
-            // pick for the block and the entity.
-            c.pick.fill(sim, c.opts.caps, eyes);
-            let crosshair = sim.crosshair_target(&PickQuery {
-                eyes,
-                rotation: (c.pose.yaw, c.pose.pitch),
-                look,
-                held: held_id,
-                now: true,
-                creative: c.game_mode == GameMode::Creative,
-                player_bb: pick_box(c.pose.pos),
-                entities: &c.pick.entities,
-            });
-            let (target, entity) = c.pick.split(crosshair, eyes);
+            // pick for the block and the entity. With both buttons up the hands never read it
+            // (no click, and the dig is reset whatever the target), so it is only computed
+            // when a button is down — here, at the vanilla pick point, from this state.
+            let (target, entity) = if left || right {
+                c.pick.fill(sim, c.opts.caps, eyes);
+                let crosshair = sim.crosshair_target(&PickQuery {
+                    eyes,
+                    rotation: (c.pose.yaw, c.pose.pitch),
+                    look,
+                    held: held_id,
+                    now: true,
+                    creative: c.game_mode == GameMode::Creative,
+                    player_bb: pick_box(c.pose.pos),
+                    entities: &c.pick.entities,
+                });
+                c.pick.split(crosshair, eyes)
+            } else {
+                (None, None)
+            };
             let in_water = blocks(
                 eyes.x.floor() as i32,
                 eyes.y.floor() as i32,
@@ -1228,7 +1236,6 @@ impl<S: Sim> Engine<S> {
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
             };
-            let (left, right) = (c.buttons.left && !gui, c.buttons.right && !gui);
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
             let _ = placed;
@@ -1570,6 +1577,9 @@ pub struct TickContext<'a> {
     core: &'a mut Core,
     world: &'a dyn Sim,
     held: Option<hands::HeldItem>,
+    /// The sent-pose crosshair, picked on the first ask: nothing a behaviour does during its
+    /// tick changes the sent pose, the game mode or the world.
+    crosshair: std::cell::OnceCell<(Option<BlockHit>, Option<hands::EntityHit>)>,
 }
 
 impl std::fmt::Debug for TickContext<'_> {
@@ -1836,6 +1846,10 @@ impl TickContext<'_> {
     /// The crosshair as the server judges it: vanilla's pick (block at the game mode's reach,
     /// then the entity ray) along the **sent** look from the sent eyes.
     fn sent_crosshair(&self) -> (Option<BlockHit>, Option<hands::EntityHit>) {
+        *self.crosshair.get_or_init(|| self.pick_sent())
+    }
+
+    fn pick_sent(&self) -> (Option<BlockHit>, Option<hands::EntityHit>) {
         let s = &self.core.sent;
         let v = self.core.opts.caps;
         let eye = if s.sneaking {
