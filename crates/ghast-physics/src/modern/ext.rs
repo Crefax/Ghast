@@ -45,7 +45,8 @@ pub struct PlayerExt {
     /// the main arm is left (client option), or rockets are only in the off hand of a right-handed
     /// player. Default: right.
     pub rocket_arm_left: bool,
-    rockets: [Option<Rocket>; MAX_ROCKETS],
+    rocket_count: u8,
+    rockets: [Rocket; MAX_ROCKETS],
 }
 
 /// Attached rockets [`PlayerExt`] keeps track of.
@@ -53,7 +54,7 @@ pub const MAX_ROCKETS: usize = 16;
 
 /// An attached firework rocket: its entity id and position (the chunk it ticks in; below the
 /// world it is discarded).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Rocket {
     id: i32,
     x: f64,
@@ -91,48 +92,49 @@ impl PlayerExt {
     /// no limit; the rocket is then ignored).
     pub fn attach_rocket(&mut self, id: i32, pos: [f64; 3]) -> bool {
         self.remove_rocket(id);
-        match self.rockets.iter_mut().find(|r| r.is_none()) {
-            Some(slot) => {
-                *slot = Some(Rocket {
-                    id,
-                    x: pos[0],
-                    y: pos[1],
-                    z: pos[2],
-                });
-                true
-            }
-            None => false,
+        let n = usize::from(self.rocket_count);
+        if n == MAX_ROCKETS {
+            return false;
         }
+        self.rockets[n] = Rocket {
+            id,
+            x: pos[0],
+            y: pos[1],
+            z: pos[2],
+        };
+        self.rocket_count += 1;
+        true
     }
 
     /// The entity `id` was removed (a no-op for an entity that is not an attached rocket).
     pub fn remove_rocket(&mut self, id: i32) {
         // Keep the order of the others: it is the client's tick order.
-        if let Some(i) = self
-            .rockets
-            .iter()
-            .position(|r| r.is_some_and(|r| r.id == id))
-        {
-            self.rockets.copy_within(i + 1.., i);
-            self.rockets[MAX_ROCKETS - 1] = None;
+        let n = usize::from(self.rocket_count);
+        if let Some(i) = self.rockets[..n].iter().position(|r| r.id == id) {
+            self.rockets.copy_within(i + 1..n, i);
+            self.rocket_count -= 1;
         }
     }
 
     /// Number of attached rockets.
     #[must_use]
     pub fn rocket_count(&self) -> usize {
-        self.rockets.iter().flatten().count()
+        usize::from(self.rocket_count)
     }
 
     /// Ticks the attached rockets after the player (`FireworkRocketEntity.tick` of each rocket in a
     /// loaded chunk): a rocket more than 64 blocks below the world is discarded (but finishes that
     /// tick); boost while gliding, then the rocket moves to the player's hand.
     pub(super) fn tick_rockets(&mut self, p: &mut PlayerState, loaded: impl Fn(i32, i32) -> bool) {
+        let count = usize::from(self.rocket_count);
+        if count == 0 {
+            return;
+        }
         let (yaw, pitch) = (p.yaw, p.pitch);
         let below = f64::from(p.level.min_y - 64);
         let mut discarded = [0i32; MAX_ROCKETS];
         let mut n = 0;
-        for r in self.rockets.iter_mut().flatten() {
+        for r in &mut self.rockets[..count] {
             let cx = m::floor(r.x) >> 4;
             let cz = m::floor(r.z) >> 4;
             if !loaded(cx, cz) {

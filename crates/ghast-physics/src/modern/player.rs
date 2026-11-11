@@ -742,8 +742,7 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     world: &W,
     out: &mut Packets,
 ) {
-    let mut x = PlayerExt::default();
-    tick_ext::<R, W>(p, &mut x, input, world, out);
+    tick_core::<R, W>(p, &mut Glide::default(), input, world, out);
 }
 
 /// [`tick`] with the extension state of the mechanics added after 0.4.0 (gliding and rockets, see
@@ -752,6 +751,30 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
 pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
     p: &mut PlayerState,
     x: &mut PlayerExt,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    let mut g = Glide {
+        fall_flying: x.fall_flying,
+        glider: x.glider,
+    };
+    tick_core::<R, W>(p, &mut g, input, world, out);
+    x.fall_flying = g.fall_flying;
+    x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
+}
+
+/// The part of [`PlayerExt`] the player's own tick reads and writes (kept small so a plain
+/// [`tick`] does not build the rocket list).
+#[derive(Clone, Copy, Default)]
+struct Glide {
+    fall_flying: bool,
+    glider: bool,
+}
+
+fn tick_core<R: Rules, W: BlockView<State = R::State>>(
+    p: &mut PlayerState,
+    x: &mut Glide,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -773,19 +796,22 @@ pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
     };
     let mut t = Ctx {
         p,
-        x,
+        x: Glide {
+            fall_flying: x.fall_flying,
+            glider: x.glider,
+        },
         w: &w,
         old_pos: V3::ZERO,
         moves: [None; 4],
         using_item: input.using_item,
     };
     t.tick(&input.keys, out);
-    x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
+    x.fall_flying = t.x.fall_flying;
 }
 
 struct Ctx<'a, 'b, R: Rules, W> {
     p: &'a mut PlayerState,
-    x: &'a mut PlayerExt,
+    x: Glide,
     w: &'a World<'b, R, W>,
     old_pos: V3,
     moves: [Option<Movement>; 4],
@@ -1023,12 +1049,15 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
                 }
             }
         }
+        // jump && !justToggled && !onClimbable && tryToStartFallFlying (the cheap glide conditions
+        // first: onClimbable reads the world and has no effect on movement state).
         if self.p.input.keys.jump
             && !just_toggled
             && !was_jumping
+            && self.can_start_fall_flying()
             && !self.on_climbable()
-            && self.try_to_start_fall_flying()
         {
+            self.x.fall_flying = true;
             out.push(Packet::StartFallFlying);
         }
         let p = &mut *self.p;
@@ -1056,24 +1085,24 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         }
     }
 
-    /// `Player.tryToStartFallFlying`.
-    fn try_to_start_fall_flying(&mut self) -> bool {
+    /// The condition of `Player.tryToStartFallFlying`: not gliding, `canGlide` (not flying, not on
+    /// the ground, not riding, no levitation, a usable glider) and not in water.
+    fn can_start_fall_flying(&self) -> bool {
         let p = &self.p;
-        // canGlide: not flying, not on the ground, not riding, no levitation, a usable glider.
-        let can_glide =
-            !p.abilities.flying && !p.on_ground && p.effects.levitation.is_none() && self.x.glider;
-        if !self.x.fall_flying && can_glide && !p.touching_water {
-            self.x.fall_flying = true;
-            true
-        } else {
-            false
-        }
+        self.x.glider
+            && !self.x.fall_flying
+            && !p.abilities.flying
+            && !p.on_ground
+            && p.effects.levitation.is_none()
+            && !p.touching_water
     }
 
     /// `isVisuallyCrawling()`: the swimming pose out of water, or (`LivingEntity`) the gliding pose
     /// kept after gliding stopped.
     fn visually_crawling(&self) -> bool {
-        self.x.visually_crawling(self.p)
+        let p = &self.p;
+        (p.pose == Pose::Swimming || !self.x.fall_flying && p.pose == Pose::FallFlying)
+            && !p.touching_water
     }
 
     fn sprinting_possible(&self, allow_shallow: bool) -> bool {
