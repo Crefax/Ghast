@@ -15,7 +15,9 @@ use bytes::Bytes;
 use ghast_protocol::codec::Reader;
 use ghast_protocol::nbt::AnonNbt;
 
-use super::{COMPONENT_NAMES, POTIONS, anon_hash, component as c, generated, ops};
+use ghast_protocol::types::slot::v775::ComponentPatch;
+
+use super::{COMPONENT_NAMES, POTIONS, anon_hash, component as c, generated, ops, typed_nbt_hash};
 
 /// Names of the registries a click hash needs: the configuration phase's `registry_data` keys
 /// in order (data-driven registries such as enchantments, damage types, entity variants).
@@ -71,6 +73,14 @@ enum Reg {
     SoundEvent,
     /// The villager type registry.
     VillagerType,
+    /// The mob effect registry.
+    MobEffect,
+    /// The entity type registry.
+    EntityType,
+    /// The block entity type registry.
+    BlockEntityType,
+    /// The block registry (from ghast-data).
+    Block,
     /// A data-driven registry the server sent in configuration.
     Data(&'static str),
 }
@@ -80,6 +90,10 @@ enum Reg {
 enum S {
     /// VarInt -> int.
     VarInt,
+    /// VarInt -> byte (`ExtraCodecs.UNSIGNED_BYTE`).
+    UByte,
+    /// Packed i64 (`BlockPos.STREAM_CODEC`) -> int stream `[x, y, z]`.
+    BlockPos,
     /// Big-endian i32 -> int.
     Int,
     /// f64 -> double.
@@ -104,6 +118,8 @@ enum S {
     Reg(Reg),
     /// `ByteBufCodecs.holder`: VarInt id + 1 -> identifier (0 = an inline value, not modelled).
     Holder(Reg),
+    /// `ByteBufCodecs.holder` whose inline (id 0) value has this schema (the direct codec).
+    HolderOr(Reg, &'static S),
     /// `ItemAttributeModifiers.Display` (`optionalFieldOf("display", Default)`): type 0 omitted,
     /// 1 `{type: "hidden"}`, 2 `{type: "override", value: text}`.
     AttrDisplay,
@@ -116,8 +132,22 @@ enum S {
     Map(&'static S, &'static S),
     /// Fields in wire order -> map of the present fields.
     Rec(&'static [Field]),
-    /// A value ghast does not model: hashing fails when one is present.
-    Never,
+    /// Another schema (for recursive rows).
+    Ref(&'static S),
+    /// `ItemStackTemplate`: item id, count, component patch -> `{id, count (unless 1),
+    /// components (unless empty)}`; the patch's values hash through their own rows.
+    Template,
+    /// `ItemContainerContents`: VarInt count + optional templates -> list of the present
+    /// `{slot, item}`.
+    Container,
+    /// `PotDecorations`: VarInt count + item ids (at most 4) -> four item names, empty sides as
+    /// `minecraft:brick`.
+    PotItems,
+    /// `TypedEntityData`: VarInt type id + compound -> the compound with `id` set to the type.
+    TypedNbt(Reg),
+    /// `ByteBufCodecs.registry(type).dispatch(..)` over a `byNameCodec().dispatch("type", ..)`:
+    /// VarInt type id -> the type's record with `type` added (`(name, record)` by id).
+    Dispatch(&'static [(&'static str, S)]),
 }
 
 /// A record field: name, schema, and how the codec treats it.
@@ -136,15 +166,17 @@ enum Def {
 }
 
 /// A decoded value (codec form).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 enum Value {
     Int(i32),
     Float(f32),
     Bool(bool),
     /// An empty list (the only list default the rows use).
     EmptyList,
-    /// A string default (enum names).
+    /// A string default (enum names, holder identifiers).
     Name(&'static str),
+    /// A structured default, given by its hash.
+    Of(fn() -> u32),
 }
 
 /// A decoded value ready to hash.
@@ -154,6 +186,8 @@ enum V {
     Omit,
     Double(f64),
     Int(i32),
+    Byte(i8),
+    IntList(Vec<i32>),
     Float(f32),
     Bool(bool),
     Str(String),
@@ -168,6 +202,8 @@ impl V {
             V::Omit => ops::empty_map(),
             V::Double(d) => ops::double(*d),
             V::Int(i) => ops::int(*i),
+            V::Byte(b) => ops::byte(*b),
+            V::IntList(l) => ops::int_list(l),
             V::Float(f) => ops::float(*f),
             V::Bool(b) => ops::boolean(*b),
             V::Str(s) => ops::string(s),
@@ -180,11 +216,13 @@ impl V {
     fn is(&self, d: &Value) -> bool {
         match (self, d) {
             (V::Int(a), Value::Int(b)) => a == b,
+            (V::Byte(a), Value::Int(b)) => i32::from(*a as u8) == *b,
             // Java Float.equals: bit equality
             (V::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
             (V::Bool(a), Value::Bool(b)) => a == b,
             (V::List(l), Value::EmptyList) => l.is_empty(),
             (V::Str(s), Value::Name(n)) => s == n,
+            (v, Value::Of(f)) => v.hash() == f(),
             _ => false,
         }
     }
@@ -226,6 +264,198 @@ const SLOT_GROUP: &[(i32, &str)] = &[
     (9, "body"),
     (10, "saddle"),
 ];
+const FIREWORK_SHAPE: &[(i32, &str)] = &[
+    (0, "small_ball"),
+    (1, "large_ball"),
+    (2, "star"),
+    (3, "creeper"),
+    (4, "burst"),
+];
+
+/// `FireworkExplosion.CODEC`.
+const EXPLOSION: S = S::Rec(&[
+    Field("shape", S::Enum(FIREWORK_SHAPE), Def::Required),
+    Field("colors", S::List(&S::Int), Def::Default(Value::EmptyList)),
+    Field(
+        "fade_colors",
+        S::List(&S::Int),
+        Def::Default(Value::EmptyList),
+    ),
+    Field("has_trail", S::Bool, Def::Default(Value::Bool(false))),
+    Field("has_twinkle", S::Bool, Def::Default(Value::Bool(false))),
+]);
+
+/// `MobEffectInstance.Details.MAP_CODEC` (recursive through `hidden_effect`).
+static EFFECT_DETAILS: S = S::Rec(&[
+    Field("amplifier", S::UByte, Def::Default(Value::Int(0))),
+    Field("duration", S::VarInt, Def::Default(Value::Int(0))),
+    Field("ambient", S::Bool, Def::Default(Value::Bool(false))),
+    Field("show_particles", S::Bool, Def::Default(Value::Bool(true))),
+    Field("show_icon", S::Bool, Def::Required),
+    Field("hidden_effect", S::Ref(&EFFECT_DETAILS), Def::Optional),
+]);
+
+/// `MobEffectInstance.CODEC`: the effect id and its details in one map.
+static EFFECT: S = S::Rec(&[
+    Field("id", S::Reg(Reg::MobEffect), Def::Required),
+    Field("amplifier", S::UByte, Def::Default(Value::Int(0))),
+    Field("duration", S::VarInt, Def::Default(Value::Int(0))),
+    Field("ambient", S::Bool, Def::Default(Value::Bool(false))),
+    Field("show_particles", S::Bool, Def::Default(Value::Bool(true))),
+    Field("show_icon", S::Bool, Def::Required),
+    Field("hidden_effect", S::Ref(&EFFECT_DETAILS), Def::Optional),
+]);
+
+/// `PotionContents.CODEC`.
+static POTION_CONTENTS: S = S::Rec(&[
+    Field("potion", S::Reg(Reg::Potion), Def::Optional),
+    Field("custom_color", S::Int, Def::Optional),
+    Field(
+        "custom_effects",
+        S::List(&EFFECT),
+        Def::Default(Value::EmptyList),
+    ),
+    Field("custom_name", S::Str, Def::Optional),
+]);
+
+/// `Filterable.codec(Codec.STRING)` (the full form is the one encoded).
+const FILTERABLE_STR: S = S::Rec(&[
+    Field("raw", S::Str, Def::Required),
+    Field("filtered", S::Str, Def::Optional),
+]);
+
+/// `Filterable.codec(ComponentSerialization.CODEC)`.
+const FILTERABLE_TEXT: S = S::Rec(&[
+    Field("raw", S::Text, Def::Required),
+    Field("filtered", S::Text, Def::Optional),
+]);
+
+const USE_ANIMATION: &[(i32, &str)] = &[
+    (0, "none"),
+    (1, "eat"),
+    (2, "drink"),
+    (3, "block"),
+    (4, "bow"),
+    (5, "trident"),
+    (6, "crossbow"),
+    (7, "spyglass"),
+    (8, "toot_horn"),
+    (9, "brush"),
+    (10, "bundle"),
+    (11, "spear"),
+];
+const EQUIPMENT_SLOT: &[(i32, &str)] = &[
+    (0, "mainhand"),
+    (1, "feet"),
+    (2, "legs"),
+    (3, "chest"),
+    (4, "head"),
+    (5, "offhand"),
+    (6, "body"),
+    (7, "saddle"),
+];
+
+/// `SoundEvent.CODEC`: a registry sound's id, or an inline `{sound_id, range}`.
+const SOUND: S = S::HolderOr(
+    Reg::SoundEvent,
+    &S::Rec(&[
+        Field("sound_id", S::Ident, Def::Required),
+        Field("range", S::Float, Def::Optional),
+    ]),
+);
+
+/// `ConsumeEffect.CODEC` (dispatched on the effect type).
+static CONSUME_EFFECT: S = S::Dispatch(&[
+    (
+        "minecraft:apply_effects",
+        S::Rec(&[
+            Field("effects", S::List(&EFFECT), Def::Required),
+            Field("probability", S::Float, Def::Default(Value::Float(1.0))),
+        ]),
+    ),
+    (
+        "minecraft:remove_effects",
+        S::Rec(&[Field(
+            "effects",
+            S::HolderSet(Reg::MobEffect),
+            Def::Required,
+        )]),
+    ),
+    ("minecraft:clear_all_effects", S::Rec(&[])),
+    (
+        "minecraft:teleport_randomly",
+        S::Rec(&[Field(
+            "diameter",
+            S::Float,
+            Def::Default(Value::Float(16.0)),
+        )]),
+    ),
+    (
+        "minecraft:play_sound",
+        S::Rec(&[Field("sound", SOUND, Def::Required)]),
+    ),
+]);
+
+/// `Consumable.CODEC`.
+static CONSUMABLE: S = S::Rec(&[
+    Field("consume_seconds", S::Float, Def::Default(Value::Float(1.6))),
+    Field(
+        "animation",
+        S::Enum(USE_ANIMATION),
+        Def::Default(Value::Name("eat")),
+    ),
+    Field(
+        "sound",
+        SOUND,
+        Def::Default(Value::Name("minecraft:entity.generic.eat")),
+    ),
+    Field(
+        "has_consume_particles",
+        S::Bool,
+        Def::Default(Value::Bool(true)),
+    ),
+    Field(
+        "on_consume_effects",
+        S::List(&CONSUME_EFFECT),
+        Def::Default(Value::EmptyList),
+    ),
+]);
+
+/// `DeathProtection.CODEC`.
+static DEATH_PROTECTION: S = S::Rec(&[Field(
+    "death_effects",
+    S::List(&CONSUME_EFFECT),
+    Def::Default(Value::EmptyList),
+)]);
+
+/// `KineticWeapon.Condition.CODEC`.
+const KINETIC_CONDITION: S = S::Rec(&[
+    Field("max_duration_ticks", S::VarInt, Def::Required),
+    Field("min_speed", S::Float, Def::Default(Value::Float(0.0))),
+    Field(
+        "min_relative_speed",
+        S::Float,
+        Def::Default(Value::Float(0.0)),
+    ),
+]);
+
+/// `BlocksAttacks` default `damage_reductions`: one `DamageReduction(90, empty, 0, 1)`.
+fn default_damage_reductions() -> u32 {
+    ops::list([ops::map(vec![
+        (ops::string("base"), ops::float(0.0)),
+        (ops::string("factor"), ops::float(1.0)),
+    ])])
+}
+
+/// `BlocksAttacks.ItemDamageFunction.DEFAULT` (1, 0, 1).
+fn default_item_damage() -> u32 {
+    ops::map(vec![
+        (ops::string("threshold"), ops::float(1.0)),
+        (ops::string("base"), ops::float(0.0)),
+        (ops::string("factor"), ops::float(1.0)),
+    ])
+}
+
 const RARITY: &[(i32, &str)] = &[(0, "common"), (1, "uncommon"), (2, "rare"), (3, "epic")];
 const SWING: &[(i32, &str)] = &[(0, "none"), (1, "whack"), (2, "stab")];
 const FOX: &[(i32, &str)] = &[(0, "red"), (1, "snow")];
@@ -407,12 +637,154 @@ fn schema(ty: i32) -> Option<S> {
             Field("slot", S::Enum(SLOT_GROUP), D(Value::Name("any"))),
             Field("display", S::AttrDisplay, R),
         ])),
-        c::POTION_CONTENTS => S::Rec(&[
-            Field("potion", S::Reg(Reg::Potion), O),
-            Field("custom_color", S::Int, O),
-            // non-empty custom effects make the row fail (MobEffectInstance is not modelled)
-            Field("custom_effects", S::List(&S::Never), D(Value::EmptyList)),
-            Field("custom_name", S::Str, O),
+        c::POTION_CONTENTS => S::Ref(&POTION_CONTENTS),
+        c::SUSPICIOUS_STEW_EFFECTS => S::List(&S::Rec(&[
+            Field("id", S::Reg(Reg::MobEffect), R),
+            Field("duration", S::VarInt, D(Value::Int(160))),
+        ])),
+        c::LODESTONE_TRACKER => S::Rec(&[
+            Field(
+                "target",
+                S::Rec(&[
+                    Field("dimension", S::Ident, R),
+                    Field("pos", S::BlockPos, R),
+                ]),
+                O,
+            ),
+            Field("tracked", S::Bool, D(Value::Bool(true))),
+        ]),
+        c::BLOCK_STATE => S::Map(&S::Str, &S::Str),
+        c::POT_DECORATIONS => S::PotItems,
+        c::TRIM => S::Rec(&[
+            Field(
+                "material",
+                S::Holder(Reg::Data("minecraft:trim_material")),
+                R,
+            ),
+            Field("pattern", S::Holder(Reg::Data("minecraft:trim_pattern")), R),
+        ]),
+        c::BANNER_PATTERNS => S::List(&S::Rec(&[
+            Field(
+                "pattern",
+                S::Holder(Reg::Data("minecraft:banner_pattern")),
+                R,
+            ),
+            Field("color", S::Enum(DYE), R),
+        ])),
+        c::FIREWORK_EXPLOSION => S::Ref(&EXPLOSION),
+        c::FIREWORKS => S::Rec(&[
+            Field("flight_duration", S::UByte, D(Value::Int(0))),
+            Field("explosions", S::List(&EXPLOSION), D(Value::EmptyList)),
+        ]),
+        c::CONTAINER => S::Container,
+        c::CONSUMABLE => S::Ref(&CONSUMABLE),
+        c::DEATH_PROTECTION => S::Ref(&DEATH_PROTECTION),
+        c::TOOL => S::Rec(&[
+            Field(
+                "rules",
+                S::List(&S::Rec(&[
+                    Field("blocks", S::HolderSet(Reg::Block), R),
+                    Field("speed", S::Float, O),
+                    Field("correct_for_drops", S::Bool, O),
+                ])),
+                R,
+            ),
+            Field("default_mining_speed", S::Float, D(Value::Float(1.0))),
+            Field("damage_per_block", S::VarInt, D(Value::Int(1))),
+            Field(
+                "can_destroy_blocks_in_creative",
+                S::Bool,
+                D(Value::Bool(true)),
+            ),
+        ]),
+        c::EQUIPPABLE => S::Rec(&[
+            Field("slot", S::Enum(EQUIPMENT_SLOT), R),
+            Field(
+                "equip_sound",
+                SOUND,
+                D(Value::Name("minecraft:item.armor.equip_generic")),
+            ),
+            Field("asset_id", S::Ident, O),
+            Field("camera_overlay", S::Ident, O),
+            Field("allowed_entities", S::HolderSet(Reg::EntityType), O),
+            Field("dispensable", S::Bool, D(Value::Bool(true))),
+            Field("swappable", S::Bool, D(Value::Bool(true))),
+            Field("damage_on_hurt", S::Bool, D(Value::Bool(true))),
+            Field("equip_on_interact", S::Bool, D(Value::Bool(false))),
+            Field("can_be_sheared", S::Bool, D(Value::Bool(false))),
+            Field(
+                "shearing_sound",
+                SOUND,
+                D(Value::Name("minecraft:item.shears.snip")),
+            ),
+        ]),
+        c::BLOCKS_ATTACKS => S::Rec(&[
+            Field("block_delay_seconds", S::Float, D(Value::Float(0.0))),
+            Field("disable_cooldown_scale", S::Float, D(Value::Float(1.0))),
+            Field(
+                "damage_reductions",
+                S::List(&S::Rec(&[
+                    Field("horizontal_blocking_angle", S::Float, D(Value::Float(90.0))),
+                    Field("type", S::HolderSet(Reg::Data("minecraft:damage_type")), O),
+                    Field("base", S::Float, R),
+                    Field("factor", S::Float, R),
+                ])),
+                D(Value::Of(default_damage_reductions)),
+            ),
+            Field(
+                "item_damage",
+                S::Rec(&[
+                    Field("threshold", S::Float, R),
+                    Field("base", S::Float, R),
+                    Field("factor", S::Float, R),
+                ]),
+                D(Value::Of(default_item_damage)),
+            ),
+            Field(
+                "bypassed_by",
+                S::HolderSet(Reg::Data("minecraft:damage_type")),
+                O,
+            ),
+            Field("block_sound", SOUND, O),
+            Field("disabled_sound", SOUND, O),
+        ]),
+        c::PIERCING_WEAPON => S::Rec(&[
+            Field("deals_knockback", S::Bool, D(Value::Bool(true))),
+            Field("dismounts", S::Bool, D(Value::Bool(false))),
+            Field("sound", SOUND, O),
+            Field("hit_sound", SOUND, O),
+        ]),
+        c::KINETIC_WEAPON => S::Rec(&[
+            Field("contact_cooldown_ticks", S::VarInt, D(Value::Int(10))),
+            Field("delay_ticks", S::VarInt, D(Value::Int(0))),
+            Field("dismount_conditions", KINETIC_CONDITION, O),
+            Field("knockback_conditions", KINETIC_CONDITION, O),
+            Field("damage_conditions", KINETIC_CONDITION, O),
+            Field("forward_movement", S::Float, D(Value::Float(0.0))),
+            Field("damage_multiplier", S::Float, D(Value::Float(1.0))),
+            Field("sound", SOUND, O),
+            Field("hit_sound", SOUND, O),
+        ]),
+        c::BUNDLE_CONTENTS | c::CHARGED_PROJECTILES => S::List(&S::Template),
+        c::USE_REMAINDER => S::Template,
+        c::ENTITY_DATA => S::TypedNbt(Reg::EntityType),
+        c::BLOCK_ENTITY_DATA => S::TypedNbt(Reg::BlockEntityType),
+        c::BEES => S::List(&S::Rec(&[
+            Field("entity_data", S::TypedNbt(Reg::EntityType), R),
+            Field("ticks_in_hive", S::VarInt, R),
+            Field("min_ticks_in_hive", S::VarInt, R),
+        ])),
+        c::WRITABLE_BOOK_CONTENT => S::Rec(&[Field(
+            "pages",
+            S::List(&FILTERABLE_STR),
+            D(Value::EmptyList),
+        )]),
+        c::WRITTEN_BOOK_CONTENT => S::Rec(&[
+            Field("title", S::Ref(&FILTERABLE_STR), R),
+            Field("author", S::Str, R),
+            Field("generation", S::VarInt, D(Value::Int(0))),
+            Field("pages", S::List(&FILTERABLE_TEXT), D(Value::EmptyList)),
+            Field("resolved", S::Bool, D(Value::Bool(false))),
         ]),
         _ => return None,
     })
@@ -427,6 +799,10 @@ fn name_of(reg: Reg, id: i32, regs: &HashRegistries) -> Option<&str> {
         Reg::Attribute => super::ATTRIBUTES.get(i).copied(),
         Reg::SoundEvent => super::SOUND_EVENTS.get(i).copied(),
         Reg::VillagerType => super::VILLAGER_TYPES.get(i).copied(),
+        Reg::MobEffect => generated::MOB_EFFECTS.get(i).copied(),
+        Reg::EntityType => generated::ENTITY_TYPES.get(i).copied(),
+        Reg::BlockEntityType => generated::BLOCK_ENTITY_TYPES.get(i).copied(),
+        Reg::Block => ghast_data::v26_1::Block::from_id(u16::try_from(i).ok()?).map(|b| b.name()),
         Reg::Data(r) => regs.names(r)?.get(i).map(String::as_str),
     }
 }
@@ -442,6 +818,67 @@ fn ident(reg: Reg, name: &str) -> String {
 fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
     Some(match *s {
         S::VarInt => V::Int(r.read_varint().ok()?),
+        S::UByte => V::Byte(r.read_varint().ok()? as i8),
+        S::BlockPos => {
+            let l = r.read_i64().ok()?;
+            V::IntList(vec![
+                (l >> 38) as i32,
+                ((l << 52) >> 52) as i32,
+                ((l << 26) >> 38) as i32,
+            ])
+        }
+        S::HolderOr(reg, inline) => {
+            let id = r.read_varint().ok()?;
+            if id == 0 {
+                read(inline, r, regs)?
+            } else {
+                V::Str(ident(reg, name_of(reg, id - 1, regs)?))
+            }
+        }
+        S::Ref(inner) => read(inner, r, regs)?,
+        S::Dispatch(types) => {
+            let id = r.read_varint().ok()?;
+            let (name, rec) = types.get(usize::try_from(id).ok()?)?;
+            let V::Map(mut m) = read(rec, r, regs)? else {
+                return None;
+            };
+            m.push((V::Str("type".into()), V::Str((*name).to_string())));
+            V::Map(m)
+        }
+        S::Template => template(r, regs)?,
+        S::Container => {
+            let n = r.read_varint().ok()?;
+            let mut v = Vec::new();
+            for i in 0..n.max(0) {
+                if r.read_bool().ok()? {
+                    v.push(V::Map(vec![
+                        (V::Str("slot".into()), V::Int(i)),
+                        (V::Str("item".into()), template(r, regs)?),
+                    ]));
+                }
+            }
+            V::List(v)
+        }
+        S::PotItems => {
+            let n = r.read_varint().ok()?;
+            if !(0..=4).contains(&n) {
+                return None;
+            }
+            let mut v = Vec::with_capacity(4);
+            for _ in 0..n {
+                let id = r.read_varint().ok()?;
+                v.push(V::Str(ident(Reg::Item, name_of(Reg::Item, id, regs)?)));
+            }
+            while v.len() < 4 {
+                v.push(V::Str("minecraft:brick".into()));
+            }
+            V::List(v)
+        }
+        S::TypedNbt(reg) => {
+            let id = r.read_varint().ok()?;
+            let name = ident(reg, name_of(reg, id, regs)?);
+            V::Hash(typed_nbt_hash(&AnonNbt::read(r).ok()?, &name)?)
+        }
         S::Int => V::Int(r.read_i32().ok()?),
         S::Double => V::Double(r.read_f64().ok()?),
         S::Holder(reg) => {
@@ -506,7 +943,6 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             }
             V::Map(v)
         }
-        S::Never => return None,
         S::Rec(fields) => {
             let mut out = Vec::new();
             for Field(name, fs, def) in fields {
@@ -532,6 +968,36 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             V::Map(out)
         }
     })
+}
+
+/// `ItemStackTemplate.STREAM_CODEC` read, `ItemStackTemplate.CODEC` (its map form) written.
+fn template(r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
+    let item = r.read_varint().ok()?;
+    let count = r.read_varint().ok()?;
+    let added = r.read_varint().ok()?;
+    let removed = r.read_varint().ok()?;
+    let patch = ComponentPatch::read(r, added, removed).ok()?;
+    let mut m = vec![(
+        V::Str("id".into()),
+        V::Str(ident(Reg::Item, name_of(Reg::Item, item, regs)?)),
+    )];
+    if count != 1 {
+        m.push((V::Str("count".into()), V::Int(count)));
+    }
+    let mut comps = Vec::new();
+    for (t, value) in patch.iter() {
+        let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+        let h = component_hash(t, &value, regs)?;
+        comps.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
+    }
+    for t in patch.removed() {
+        let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+        comps.push((V::Str(format!("!minecraft:{name}")), V::Map(Vec::new())));
+    }
+    if !comps.is_empty() {
+        m.push((V::Str("components".into()), V::Map(comps)));
+    }
+    Some(V::Map(m))
 }
 
 /// The `HashOps` hash of one component value as it appears on the wire (`None`: the type is

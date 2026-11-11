@@ -484,6 +484,16 @@ fn nbt_hash(t: &Tag, text: bool) -> u32 {
     }
 }
 
+/// `TypedEntityData.codec`: the compound without its `id`, then `id` = the type's name.
+fn typed_nbt_hash(n: &AnonNbt, type_name: &str) -> Option<u32> {
+    let Tag::Compound(mut c) = n.parse().ok()?? else {
+        return None;
+    };
+    c.0.retain(|(k, _)| k != "id");
+    c.0.push(("id".into(), Tag::String(type_name.into())));
+    Some(nbt_hash(&Tag::Compound(c), false))
+}
+
 fn anon_hash(n: &AnonNbt, text: bool) -> Option<u32> {
     if n.is_end() {
         return None;

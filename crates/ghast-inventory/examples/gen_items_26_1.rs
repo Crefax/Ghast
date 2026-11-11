@@ -44,6 +44,9 @@ fn main() {
         ("ATTRIBUTES", "minecraft:attribute"),
         ("SOUND_EVENTS", "minecraft:sound_event"),
         ("VILLAGER_TYPES", "minecraft:villager_type"),
+        ("MOB_EFFECTS", "minecraft:mob_effect"),
+        ("ENTITY_TYPES", "minecraft:entity_type"),
+        ("BLOCK_ENTITY_TYPES", "minecraft:block_entity_type"),
     ];
 
     let mut out = String::new();

@@ -18,6 +18,7 @@ use bytes::{Bytes, BytesMut};
 use ghast_inventory::v26_1::{HashRegistries, component, item_id};
 use ghast_inventory::{Click, Inventory, ItemData, Outgoing, Version};
 use ghast_protocol::codec::Reader;
+use ghast_protocol::defs::p775::types::HashedSlot;
 use ghast_protocol::v26_1::configuration::clientbound::ClientboundConfigurationPacket;
 use ghast_protocol::v26_1::play::clientbound::ClientboundPlayPacket;
 use ghast_protocol::v26_1::play::serverbound::{self as sb, ServerboundPlayPacket};
@@ -113,7 +114,31 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
                     ServerboundPlayPacket::CloseWindow(_) => inv.close().unwrap(),
                     other => panic!("{other:?}"),
                 };
-                let ours = inv.encode_v26_1(&out).unwrap();
+                let mut ours = inv.encode_v26_1(&out).unwrap();
+                // The capture holds the hashes ghast sent then: hash 0 for kinds it could not
+                // hash yet. Kinds hashed since (proven by the oracle vectors) differ only there.
+                if let (
+                    ServerboundPlayPacket::WindowClick(o),
+                    ServerboundPlayPacket::WindowClick(t),
+                ) = (&mut ours, &p)
+                {
+                    let mut pairs: Vec<(&mut Option<HashedSlot>, &Option<HashedSlot>)> = o
+                        .changed_slots
+                        .iter_mut()
+                        .zip(&t.changed_slots)
+                        .map(|(a, b)| (&mut a.item, &b.item))
+                        .collect();
+                    pairs.push((&mut o.cursor_item, &t.cursor_item));
+                    for (a, b) in pairs {
+                        if let (Some(a), Some(b)) = (a, b) {
+                            for (x, y) in a.components.iter_mut().zip(&b.components) {
+                                if y.hash == 0 && x.r#type == y.r#type {
+                                    x.hash = 0;
+                                }
+                            }
+                        }
+                    }
+                }
                 let mut a = BytesMut::new();
                 let mut b = BytesMut::new();
                 ours.encode_body(&mut a).unwrap();

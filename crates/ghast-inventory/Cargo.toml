@@ -20,7 +20,7 @@ v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 # 26.1: data components (lazy), hashed click stacks, item defaults from Mojang's reports.
-v26_1 = ["ghast-protocol/v26_1"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
 
 [dependencies]
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false }
