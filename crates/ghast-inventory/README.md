@@ -3,7 +3,7 @@
 Inventory and container windows for the ghast client library: the player inventory, cursor and
 open window as the vanilla client holds them, **vanilla's client-side click prediction** and the
 window confirm protocol, for **1.8.9** (protocol 47), **1.12.2** (protocol 340; the click rules
-hold for 1.12 – 1.12.2) and **1.16.5** (protocol 754). Pure and
+hold for 1.12 – 1.12.2), **1.16.5** (protocol 754) and **26.1** (protocol 775). Pure and
 sync: packets in, packets out; no I/O, no clock.
 
 ```rust
@@ -148,14 +148,41 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
   (`set_registries_26_1`). A component ghast cannot hash (an unsent registry, an inline holder
   other than a sound event, a block predicate with an `nbt` test) gets a hash the server
   corrects.
-- Prediction: the 1.16 rules with the 26.1 differences (99 container cap and component stack
-  sizes, `equippable` slots incl. patched ones, binding curse by enchantment registry id).
-  Bundles (where they override a click), a patched `equippable` with `allowed_entities` and
-  crafting results are sent unpredicted. Checked on a vanilla 26.1.2 server: 34 of 36 scripted clicks drew no correction,
-  the other two are bundle cases (`tests/v26_1.rs` replays that session byte for byte).
-- Not modelled / unproven for 26.1: drag (quick craft) clicks, creative clicks, crafting,
-  furnaces and the other special screens (their clicks are sent unpredicted), the crafter
-  screen, a click oracle (only the live server checked the rules above).
+- Prediction: vanilla 26.1's own click handling (`src/sim26.rs`: `AbstractContainerMenu.doClick`
+  with every click mode, each menu's slot rules and quick move, the client-side result updates)
+  for window 0 and all 25 menus a server opens with `open_screen`. A 26.1 click is never
+  refused: one ghast cannot predict is sent unpredicted ([`ContainerClick::predicted`]) and the
+  server's corrections bring the result. The packet lists the changed slots in the real
+  client's `Int2ObjectOpenHashMap` order; `ContainerClick::swings` is how many arm swings the
+  client sends first (every dropped stack swings).
+- Server data the rules read: the furnace / blast furnace / smoker inputs, smithing slots and
+  stonecutter inputs from `update_recipes` (`declare_recipes`), creative mode from `abilities`,
+  the experience level from `experience` (the anvil), container data (anvil cost, crafter
+  locks), all read by `apply_raw_v26_1`. Fuels, brewing ingredients and fuel, beacon payments,
+  loom dyes and patterns, crafting remainders and "fits inside a bundle / shulker box" are
+  item facts of the real client after configuration (`src/generated/menus_26_1.rs`, from the
+  click vectors).
+- Item use facts for the client engine: `v26_1::item_use(&stack)` (animation, duration,
+  `use_effects` speed multiplier and sprinting, consumable, food).
+
+| 26.1 | predicted (proven by the click vectors) | sent unpredicted |
+|---|---|---|
+| clicks | pickup, quick move, number keys, Q / ctrl+Q, double click, drags (split, one each, creative clone), creative middle click, clicks outside | — |
+| window 0, chests, dispenser / dropper, hopper, shulker box, lectern, crafter | everything (shulker boxes refused by shulker box slots; crafter: locked slots) | — |
+| crafting table, window 0 grid | everything; taking a result uses up the grid and leaves the items' remainders (the result itself is what the server sent) | — |
+| furnace, blast furnace, smoker | input / fuel rules, quick moves by the server's item sets, a bucket as fuel | — |
+| brewing stand, enchanting table, beacon | slot rules and quick moves | — |
+| smithing table, stonecutter, cartography table | slot rules; the client's own result updates (none: no client recipes / map data) | — |
+| grindstone | while its result is empty (no enchanted / damageable pair to merge) | clicks after which the client computes a result |
+| loom | while the banner or the dye slot is empty | clicks with both (pattern selection) |
+| anvil | clicks with an empty input slot | clicks the client recomputes the result for (enchantment data); taking the result |
+| villager trading | clicks that leave both payment slots empty | anything with a payment (offers) |
+| bundles | insert into / take out of a bundle (carried or in the slot), nested bundles, weights | a bundle whose contents do not read |
+| creative mode | clone, clone drags, armor with the binding curse comes off, overflow vanishes | window 0 itself (the creative inventory screen sends `set_creative_mode_slot`, not modelled) |
+
+Not covered: horse / llama / nautilus inventories (opened with `horse_screen_open`, not
+handled), the creative inventory screen, a server that changes tags or recipe item sets
+mid-session (the item facts are vanilla's), a selected bundle item (the bundle scroll wheel).
 
 ## Tests
 
@@ -196,6 +223,25 @@ cargo test -p ghast-inventory
   `clicks_craft_seed1` 15 262 clicks, 14 797 predicted, all byte-identical, 0 differences, 465
   refused (taking a stale result: the oracle emulates the server's result only once per case,
   so most grid changes leave a stale result there).
+- `tests/oracle_clicks_26_1.rs`: replays the 26.1 click vectors (oracle `clicks` with `MC=26.1`,
+  `oracle/src/mc_26_1/…/ClickDump.java`: the real client's `handleContainerInput` on all 25
+  menus and window 0, contents through real `container_set_content` packets, recipes through a
+  real `update_recipes`, survival and creative, every click mode incl. valid and broken drags).
+  For every click ghast predicts, the encoded `container_click` body must equal the client's
+  bytes, the client must have sent as many arm swings, and every slot, the carried stack and the
+  player inventory must equal the client's afterwards (compared by item, count and component
+  hashes, as the server compares them). **Committed `tests/golden/26.1/clicks_seed1.jsonl.gz`
+  (3000 cases): 23 904 clicks, 23 848 predicted, all byte-identical, 0 differences; 56 sent
+  unpredicted (anvil, loom, merchant). 30 000 cases (seed 2, 2026-11-12): 239 648 clicks,
+  239 108 predicted, all byte-identical, 0 differences; 540 unpredicted (anvil 254, merchant 203,
+  loom 79, grindstone 4).** Big runs: `MC=26.1 oracle/run.sh clicks --seed 2 --count 30000` then
+  `GHAST_CLICK_VECTORS_26_1=$PWD/oracle/cache/26.1/clicks/clicks-seed2-n30000.jsonl.gz cargo test --release -p ghast-inventory --test oracle_clicks_26_1 -- --nocapture`.
+- `tests/v26_1.rs` `menus_session_replays` (`fixtures/menus_26_1_2.bin.zz`): `examples/live_clicks_26_1.rs`
+  with `MENUS=1` on a vanilla 26.1.2 server (2026-11-12): drags, bundles, a crafting table
+  (remainders), a furnace, an anvil, a shulker box and creative clicks — 60 clicks, 59
+  predicted, none corrected by the server (every slot compared after each click); the anvil click
+  is sent unpredicted. The driver gives the items and places the blocks around the player
+  (`forceload add` first: right after a join `setblock` reports the position as not loaded).
 - `tests/robustness.rs`: proptest sequences of random packets (wild ids, counts -3..130,
   oversized/short `window_items`, random window types) and clicks never panic; 1.12 and 1.16.5 never
   store empty stacks; clicks that only move items (all but drops) conserve every item.

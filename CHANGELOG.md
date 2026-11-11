@@ -35,6 +35,27 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `server_switch`, `online_chat` (feature `microsoft`), option `--follow-transfers`.
 - CI runs the protocol differential tests against node-minecraft-protocol (`setup-node`,
   `npm ci`); `GHAST_REQUIRE_NODE=1` makes a missing harness fail instead of skip.
+- **26.1 click prediction for every menu**, proven against the real client (oracle `clicks`,
+  `tests/golden/26.1/clicks_seed1.jsonl.gz`: all 25 `open_screen` menus and window 0, survival
+  and creative, every click mode; 239 648 clicks of a 30 000-case run, all predicted ones
+  byte-identical): drags (`Click::QuickCraft` with `DragStage` / `DragKind`), creative
+  middle-click (`Click::Clone`), bundles, crafting results taken with their remainders,
+  furnace / smoker / blast furnace input and fuel rules (from the server's `update_recipes`
+  item sets), brewing stand, enchanting table, beacon, grindstone (when its result is empty),
+  smithing, stonecutter, loom (banner or dye slot empty), cartography table, crafter (locked
+  slots), lectern, hopper, dispenser, shulker box. The anvil, a loom with banner and dye and a
+  villager's trade result are computed by the client from data ghast does not model: those
+  clicks are sent unpredicted.
+- `ContainerClick::swings`: the arm swings the real client sends before a click that drops a
+  stack (send them first). `WindowKind::Crafter` (the crafter screen opens on 26.1).
+  `Window::menu_26_1`. `Inventory::{on_open_screen_26_1, on_recipes_26_1, set_creative_26_1,
+  set_experience_level_26_1}`; `apply_raw_v26_1` also reads `declare_recipes`, `abilities`
+  and `experience` (now in `PACKET_IDS_26_1`).
+- `v26_1::item_use(&Stack) -> Option<ItemUse>`: use animation and duration, `use_effects`
+  (speed multiplier, can sprint), `consumable`, `food` of a 26.1 stack (checked against the
+  real client's components in `hashed_stacks.jsonl.gz`).
+- Oracle dump `clicks` (26.1) and `examples/gen_menus_26_1.rs` (the menus' item facts from the
+  click vectors).
 
 ### Changed (behaviour)
 
@@ -45,6 +66,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `/teammsg` …) are sent as `chat_command_signed` like vanilla (without signatures when there is
   no chat session, e.g. offline mode); other commands stay `chat_command`.
 - A server transfer ends the session (`SessionEnd::Transferred`) instead of being ignored.
+- 26.1 clicks: the changed slots are written in the real client's map order and each hashed
+  stack's components in type id order (both are maps the server compares by content); bundle
+  clicks, crafting results and the other menus above are predicted instead of sent
+  unpredicted; a 26.1 smithing table has 4 slots (template, base, addition, result), not 3;
+  crafting grids, the crafter and result slots no longer cap stacks at 99 when the server
+  sets them.
 
 ## 0.4.0 — 2026-11-11
 

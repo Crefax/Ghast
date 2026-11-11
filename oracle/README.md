@@ -703,8 +703,8 @@ Run everything with `MC=26.1`, e.g. `MC=26.1 oracle/run.sh`, `MC=26.1 oracle/run
 Output: `tests/golden/26.1/` — `scenarios.jsonl.gz` (73 cases: the 61 of 1.16.5 plus 12 for 26.1
 mechanics), `fuzz_seed1.jsonl.gz` (100 × 60), `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
 `voxel_shapes.jsonl.gz`, `entity_sizes.jsonl.gz`. Commands: `golden`, `scenarios`, `fuzz` (plain and
-`--use-item true`), `replay`, `boxes`, `boxes-far`, `voxels`, `entity-sizes`, `list`, `selftest`, `compare`
-(no click vectors yet). `fuzz` takes `--palette edges` and `--extras true` (see "26.1 fuzz" below); the
+`--use-item true`), `replay`, `boxes`, `boxes-far`, `voxels`, `entity-sizes`, `list`, `selftest`, `compare`,
+`clicks` (see "Window clicks (26.1)"). `fuzz` takes `--palette edges` and `--extras true` (see "26.1 fuzz" below); the
 golden set adds `fuzz_edges_seed1.jsonl.gz` and `fuzz_extras_seed1.jsonl.gz` (100 × 60 each).
 
 Setup: **26.1 ships unobfuscated** — its version json has no `client_mappings` download and the classes
@@ -1306,3 +1306,60 @@ click path, screen handlers, inventories, item stacks and NBT. Faked: nothing be
 harness (the client screens are not opened; the handler is put into `openScreenHandler` /
 `currentScreenHandler` directly). `selftest` also reruns 500 click cases in reverse order on the
 same player (no state leaks between cases).
+
+## Window clicks (26.1): `clicks_seed1.jsonl.gz`
+
+`ClickDump` (`MC=26.1 oracle/run.sh clicks [--seed N] [--count N] [--out FILE] [--best true]`, in
+`golden` with 3000 cases; big runs go to `cache/26.1/clicks/`). The real click path of the 26.1
+client: `MultiPlayerGameMode.handleContainerInput` → the menu's `clicked` (`doClick` with every
+`ContainerInput`: `PICKUP`, `QUICK_MOVE`, `SWAP`, `CLONE`, `THROW`, `QUICK_CRAFT`, `PICKUP_ALL`)
+→ the slots whose stack changed and the carried stack hashed into the
+`ServerboundContainerClickPacket` it sends. Every packet the click makes the client send is
+recorded (a drop also sends `swing`).
+
+Real, per case: the menu, built as `MenuScreens.create` builds it (`MenuType.create(id,
+inventory)` for all 25 `minecraft:menu` types, or window 0's `InventoryMenu`); contents, carried
+stack and state id through a real `container_set_content` (window 0 and the menu); game mode
+changes as a server sends them (game event, player info, abilities: creative cases enable
+`CLONE` and clone drags, and lift the binding curse lock); the experience level
+(`set_experience`: the anvil's cost check), the held slot, container data (crafter slot locks,
+anvil cost, stonecutter / loom selection). Once per file the vanilla data pack's recipes are
+loaded the way a server loads them and synced through a real `ClientboundUpdateRecipesPacket`
+(its bytes are the first line: the furnace, smithing and stonecutter item sets come from it);
+the item sets and stonecutter entries are written sorted (item id, recipe id) because the
+server's own order depends on identity hash codes. Faked: `Minecraft.screen` is an allocated
+`InventoryScreen` / `ContainerScreen` (never initialised): the click code only asks whether a
+container screen is open. Window 0 in creative mode is the creative inventory screen in a real
+client (`set_creative_mode_slot` instead of `container_click`); those cases always open a menu.
+
+Stacks: random items chosen for their rules (stack sizes, armor and offhand, remainders,
+bundles with contents, shulker boxes, fuels, brewing ingredients, beacon payments, banners,
+dyes and patterns, maps, smithing templates), damage, over-stacked counts, one random component
+change in 15 % (custom name, `max_stack_size`, enchantments incl. the binding curse, repair cost,
+unbreakable, `equippable` incl. `allowed_entities`, custom data, damage, a removed default).
+Menus get contents that fit their slots most of the time. Gestures: a single click of each mode
+(buttons as the GUI sends them, slot -999 for outside), or a drag: start (-999), 1–6 slots, end
+(-999), of type split / one each / clone, sometimes broken (no start or end, a type change, an
+unrelated click in the middle).
+
+Lines: `{"type":"update_recipes","packet":hex}`; `{"type":"registry","name","entries"}` (every
+registry the client holds, ids in order); `{"type":"item","id","name","fuel",
+"brewing_ingredient","brewing_fuel","beacon_payment","loom_dye_tag","loom_pattern_tag","banner",
+"fits_container","has_dye","has_patterns","remainder"}` (the facts the slot rules read, after
+the configuration phase; `remainder` = `defaultCraftingReminder` of the item alone, stack hex);
+`{"type":"case","case","menu"` (registry id, -1 = window 0)`,"window"` (container id)`,
+"creative","xp","selected","data"`(crafter: 10 values, anvil / loom / stonecutter: 1)`` + state
+`,"clicks":[{"slot","button","mode","packets":[hex…]` + state `}]}`. State: `"w0"` (46 window 0
+slots), `"screen"` (the menu's slots or null), `"carried"`, `"inv"` (41 player inventory slots),
+`"state_id"`, `"drag"` (`quickcraftStatus`). Stack hex: `ItemStack.OPTIONAL_STREAM_CODEC`'s
+layout with the patch in component type id order and enchantment maps by registry id (the
+in-memory order depends on how the stack was built). Packet hex: a tag byte (0
+`container_click`, 1 `set_creative_mode_slot`, 2 any other packet followed by its type name),
+then the body: `container_click` exactly as `STREAM_CODEC` writes it (the changed-slot map in
+its own `Int2ObjectOpenHashMap` order) except that each `HashedStack`'s added components and
+removed types are in type id order (vanilla's `IdentityHashMap` / `HashSet` order is
+arbitrary; the server compares contents) — every hand-written packet is checked to decode to
+the client's own. `selftest` reruns 500 cases in reverse order on the same player; two JVM runs
+write identical files.
+
+Replayed by `crates/ghast-inventory/tests/oracle_clicks_26_1.rs`.
