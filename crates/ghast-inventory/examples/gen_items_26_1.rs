@@ -40,6 +40,11 @@ fn main() {
     let comps = registry(&reg, "minecraft:data_component_type");
     let menus = registry(&reg, "minecraft:menu");
     let potions = registry(&reg, "minecraft:potion");
+    let statics = [
+        ("ATTRIBUTES", "minecraft:attribute"),
+        ("SOUND_EVENTS", "minecraft:sound_event"),
+        ("VILLAGER_TYPES", "minecraft:villager_type"),
+    ];
 
     let mut out = String::new();
     out.push_str(
@@ -88,6 +93,19 @@ fn main() {
         let _ = writeln!(out, "    {:?},", strip(p));
     }
     out.push_str("];\n\n");
+
+    for (konst, name) in statics {
+        let names = registry(&reg, name);
+        let _ = writeln!(
+            out,
+            "/// `{name}` registry names by id.\npub static {konst}: [&str; {}] = [",
+            names.len()
+        );
+        for n in &names {
+            let _ = writeln!(out, "    {:?},", strip(n));
+        }
+        out.push_str("];\n\n");
+    }
 
     let _ = writeln!(
         out,

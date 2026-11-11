@@ -4,7 +4,7 @@
 //! cargo run --release -p ghast-inventory --example live_clicks_26_1 -- 127.0.0.1:25565 [name] [capture.bin.zz]
 //! ```
 //!
-//! With a capture path, the enchantment registry, the inventory packets of both directions
+//! With a capture path, the configuration registries, the inventory packets of both directions
 //! and nothing else are written there (record format of `ghast-protocol/examples/login_26_1.rs`)
 //! for `tests/v26_1.rs`.
 //!
@@ -123,7 +123,13 @@ impl Lab {
                     println!("    <- correction {:#04x}", raw.id);
                 }
             }
-            self.inv.apply_raw_v26_1(&raw).expect("window packet");
+            if let Err(e) = self.inv.apply_raw_v26_1(&raw) {
+                println!("DECODE ERROR {:#04x}: {e}", raw.id);
+                let dir = std::env::var("GHAST_DUMP_DIR").unwrap_or_else(|_| ".".into());
+                let path = format!("{dir}/ghast_bad_{:x}_{}.bin", raw.id, raw.body.len());
+                let _ = std::fs::write(&path, &raw.body);
+                println!("  body saved to {path}");
+            }
             let Ok(p) = P::decode_raw(&raw) else { continue };
             match p {
                 P::KeepAlive(k) => self.c.send(&sb::KeepAlive {
@@ -224,7 +230,7 @@ fn dump(inv: &Inventory) {
                 s.max_damage(v).unwrap_or(0),
                 ench.iter()
                     .map(|e| (
-                        e.id.name(&inv.registries_26_1().enchantments)
+                        e.id.name(inv.registries_26_1().enchantments())
                             .unwrap_or("?")
                             .to_string(),
                         e.level
@@ -235,6 +241,95 @@ fn dump(inv: &Inventory) {
     }
     if let Some(c) = inv.cursor() {
         println!("  cursor: {:?} x{}", c.item_name(v), c.count());
+    }
+}
+
+/// `HASH_BATCHES=n`: the driver gives batches of items (one component kind each, see the crate
+/// README); every stack is picked up and put back, and the server's corrections are counted per
+/// stack. Prints `BATCH DONE k` after each batch and waits for the inventory to empty and refill.
+fn hash_batches(lab: &mut Lab, batches: usize) {
+    use ghast_inventory::ItemData;
+    use ghast_inventory::v26_1::{COMPONENT_NAMES, hash_covers};
+    let v = Version::V26_1;
+    lab.log_corrections = false;
+    for k in 0..batches {
+        // items arrive, then 2 s of quiet
+        let start = Instant::now();
+        loop {
+            lab.corrections = 0;
+            lab.pump(2000);
+            let any = (9..45).any(|i| lab.inv.slot(i).is_some());
+            if any && lab.corrections == 0 {
+                break;
+            }
+            if start.elapsed() > Duration::from_secs(60) {
+                println!("BATCH TIMEOUT {k}");
+                return;
+            }
+        }
+        lab.inv.tick();
+        let _ = lab.inv.open_inventory();
+        for slot in 9..45i16 {
+            let Some(s) = lab.inv.slot(slot as usize).cloned() else {
+                continue;
+            };
+            let names: Vec<String> = match s.data() {
+                ItemData::Components(p) => p
+                    .iter()
+                    .map(|(t, _)| {
+                        let n = COMPONENT_NAMES.get(t as usize).copied().unwrap_or("?");
+                        format!("{n}{}", if hash_covers(t) { "" } else { "(uncovered)" })
+                    })
+                    .chain(p.removed().map(|t| {
+                        format!(
+                            "!{}",
+                            COMPONENT_NAMES.get(t as usize).copied().unwrap_or("?")
+                        )
+                    }))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let exact = ghast_inventory::v26_1::hashed_slot(Some(&s), lab.inv.registries_26_1()).1;
+            let mut corr = 0;
+            for _ in 0..2 {
+                lab.inv.tick();
+                lab.inv.tick();
+                let out = match lab.inv.click(Click::Pickup { slot, right: false }) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        println!("  click refused: {e}");
+                        break;
+                    }
+                };
+                lab.send_out(&out);
+                lab.corrections = 0;
+                lab.pump(400);
+                corr += lab.corrections;
+            }
+            println!(
+                "ITEM {:<24} exact {exact:5} corrections {corr} [{}]",
+                s.item_name(v).unwrap_or("?"),
+                names.join(", ")
+            );
+        }
+        println!("BATCH DONE {k}");
+        // wait until the driver cleared the inventory
+        let start = Instant::now();
+        while (9..45).any(|i| lab.inv.slot(i).is_some())
+            && start.elapsed() < Duration::from_secs(30)
+        {
+            lab.pump(200);
+        }
+    }
+}
+
+fn write_capture(path: Option<&str>, lab: &mut Lab) {
+    if let (Some(path), Some(buf)) = (path, lab.c.capture.take()) {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        z.write_all(&buf).unwrap();
+        let data = z.finish().unwrap();
+        std::fs::write(path, &data).unwrap();
+        println!("capture: {} bytes -> {path}", data.len());
     }
 }
 
@@ -319,8 +414,8 @@ fn main() {
                         .collect();
                     c.send(&csb::SelectKnownPacks { packs });
                 }
-                C::RegistryData(r) if &*r.id == "minecraft:enchantment" => {
-                    reg.enchantments = r.entries.iter().map(|e| e.key.to_string()).collect();
+                C::RegistryData(r) => {
+                    reg.add(&r.id, r.entries.iter().map(|e| &*e.key));
                     c.record_registry(&raw);
                 }
                 C::KeepAlive(k) => c.send(&csb::KeepAlive {
@@ -338,7 +433,7 @@ fn main() {
     }
     println!(
         "in play; {} enchantments in the registry",
-        reg.enchantments.len()
+        reg.enchantments().len()
     );
     let mut inv = Inventory::new(Version::V26_1);
     inv.set_registries_26_1(reg.clone());
@@ -354,6 +449,11 @@ fn main() {
     // The inventory reset on login drops the registries: set them again after login.
     lab.pump(2000);
     lab.inv.set_registries_26_1(reg);
+    if let Ok(n) = std::env::var("HASH_BATCHES") {
+        hash_batches(&mut lab, n.parse().unwrap_or(1));
+        write_capture(capture.as_deref(), &mut lab);
+        return;
+    }
     // Wait for the console to give items (the driver script gives them now).
     println!("waiting for items");
     lab.pump(9000);
@@ -658,12 +758,6 @@ fn main() {
     }
     dump(&lab.inv);
     println!("RESULT: {ok} of {total} clicks without server corrections");
-    if let (Some(path), Some(buf)) = (capture, lab.c.capture.take()) {
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-        z.write_all(&buf).unwrap();
-        let data = z.finish().unwrap();
-        std::fs::write(&path, &data).unwrap();
-        println!("capture: {} bytes -> {path}", data.len());
-    }
+    write_capture(capture.as_deref(), &mut lab);
     let _: Option<Stack> = None;
 }

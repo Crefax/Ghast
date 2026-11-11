@@ -24,6 +24,7 @@ use ghast_protocol::v26_1::play::serverbound::{self as sb, ServerboundPlayPacket
 use ghast_protocol::{PacketSet, RawPacket};
 
 const CLICKS: &[u8] = include_bytes!("fixtures/clicks_26_1_2.bin.zz");
+const HASHES: &[u8] = include_bytes!("fixtures/hashes_26_1_2.bin.zz");
 const CAPTURE: &[u8] = include_bytes!("../../ghast-protocol/tests/fixtures/capture_26_1_2.bin.zz");
 
 fn records(z: &[u8]) -> Vec<(u8, u8, RawPacket)> {
@@ -68,15 +69,17 @@ fn click_of(c: &sb::WindowClick) -> Click {
     }
 }
 
-#[test]
-fn replayed_session_sends_the_same_click_bytes() {
+/// Replays a live session: inbound packets in, the same clicks out; returns (clicks,
+/// unpredicted, outcomes).
+fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) {
     let mut inv = Inventory::new(Version::V26_1);
-    // the session waited 700 ms after each click: one tick of silence settles it here
+    // the sessions waited 400 - 700 ms after each click: one tick of silence settles it here
     inv.set_click_settle_ticks(1);
+    let mut reg = HashRegistries::default();
     let mut clicks = 0;
     let mut unpredicted = 0;
     let mut outcomes = Vec::new();
-    for (state, dir, raw) in records(CLICKS) {
+    for (state, dir, raw) in records(fixture) {
         match (state, dir) {
             (3, 0) => {
                 let ClientboundConfigurationPacket::RegistryData(r) =
@@ -84,9 +87,8 @@ fn replayed_session_sends_the_same_click_bytes() {
                 else {
                     panic!()
                 };
-                inv.set_registries_26_1(HashRegistries {
-                    enchantments: r.entries.iter().map(|e| e.key.to_string()).collect(),
-                });
+                reg.add(&r.id, r.entries.iter().map(|e| &*e.key));
+                inv.set_registries_26_1(reg.clone());
             }
             (4, 0) => inv.apply_raw_v26_1(&raw).unwrap(),
             (4, 1) => {
@@ -123,6 +125,12 @@ fn replayed_session_sends_the_same_click_bytes() {
     }
     inv.tick();
     outcomes.extend(inv.drain_events().clicks.iter().map(|c| c.outcome));
+    (clicks, unpredicted, outcomes)
+}
+
+#[test]
+fn replayed_session_sends_the_same_click_bytes() {
+    let (clicks, unpredicted, outcomes) = replay(CLICKS);
     assert_eq!(clicks, 36);
     assert_eq!(unpredicted, 1);
     // every click resolves once: the 2 corrected bundle clicks as rejected, the rest accepted
@@ -132,6 +140,27 @@ fn replayed_session_sends_the_same_click_bytes() {
         outcomes.iter().filter(|o| **o == O::Rejected).count(),
         2,
         "{outcomes:?}"
+    );
+}
+
+/// `fixtures/hashes_26_1_2.bin.zz`: 117 stacks, one component kind each (plus removed-component
+/// and combined cases), picked up and put back on a vanilla 26.1.2 server. The server sent no
+/// correction for every stack whose components ghast hashes (84 component kinds); the stacks
+/// that drew corrections carry exactly the kinds ghast does not hash (listed in the README).
+/// Replaying the session reproduces every click byte for byte, hashes included.
+#[test]
+fn component_hashes_session_replays() {
+    let (clicks, unpredicted, outcomes) = replay(HASHES);
+    assert_eq!(clicks, 2 * 117);
+    // a stack with a patched `equippable` is sent unpredicted (its slot rules are unknown)
+    assert_eq!(unpredicted, 2);
+    use ghast_inventory::ClickOutcome as O;
+    let rejected = outcomes.iter().filter(|o| **o == O::Rejected).count();
+    // 23 stacks with unhashed kinds (and potion custom_effects), corrected on both clicks,
+    // plus the batch ends: the driver's `/clear` lands before the batch's last click settles
+    assert!(
+        (2 * 23..=2 * 23 + 4).contains(&rejected),
+        "{rejected}: {outcomes:?}"
     );
 }
 

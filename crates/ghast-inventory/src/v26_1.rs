@@ -10,12 +10,19 @@ use ghast_protocol::nbt::{AnonNbt, Tag};
 use crate::stack::{ItemData, Stack};
 use crate::window::WindowKind;
 
+#[path = "v26_1_hash.rs"]
+mod hash;
+pub use hash::{HashRegistries, component_hash, hash_covers};
+
 mod generated {
     use super::{Equip, ItemDefaults};
     include!("generated/items_26_1.rs");
 }
 
-pub use generated::{COMPONENT_NAMES, ITEM_COUNT, MENUS, POTIONS, component};
+pub use generated::{
+    ATTRIBUTES, COMPONENT_NAMES, ITEM_COUNT, MENUS, POTIONS, SOUND_EVENTS, VILLAGER_TYPES,
+    component,
+};
 
 /// The equipment slot of an item's `equippable` component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -290,14 +297,6 @@ pub(crate) fn potion(s: &Stack) -> Option<&'static str> {
 
 // ---------------------------------------------------------------------- hashed stacks
 
-/// Names of the data-driven registries a click hash needs (the configuration phase's
-/// `registry_data` keys, in order).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HashRegistries {
-    /// `minecraft:enchantment` entry names by id (`"minecraft:sharpness"`).
-    pub enchantments: Vec<String>,
-}
-
 /// Hash put into a click for a component ghast cannot hash: certainly not the real one, so the
 /// server answers with the slot's true contents (the click itself is applied either way).
 pub const UNKNOWN_HASH: i32 = 0;
@@ -490,48 +489,6 @@ fn anon_hash(n: &AnonNbt, text: bool) -> Option<u32> {
         return None;
     }
     Some(nbt_hash(&n.parse().ok()??, text))
-}
-
-/// The `HashOps` hash of one component value as it appears on the wire (`None`: not
-/// computable by ghast).
-#[must_use]
-pub fn component_hash(ty: i32, value: &Bytes, reg: &HashRegistries) -> Option<i32> {
-    use component as c;
-    let mut r = Reader::new(value);
-    let h = match ty {
-        c::MAX_STACK_SIZE | c::MAX_DAMAGE | c::DAMAGE | c::REPAIR_COST | c::MAP_ID => {
-            ops::int(r.read_varint().ok()?)
-        }
-        c::UNBREAKABLE => ops::empty_map(),
-        c::ENCHANTMENT_GLINT_OVERRIDE => ops::boolean(r.read_bool().ok()?),
-        c::RARITY => {
-            let names = ["common", "uncommon", "rare", "epic"];
-            ops::string(names.get(usize::try_from(r.read_varint().ok()?).ok()?)?)
-        }
-        c::CUSTOM_DATA => anon_hash(&AnonNbt::read(&mut r).ok()?, false)?,
-        c::CUSTOM_NAME | c::ITEM_NAME => anon_hash(&AnonNbt::read(&mut r).ok()?, true)?,
-        c::LORE => {
-            let n = r.read_varint().ok()?;
-            let mut v = Vec::new();
-            for _ in 0..n.max(0) {
-                v.push(anon_hash(&AnonNbt::read(&mut r).ok()?, true)?);
-            }
-            ops::list(v)
-        }
-        c::ENCHANTMENTS | c::STORED_ENCHANTMENTS => {
-            let n = r.read_varint().ok()?;
-            let mut v = Vec::new();
-            for _ in 0..n.max(0) {
-                let id = r.read_varint().ok()?;
-                let level = r.read_varint().ok()?;
-                let name = reg.enchantments.get(usize::try_from(id).ok()?)?;
-                v.push((ops::string(name), ops::int(level)));
-            }
-            ops::map(v)
-        }
-        _ => return None,
-    };
-    Some(h as i32)
 }
 
 /// One slot as a 26.1 click sends it (vanilla `HashedStack.create`), with
