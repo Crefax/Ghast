@@ -220,10 +220,11 @@ pub(crate) fn unbreakable(s: &Stack) -> bool {
     )
 }
 
-/// The equipment slot of `equippable` (the item default; a patched `equippable` is unknown).
+/// The equipment slot of `equippable`: the item default, or the patched value's slot
+/// (`Err` when a patch sets `allowed_entities`: whether a player may wear it is not modelled).
 pub(crate) fn equip(s: &Stack) -> Result<Equip, ()> {
     match patched(s, component::EQUIPPABLE) {
-        Some(Some(_)) => Err(()),
+        Some(Some(b)) => patched_equip(&b).ok_or(()),
         Some(None) => Ok(Equip::None),
         None => Ok(defaults(s.id).map_or(Equip::None, |d| {
             if d.equip_restricted {
@@ -233,6 +234,41 @@ pub(crate) fn equip(s: &Stack) -> Result<Equip, ()> {
             }
         })),
     }
+}
+
+/// The slot of a patched `equippable` (`Equippable.STREAM_CODEC`: slot, equip sound, asset id,
+/// camera overlay, allowed entities, ...); `None` when `allowed_entities` is set or the bytes
+/// do not read.
+fn patched_equip(b: &Bytes) -> Option<Equip> {
+    let mut r = Reader::new(b);
+    let slot = r.read_varint().ok()?;
+    // equip_sound: a registry id + 1, or 0 and an inline `SoundEvent` (id, optional range)
+    if r.read_varint().ok()? == 0 {
+        r.read_string().ok()?;
+        if r.read_bool().ok()? {
+            r.read_f32().ok()?;
+        }
+    }
+    for _ in 0..2 {
+        // asset_id, camera_overlay
+        if r.read_bool().ok()? {
+            r.read_string().ok()?;
+        }
+    }
+    if r.read_bool().ok()? {
+        return None;
+    }
+    Some(match slot {
+        0 => Equip::MainHand,
+        1 => Equip::Feet,
+        2 => Equip::Legs,
+        3 => Equip::Chest,
+        4 => Equip::Head,
+        5 => Equip::Offhand,
+        6 => Equip::Body,
+        7 => Equip::Saddle,
+        _ => return None,
+    })
 }
 
 /// Whether the stack has the `bundle_contents` component (a bundle: some clicks with it run

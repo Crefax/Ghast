@@ -140,14 +140,18 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 - Clicks: there is no confirm. The client sends the slots its prediction changed and the
   cursor as hashed stacks (vanilla `HashedStack`: crc32c `HashOps` over each component's
   codec); the server applies the click and resends only slots whose hash differs. ghast hashes
-  `damage`, `max_damage`, `max_stack_size`, `repair_cost`, `map_id`, `unbreakable`,
-  `enchantment_glint_override`, `rarity`, `custom_data`, `custom_name`, `item_name`, `lore`,
-  `enchantments` and `stored_enchantments` (the last two need the configuration phase's
-  enchantment names, `set_registries_26_1`); other components get a hash the server corrects.
+  every component kind a client can receive (107 of 110; the other three never reach a
+  client), from a data-driven schema table (`src/v26_1_hash.rs`). Proven against the real
+  client's hashes of 4000 stacks (`tests/golden/26.1/hashed_stacks.jsonl.gz`, all
+  byte-identical) and live: 129 stacks, one kind each, drew no correction on a vanilla 26.1.2
+  server. Data-driven registry names come from the configuration phase
+  (`set_registries_26_1`). A component ghast cannot hash (an unsent registry, an inline holder
+  other than a sound event, a block predicate with an `nbt` test) gets a hash the server
+  corrects.
 - Prediction: the 1.16 rules with the 26.1 differences (99 container cap and component stack
-  sizes, `equippable` slots, binding curse by enchantment registry id). Bundles (where they
-  override a click), stacks with a patched `equippable` and crafting results are sent
-  unpredicted. Checked on a vanilla 26.1.2 server: 34 of 36 scripted clicks drew no correction,
+  sizes, `equippable` slots incl. patched ones, binding curse by enchantment registry id).
+  Bundles (where they override a click), a patched `equippable` with `allowed_entities` and
+  crafting results are sent unpredicted. Checked on a vanilla 26.1.2 server: 34 of 36 scripted clicks drew no correction,
   the other two are bundle cases (`tests/v26_1.rs` replays that session byte for byte).
 - Not modelled / unproven for 26.1: drag (quick craft) clicks, creative clicks, crafting,
   furnaces and the other special screens (their clicks are sent unpredicted), the crafter

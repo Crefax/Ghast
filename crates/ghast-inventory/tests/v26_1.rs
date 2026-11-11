@@ -5,9 +5,9 @@
 //!   inventory packet and every click / close the tool sent. The server answered 34 of the 36
 //!   clicks with no correction at all (it sends `container_set_slot` / `set_cursor_item` only
 //!   for slots whose hash differs from its own result), so those clicks' predictions and
-//!   hashes were right; the 2 others involve a bundle (sent unpredicted, and a
-//!   `bundle_contents` hash ghast does not compute). Replaying the inbound packets, ghast must
-//!   produce byte-identical click packets.
+//!   hashes were right; the 2 others involve a bundle (sent unpredicted; ghast did not hash
+//!   `bundle_contents` yet when it was captured). Replaying the inbound packets, ghast must
+//!   produce byte-identical click packets (kinds hashed since the capture are hash 0 there).
 //! - `../../ghast-protocol/tests/fixtures/capture_26_1_2.bin.zz`: items with many component
 //!   kinds given by the console; the lazy (raw) path and the generated-packet path must agree.
 #![cfg(feature = "v26_1")]
@@ -168,25 +168,21 @@ fn replayed_session_sends_the_same_click_bytes() {
     );
 }
 
-/// `fixtures/hashes_26_1_2.bin.zz`: 117 stacks, one component kind each (plus removed-component
-/// and combined cases), picked up and put back on a vanilla 26.1.2 server. The server sent no
-/// correction for every stack whose components ghast hashes (84 component kinds); the stacks
-/// that drew corrections carry exactly the kinds ghast does not hash (listed in the README).
-/// Replaying the session reproduces every click byte for byte, hashes included.
+/// `fixtures/hashes_26_1_2.bin.zz`: 129 stacks, one component kind each (plus removed-component
+/// and combined cases, covering every component kind a client can receive), picked up and put
+/// back on a vanilla 26.1.2 server. The server sent no correction for any of them: every hash
+/// and every predicted slot matched. Replaying the session reproduces every click byte for
+/// byte, hashes included.
 #[test]
 fn component_hashes_session_replays() {
     let (clicks, unpredicted, outcomes) = replay(HASHES);
-    assert_eq!(clicks, 2 * 117);
-    // a stack with a patched `equippable` is sent unpredicted (its slot rules are unknown)
-    assert_eq!(unpredicted, 2);
+    assert_eq!(clicks, 2 * 129);
+    assert_eq!(unpredicted, 0);
     use ghast_inventory::ClickOutcome as O;
     let rejected = outcomes.iter().filter(|o| **o == O::Rejected).count();
-    // 23 stacks with unhashed kinds (and potion custom_effects), corrected on both clicks,
-    // plus the batch ends: the driver's `/clear` lands before the batch's last click settles
-    assert!(
-        (2 * 23..=2 * 23 + 4).contains(&rejected),
-        "{rejected}: {outcomes:?}"
-    );
+    // only the batch ends: the driver's `/clear` lands before the batch's last click settles
+    eprintln!("hash session: {clicks} clicks, {rejected} rejected");
+    assert!(rejected <= 5, "{rejected}: {outcomes:?}");
 }
 
 #[test]
