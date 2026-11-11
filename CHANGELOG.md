@@ -71,6 +71,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `/teammsg` …) are sent as `chat_command_signed` like vanilla (without signatures when there is
   no chat session, e.g. offline mode); other commands stay `chat_command`.
 - A server transfer ends the session (`SessionEnd::Transferred`) instead of being ignored.
+- 26.1 item use: whether an item has a use state comes from its components (`item_use`:
+  duration > 0, food only below a full bar unless `can_always_eat`), the item's `use_effects`
+  (`can_sprint`, `speed_multiplier`) drive the movement while using, and the use stops when the
+  used hand no longer holds that item. The client writes the swings of a dropping click
+  (`ContainerClick::swings`) before the `container_click`, and lets `update_recipes`,
+  `abilities` and `experience` through to the inventory.
 - 26.1 clicks: the changed slots are written in the real client's map order and each hashed
   stack's components in type id order (both are maps the server compares by content); bundle
   clicks, crafting results and the other menus above are predicted instead of sent
