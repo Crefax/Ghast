@@ -148,6 +148,27 @@ enum S {
     /// `ByteBufCodecs.registry(type).dispatch(..)` over a `byNameCodec().dispatch("type", ..)`:
     /// VarInt type id -> the type's record with `type` added (`(name, record)` by id).
     Dispatch(&'static [(&'static str, S)]),
+    /// Two big-endian i64 (`UUIDUtil.STREAM_CODEC`) -> int stream of 4 (`UUIDUtil.CODEC`).
+    Uuid,
+    /// `ByteBufCodecs.GAME_PROFILE_PROPERTIES` -> `ExtraCodecs.PROPERTY_MAP`'s list form, grouped
+    /// by name in order of first appearance (a Guava `ImmutableMultimap`).
+    Properties,
+    /// bool -> one of two names (`false`, `true`).
+    BoolEnum(&'static str, &'static str),
+    /// `ByteBufCodecs.either`: bool, then left (`true`) or right.
+    Either(&'static S, &'static S),
+    /// Map codecs in one record: their maps concatenated.
+    Merge(&'static [S]),
+    /// `ExtraCodecs.compactListCodec`: VarInt count + elements -> the element alone when there is
+    /// one, else a list.
+    CompactList(&'static S),
+    /// `DataComponentExactPredicate`: VarInt count + typed components -> map of component names
+    /// to their hashes.
+    ExactComponents,
+    /// A VarInt-counted collection ghast only hashes when empty (empty map).
+    EmptyOnly,
+    /// A value ghast does not model: hashing fails when one is present.
+    Never,
 }
 
 /// A record field: name, schema, and how the codec treats it.
@@ -428,6 +449,55 @@ static DEATH_PROTECTION: S = S::Rec(&[Field(
     Def::Default(Value::EmptyList),
 )]);
 
+/// `StatePropertiesPredicate.ValueMatcher.CODEC`: an exact value, or `{min, max}`.
+const STATE_MATCHER: S = S::Either(
+    &S::Str,
+    &S::Rec(&[
+        Field("min", S::Str, Def::Optional),
+        Field("max", S::Str, Def::Optional),
+    ]),
+);
+
+/// `BlockPredicate.CODEC` (an NBT predicate encodes as SNBT text, which ghast does not print).
+const BLOCK_PREDICATE: S = S::Rec(&[
+    Field("blocks", S::HolderSet(Reg::Block), Def::Optional),
+    Field("state", S::Map(&S::Str, &STATE_MATCHER), Def::Optional),
+    Field("nbt", S::Never, Def::Optional),
+    Field(
+        "components",
+        S::ExactComponents,
+        Def::Default(Value::Of(ops::empty_map)),
+    ),
+    Field(
+        "predicates",
+        S::EmptyOnly,
+        Def::Default(Value::Of(ops::empty_map)),
+    ),
+]);
+
+/// `ResolvableProfile.CODEC` (its full form): a game profile or a partial one, plus the skin
+/// patch.
+const PROFILE: S = S::Merge(&[
+    S::Either(
+        &S::Rec(&[
+            Field("id", S::Uuid, Def::Required),
+            Field("name", S::Str, Def::Required),
+            Field("properties", S::Properties, Def::Default(Value::EmptyList)),
+        ]),
+        &S::Rec(&[
+            Field("name", S::Str, Def::Optional),
+            Field("id", S::Uuid, Def::Optional),
+            Field("properties", S::Properties, Def::Default(Value::EmptyList)),
+        ]),
+    ),
+    S::Rec(&[
+        Field("texture", S::Ident, Def::Optional),
+        Field("cape", S::Ident, Def::Optional),
+        Field("elytra", S::Ident, Def::Optional),
+        Field("model", S::BoolEnum("wide", "slim"), Def::Optional),
+    ]),
+]);
+
 /// `KineticWeapon.Condition.CODEC`.
 const KINETIC_CONDITION: S = S::Rec(&[
     Field("max_duration_ticks", S::VarInt, Def::Required),
@@ -677,6 +747,8 @@ fn schema(ty: i32) -> Option<S> {
             Field("explosions", S::List(&EXPLOSION), D(Value::EmptyList)),
         ]),
         c::CONTAINER => S::Container,
+        c::CAN_PLACE_ON | c::CAN_BREAK => S::CompactList(&BLOCK_PREDICATE),
+        c::PROFILE => PROFILE,
         c::CONSUMABLE => S::Ref(&CONSUMABLE),
         c::DEATH_PROTECTION => S::Ref(&DEATH_PROTECTION),
         c::TOOL => S::Rec(&[
@@ -836,6 +908,92 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             }
         }
         S::Ref(inner) => read(inner, r, regs)?,
+        S::Uuid => {
+            let (hi, lo) = (r.read_i64().ok()?, r.read_i64().ok()?);
+            V::IntList(vec![
+                (hi >> 32) as i32,
+                hi as i32,
+                (lo >> 32) as i32,
+                lo as i32,
+            ])
+        }
+        S::Properties => {
+            let n = r.read_varint().ok()?;
+            let mut props: Vec<(String, V)> = Vec::new();
+            for _ in 0..n.max(0) {
+                let name = r.read_string().ok()?.to_string();
+                let value = r.read_string().ok()?.to_string();
+                let mut m = vec![
+                    (V::Str("name".into()), V::Str(name.clone())),
+                    (V::Str("value".into()), V::Str(value)),
+                ];
+                if r.read_bool().ok()? {
+                    let sig = r.read_string().ok()?.to_string();
+                    m.push((V::Str("signature".into()), V::Str(sig)));
+                }
+                props.push((name, V::Map(m)));
+            }
+            // ImmutableMultimap: keys in first-appearance order, each key's values together
+            let mut keys: Vec<String> = Vec::new();
+            for (k, _) in &props {
+                if !keys.contains(k) {
+                    keys.push(k.clone());
+                }
+            }
+            let mut out = Vec::with_capacity(props.len());
+            for k in &keys {
+                for (pk, v) in props.iter_mut() {
+                    if pk == k {
+                        out.push(std::mem::replace(v, V::Omit));
+                    }
+                }
+            }
+            V::List(out)
+        }
+        S::BoolEnum(f, t) => V::Str(if r.read_bool().ok()? { t } else { f }.to_string()),
+        S::Either(left, right) => {
+            if r.read_bool().ok()? {
+                read(left, r, regs)?
+            } else {
+                read(right, r, regs)?
+            }
+        }
+        S::Merge(parts) => {
+            let mut all = Vec::new();
+            for p in parts {
+                let V::Map(m) = read(p, r, regs)? else {
+                    return None;
+                };
+                all.extend(m);
+            }
+            V::Map(all)
+        }
+        S::CompactList(e) => {
+            let n = r.read_varint().ok()?;
+            let mut v = Vec::new();
+            for _ in 0..n.max(0) {
+                v.push(read(e, r, regs)?);
+            }
+            if v.len() == 1 { v.pop()? } else { V::List(v) }
+        }
+        S::ExactComponents => {
+            let n = r.read_varint().ok()?;
+            let patch = ComponentPatch::read(r, n, 0).ok()?;
+            let mut m = Vec::new();
+            for (t, value) in patch.iter() {
+                let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+                let h = component_hash(t, &value, regs)?;
+                m.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
+            }
+            V::Map(m)
+        }
+        S::EmptyOnly => {
+            if r.read_varint().ok()? != 0 {
+                return None;
+            }
+            V::Map(Vec::new())
+        }
+        S::Never => return None,
         S::Dispatch(types) => {
             let id = r.read_varint().ok()?;
             let (name, rec) = types.get(usize::try_from(id).ok()?)?;

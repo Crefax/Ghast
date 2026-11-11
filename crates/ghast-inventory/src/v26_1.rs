@@ -504,6 +504,13 @@ fn anon_hash(n: &AnonNbt, text: bool) -> Option<u32> {
 /// One slot as a 26.1 click sends it (vanilla `HashedStack.create`), with
 /// [`UNKNOWN_HASH`] for components ghast cannot hash. The second value is `false` when such a
 /// component was present.
+///
+/// Every component kind a client can receive is hashed (checked against the real client's
+/// hashes of 4000 stacks in `tests/golden/26.1/hashed_stacks.jsonl.gz`). What still falls back
+/// to [`UNKNOWN_HASH`]: a registry name the server did not send in configuration, an inline
+/// holder value without a modelled direct form (trim materials/patterns, banner patterns,
+/// instruments, jukebox songs, painting variants; inline sound events are modelled), and an
+/// adventure-mode block predicate with an `nbt` test or partial component predicates.
 #[must_use]
 pub fn hashed_slot(
     s: Option<&Stack>,

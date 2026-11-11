@@ -457,4 +457,22 @@ fn hashed_stacks_match_the_real_client() {
     }
     eprintln!("coverage (id, name, class, exact values, unhashed values):\n{table}{classes:?}");
     assert_eq!(classes.iter().sum::<usize>(), COMPONENT_NAMES.len());
+    // Every kind a client can receive is hashed like the real client; only the three
+    // transient kinds (never sent to clients) are not.
+    let unhashed: Vec<&str> = COMPONENT_NAMES
+        .iter()
+        .enumerate()
+        .filter(|(t, _)| !ghast_inventory::v26_1::hash_covers(*t as i32))
+        .map(|(_, n)| *n)
+        .collect();
+    assert_eq!(
+        unhashed,
+        [
+            "creative_slot_lock",
+            "additional_trade_cost",
+            "map_post_processing"
+        ]
+    );
+    assert_eq!(classes[1], 0, "partially hashed kinds");
+    assert_eq!(whole_exact, stacks, "every whole HashedStack is exact");
 }
