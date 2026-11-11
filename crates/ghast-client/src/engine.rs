@@ -1358,7 +1358,7 @@ impl TickView<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8"))]
 impl Core {
     /// Test hook: the held slot as both the client and the server have it (no sync packet).
     pub(crate) fn test_set_slot(&mut self, slot: u8) {
@@ -1378,7 +1378,7 @@ impl Core {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8"))]
 impl TickContext<'_> {
     /// Test hook: this tick's look without a rotation step.
     pub(crate) fn test_force_look(&mut self, yaw: f32, pitch: f32) {

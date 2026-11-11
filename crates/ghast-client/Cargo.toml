@@ -14,7 +14,7 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-client"
 
 [features]
-default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate"]
+default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate", "display-names"]
 # Game versions (each one alone builds; drop the ones you do not connect with to cut compile
 # time and binary size). A `GameVersion` whose feature is off still exists, but running it
 # returns `ClientError::VersionNotEnabled`.
@@ -22,6 +22,9 @@ v1_8 = ["ghast-protocol/v1_8", "ghast-world/v1_8", "ghast-data/v1_8", "ghast-phy
 v1_12_2 = ["ghast-protocol/v1_12_2", "ghast-world/v1_12", "ghast-data/v1_12", "ghast-physics/v1_12", "ghast-inventory/v1_12", "ghast-entity/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-world/v1_16_5", "ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-inventory/v1_16_5", "ghast-entity/v1_16_5"]
 v26_1 = ["ghast-protocol/v26_1", "ghast-world/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1", "ghast-inventory/v26_1"]
+# English display names of blocks, items, entities, biomes, enchantments and effects in
+# ghast-data (`display_name` fields); registry names are always there. Off saves ~120–200 KB.
+display-names = ["ghast-data/display-names"]
 # Inflate / deflate packets with libdeflate (C, faster); off = pure Rust (flate2 + zlib-rs).
 libdeflate = ["ghast-protocol/libdeflate"]
 # Online-mode servers: Microsoft account sessions and the session-server join call.
@@ -50,3 +53,17 @@ tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"
 
 [package.metadata.docs.rs]
 all-features = true
+
+# The integration tests drive the old versions.
+[[test]]
+name = "fake_server"
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
+[[test]]
+name = "oracle_raytrace"
+required-features = ["v1_8"]
+
+[[test]]
+name = "cpu"
+required-features = ["v1_8"]
+

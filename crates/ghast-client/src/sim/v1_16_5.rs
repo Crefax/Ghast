@@ -35,7 +35,7 @@ impl std::fmt::Debug for Sim16 {
 
 impl Sim16 {
     /// Test hook: sets one block.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) fn test_set_block(
         &mut self,
         x: i32,

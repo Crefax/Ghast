@@ -90,7 +90,7 @@ impl Sim26 {
     }
 
     /// Test hook: a world in the vanilla overworld (registries as with known packs).
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) fn test_overworld() -> Self {
         let mut s = Self::new();
         s.world.apply_registry(

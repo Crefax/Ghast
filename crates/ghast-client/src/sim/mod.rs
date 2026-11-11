@@ -401,7 +401,6 @@ pub(super) fn activates_1_16(name: &str) -> bool {
 }
 
 /// A pick result as the hands take it (`None` for a miss).
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
 pub(super) fn block_hit(
     hit: &ghast_physics::pick::BlockHit,
     eye: [f64; 3],
@@ -731,6 +730,7 @@ pub(super) fn rel_flags(flags: i8) -> [bool; 5] {
 
 /// Chunk packets for tests.
 #[cfg(test)]
+#[allow(unused_imports, dead_code)] // each helper is used by the tests of its version
 pub(crate) mod test_chunks {
     use bytes::{BufMut, Bytes, BytesMut};
     use ghast_protocol::RawPacket;

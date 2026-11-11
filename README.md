@@ -104,7 +104,7 @@ protocol are served by the same code.
 | keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (unsigned chat and commands; signed chat not yet) |
 | chunks and block changes | yes | yes | yes | yes |
 | player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block) |
-| crosshair raytrace, dig / place / use items | oracle-verified rays | yes (oracle selection boxes; neighbour-dependent and stairs rays approximated) | oracle-verified rays | oracle-verified rays |
+| crosshair raytrace, dig / place / use items | oracle-verified rays | oracle-verified rays | oracle-verified rays | oracle-verified rays |
 | block breaking time (per tick progress, finish tick) | oracle-verified | oracle-verified | oracle-verified | oracle-verified |
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows, hashed clicks and their results (lab probe: 30 clicks accepted, 0 differences) |
 | entities: tracking, crosshair, attack / interact | yes | yes | yes | not yet |
@@ -127,11 +127,12 @@ each one builds alone, so a bot that only ever joins one server version can drop
 |---|---|
 | `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` | the game versions (default: all) |
 | `libdeflate` | packet compression with libdeflate (C, faster; default). Without it: pure Rust (flate2 + zlib-rs) |
+| `display-names` | English display names of blocks, items, entities, … in `ghast::data` (default). Registry names are always there; off saves ~120–200 KB |
 | `microsoft` | online-mode servers (Microsoft accounts) |
 | `ext`, `pathfinder`, `viewer` | the optional crates (see above) |
 
 ```toml
-ghast = { version = "0.4", default-features = false, features = ["v1_8", "libdeflate"] }
+ghast = { version = "0.4", default-features = false, features = ["v1_8", "libdeflate"] }  # no display names
 ```
 
 A `GameVersion` whose feature is off still exists; running it returns

@@ -68,7 +68,7 @@ impl Sim18 {
     }
 
     /// Test hook: sets one block.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) fn test_set_block(
         &mut self,
         x: i32,
@@ -157,6 +157,21 @@ impl WorldView for Sim18 {
             stairs: ray.1,
             activates: ACTIVATED_1_8.contains(&b.id()),
         })
+    }
+
+    fn crosshair(
+        &self,
+        eyes: Vec3,
+        (yaw, pitch): (f32, f32),
+        _look: Vec3,
+        reach: f64,
+    ) -> Option<crate::BlockHit> {
+        // The oracle-verified 1.8 pick (ghast_physics::pick::v1_8: vanilla's ray shapes,
+        // Entity.rayTrace with the float look vector).
+        use ghast_physics::pick::v1_8 as pick;
+        let eye = [eyes.x, eyes.y, eyes.z];
+        let hit = pick::pick(&self.world, eye, pick::look_vector(yaw, pitch), reach)?;
+        block_hit(&hit, eye)
     }
 }
 

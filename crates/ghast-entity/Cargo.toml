@@ -39,3 +39,23 @@ required-features = ["v1_8", "v1_12", "v1_16_5"]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[[test]]
+name = "v1_8"
+required-features = ["v1_8"]
+
+[[test]]
+name = "v1_12"
+required-features = ["v1_12"]
+
+[[test]]
+name = "v1_16_5"
+required-features = ["v1_16_5"]
+
+[[test]]
+name = "robustness"
+required-features = ["v1_8", "v1_12", "v1_16_5"]
+
+[[example]]
+name = "live_probe"
+required-features = ["v1_8", "v1_12", "v1_16_5"]
