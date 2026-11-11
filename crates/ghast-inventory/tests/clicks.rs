@@ -1,6 +1,7 @@
 //! Click prediction against hand-derived vanilla expectations (1.8.9, 1.12.2 and 1.16.5
 //! `ScreenHandler.onSlotClick` traced by hand for each case), and the confirm
 //! protocol.
+#![cfg(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 
 use ghast_inventory::{
     Click, ClickError, ClickOutcome, ClickPacket, Inventory, OUTSIDE, Outgoing, Stack, Version,

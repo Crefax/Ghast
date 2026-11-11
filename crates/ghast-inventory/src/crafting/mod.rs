@@ -8,10 +8,16 @@
 //! - **1.16.5**: the server computes results (`set_slot`); the client only needs the recipes it got
 //!   in `declare_recipes` for the remainders when a result is taken ([`RecipeBook`]).
 
+#![cfg_attr(
+    not(all(feature = "v1_8", feature = "v1_16_5")),
+    allow(dead_code, unused_imports)
+)]
+
 use std::sync::Arc;
 
 use ghast_protocol::nbt::{Compound, List, NamedTag, RawNbt, Tag, tag};
 
+#[cfg(feature = "v1_8")]
 use ghast_data::v1_8::{RECIPE_ANY_DATA, Recipe, SpecialRecipe};
 
 use crate::rules::Version;
@@ -26,6 +32,7 @@ pub(crate) enum Craft {
     Unknown,
 }
 
+#[cfg(feature = "v1_8")]
 const WILDCARD: u16 = RECIPE_ANY_DATA;
 
 // 1.8 item ids used by the special recipes
@@ -99,10 +106,12 @@ impl Grid<'_> {
 
 // ---------------------------------------------------------------- 1.8.9
 
+#[cfg(feature = "v1_8")]
 fn ing_matches(ing: (u16, u16), s: &Stack) -> bool {
     s.id == i32::from(ing.0) && (ing.1 == WILDCARD || i32::from(s.damage) == i32::from(ing.1))
 }
 
+#[cfg(feature = "v1_8")]
 fn shaped_matches(g: &Grid<'_>, w: usize, h: usize, ins: &[Option<(u16, u16)>]) -> bool {
     for ox in 0..=3usize.saturating_sub(w) {
         for oy in 0..=3usize.saturating_sub(h) {
@@ -135,6 +144,7 @@ fn shaped_matches(g: &Grid<'_>, w: usize, h: usize, ins: &[Option<(u16, u16)>]) 
     false
 }
 
+#[cfg(feature = "v1_8")]
 fn shapeless_matches(g: &Grid<'_>, ins: &[(u16, u16)]) -> bool {
     let mut left: Vec<(u16, u16)> = ins.to_vec();
     for y in 0..g.height() {
@@ -152,11 +162,13 @@ fn shapeless_matches(g: &Grid<'_>, ins: &[(u16, u16)]) -> bool {
     left.is_empty()
 }
 
+#[cfg(feature = "v1_8")]
 fn output(o: (u16, u8, u16)) -> Stack {
     Stack::new(i32::from(o.0), i32::from(o.1), o.2 as i16)
 }
 
 /// Whether a special recipe matches; `Err` when ghast cannot tell.
+#[cfg(feature = "v1_8")]
 fn special_matches(sp: SpecialRecipe, g: &Grid<'_>) -> Result<bool, ()> {
     match sp {
         SpecialRecipe::BannerPattern | SpecialRecipe::BannerDuplicate => {
@@ -247,10 +259,12 @@ fn special_matches(sp: SpecialRecipe, g: &Grid<'_>) -> Result<bool, ()> {
 }
 
 /// 1.8 `Item.isDamageable()`: has durability and no subtypes.
+#[cfg(feature = "v1_8")]
 fn damageable_item(id: i32) -> bool {
     max_damage(id) > 0 && !Version::V1_8.has_subtypes(id)
 }
 
+#[cfg(feature = "v1_8")]
 fn max_damage(id: i32) -> i32 {
     u16::try_from(id)
         .ok()
@@ -260,6 +274,7 @@ fn max_damage(id: i32) -> i32 {
 }
 
 /// The result of a special recipe that matched.
+#[cfg(feature = "v1_8")]
 fn special_result(sp: SpecialRecipe, g: &Grid<'_>) -> Craft {
     match sp {
         SpecialRecipe::ArmorDye => Craft::Known(armor_dye(g)),
@@ -306,6 +321,7 @@ fn special_result(sp: SpecialRecipe, g: &Grid<'_>) -> Craft {
 }
 
 /// 1.8 `RecipeDispatcher.matches` (the result for a grid).
+#[cfg(feature = "v1_8")]
 pub(crate) fn result_1_8(g: &Grid<'_>) -> Craft {
     for r in ghast_data::v1_8::recipes() {
         let hit = match r {
@@ -356,6 +372,7 @@ pub(crate) enum Rem {
 
 /// 1.8 `RecipeDispatcher.getRemainders` for the matching recipe; `Err` when ghast cannot tell
 /// (unmodelled recipe, no recipe matching, a written book stack above 1).
+#[cfg(feature = "v1_8")]
 pub(crate) fn remainders_1_8(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
     if g.items().next().is_none() {
         return Ok(vec![Rem::None; g.stacks.len()]); // nothing to consume or hand back
@@ -443,6 +460,24 @@ pub(crate) fn remainders_1_12(g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
         v[i] = Rem::Item(g.stacks[i].as_ref().map(|s| s.with_count(1)).ok_or(())?);
     }
     Ok(v)
+}
+
+/// Without the 1.8 tables nothing is known.
+#[cfg(not(feature = "v1_8"))]
+pub(crate) fn result_1_8(_: &Grid<'_>) -> Craft {
+    Craft::Unknown
+}
+
+/// Without the 1.8 tables nothing is known.
+#[cfg(not(feature = "v1_8"))]
+pub(crate) fn remainders_1_8(_: &Grid<'_>) -> Result<Vec<Rem>, ()> {
+    Err(())
+}
+
+/// Without the 1.16.5 tables nothing is known.
+#[cfg(not(feature = "v1_16_5"))]
+pub(crate) fn remainders_1_16(_: &RecipeBook, _: &Grid<'_>) -> Result<Vec<Rem>, ()> {
+    Err(())
 }
 
 // ---------------------------------------------------------------- NBT helpers
@@ -789,6 +824,7 @@ impl RecipeBook {
     }
 
     /// Builds the book from a 1.16.5 `declare_recipes` packet.
+    #[cfg(feature = "v1_16_5")]
     #[must_use]
     pub fn from_v1_16_5(
         p: &ghast_protocol::v1_16_5::play::clientbound::DeclareRecipes,
@@ -914,6 +950,7 @@ fn shapeless16(g: &Grid<'_>, ins: &[Vec<i32>]) -> bool {
 /// `Err` when ghast cannot tell: a written book or banner in the grid (book cloning / banner
 /// duplication keep them), or no shaped / shapeless recipe matching (a special recipe, or none —
 /// vanilla then hands back the grid stacks themselves).
+#[cfg(feature = "v1_16_5")]
 pub(crate) fn remainders_1_16(book: &RecipeBook, g: &Grid<'_>) -> Result<Vec<Rem>, ()> {
     if g.items().next().is_none() {
         return Ok(vec![Rem::None; g.stacks.len()]); // nothing to consume or hand back
@@ -951,7 +988,7 @@ pub(crate) fn remainders_1_16(book: &RecipeBook, g: &Grid<'_>) -> Result<Vec<Rem
         .collect::<Vec<_>>())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
 mod tests {
     use super::*;
 

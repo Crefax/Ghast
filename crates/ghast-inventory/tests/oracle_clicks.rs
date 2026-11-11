@@ -11,6 +11,7 @@
 //! `GHAST_CLICK_VECTORS_1_12`, `GHAST_CLICK_VECTORS_1_16`, `GHAST_CRAFT_VECTORS_1_8`,
 //! `GHAST_CRAFT_VECTORS_1_12`, `GHAST_CRAFT_VECTORS_1_16` = path, then
 //! `cargo test -p ghast-inventory --release --test oracle_clicks -- --nocapture`.
+#![cfg(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};

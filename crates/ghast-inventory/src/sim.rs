@@ -189,12 +189,20 @@ pub(crate) fn clamp(s: &mut Option<Stack>) {
 }
 
 /// The version's `SimpleContainer.setItem` cap (26.1: `limitSize(min(99, max stack size))`).
+#[inline]
 pub(crate) fn clamp_v(v: Version, s: &mut Option<Stack>) {
     if v != Version::V26_1 {
         return clamp(s);
     }
-    if let Some(st) = s {
-        let max = v.max_count(st).min(99);
+    clamp_26_1(s);
+}
+
+#[inline(never)]
+fn clamp_26_1(s: &mut Option<Stack>) {
+    if let Some(st) = s
+        && st.count > 1
+    {
+        let max = Version::V26_1.max_count(st).min(99);
         if st.count > max {
             st.count = max;
         }

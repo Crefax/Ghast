@@ -130,6 +130,29 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 - **Only click while still**: the server and anticheats judge clicks against the last sent pose;
   the client (TickContext) must not click while turning.
 
+## 26.1
+
+- Stacks keep their data component patch raw (`ItemData::Components`); `apply_raw_v26_1`
+  reads `container_set_content` / `container_set_slot` / `set_cursor_item` /
+  `set_player_inventory` with a structural skip (no component is decoded). Item accessors
+  read one component on demand, over the item defaults from Mojang's 26.1.2 reports
+  (`src/generated/items_26_1.rs`, regenerated with `examples/gen_items_26_1.rs`).
+- Clicks: there is no confirm. The client sends the slots its prediction changed and the
+  cursor as hashed stacks (vanilla `HashedStack`: crc32c `HashOps` over each component's
+  codec); the server applies the click and resends only slots whose hash differs. ghast hashes
+  `damage`, `max_damage`, `max_stack_size`, `repair_cost`, `map_id`, `unbreakable`,
+  `enchantment_glint_override`, `rarity`, `custom_data`, `custom_name`, `item_name`, `lore`,
+  `enchantments` and `stored_enchantments` (the last two need the configuration phase's
+  enchantment names, `set_registries_26_1`); other components get a hash the server corrects.
+- Prediction: the 1.16 rules with the 26.1 differences (99 container cap and component stack
+  sizes, `equippable` slots, binding curse by enchantment registry id). Bundles (where they
+  override a click), stacks with a patched `equippable` and crafting results are sent
+  unpredicted. Checked on a vanilla 26.1.2 server: 34 of 36 scripted clicks drew no correction,
+  the other two are bundle cases (`tests/v26_1.rs` replays that session byte for byte).
+- Not modelled / unproven for 26.1: drag (quick craft) clicks, creative clicks, crafting,
+  furnaces and the other special screens (their clicks are sent unpredicted), the crafter
+  screen, a click oracle (only the live server checked the rules above).
+
 ## Tests
 
 ```sh

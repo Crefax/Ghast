@@ -89,6 +89,7 @@ impl Outgoing {
 
     /// The 1.12.2 serverbound packet (`None` for [`Outgoing::OpenInventory`], which 1.12 does
     /// not have; [`Inventory::open_inventory`] never returns it on 1.12).
+    #[cfg(feature = "v1_12")]
     #[must_use]
     pub fn to_v1_12_2(&self) -> Option<sb12::ServerboundPlayPacket> {
         Some(match self {

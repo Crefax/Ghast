@@ -267,7 +267,7 @@ fn equipment_1_12(id: i32) -> Option<u8> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
 mod tests {
     use super::*;
 

@@ -1,6 +1,6 @@
 [package]
 name = "ghast-inventory"
-description = "Inventory and container windows for the ghast Minecraft Java Edition client library: vanilla client-side click prediction, the window confirm protocol and lazy-NBT item stacks (1.8.9, 1.12.2 and 1.16.5)"
+description = "Inventory and container windows for the ghast Minecraft Java Edition client library: vanilla client-side click prediction, the window confirm protocol, hashed 26.1 clicks and lazy NBT / data-component item stacks (1.8.9, 1.12.2, 1.16.5 and 26.1)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -30,12 +30,18 @@ bytestring = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+criterion = { workspace = true }
 # tests/oracle_clicks.rs (golden vectors from the vanilla oracle)
 serde_json = { workspace = true }
 flate2 = { workspace = true }
 # examples/live_clicks.rs (lab test tool)
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["tokio"] }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
+
+[[bench]]
+name = "window_items"
+harness = false
+required-features = ["v1_8"]
 
 [[example]]
 name = "live_clicks"

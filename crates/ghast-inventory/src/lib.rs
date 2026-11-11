@@ -1,5 +1,5 @@
 //! Inventory and container windows for the ghast Minecraft Java Edition client library
-//! (1.8.9, 1.12.2 and 1.16.5).
+//! (1.8.9, 1.12.2, 1.16.5 and 26.1).
 //!
 //! [`Inventory`] holds what the vanilla client holds — the player inventory, the cursor stack
 //! and the open window — fed by the server's window packets, and turns click intents into
@@ -19,6 +19,15 @@
 //! - **Lazy NBT.** Stacks keep their NBT as raw bytes ([`ghast_protocol::nbt::RawNbt`]);
 //!   `window_items` is applied without parsing any NBT. Stack comparisons compare the bytes
 //!   and only parse when they differ (vanilla compares trees).
+//! - **26.1** has no confirms: the server applies every click and answers only the slots whose
+//!   hash (vanilla `HashedStack`) differs from its own result. A 26.1 click is never refused:
+//!   one ghast cannot predict is sent unpredicted ([`ContainerClick::predicted`]) and the
+//!   server's corrections bring the result. Data components stay raw too
+//!   ([`ItemData::Components`]); `window_items` is applied with a structural skip
+//!   ([`Inventory::apply_raw_v26_1`]). Item facts come from Mojang's reports ([`v26_1`]).
+//! - **Item accessors** ([`Stack::item_name`], [`Stack::max_stack_size`],
+//!   [`Stack::damage_value`], [`Stack::custom_name`], [`Stack::enchantments`], …) answer from NBT
+//!   or components, decoding only what they read.
 //! - **Pure.** No I/O, no clock, no async: packets in, packets out. The client writes the
 //!   returned packets immediately, in call order, before the tick's movement packet, and calls
 //!   [`Inventory::tick`] once per tick.

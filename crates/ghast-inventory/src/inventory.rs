@@ -19,6 +19,19 @@ fn is_grid(lay: Layout, l: Loc) -> bool {
 }
 use crate::window::{SlotKind, WindowKind};
 
+/// `a == b` for slots, written out so the common equal-NBT case stays a few compares and one
+/// `memcmp` whatever variants `ItemData` has.
+#[inline(always)]
+fn same_slot(a: &Option<Stack>, b: &Option<Stack>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.id == b.id && a.count == b.count && a.damage == b.damage && a.data == b.data
+        }
+        _ => false,
+    }
+}
+
 /// Ticks a click may wait for its confirm before it is given up ([`ClickOutcome::TimedOut`]).
 pub const DEFAULT_CLICK_TIMEOUT_TICKS: u32 = 40;
 
@@ -963,12 +976,13 @@ impl Inventory {
         for (i, s) in items.into_iter().enumerate() {
             let Some(l) = lay.loc(i) else { break };
             touched_grid |= is_grid(lay, l);
-            let mut s = self.normalize(s);
+            let mut s = s;
+            self.normalize_in_place(&mut s);
             if lay.clamps(l) {
                 crate::sim::clamp_v(self.version, &mut s);
             }
             let slot = self.m.at_mut(l);
-            if *slot != s {
+            if !same_slot(slot, &s) {
                 *slot = s;
                 match l {
                     Loc::Container(_) => window = true,
@@ -1217,13 +1231,26 @@ impl Inventory {
 
     /// 1.12 / 1.16.5 drop empty stacks (1.16.5 also has no damage field); 1.8 keeps zero-count
     /// stacks.
-    fn normalize(&self, s: Option<Stack>) -> Option<Stack> {
-        match self.version {
-            Version::V1_8 => s,
-            Version::V1_12 => s.filter(|s| s.count > 0 && s.id != 0),
-            Version::V1_16_5 | Version::V26_1 => s
-                .filter(|s| s.count > 0 && s.id != 0)
-                .map(|s| Stack { damage: 0, ..s }),
+    ///
+    /// Works in place: moving an `Option<Stack>` through a `match` per slot cost the legacy
+    /// `window_items` path measurably once `Stack` grew the 26.1 variant.
+    #[inline]
+    fn normalize(&self, mut s: Option<Stack>) -> Option<Stack> {
+        self.normalize_in_place(&mut s);
+        s
+    }
+
+    #[inline]
+    fn normalize_in_place(&self, s: &mut Option<Stack>) {
+        if self.version == Version::V1_8 {
+            return;
+        }
+        if s.as_ref().is_some_and(|s| s.count <= 0 || s.id == 0) {
+            *s = None;
+        } else if self.version != Version::V1_12
+            && let Some(st) = s
+        {
+            st.damage = 0;
         }
     }
 }

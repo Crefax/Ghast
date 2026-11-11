@@ -1,5 +1,6 @@
 //! Random packet and click sequences: never panic, keep the version's invariants, and conserve
 //! items in clicks that only move them.
+#![cfg(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 
 use ghast_inventory::{Click, Inventory, OUTSIDE, Outgoing, SlotKind, Stack, Version, WindowKind};
 use ghast_protocol::nbt::{Compound, NamedTag, RawNbt, Tag};

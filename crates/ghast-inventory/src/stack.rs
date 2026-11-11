@@ -20,9 +20,10 @@ pub enum ItemData {
     /// 1.8 – 1.16.5 item NBT exactly as received.
     Nbt(RawNbt),
     /// 26.1 data component patch (added / removed against the item's defaults) exactly as
-    /// received; components are decoded only when asked for.
+    /// received; components are decoded only when asked for. Boxed so that a [`Stack`] stays
+    /// small for the versions without components.
     #[cfg(feature = "v26_1")]
-    Components(ghast_protocol::types::slot::v775::ComponentPatch),
+    Components(Box<ghast_protocol::types::slot::v775::ComponentPatch>),
 }
 
 impl ItemData {
@@ -131,7 +132,7 @@ impl Stack {
             data: if s.components.is_empty() {
                 ItemData::None
             } else {
-                ItemData::Components(s.components)
+                ItemData::Components(Box::new(s.components))
             },
         }
     }

@@ -169,23 +169,35 @@ fn accessors_from_defaults_and_patches() {
     assert_eq!(s.max_damage(v), Some(1561));
     assert!(s.is_damageable(v));
     assert!(!s.unbreakable(v));
-    s.data = ItemData::Components(ComponentPatch::from_parts(
+    s.data = ItemData::Components(Box::new(ComponentPatch::from_parts(
         &[
             (component::DAMAGE, &[0x96, 0x01]),
             (component::UNBREAKABLE, &[]),
         ],
         &[],
-    ));
+    )));
     assert_eq!(s.damage_value(v), 150);
     assert!(s.unbreakable(v));
     assert!(!s.is_damageable(v));
     // removing max_stack_size makes the default 1
     let dirt = ghast_inventory::Stack {
-        data: ItemData::Components(ComponentPatch::from_parts(
+        data: ItemData::Components(Box::new(ComponentPatch::from_parts(
             &[],
             &[component::MAX_STACK_SIZE],
-        )),
+        ))),
         ..ghast_inventory::Stack::new(item_id("dirt").unwrap(), 1, 0)
     };
     assert_eq!(dirt.max_stack_size(v), 1);
+}
+
+#[test]
+fn print_sizes() {
+    eprintln!(
+        "Stack {} ItemData {} ComponentPatch {} RawNbt {} Option<Stack> {}",
+        size_of::<ghast_inventory::Stack>(),
+        size_of::<ItemData>(),
+        size_of::<ghast_protocol::types::slot::v775::ComponentPatch>(),
+        size_of::<ghast_protocol::nbt::RawNbt>(),
+        size_of::<Option<ghast_inventory::Stack>>()
+    );
 }

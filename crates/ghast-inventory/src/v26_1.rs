@@ -740,7 +740,7 @@ mod tests {
             ],
             &[component::MAX_DAMAGE],
         );
-        st.data = ItemData::Components(p);
+        st.data = ItemData::Components(Box::new(p));
         assert_eq!(patch(&st).unwrap().added_len(), 2);
         assert_eq!(max_stack_size(&st), 4);
         assert_eq!(max_damage(&st), None);
