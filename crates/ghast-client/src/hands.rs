@@ -777,6 +777,9 @@ pub struct Hands {
     left_click_counter: u32,
     right_click_delay: u32,
     using: bool,
+    /// The hand and item id of the use in progress (`getUsedItemHand`, `useItem`).
+    use_hand_off: bool,
+    use_item: u16,
     left_was: bool,
     right_was: bool,
     /// Blocks broken (finish sent).
@@ -806,6 +809,19 @@ impl Hands {
     #[must_use]
     pub fn using_item(&self) -> bool {
         self.using
+    }
+
+    /// The use in progress: (off hand, item id).
+    #[must_use]
+    pub fn use_item(&self) -> Option<(bool, u16)> {
+        self.using.then_some((self.use_hand_off, self.use_item))
+    }
+
+    /// `startUsingItem`: remembers the hand and the item.
+    fn start_using(&mut self, off_hand: bool, id: u16) {
+        self.using = true;
+        self.use_hand_off = off_hand;
+        self.use_item = id;
     }
 
     /// The server finished our item use (entity status 9) or the held slot changed.
@@ -1062,7 +1078,7 @@ impl Hands {
                     off_hand: false,
                 });
                 if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                    self.using = true;
+                    self.start_using(false, h.id);
                 }
             }
             return;
@@ -1090,7 +1106,7 @@ impl Hands {
             });
             // FoodItem.onStartUse: only when the player can eat.
             if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                self.using = true;
+                self.start_using(false, h.id);
             }
         }
     }
@@ -1149,7 +1165,7 @@ impl Hands {
                     off_hand,
                 });
                 if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                    self.using = true;
+                    self.start_using(off_hand, h.id);
                     return;
                 }
             }

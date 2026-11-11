@@ -695,6 +695,11 @@ impl ClientVersion for V26_1 {
         for &id in ghast_world::v26_1::PACKET_IDS {
             f.insert(id);
         }
+        // Everything the inventory reads (recipes for the furnace / smithing / stonecutter
+        // slots, abilities for creative clicks, experience for the anvil and enchanting).
+        for &id in ghast_inventory::PACKET_IDS_26_1 {
+            f.insert(id);
+        }
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::SYSTEM_CHAT);
             f.insert(cb::id::PROFILELESS_CHAT);
@@ -1247,7 +1252,18 @@ impl ClientVersion for V26_1 {
             }),
             // Only the window packets' encoders (write_set would link every packet's).
             Outbound::Inventory(o) => match o.to_v26_1(&wire.hash_registries) {
-                Some(sb::ServerboundPlayPacket::WindowClick(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::WindowClick(p)) => {
+                    // Every stack the click drops swings the arm first (ServerboundSwingPacket
+                    // from LocalPlayer.drop / the slot's throw), then the click goes out.
+                    if let ghast_inventory::Outgoing::ContainerClick(c) = o {
+                        for _ in 0..c.swings {
+                            enc.write_packet(&sb::ArmAnimation {
+                                hand: sb::ArmAnimationHand::MAIN_HAND,
+                            })?;
+                        }
+                    }
+                    enc.write_packet(&p)
+                }
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
                 _ => Ok(()),
             },
@@ -1299,6 +1315,47 @@ mod tests {
         assert_eq!(checksum, if c as u8 == 0 { 1 } else { c as u8 });
         // Arrays.hashCode([1,2,3]) = 30817.
         assert_eq!(h1, 30817);
+    }
+
+    /// The play filter passes every packet the inventory reads.
+    #[test]
+    fn filter_passes_the_inventory_packets() {
+        let f = V26_1::play_filter(Interests::NONE);
+        for &id in ghast_inventory::PACKET_IDS_26_1 {
+            assert!(f.contains(id), "0x{id:02x}");
+        }
+    }
+
+    /// A click that drops a stack (Q over a filled slot) sends its swings before the click.
+    #[test]
+    fn dropping_click_swings_first() {
+        use ghast_inventory::{Click, Inventory, Stack, Version};
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        let dirt = ghast_inventory::v26_1::item_id("dirt").unwrap();
+        inv.on_set_slot(0, 36, Some(Stack::new(dirt, 5, 0)));
+        let _ = inv.open_inventory().unwrap();
+        // Clicks wait for the tick after the screen opened / the slot changed.
+        for _ in 0..3 {
+            inv.tick();
+        }
+        let o = inv
+            .click(Click::Drop {
+                slot: 36,
+                all: false,
+            })
+            .unwrap();
+        let swings = match &o {
+            ghast_inventory::Outgoing::ContainerClick(c) => c.swings,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(swings, 1);
+        let mut enc = FrameEncoder::new();
+        let mut wire = Wire26_1::default();
+        V26_1::write_play(&mut enc, &Outbound::Inventory(o), &mut wire).unwrap();
+        let out = enc.out_mut().split().freeze();
+        // frame 1: arm_animation (len 2: id, hand 0); frame 2: the window click.
+        assert_eq!(&out[..3], &[2, sb::id::ARM_ANIMATION as u8, 0]);
+        assert_eq!(out[4], sb::id::WINDOW_CLICK as u8);
     }
 
     /// A transfer reconnects with `ClientIntent.TRANSFER` (3).

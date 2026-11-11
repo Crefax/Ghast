@@ -31,6 +31,8 @@ pub(crate) struct Sim26 {
     session: SessionPackets,
     /// The level-load gate (`player_loaded`), oracle-proven on `joins.jsonl.gz`.
     gate: modern::LoadGate,
+    /// `use_effects` of the item in use (see [`Sim26::use_effects`]).
+    use_effects: Option<(bool, f32)>,
 }
 
 /// The interaction ranges with vanilla's defaults and ranges.
@@ -60,13 +62,16 @@ impl std::fmt::Debug for Sim26 {
 }
 
 impl Sim26 {
-    /// SEAM (26.1 item use effects, waiting for ghast-inventory accessors): the
-    /// `minecraft:use_effects` component of the stack in use (`LivingEntity.getUseItem`:
-    /// `can_sprint`, `speed_multiplier`) belongs here. Until the inventory exposes it, every
-    /// item uses the component's default (no sprinting, x0.2), which is exact only for stacks
-    /// whose item has no `use_effects` (not checked per item yet).
+    /// The `use_effects` of the stack in use (`LivingEntity.getUseItem`), set by the engine
+    /// each tick from `ghast_inventory::v26_1::item_use`; the component default without one.
     fn use_effects(&self) -> modern::UseEffects {
-        modern::UseEffects::default()
+        self.use_effects.map_or_else(
+            modern::UseEffects::default,
+            |(can_sprint, speed_multiplier)| modern::UseEffects {
+                can_sprint,
+                speed_multiplier,
+            },
+        )
     }
 
     pub(crate) fn new() -> Self {
@@ -80,6 +85,7 @@ impl Sim26 {
             ranges: range_attributes(),
             old_pos: [0.0; 3],
             entities: None,
+            use_effects: None,
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -165,7 +171,9 @@ impl WorldView for Sim26 {
     }
 
     fn build_height(&self) -> Option<(i32, i32)> {
-        self.world.dimension().map(|d| (d.kind.min_y, d.kind.height))
+        self.world
+            .dimension()
+            .map(|d| (d.kind.min_y, d.kind.height))
     }
 
     fn block_query(&self, x: i32, y: i32, z: i32) -> Option<BlockQuery> {
@@ -325,6 +333,10 @@ impl Sim for Sim26 {
             }
             Err(e) => log::warn!("bad registry_data packet: {e}"),
         }
+    }
+
+    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
+        self.use_effects = effects;
     }
 
     fn drop_level(&mut self) {

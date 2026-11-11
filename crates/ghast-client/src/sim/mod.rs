@@ -209,6 +209,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError>;
     /// A new client player (join, respawn).
     fn reset_player(&mut self);
+    /// 26.1: the use effects (`can_sprint`, `speed_multiplier`) of the item in use this tick
+    /// (`None`: not using, or the component default).
+    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
+        let _ = effects;
+    }
     /// Play → configuration (`start_configuration`): vanilla's `clearClientLevel` drops the
     /// level (chunks, entities) and the player until the next join.
     fn drop_level(&mut self) {
@@ -1080,6 +1085,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         (**self).held_item(id, count, efficiency)
+    }
+    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
+        (**self).set_use_effects(effects);
     }
     fn crosshair_now(
         &self,
