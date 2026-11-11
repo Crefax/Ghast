@@ -243,3 +243,117 @@ fn print_sizes() {
         size_of::<Option<ghast_inventory::Stack>>()
     );
 }
+
+/// The real 26.1 client's `HashedStack` hashes (oracle `HashDump`,
+/// `tests/golden/26.1/hashed_stacks.jsonl.gz`: 4000 random stacks covering every component
+/// type, with the client's registries). Every hash ghast computes must equal the client's; types
+/// ghast does not hash are listed (they are sent with a hash the server corrects).
+#[test]
+fn hashed_stacks_match_the_real_client() {
+    use ghast_inventory::v26_1::{COMPONENT_NAMES, component_hash, hashed_slot};
+    use ghast_protocol::types::slot::v775::ItemStack;
+    use std::collections::BTreeMap;
+    const VECTORS: &[u8] = include_bytes!("../../../tests/golden/26.1/hashed_stacks.jsonl.gz");
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(VECTORS).read_to_string(&mut text).unwrap();
+    let unhex = |s: &str| -> Bytes {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect::<Vec<u8>>().into()
+    };
+    let mut reg = HashRegistries::default();
+    // per type: (exact, wrong, not hashed)
+    let mut per: BTreeMap<i32, [usize; 3]> = BTreeMap::new();
+    let mut stacks = 0;
+    let mut whole_exact = 0;
+    let mut undecodable: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        match v["type"].as_str().unwrap() {
+            "registry" => {
+                let names: Vec<&str> = v["entries"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+                reg.add(v["name"].as_str().unwrap(), names);
+            }
+            "stack" => {
+                stacks += 1;
+                let wire = unhex(v["wire"].as_str().unwrap());
+                let s = match ItemStack::read(&mut Reader::new(&wire)) {
+                    Ok(s) => s.unwrap(),
+                    Err(e) => {
+                        // name the component the generated layout cannot read
+                        let mut r = Reader::new(&wire);
+                        for _ in 0..4 {
+                            r.read_varint().unwrap();
+                        }
+                        let mut bad = String::from("?");
+                        for _ in 0..v["added"].as_array().unwrap().len() {
+                            let ty = r.clone().read_varint().unwrap();
+                            if ghast_protocol::defs::p775::types::SlotComponent::skip(&mut r).is_err() {
+                                bad = COMPONENT_NAMES[ty as usize].to_string();
+                                break;
+                            }
+                        }
+                        undecodable.push(format!("{bad} ({e})"));
+                        continue;
+                    }
+                };
+                assert_eq!(s.id, v["item_id"].as_i64().unwrap() as i32);
+                let mut want_types: Vec<i32> = v["added"].as_array().unwrap().iter().map(|a| a["id"].as_i64().unwrap() as i32).collect();
+                let mut got_types: Vec<i32> = s.components.iter().map(|(t, _)| t).collect();
+                want_types.sort();
+                got_types.sort();
+                if want_types != got_types || s.components.removed().count() != v["removed"].as_array().unwrap().len() {
+                    let wire_order: Vec<&str> = s.components.iter().map(|(t, _)| COMPONENT_NAMES.get(t as usize).copied().unwrap_or("?")).collect();
+                    undecodable.push(format!("types differ: wire order read {wire_order:?}"));
+                    continue;
+                }
+                let mut all = true;
+                for a in v["added"].as_array().unwrap() {
+                    let ty = a["id"].as_i64().unwrap() as i32;
+                    let want = a["hash"].as_i64().unwrap() as i32;
+                    let value = s.components.get(ty).expect("component on the wire");
+                    let e = per.entry(ty).or_default();
+                    match component_hash(ty, &value, &reg) {
+                        Some(h) if h == want => e[0] += 1,
+                        Some(_) => {
+                            e[1] += 1;
+                            all = false;
+                        }
+                        None => {
+                            e[2] += 1;
+                            all = false;
+                        }
+                    }
+                }
+                if all {
+                    // the whole HashedStack, removed set included, byte for byte
+                    let st = ghast_inventory::Stack::from_v775(s);
+                    let (h, exact) = hashed_slot(Some(&st), &reg);
+                    assert!(exact);
+                    let want = unhex(v["hashed_wire"].as_str().unwrap());
+                    // optional HashedStack; HashedPatchMap is a map: compare sorted
+                    let mut r = Reader::new(&want);
+                    assert!(r.read_bool().unwrap());
+                    let back = <ghast_protocol::defs::p775::types::HashedSlot as ghast_protocol::Decode>::decode(&mut r).unwrap();
+                    let (mut x, mut y) = (h.unwrap(), back);
+                    x.components.sort_by_key(|c| c.r#type.0);
+                    y.components.sort_by_key(|c| c.r#type.0);
+                    x.remove_components.sort_by_key(|c| c.r#type.0);
+                    y.remove_components.sort_by_key(|c| c.r#type.0);
+                    assert_eq!(x, y, "stack {}", v["k"]);
+                    whole_exact += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(stacks, 4000);
+    undecodable.sort();
+    undecodable.dedup();
+    assert!(undecodable.is_empty(), "stacks ghast cannot read: {undecodable:?}");
+    let name = |t: i32| COMPONENT_NAMES[t as usize];
+    let exact: Vec<&str> = per.iter().filter(|(_, c)| c[0] > 0 && c[1] == 0 && c[2] == 0).map(|(t, _)| name(*t)).collect();
+    let partial: Vec<String> = per.iter().filter(|(_, c)| c[0] > 0 && (c[1] > 0 || c[2] > 0)).map(|(t, c)| format!("{}:{c:?}", name(*t))).collect();
+    let wrong: Vec<String> = per.iter().filter(|(_, c)| c[1] > 0).map(|(t, c)| format!("{}:{c:?}", name(*t))).collect();
+    let none: Vec<&str> = per.iter().filter(|(_, c)| c[0] == 0 && c[1] == 0).map(|(t, _)| name(*t)).collect();
+    eprintln!("exact ({}): {exact:?}\npartial ({}): {partial:?}\nnot hashed ({}): {none:?}\nwhole stacks exact: {whole_exact}", exact.len(), partial.len(), none.len());
+    assert!(wrong.is_empty(), "wrong hashes: {wrong:?}");
+}

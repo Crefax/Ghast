@@ -6768,7 +6768,7 @@ pub struct SlotComponentDataBlocksAttacks {
     /// `itemDamage`
     pub item_damage: crate::defs::p775::types::SlotComponentDataBlocksAttacksItemDamage,
     /// `bypassedBy`
-    pub bypassed_by: Option<ByteString>,
+    pub bypassed_by: Option<HolderSet>,
     /// `blockSound`
     pub block_sound: Option<Holder<crate::defs::p775::types::ItemSoundEvent>>,
     /// `disableSound`
@@ -7343,6 +7343,8 @@ pub struct SlotComponentDataBlockState {
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBeesBees {
+    /// `entityType`
+    pub entity_type: i32,
     /// `nbtData`
     pub nbt_data: AnonNbt,
     /// `ticksInHive`
@@ -7838,7 +7840,7 @@ impl Decode for SlotComponent {
                         }
                     };
                     let v63 = if r.read_bool()? {
-                        Some(r.read_string()?)
+                        Some(<HolderSet as Decode>::decode(r)?)
                     } else {
                         None
                     };
@@ -8612,18 +8614,20 @@ impl Decode for SlotComponent {
                     let v180 = {
                         let v181 = {
                             let c = r.read_varint()?;
-                            r.check_count(i64::from(c), 3)?
+                            r.check_count(i64::from(c), 4)?
                         };
                         let mut v182 = Vec::with_capacity(v181.min(crate::codec::PREALLOC_LIMIT));
                         for _ in 0..v181 {
                             v182.push({
-                                let v183 = AnonNbt::read(r)?;
-                                let v184 = r.read_varint()?;
+                                let v183 = r.read_varint()?;
+                                let v184 = AnonNbt::read(r)?;
                                 let v185 = r.read_varint()?;
+                                let v186 = r.read_varint()?;
                                 crate::defs::p775::types::SlotComponentDataBeesBees {
-                                    nbt_data: v183,
-                                    ticks_in_hive: v184,
-                                    min_ticks_in_hive: v185,
+                                    entity_type: v183,
+                                    nbt_data: v184,
+                                    ticks_in_hive: v185,
+                                    min_ticks_in_hive: v186,
                                 }
                             });
                         }
@@ -8962,7 +8966,7 @@ impl Encode for SlotComponent {
                 match &(*v35).bypassed_by {
                     Some(v38) => {
                         w.put_u8(1);
-                        w.put_string(&(*v38))?;
+                        (*v38).encode(w)?;
                     }
                     None => w.put_u8(0),
                 }
@@ -9663,6 +9667,7 @@ impl Encode for SlotComponent {
                 }
                 w.put_len_varint((*v153).bees.len())?;
                 for v154 in (*v153).bees.iter() {
+                    w.put_varint((*v154).entity_type);
                     (*v154).nbt_data.write(w);
                     w.put_varint((*v154).ticks_in_hive);
                     w.put_varint((*v154).min_ticks_in_hive);
@@ -10222,7 +10227,11 @@ impl Generate for SlotComponent {
                             factor: v62,
                         }
                     };
-                    let v63 = if g.bool() { Some(g.string()) } else { None };
+                    let v63 = if g.bool() {
+                        Some(<HolderSet as Generate>::generate(g))
+                    } else {
+                        None
+                    };
                     let v64 = if g.bool() {
                         Some(if g.bool() {
                             Holder::Id(match g.int_in(-2147483648, 2147483647, &[0, 1, 2]) as i32 {
@@ -10930,13 +10939,15 @@ impl Generate for SlotComponent {
                         let mut v182 = Vec::with_capacity(v181.min(crate::codec::PREALLOC_LIMIT));
                         for _ in 0..v181 {
                             v182.push({
-                                let v183 = g.anon_nbt();
-                                let v184 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                                let v183 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                                let v184 = g.anon_nbt();
                                 let v185 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
+                                let v186 = (g.int_in(-2147483648, 2147483647, &[]) as i32);
                                 crate::defs::p775::types::SlotComponentDataBeesBees {
-                                    nbt_data: v183,
-                                    ticks_in_hive: v184,
-                                    min_ticks_in_hive: v185,
+                                    entity_type: v183,
+                                    nbt_data: v184,
+                                    ticks_in_hive: v185,
+                                    min_ticks_in_hive: v186,
                                 }
                             });
                         }
@@ -11448,7 +11459,9 @@ impl SlotComponent {
                         let v80 = r.read_f32()?;
                     };
                     let v81 = if r.read_bool()? {
-                        Some(r.read_string()?)
+                        Some({
+                            HolderSet::skip(r)?;
+                        })
                     } else {
                         None
                     };
@@ -12493,13 +12506,14 @@ impl SlotComponent {
                     let v363 = {
                         let v364 = {
                             let c = r.read_varint()?;
-                            r.check_count(i64::from(c), 3)?
+                            r.check_count(i64::from(c), 4)?
                         };
                         for _ in 0..v364 {
                             let _ = {
-                                let v365 = AnonNbt::read(r)?;
-                                let v366 = r.read_varint()?;
+                                let v365 = r.read_varint()?;
+                                let v366 = AnonNbt::read(r)?;
                                 let v367 = r.read_varint()?;
+                                let v368 = r.read_varint()?;
                             };
                         }
                     };
@@ -12513,8 +12527,8 @@ impl SlotComponent {
                     let id = r.read_varint()?;
                     if id == 0 {
                         let _ = {
-                            let v368 = r.read_string()?;
-                            let v369 = if r.read_bool()? {
+                            let v369 = r.read_string()?;
+                            let v370 = if r.read_bool()? {
                                 Some(r.read_f32()?)
                             } else {
                                 None
@@ -12569,15 +12583,15 @@ impl SlotComponent {
                     let id = r.read_varint()?;
                     if id == 0 {
                         let _ = {
-                            let v370 = r.read_i32()?;
                             let v371 = r.read_i32()?;
-                            let v372 = r.read_string()?;
-                            let v373 = if r.read_bool()? {
+                            let v372 = r.read_i32()?;
+                            let v373 = r.read_string()?;
+                            let v374 = if r.read_bool()? {
                                 Some(AnonNbt::read(r)?)
                             } else {
                                 None
                             };
-                            let v374 = if r.read_bool()? {
+                            let v375 = if r.read_bool()? {
                                 Some(AnonNbt::read(r)?)
                             } else {
                                 None

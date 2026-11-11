@@ -287,6 +287,18 @@ pub const PATCHES: &[Patch] = &[Patch {
     expect: r#"["registryEntryHolder", {"baseName": "variantId", "otherwise": {"name": "variantData", "type": "string"}}]"#,
     replace: r#""varint""#,
     why: "ZombieNautilusVariant.STREAM_CODEC is ByteBufCodecs.holderRegistry (a plain registry id; checked live) (found by a live 26.1.2 decode failure / hash check)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/blocks_attacks/1/4/type",
+    expect: r#"["option", "string"]"#,
+    replace: r#"["option", "IDSet"]"#,
+    why: "BlocksAttacks.STREAM_CODEC sends bypassedBy as an optional ByteBufCodecs.holderSet(DAMAGE_TYPE) (found by the oracle HashedStack vectors)",
+}, Patch {
+    data_key: "26.1",
+    pointer: "/types/SlotComponent/1/1/type/1/fields/bees",
+    expect: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
+    replace: r#"["container", [{"name": "bees", "type": ["array", {"countType": "varint", "type": ["container", [{"name": "entityType", "type": "varint"}, {"name": "nbtData", "type": "anonymousNbt"}, {"name": "ticksInHive", "type": "varint"}, {"name": "minTicksInHive", "type": "varint"}]]}]}]]"#,
+    why: "BeehiveBlockEntity.Occupant.STREAM_CODEC starts with TypedEntityData.streamCodec(EntityType.STREAM_CODEC): the entity type id, then the compound (found by the oracle HashedStack vectors)",
 }];
 
 /// Applies the [`PATCHES`] of one minecraft-data version.
