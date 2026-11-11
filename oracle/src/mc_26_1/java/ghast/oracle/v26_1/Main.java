@@ -66,6 +66,15 @@ public final class Main {
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
             case "items" -> Io.write(a.path("--out", golden.resolve("items.jsonl.gz")), ItemDump::lines);
             case "hashed-stacks" -> Io.write(a.path("--out", golden.resolve("hashed_stacks.jsonl.gz")), HashDump::lines);
+            case "net-crypto" -> Io.write(a.path("--out", golden.resolve("net_crypto.jsonl.gz")), NetCryptoDump::lines);
+            case "chat-signing" -> Io.write(a.path("--out", golden.resolve("chat_signing.jsonl.gz")), ChatSigningDump::lines);
+            case "clicks" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", ClickDump.CASES);
+                Path out = a.path("--out", Path.of("cache", VERSION, "clicks", "clicks-seed" + seed + "-n" + count + ".jsonl.gz"));
+                Io.bestCompression = Boolean.parseBoolean(a.str("--best", "false"));
+                Io.write(out, sink -> ClickDump.lines(seed, count, sink));
+            }
             case "dig" -> {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", DigDump.CASES);
@@ -112,6 +121,9 @@ public final class Main {
                   dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
                   joins [--out FILE]                   joins through the level-load gate (delayed load)
                   hashed-stacks [--out FILE]           item stack wire bytes + the client's HashedStack
+                  net-crypto [--out FILE]              login encryption: session hash, AES/CFB8, hello / key packets
+                  chat-signing [--out FILE]            signed chat: session update, chat / command signatures, acks
+                  clicks [--seed N] [--count N] [--out FILE]  window clicks through the real client (every menu type)
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
@@ -151,6 +163,9 @@ public final class Main {
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
         Io.write(dir.resolve("items.jsonl.gz"), ItemDump::lines);
         Io.write(dir.resolve("hashed_stacks.jsonl.gz"), HashDump::lines);
+        Io.write(dir.resolve("net_crypto.jsonl.gz"), NetCryptoDump::lines);
+        Io.write(dir.resolve("chat_signing.jsonl.gz"), ChatSigningDump::lines);
+        Io.write(dir.resolve("clicks_seed1.jsonl.gz"), sink -> ClickDump.lines(1, ClickDump.CASES, sink));
         Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
@@ -231,6 +246,9 @@ public final class Main {
         }
         System.out.println((mismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of " + all.size() + " scenarios");
         ok &= mismatches == 0;
+        int clickMismatches = ClickDump.reverseMismatches(1, 500);
+        System.out.println((clickMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 500 click cases");
+        ok &= clickMismatches == 0;
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "teleports.jsonl.gz", "joins.jsonl.gz"}) {

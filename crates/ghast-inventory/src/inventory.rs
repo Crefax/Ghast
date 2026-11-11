@@ -184,6 +184,47 @@ pub enum Click {
         /// Slot (normally the now empty slot the stack was picked up from).
         slot: i16,
     },
+    /// Mode 3: middle click in creative mode: a full stack of the slot's item onto the empty
+    /// cursor (26.1; no effect outside creative mode).
+    Clone {
+        /// Slot.
+        slot: i16,
+    },
+    /// Mode 5: one packet of a drag ("quick craft"): the GUI sends [`DragStage::Start`] (slot
+    /// [`OUTSIDE`]), one [`DragStage::Slot`] per slot the mouse crosses, then
+    /// [`DragStage::End`] (slot [`OUTSIDE`]), each its own click (26.1).
+    QuickCraft {
+        /// Slot ([`OUTSIDE`] for start and end).
+        slot: i16,
+        /// Which packet of the drag.
+        stage: DragStage,
+        /// How the carried stack is spread.
+        kind: DragKind,
+    },
+}
+
+/// The packet of a drag ([`Click::QuickCraft`]): vanilla's quick-craft header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DragStage {
+    /// Mouse pressed over the screen (header 0).
+    Start,
+    /// The mouse crossed a slot (header 1).
+    Slot,
+    /// Mouse released: the stack is spread (header 2).
+    End,
+}
+
+/// How a drag spreads the carried stack ([`Click::QuickCraft`]): vanilla's quick-craft type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DragKind {
+    /// Left button: split evenly (type 0).
+    Split,
+    /// Right button: one item per slot (type 1).
+    One,
+    /// Middle button, creative mode: a full stack per slot (type 2).
+    Clone,
 }
 
 impl Click {
@@ -196,6 +237,20 @@ impl Click {
             Click::Swap { slot, hotbar } => (slot, hotbar, 2),
             Click::Drop { slot, all } => (slot, u8::from(all), 4),
             Click::PickupAll { slot } => (slot, 0, 6),
+            Click::Clone { slot } => (slot, 2, 3),
+            Click::QuickCraft { slot, stage, kind } => {
+                let header = match stage {
+                    DragStage::Start => 0,
+                    DragStage::Slot => 1,
+                    DragStage::End => 2,
+                };
+                let ty = match kind {
+                    DragKind::Split => 0,
+                    DragKind::One => 1,
+                    DragKind::Clone => 2,
+                };
+                (slot, header | ty << 2, 5)
+            }
         }
     }
 }
@@ -310,6 +365,10 @@ pub struct ContainerClick {
     /// ghast's own number for the click (per screen, like the legacy action number, but never
     /// sent): the [`ClickResult::action`] that resolves it.
     pub action: i16,
+    /// How many `swing` (main hand) packets the vanilla client sends right before this click:
+    /// every stack the click drops (outside the window, the drop key, a remainder that does not
+    /// fit) swings the arm. Send them first, then the click (0 when unpredicted).
+    pub swings: u8,
 }
 
 /// What became of a click.
@@ -374,6 +433,8 @@ pub struct Window {
     title: ByteString,
     action: i16,
     properties: Vec<(i16, i16)>,
+    /// 26.1 `minecraft:menu` registry id (-1 for other versions).
+    menu: i32,
 }
 
 impl Window {
@@ -396,6 +457,11 @@ impl Window {
     #[must_use]
     pub fn property(&self, id: i16) -> Option<i16> {
         self.properties.iter().find(|p| p.0 == id).map(|p| p.1)
+    }
+    /// 26.1: the `minecraft:menu` registry id of `open_screen` (`None` for other versions).
+    #[must_use]
+    pub fn menu_26_1(&self) -> Option<i32> {
+        (self.menu >= 0).then_some(self.menu)
     }
 }
 
@@ -443,6 +509,12 @@ pub struct Inventory {
     /// 26.1 registry names for click hashes and the binding curse.
     #[cfg(feature = "v26_1")]
     reg26: crate::v26_1::HashRegistries,
+    /// 26.1: recipe item sets, game mode, experience level.
+    #[cfg(feature = "v26_1")]
+    w26: crate::sim26::World26,
+    /// 26.1: window 0's and the open container's per-screen click state (drags, …).
+    #[cfg(feature = "v26_1")]
+    s26: [crate::sim26::Screen26; 2],
 }
 
 impl Inventory {
@@ -476,6 +548,10 @@ impl Inventory {
             state_window: 0,
             #[cfg(feature = "v26_1")]
             reg26: crate::v26_1::HashRegistries::default(),
+            #[cfg(feature = "v26_1")]
+            w26: crate::sim26::World26::default(),
+            #[cfg(feature = "v26_1")]
+            s26: Default::default(),
         }
     }
 
@@ -509,12 +585,16 @@ impl Inventory {
         // the recipe book belongs to the connection, not to the player entity
         #[cfg(feature = "v26_1")]
         let reg26 = std::mem::take(&mut self.reg26);
+        #[cfg(feature = "v26_1")]
+        let w26 = std::mem::take(&mut self.w26);
         *self = Inventory {
             timeout: self.timeout,
             settle: self.settle,
             book: std::mem::take(&mut self.book),
             #[cfg(feature = "v26_1")]
             reg26,
+            #[cfg(feature = "v26_1")]
+            w26,
             ..Inventory::empty(self.version)
         };
         self.events.player_changed = true;
@@ -774,10 +854,23 @@ impl Inventory {
         let in_range = usize::try_from(slot).is_ok_and(|i| i < lay.len);
         let slot_ok = match click {
             Click::Pickup { .. } | Click::Drop { .. } => in_range || slot == OUTSIDE,
-            Click::QuickMove { .. } | Click::Swap { .. } | Click::PickupAll { .. } => in_range,
+            Click::QuickMove { .. }
+            | Click::Swap { .. }
+            | Click::PickupAll { .. }
+            | Click::Clone { .. } => in_range,
+            Click::QuickCraft { stage, .. } => match stage {
+                DragStage::Slot => in_range,
+                DragStage::Start | DragStage::End => in_range || slot == OUTSIDE,
+            },
         };
         if !slot_ok {
             return Err(ClickError::InvalidSlot);
+        }
+        if matches!(click, Click::Clone { .. } | Click::QuickCraft { .. })
+            && self.version != Version::V26_1
+        {
+            // the older versions' drags and creative clicks are not modelled
+            return Err(ClickError::Unpredictable);
         }
         if let Click::Swap { hotbar, .. } = click {
             let ok = hotbar < 9
@@ -785,6 +878,10 @@ impl Inventory {
             if !ok {
                 return Err(ClickError::InvalidButton);
             }
+        }
+        #[cfg(feature = "v26_1")]
+        if self.version == Version::V26_1 {
+            return Ok(self.click_26(slot, button, mode));
         }
         let mut m = self.m.clone();
         let simulated = {
@@ -797,9 +894,6 @@ impl Inventory {
             };
             sim.click(slot, button, mode)
         };
-        if self.version == Version::V26_1 {
-            return Ok(self.click_26_1(lay, m, simulated.is_ok(), slot, button, mode));
-        }
         let item = simulated.map_err(|_| ClickError::Unpredictable)?;
         self.commit(m, lay);
         let (window_id, action) = match &mut self.screen {
@@ -866,22 +960,48 @@ impl Inventory {
         }
     }
 
-    /// The 26.1 click: vanilla predicts, then lists every slot whose stack changed and the
-    /// cursor. A click ghast cannot predict is sent unpredicted (nothing changes locally; the
-    /// server applies it and sends the true slots), never refused.
-    fn click_26_1(
-        &mut self,
-        lay: Layout,
-        m: Model,
-        predicted: bool,
-        slot: i16,
-        button: u8,
-        mode: u8,
-    ) -> Outgoing {
+    /// The 26.1 menu the click runs in.
+    #[cfg(feature = "v26_1")]
+    fn kind_26(&self) -> crate::sim26::Kind {
+        match &self.screen {
+            ScreenState::Window(w) => match (crate::sim26::Kind::from_menu(w.menu), w.kind) {
+                (Some(k), _) => k,
+                (None, WindowKind::Chest { rows }) => crate::sim26::Kind::Chest(rows),
+                (None, _) => crate::sim26::Kind::Chest(0),
+            },
+            _ => crate::sim26::Kind::Player,
+        }
+    }
+
+    /// The 26.1 click (`MultiPlayerGameMode.handleContainerInput`): vanilla predicts, then lists
+    /// every slot whose stack changed (in the order of its `Int2ObjectOpenHashMap`) and the
+    /// carried stack. A click ghast cannot predict is sent unpredicted (nothing changes locally;
+    /// the server applies it and sends the true slots), never refused.
+    #[cfg(feature = "v26_1")]
+    fn click_26(&mut self, slot: i16, button: u8, mode: u8) -> Outgoing {
+        let kind = self.kind_26();
+        let w = usize::from(matches!(self.screen, ScreenState::Window(_)));
+        let mut m = self.m.clone();
+        let mut scr = self.s26[w].clone();
+        self.w26.binding_curse = self.binding_curse();
+        let (result, swings) = {
+            let mut sim = crate::sim26::Sim26 {
+                kind,
+                m: &mut m,
+                s: &mut scr,
+                w: &self.w26,
+                swings: 0,
+            };
+            let r = sim.click(slot, button as i8, mode);
+            (r, sim.swings)
+        };
+        let predicted = result.is_ok();
         let mut changed = Vec::new();
+        let mut swings_out = 0;
         if predicted {
-            for i in 0..lay.len {
-                let Some(l) = lay.loc(i) else { break };
+            let mut idx = Vec::new();
+            for i in 0..kind.len() {
+                let Some(l) = kind.loc(i) else { break };
                 let (a, b) = (self.m.at(l), m.at(l));
                 let same = match (a, b) {
                     (None, None) => true,
@@ -889,10 +1009,20 @@ impl Inventory {
                     _ => false,
                 };
                 if !same {
-                    changed.push((i as i16, b.clone()));
+                    idx.push(i as i32);
                 }
             }
+            for i in crate::sim26::fastutil_order(&idx) {
+                let l = kind.loc(i as usize).unwrap_or(Loc::Player(0));
+                changed.push((i as i16, m.at(l).clone()));
+            }
+            let lay = self.layout();
             self.commit(m, lay);
+            self.s26[w] = scr;
+            swings_out = swings;
+        } else {
+            // the outcome is unknown, including how far a drag got: start over
+            self.s26[w].drag.reset();
         }
         let (window_id, action) = match &mut self.screen {
             ScreenState::Window(w) => {
@@ -920,9 +1050,118 @@ impl Inventory {
             changed,
             carried: self.m.cursor.clone(),
             predicted,
+            swings: swings_out,
         })
     }
 
+    /// 26.1: whether the player is in creative mode (instant build): middle-click clones,
+    /// clone drags, armor with the binding curse comes off, overflow vanishes. Set from the
+    /// `abilities` packet by [`Inventory::apply_raw_v26_1`] / [`Inventory::apply_v26_1`].
+    #[cfg(feature = "v26_1")]
+    pub fn set_creative_26_1(&mut self, creative: bool) {
+        self.w26.creative = creative;
+    }
+
+    /// 26.1: the player's experience level (the anvil's result can only be taken with enough);
+    /// set from the `experience` packet by [`Inventory::apply_raw_v26_1`].
+    #[cfg(feature = "v26_1")]
+    pub fn set_experience_level_26_1(&mut self, level: i32) {
+        self.w26.xp_level = Some(level);
+    }
+
+    /// 26.1 `update_recipes` (`declare_recipes`): the recipe item sets the furnace, smithing
+    /// and stonecutter slot rules read (`(set name, item ids)`, e.g.
+    /// `("minecraft:furnace_input", …)`) and the stonecutter recipes' inputs (`None` when one
+    /// names a tag: shift-clicks into the stonecutter are then not predicted).
+    #[cfg(feature = "v26_1")]
+    pub fn on_recipes_26_1<'a>(
+        &mut self,
+        sets: impl IntoIterator<Item = (&'a str, &'a [i32])>,
+        stonecutter_inputs: Option<Vec<i32>>,
+    ) {
+        let w = &mut self.w26;
+        for v in [
+            &mut w.furnace_input,
+            &mut w.blast_input,
+            &mut w.smoker_input,
+            &mut w.smithing_base,
+            &mut w.smithing_template,
+            &mut w.smithing_addition,
+        ] {
+            v.clear();
+        }
+        for (name, ids) in sets {
+            let target = match name.strip_prefix("minecraft:").unwrap_or(name) {
+                "furnace_input" => &mut w.furnace_input,
+                "blast_furnace_input" => &mut w.blast_input,
+                "smoker_input" => &mut w.smoker_input,
+                "smithing_base" => &mut w.smithing_base,
+                "smithing_template" => &mut w.smithing_template,
+                "smithing_addition" => &mut w.smithing_addition,
+                _ => continue,
+            };
+            target.extend_from_slice(ids);
+            target.sort_unstable();
+            target.dedup();
+        }
+        w.cutter_inputs = stonecutter_inputs.map(|mut v| {
+            v.sort_unstable();
+            v.dedup();
+            v
+        });
+    }
+
+    /// 26.1 `open_screen`: the menu registry id (`minecraft:menu`) and the title. Menus the
+    /// client has no screen for are ignored.
+    #[cfg(feature = "v26_1")]
+    pub fn on_open_screen_26_1(&mut self, id: i32, menu: i32, title: ByteString) {
+        self.on_open_window(id, crate::v26_1::window_kind(menu), title);
+        if let ScreenState::Window(w) = &mut self.screen
+            && w.id == id
+        {
+            w.menu = menu;
+        }
+        self.s26[1] = Default::default();
+    }
+
+    /// 26.1: the client-side effects of setting the open menu's container slot `k` from a
+    /// packet (vanilla runs the slot's `set` and the menu's `slotsChanged`).
+    #[cfg(feature = "v26_1")]
+    fn inbound_26_1(&mut self, k: usize, content: bool) {
+        use crate::sim26::Kind;
+        let kind = self.kind_26();
+        match kind {
+            Kind::Beacon => {
+                if let Some(Some(s)) = self.m.container.get_mut(0)
+                    && s.count > 1
+                {
+                    s.count = 1;
+                }
+            }
+            Kind::Stonecutter if k == 0 => {
+                let id = self
+                    .m
+                    .container
+                    .first()
+                    .and_then(|s| s.as_ref())
+                    .map_or(0, |s| s.id);
+                if id != self.s26[1].cutter_input {
+                    self.s26[1].cutter_input = id;
+                    // a content packet sets the result slot after the input
+                    if !content && let Some(r) = self.m.container.get_mut(1) {
+                        *r = None;
+                    }
+                }
+            }
+            Kind::Cartography if k <= 2 => {
+                let c = &mut self.m.container;
+                if c.len() >= 3 && c[2].is_some() && !(c[0].is_some() && c[1].is_some()) {
+                    c[2] = None;
+                }
+            }
+            _ => {}
+        }
+    }
     /// Replaces the model with the simulated one, records which parts changed and marks a
     /// crafting result unknown when its grid changed.
     fn commit(&mut self, new: Model, lay: Layout) {
@@ -1027,6 +1266,10 @@ impl Inventory {
                 self.m.container.clear();
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
+                #[cfg(feature = "v26_1")]
+                {
+                    self.s26[1] = Default::default();
+                }
             }
             ScreenState::None => {}
         }
@@ -1098,6 +1341,7 @@ impl Inventory {
             title,
             action: 0,
             properties: Vec::new(),
+            menu: -1,
         });
         self.events.opened = Some(id);
         self.events.window_changed = true;
@@ -1177,7 +1421,11 @@ impl Inventory {
         for (i, s) in items.enumerate() {
             let Some(l) = lay.loc(i) else { break };
             touched_grid |= is_grid(lay, l);
-            let clamps = lay.clamps(l);
+            let clamps = if V == V261 {
+                lay.clamps_26(l)
+            } else {
+                lay.clamps(l)
+            };
             let slot = self.m.at_mut(l);
             if s.settle::<V>(slot, clamps) {
                 match l {
@@ -1310,6 +1558,11 @@ impl Inventory {
             self.state_player = state_id;
         } else {
             self.state_window = state_id;
+            #[cfg(feature = "v26_1")]
+            {
+                self.inbound_26_1(0, true);
+                self.inbound_26_1(2, true);
+            }
         }
         if current {
             self.on_set_cursor(carried);
@@ -1343,7 +1596,7 @@ impl Inventory {
             return;
         };
         let mut item = item;
-        if lay.clamps(l) {
+        if lay.clamps_26(l) {
             crate::sim::clamp_v(self.version, &mut item);
         }
         match l {
@@ -1360,6 +1613,12 @@ impl Inventory {
                 Loc::Container(_) => self.events.window_changed = true,
                 _ => self.events.player_changed = true,
             }
+        }
+        #[cfg(feature = "v26_1")]
+        if let Loc::Container(k) = l
+            && window_id != 0
+        {
+            self.inbound_26_1(k, false);
         }
     }
 
@@ -1409,6 +1668,21 @@ impl Inventory {
             match w.properties.iter_mut().find(|p| p.0 == property) {
                 Some(p) => p.1 = value,
                 None => w.properties.push((property, value)),
+            }
+            #[cfg(feature = "v26_1")]
+            match w.menu {
+                // anvil: the cost data slot
+                8 if property == 0 => self.s26[1].anvil_cost = i32::from(value),
+                // crafter: slot locks
+                7 if (0..9).contains(&property) => {
+                    let bit = 1u16 << property;
+                    if value == 1 {
+                        self.s26[1].crafter_locked |= bit;
+                    } else {
+                        self.s26[1].crafter_locked &= !bit;
+                    }
+                }
+                _ => {}
             }
         }
     }

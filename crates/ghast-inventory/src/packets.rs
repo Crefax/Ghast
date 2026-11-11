@@ -262,6 +262,9 @@ mod v26_1 {
         cb::id::SET_PLAYER_INVENTORY,
         cb::id::HELD_ITEM_SLOT,
         cb::id::CRAFT_PROGRESS_BAR,
+        cb::id::DECLARE_RECIPES,
+        cb::id::ABILITIES,
+        cb::id::EXPERIENCE,
     ];
 
     fn slot(r: &mut Reader<'_>) -> Result<Option<Stack>, DecodeError> {
@@ -358,8 +361,26 @@ mod v26_1 {
                 }
                 P::HeldItemSlot(h) => self.on_held_slot(i8::try_from(h.slot).unwrap_or(-1)),
                 P::CraftProgressBar(c) => self.on_window_property(c.window_id, c.property, c.value),
+                P::DeclareRecipes(d) => self.declare_recipes_26_1(d),
+                P::Abilities(a) => self.set_creative_26_1(a.flags & 0x08 != 0),
+                P::Experience(e) => self.set_experience_level_26_1(e.level),
                 _ => {}
             }
+        }
+
+        fn declare_recipes_26_1(&mut self, d: &cb::DeclareRecipes) {
+            use ghast_protocol::types::holder::HolderSet;
+            let mut inputs = Some(Vec::new());
+            for r in &d.stone_cutter_recipes {
+                match (&r.input, &mut inputs) {
+                    (HolderSet::Ids(ids), Some(v)) => v.extend_from_slice(ids),
+                    _ => inputs = None,
+                }
+            }
+            self.on_recipes_26_1(
+                d.recipes.iter().map(|r| (&*r.name, r.items.as_slice())),
+                inputs,
+            );
         }
 
         /// Applies a 26.1 window packet from its raw body ([`PACKET_IDS_26_1`]): slots are read
@@ -421,15 +442,26 @@ mod v26_1 {
                     let c = raw.decode_as::<cb::CraftProgressBar>()?;
                     self.on_window_property(c.window_id, c.property, c.value);
                 }
+                cb::id::DECLARE_RECIPES => {
+                    self.declare_recipes_26_1(&raw.decode_as::<cb::DeclareRecipes>()?);
+                }
+                cb::id::ABILITIES => {
+                    let a = raw.decode_as::<cb::Abilities>()?;
+                    self.set_creative_26_1(a.flags & 0x08 != 0);
+                }
+                cb::id::EXPERIENCE => {
+                    let e = raw.decode_as::<cb::Experience>()?;
+                    self.set_experience_level_26_1(e.level);
+                }
                 _ => {}
             }
             Ok(())
         }
 
         fn open_window_26_1(&mut self, w: &cb::OpenWindow) {
-            self.on_open_window(
+            self.on_open_screen_26_1(
                 w.window_id,
-                crate::v26_1::window_kind(w.inventory_type),
+                w.inventory_type,
                 ghast_protocol::chat::nbt_to_plain_text(&w.window_title).into(),
             );
         }

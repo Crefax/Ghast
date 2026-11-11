@@ -137,6 +137,12 @@ impl Layout {
                 n: 0,
                 len: if v == Version::V1_8 { 45 } else { 46 },
             },
+            // 26.1 crafter: 9 grid slots, the player's 36, then the result
+            Screen::Container(WindowKind::Crafter) => Layout {
+                screen,
+                n: 9,
+                len: 46,
+            },
             Screen::Container(k) => {
                 let n = k.container_len(v);
                 Layout {
@@ -167,7 +173,13 @@ impl Layout {
                 } else if i < self.n + 27 {
                     Loc::Player(i - self.n + 9)
                 } else {
-                    Loc::Player(i - self.n - 27)
+                    let k = i - self.n - 27;
+                    if k < 9 {
+                        Loc::Player(k)
+                    } else {
+                        // only the crafter has a slot after the hotbar
+                        Loc::Container(9)
+                    }
                 }
             }
         })
@@ -205,6 +217,24 @@ impl Layout {
     /// but the crafting table), whose `setStack` caps counts at 64.
     pub fn clamps(&self, l: Loc) -> bool {
         matches!(l, Loc::Container(_)) && self.screen != Screen::Container(WindowKind::Crafting)
+    }
+
+    /// 26.1: whether the location's container caps stacks in `setItem` (`SimpleContainer`,
+    /// `MerchantContainer`); crafting grids, the crafter and result containers do not.
+    pub fn clamps_26(&self, l: Loc) -> bool {
+        let Loc::Container(k) = l else {
+            return false;
+        };
+        let Screen::Container(kind) = self.screen else {
+            return false;
+        };
+        !match kind {
+            WindowKind::Crafting | WindowKind::Crafter => true,
+            WindowKind::Anvil | WindowKind::Grindstone | WindowKind::Cartography => k == 2,
+            WindowKind::Smithing => k == 3,
+            WindowKind::Stonecutter => k == 1,
+            _ => false,
+        }
     }
 
     /// Whether the result slot is a crafting result (its handler refuses it in PICKUP_ALL).

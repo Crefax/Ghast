@@ -70,6 +70,12 @@ fn click_of(c: &sb::WindowClick) -> Click {
     }
 }
 
+/// A click's prediction: the cursor and the changed slots.
+type Prediction = (
+    Option<ghast_inventory::Stack>,
+    Vec<(i16, Option<ghast_inventory::Stack>)>,
+);
+
 /// Replays a live session: inbound packets in, the same clicks out; returns (clicks,
 /// unpredicted, outcomes).
 fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) {
@@ -79,8 +85,20 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
     let mut reg = HashRegistries::default();
     let mut clicks = 0;
     let mut unpredicted = 0;
+    let mut confirmed = 0;
     let mut outcomes = Vec::new();
+    // a click sent unpredicted in the capture that ghast predicts now: its prediction (cursor,
+    // changed slots), checked against the state after the server's corrections
+    let mut check: Option<Prediction> = None;
     for (state, dir, raw) in records(fixture) {
+        if dir == 1
+            && let Some((cursor, slots)) = check.take()
+        {
+            assert_eq!(inv.cursor(), cursor.as_ref(), "corrected cursor");
+            for (i, s) in slots {
+                assert_eq!(inv.slot(i as usize), s.as_ref(), "corrected slot {i}");
+            }
+        }
         match (state, dir) {
             (3, 0) => {
                 let ClientboundConfigurationPacket::RegistryData(r) =
@@ -115,6 +133,20 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
                     other => panic!("{other:?}"),
                 };
                 let mut ours = inv.encode_v26_1(&out).unwrap();
+                let mut p = p;
+                // The changed slots are a map, the hashed components a map and a set: since the
+                // capture ghast writes them in the real client's order (oracle click vectors);
+                // compare in one canonical order.
+                for q in [&mut ours, &mut p] {
+                    if let ServerboundPlayPacket::WindowClick(w) = q {
+                        w.changed_slots.sort_by_key(|c| c.location);
+                        let items = w.changed_slots.iter_mut().map(|c| &mut c.item);
+                        for h in items.chain([&mut w.cursor_item]).flatten() {
+                            h.components.sort_by_key(|c| c.r#type.0);
+                            h.remove_components.sort_by_key(|c| c.r#type.0);
+                        }
+                    }
+                }
                 // The capture holds the hashes ghast sent then: hash 0 for kinds it could not
                 // hash yet. Kinds hashed since (proven by the oracle vectors) differ only there.
                 if let (
@@ -143,13 +175,29 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
                 let mut b = BytesMut::new();
                 ours.encode_body(&mut a).unwrap();
                 p.encode_body(&mut b).unwrap();
-                assert_eq!(a, b, "click {clicks}: {ours:?}\nsent then: {p:?}");
+                let then_unpredicted = matches!(&p, ServerboundPlayPacket::WindowClick(t) if t.changed_slots.is_empty());
+                match &out {
+                    Outgoing::ContainerClick(cc) if a != b && then_unpredicted && cc.predicted => {
+                        confirmed += 1;
+                        check = Some((cc.carried.clone(), cc.changed.clone()));
+                    }
+                    _ => assert_eq!(a, b, "click {clicks}: {ours:?}\nsent then: {p:?}"),
+                }
             }
             _ => panic!(),
         }
     }
     inv.tick();
     outcomes.extend(inv.drain_events().clicks.iter().map(|c| c.outcome));
+    if let Some((cursor, slots)) = check.take() {
+        assert_eq!(inv.cursor(), cursor.as_ref(), "corrected cursor");
+        for (i, s) in slots {
+            assert_eq!(inv.slot(i as usize), s.as_ref(), "corrected slot {i}");
+        }
+    }
+    eprintln!(
+        "{confirmed} clicks sent unpredicted then: the server's corrections confirm ghast's prediction now"
+    );
     (clicks, unpredicted, outcomes)
 }
 
@@ -157,7 +205,9 @@ fn replay(fixture: &[u8]) -> (usize, usize, Vec<ghast_inventory::ClickOutcome>) 
 fn replayed_session_sends_the_same_click_bytes() {
     let (clicks, unpredicted, outcomes) = replay(CLICKS);
     assert_eq!(clicks, 36);
-    assert_eq!(unpredicted, 1);
+    // the bundle click sent unpredicted then is predicted now (and the server's corrections in
+    // the capture confirm the prediction)
+    assert_eq!(unpredicted, 0);
     // every click resolves once: the 2 corrected bundle clicks as rejected, the rest accepted
     use ghast_inventory::ClickOutcome as O;
     assert_eq!(outcomes.len(), 36, "{outcomes:?}");

@@ -62,6 +62,8 @@ mod item;
 mod packets;
 mod rules;
 mod sim;
+#[cfg(feature = "v26_1")]
+mod sim26;
 mod stack;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
@@ -70,7 +72,8 @@ mod window;
 pub use crafting::RecipeBook;
 pub use inventory::{
     Click, ClickError, ClickOutcome, ClickPacket, ClickResult, ContainerClick,
-    DEFAULT_CLICK_SETTLE_TICKS, DEFAULT_CLICK_TIMEOUT_TICKS, Events, Inventory, Outgoing, Window,
+    DEFAULT_CLICK_SETTLE_TICKS, DEFAULT_CLICK_TIMEOUT_TICKS, DragKind, DragStage, Events,
+    Inventory, Outgoing, Window,
 };
 pub use item::{Enchantment, EnchantmentId, ItemText};
 #[cfg(feature = "v26_1")]

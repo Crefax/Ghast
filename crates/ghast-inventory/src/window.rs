@@ -50,6 +50,8 @@ pub enum WindowKind {
     Cartography,
     /// 1.16.5 stonecutter.
     Stonecutter,
+    /// 26.1 crafter: 9 grid slots, the player inventory, then the result (screen slot 45).
+    Crafter,
 }
 
 /// What a slot of a screen handler is, as far as click prediction is concerned.
@@ -164,9 +166,14 @@ impl WindowKind {
             WindowKind::Grindstone => 3,
             WindowKind::Lectern => 1,
             WindowKind::Loom => 4,
-            WindowKind::Smithing => 3,
+            // 1.20+: template, base, addition, result
+            WindowKind::Smithing => match version {
+                Version::V26_1 => 4,
+                _ => 3,
+            },
             WindowKind::Cartography => 3,
             WindowKind::Stonecutter => 2,
+            WindowKind::Crafter => 10,
         }
     }
 
@@ -201,6 +208,13 @@ impl WindowKind {
                     SlotKind::Special
                 } else {
                     SlotKind::Normal
+                }
+            }
+            WindowKind::Crafter => {
+                if i < 9 {
+                    SlotKind::Normal
+                } else {
+                    SlotKind::Output
                 }
             }
             _ => SlotKind::Special,

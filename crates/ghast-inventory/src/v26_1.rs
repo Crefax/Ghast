@@ -19,10 +19,37 @@ mod generated {
     include!("generated/items_26_1.rs");
 }
 
+pub(crate) use generated::ENTITY_TYPES;
 pub use generated::{
     ATTRIBUTES, COMPONENT_NAMES, ITEM_COUNT, MENUS, POTIONS, SOUND_EVENTS, VILLAGER_TYPES,
     component,
 };
+
+mod menus {
+    include!("generated/menus_26_1.rs");
+}
+
+pub(crate) use menus::{
+    BANNER, BEACON_PAYMENT, BREWING_FUEL, BREWING_INGREDIENT, FITS_CONTAINER, FUEL, HAS_DYE,
+    HAS_PATTERNS, LOOM_DYE_TAG, LOOM_PATTERN_TAG,
+};
+
+/// The menu slot facts of item `id` (bits of the `menus` table; 0 for unknown ids).
+pub(crate) fn menu_facts(id: i32) -> u16 {
+    usize::try_from(id)
+        .ok()
+        .and_then(|i| menus::MENU_FACTS.get(i))
+        .copied()
+        .unwrap_or(0)
+}
+
+/// `Item.getCraftingRemainder()` as a stack.
+pub(crate) fn crafting_remainder(id: i32) -> Option<Stack> {
+    menus::REMAINDERS
+        .binary_search_by_key(&id, |r| r.0)
+        .ok()
+        .map(|i| Stack::new(menus::REMAINDERS[i].1, menus::REMAINDERS[i].2, 0))
+}
 
 /// The equipment slot of an item's `equippable` component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -114,8 +141,7 @@ pub fn component_id(name: &str) -> Option<i32> {
         .map(|i| i as i32)
 }
 
-/// The window type of a 26.1 `open_screen` (`minecraft:menu` registry id). The crafter is
-/// `None`: its result slot follows the player inventory, a layout ghast does not model.
+/// The window type of a 26.1 `open_screen` (`minecraft:menu` registry id).
 #[must_use]
 pub fn window_kind(menu: i32) -> Option<WindowKind> {
     let name = MENUS.get(usize::try_from(menu).ok()?)?;
@@ -142,6 +168,7 @@ pub fn window_kind(menu: i32) -> Option<WindowKind> {
         "smithing" => WindowKind::Smithing,
         "cartography_table" => WindowKind::Cartography,
         "stonecutter" => WindowKind::Stonecutter,
+        "crafter_3x3" => WindowKind::Crafter,
         _ => return None,
     })
 }
@@ -589,6 +616,9 @@ pub fn hashed_slot(
                 });
             }
         }
+        // a map and a set in vanilla: written here in type id order
+        components.sort_by_key(|c| c.r#type.0);
+        removed.sort_by_key(|c| c.r#type.0);
     }
     (
         Some(HashedSlot {
@@ -734,7 +764,7 @@ mod tests {
         );
         assert_eq!(component_id("damage"), Some(component::DAMAGE));
         assert_eq!(window_kind(2), Some(WindowKind::Chest { rows: 3 }));
-        assert_eq!(window_kind(7), None); // crafter
+        assert_eq!(window_kind(7), Some(WindowKind::Crafter));
         assert_eq!(window_kind(20), Some(WindowKind::ShulkerBox));
     }
 
