@@ -2,7 +2,10 @@
 //! items in clicks that only move them.
 #![cfg(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 
-use ghast_inventory::{Click, Inventory, OUTSIDE, Outgoing, SlotKind, Stack, Version, WindowKind};
+use ghast_inventory::{
+    Click, Inventory, OUTSIDE, Outgoing, SlotKind, Stack, Version, WindowKind, from_legacy_slot,
+    to_legacy_slot,
+};
 use ghast_protocol::nbt::{Compound, NamedTag, RawNbt, Tag};
 use proptest::prelude::*;
 
@@ -161,7 +164,35 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
                 } else {
                     i32::from(w)
                 };
-                inv.on_window_items(id, items.into_iter().map(|s| s.map(|t| mk(v, t, !wild))));
+                let stacks: Vec<Option<Stack>> = items
+                    .into_iter()
+                    .map(|s| s.map(|t| mk(v, t, !wild)))
+                    .collect();
+                if v == Version::V1_16_5 || !(0..=255).contains(&id) {
+                    inv.on_window_items(id, stacks);
+                } else {
+                    // the wire path compares slots before converting them: it must end in
+                    // exactly the state of converting first
+                    let wire: Vec<_> = stacks.iter().map(|s| to_legacy_slot(s.as_ref())).collect();
+                    let mut twin = inv.clone();
+                    inv.on_window_items(id, wire.iter().cloned().map(from_legacy_slot));
+                    if v == Version::V1_8 {
+                        use ghast_protocol::v1_8::play::clientbound as cb;
+                        let p = cb::ClientboundPlayPacket::WindowItems(cb::WindowItems {
+                            window_id: id as u8,
+                            items: wire,
+                        });
+                        assert_eq!(twin.apply_v1_8(&p), None);
+                    } else {
+                        use ghast_protocol::v1_12_2::play::clientbound as cb;
+                        let p = cb::ClientboundPlayPacket::WindowItems(cb::WindowItems {
+                            window_id: id as u8,
+                            items: wire,
+                        });
+                        assert_eq!(twin.apply_v1_12_2(&p), None);
+                    }
+                    assert_eq!(format!("{inv:?}"), format!("{twin:?}"));
+                }
             }
             Op::SetSlot(w, s, st) => inv.on_set_slot(i32::from(w), s, st.map(|t| mk(v, t, !wild))),
             Op::Open8(t, n) => {

@@ -19,6 +19,107 @@ fn is_grid(lay: Layout, l: Loc) -> bool {
 }
 use crate::window::{SlotKind, WindowKind};
 
+/// Version tags for loops monomorphised per version ([`Inventory::on_window_items`]).
+const V18: u8 = 0;
+const V112: u8 = 1;
+const V1165: u8 = 2;
+const V261: u8 = 3;
+
+/// One incoming `window_items` slot: [`Incoming::settle`] stores it (normalised and clamped
+/// like vanilla's handler) and says whether the slot changed.
+trait Incoming {
+    fn settle<const V: u8>(self, slot: &mut Option<Stack>, clamp: bool) -> bool;
+}
+
+impl Incoming for Option<Stack> {
+    #[inline(always)]
+    fn settle<const V: u8>(self, slot: &mut Option<Stack>, clamp: bool) -> bool {
+        let s = normalize_as::<V>(self);
+        let s = if clamp { clamp_as::<V>(s) } else { s };
+        if same_slot(slot, &s) {
+            false
+        } else {
+            *slot = s;
+            true
+        }
+    }
+}
+
+#[cfg(any(feature = "v1_8", feature = "v1_12"))]
+impl Incoming for &ghast_protocol::types::slot::legacy::Slot {
+    #[inline(always)]
+    fn settle<const V: u8>(self, slot: &mut Option<Stack>, clamp: bool) -> bool {
+        if legacy_same::<V>(slot, self, clamp) {
+            return false;
+        }
+        crate::stack::from_legacy_slot(self.clone()).settle::<V>(slot, clamp);
+        true
+    }
+}
+
+/// Whether `stored` equals the 1.8 / 1.12 wire slot `w` after normalising and clamping, i.e.
+/// what [`Incoming::settle`] of the converted slot would compare.
+#[cfg(any(feature = "v1_8", feature = "v1_12"))]
+#[inline(always)]
+fn legacy_same<const V: u8>(
+    stored: &Option<Stack>,
+    w: &ghast_protocol::types::slot::legacy::Slot,
+    clamp: bool,
+) -> bool {
+    let Some(ws) = &w.0 else {
+        return stored.is_none();
+    };
+    let id = i32::from(ws.id);
+    let mut count = i32::from(ws.count);
+    if V != V18 && (count <= 0 || id == 0) {
+        return stored.is_none();
+    }
+    if V == V261 || V == V1165 {
+        // legacy slots never reach these versions (see `on_window_items_legacy`)
+        return false;
+    }
+    if clamp && count > 64 {
+        count = 64;
+    }
+    let Some(st) = stored else {
+        return false;
+    };
+    st.id == id
+        && st.count == count
+        && st.damage == ws.damage
+        && match (&st.data, &ws.nbt) {
+            (crate::stack::ItemData::None, None) => true,
+            (crate::stack::ItemData::Nbt(a), Some(b)) => a == b,
+            _ => false,
+        }
+}
+
+/// [`Inventory::normalize`] with the version as a constant.
+#[inline(always)]
+fn normalize_as<const V: u8>(s: Option<Stack>) -> Option<Stack> {
+    if V == V18 {
+        return s;
+    }
+    let mut s = s.filter(|s| s.count > 0 && s.id != 0);
+    if V != V112
+        && let Some(st) = &mut s
+    {
+        st.damage = 0;
+    }
+    s
+}
+
+/// [`crate::sim::clamp_v`] with the version as a constant.
+#[inline(always)]
+fn clamp_as<const V: u8>(mut s: Option<Stack>) -> Option<Stack> {
+    if V == V261 {
+        crate::sim::clamp_v(Version::V26_1, &mut s);
+    } else {
+        crate::sim::clamp(&mut s);
+    }
+    s
+}
+
 /// `a == b` for slots, written out so the common equal-NBT case stays a few compares and one
 /// `memcmp` whatever variants `ItemData` has.
 #[inline(always)]
@@ -1008,6 +1109,43 @@ impl Inventory {
         window_id: i32,
         items: impl IntoIterator<Item = Option<Stack>>,
     ) {
+        // One loop per version: the per-slot normalising and clamping rules are constants
+        // inside it, so the legacy hot path carries no version tests.
+        let items = items.into_iter();
+        match self.version {
+            Version::V1_8 => self.window_items_as::<V18, _>(window_id, items),
+            Version::V1_12 => self.window_items_as::<V112, _>(window_id, items),
+            Version::V1_16_5 => self.window_items_as::<V1165, _>(window_id, items),
+            Version::V26_1 => self.window_items_as::<V261, _>(window_id, items),
+        }
+    }
+
+    /// `window_items` straight from the 1.8 / 1.12 wire slots: a slot equal to the stored stack
+    /// is compared without being converted (no NBT refcount traffic for unchanged slots, the
+    /// common case of a refreshed shop window).
+    #[cfg(any(feature = "v1_8", feature = "v1_12"))]
+    pub(crate) fn on_window_items_legacy(
+        &mut self,
+        window_id: i32,
+        items: &[ghast_protocol::types::slot::legacy::Slot],
+    ) {
+        match self.version {
+            Version::V1_8 => self.window_items_as::<V18, _>(window_id, items.iter()),
+            Version::V1_12 => self.window_items_as::<V112, _>(window_id, items.iter()),
+            // not reached: the legacy packets belong to 1.8 / 1.12 connections
+            _ => self.on_window_items(
+                window_id,
+                items.iter().cloned().map(crate::stack::from_legacy_slot),
+            ),
+        }
+    }
+
+    #[inline]
+    fn window_items_as<const V: u8, W: Incoming>(
+        &mut self,
+        window_id: i32,
+        items: impl Iterator<Item = W>,
+    ) {
         let lay = if window_id == 0 {
             Layout::new(self.version, Screen::Player)
         } else if window_id == self.open_id() {
@@ -1018,17 +1156,12 @@ impl Inventory {
         let mut player = false;
         let mut window = false;
         let mut touched_grid = false;
-        for (i, s) in items.into_iter().enumerate() {
+        for (i, s) in items.enumerate() {
             let Some(l) = lay.loc(i) else { break };
             touched_grid |= is_grid(lay, l);
-            let mut s = s;
-            self.normalize_in_place(&mut s);
-            if lay.clamps(l) {
-                crate::sim::clamp_v(self.version, &mut s);
-            }
+            let clamps = lay.clamps(l);
             let slot = self.m.at_mut(l);
-            if !same_slot(slot, &s) {
-                *slot = s;
+            if s.settle::<V>(slot, clamps) {
                 match l {
                     Loc::Container(_) => window = true,
                     _ => player = true,
@@ -1043,7 +1176,7 @@ impl Inventory {
             self.m.container_fresh = true;
         }
         // 1.8: setting the grid slots made the client compute the result itself
-        if self.version == Version::V1_8 && touched_grid {
+        if V == V18 && touched_grid {
             crate::sim::recompute_1_8(&mut self.m, lay);
         }
         self.events.player_changed |= player;

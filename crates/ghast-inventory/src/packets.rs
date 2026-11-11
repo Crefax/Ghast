@@ -144,10 +144,7 @@ impl Inventory {
                 w.window_title.clone(),
             ),
             P::CloseWindow(_) => self.on_close_window(),
-            P::WindowItems(w) => self.on_window_items(
-                i32::from(w.window_id),
-                w.items.iter().cloned().map(from_legacy_slot),
-            ),
+            P::WindowItems(w) => self.on_window_items_legacy(i32::from(w.window_id), &w.items),
             P::SetSlot(s) => {
                 self.on_set_slot(
                     i32::from(s.window_id),
@@ -178,10 +175,7 @@ impl Inventory {
                 w.window_title.clone(),
             ),
             P::CloseWindow(_) => self.on_close_window(),
-            P::WindowItems(w) => self.on_window_items(
-                i32::from(w.window_id),
-                w.items.iter().cloned().map(from_legacy_slot),
-            ),
+            P::WindowItems(w) => self.on_window_items_legacy(i32::from(w.window_id), &w.items),
             P::SetSlot(s) => {
                 self.on_set_slot(
                     i32::from(s.window_id),
