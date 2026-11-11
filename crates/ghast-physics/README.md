@@ -155,9 +155,18 @@ block entity); the tables hold the closed box. The client push-out probe also re
 suffocating large shape staying inside its cube — pinned by the `ghast-data` test
 `suffocating_large_shapes_stay_in_their_cube`, which fails if the data ever changes that.
 
-## Crosshair pick (`pick`, 1.16.5 and 26.1)
+## Crosshair pick (`pick`: 1.8.9, 1.12.2, 1.16.5, 26.1)
 
-Which block, face and exact point the look ray hits, or which entity — the target the server
+1.8.9 / 1.12.2 (`pick::v1_8`, `pick::v1_12`, shared `pick::legacy`): `eye_position`, `look_vector`
+(1.8: pass the **head** yaw; 1.12: the body yaw), `pick(world, eye, look, reach)` (block or the
+last skipped block as a miss, `None` otherwise), `clip(world, start, end, liquids, return_last)`,
+and `pick_target(world, eye, look, creative, player_bb, entities)` →
+`legacy::Target::{None, Block, Entity, TooFar}`. Proven: 2000 + 2000 `raytrace.jsonl.gz` rays, all
+5161 1.12.2 selection entries, 3200 + 3200 committed and 120k + 120k cached `picks.jsonl.gz`
+picks (random worlds of every state, ~74k entity targets) bit-identical.
+
+
+1.16.5 / 26.1: which block, face and exact point the look ray hits, or which entity — the target the server
 judges a dig, place or attack against. One shared implementation of vanilla's block traversal,
 `VoxelShape.clip` (inside test on the grid, then the boxes in vanilla's order), the interaction-shape
 face override and the entity loop (`ProjectileUtil`); 1.16.5 and 26.1 run identical code there. The

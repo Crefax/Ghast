@@ -291,6 +291,12 @@ fn ray_bounds_match_selection_dump() {
         }
         let block = v["id"].as_u64().unwrap() as u16;
         let meta = v["meta"].as_u64().unwrap() as u16;
+        // Torches set their ray bounds from the facing in `TorchBlock.rayTrace`; the dump's
+        // `setBoundingBox` bounds are stale for them (the ray bounds are proven by the
+        // `picks.jsonl.gz` replay in tests/pick_legacy.rs).
+        if matches!(block, 50 | 75 | 76) {
+            continue;
+        }
         let mut w = memory_world();
         w.load_chunks(-1, -1, 0, 0);
         w.set_raw(bx, by, bz, (block << 4) | meta);

@@ -85,6 +85,11 @@ pub fn ray_shape<W: BlockView<State = BlockState>>(
         return RayShape::None;
     }
     let local = |b: [f64; 6]| RayShape::Bounds(Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5]));
+    // Torches (torch, unlit / lit redstone torch): `TorchBlock.rayTrace` sets the bounds from the
+    // facing itself (the table's bounds are whatever was set last).
+    if matches!(s.block().id(), 50 | 75 | 76) {
+        return torch_bounds(s.meta());
+    }
     match shape_kind(s.block().id()) {
         kind @ (ShapeKind::WoodFence | ShapeKind::NetherFence) => {
             let [n, so, we, e] = fence_links(w, x, y, z, kind);
@@ -176,4 +181,22 @@ pub fn ray_shape<W: BlockView<State = BlockState>>(
         }
         _ => RayShape::Bounds(sel.bounds),
     }
+}
+
+/// `TorchBlock.rayTrace`'s bounds (float maths, widened): facing from metadata 1 east, 2 west,
+/// 3 south, 4 north, otherwise standing.
+fn torch_bounds(meta: u8) -> RayShape {
+    let f = 0.15_f32;
+    let b: [f32; 6] = match meta {
+        1 => [0.0, 0.2, 0.5 - f, f * 2.0, 0.8, 0.5 + f],
+        2 => [1.0 - f * 2.0, 0.2, 0.5 - f, 1.0, 0.8, 0.5 + f],
+        3 => [0.5 - f, 0.2, 0.0, 0.5 + f, 0.8, f * 2.0],
+        4 => [0.5 - f, 0.2, 1.0 - f * 2.0, 0.5 + f, 0.8, 1.0],
+        _ => {
+            let f = 0.1_f32;
+            [0.5 - f, 0.0, 0.5 - f, 0.5 + f, 0.6, 0.5 + f]
+        }
+    };
+    let b = b.map(f64::from);
+    RayShape::Bounds(Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5]))
 }

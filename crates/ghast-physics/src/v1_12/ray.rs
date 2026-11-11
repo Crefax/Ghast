@@ -4,10 +4,10 @@
 //! connections, doors and chests as their collision box), and stairs, whose ray test runs per
 //! collision box of the actual corner shape.
 
-use ghast_data::v1_12::BlockState;
+use ghast_data::v1_12::{BlockState, Face, FaceShape, StateFlags};
 
 use super::blocks::{
-    ShapeKind, boxes_of, fence_links, id, pane_links, shape_kind, state_at, wall_links,
+    ShapeKind, boxes_of, face_shape, fence_links, id, pane_links, shape_kind, state_at, wall_links,
 };
 use crate::math::Aabb;
 use crate::world::BlockView;
@@ -55,6 +55,26 @@ pub fn ray_shape<W: BlockView<State = BlockState>>(
     }
     if s.block().id() == id::PISTON_EXTENSION {
         return RayShape::Never;
+    }
+    match s.block().id() {
+        55 => return RayShape::Bounds(wire_bounds(w, x, y, z)),
+        106 => return vine_bounds(w, x, y, z, s),
+        107 | 183..=187 => return gate_bounds(w, x, y, z, s),
+        _ => {}
+    }
+    // Flowers (yellow, red): the plant box moved by the per-position model offset (XZ).
+    if matches!(s.block().id(), 37 | 38) {
+        let [ox, oy, oz] = flower_offset(x, z);
+        let lo = f64::from(0.3_f32);
+        let hi = f64::from(0.7_f32);
+        return RayShape::Bounds(Aabb::new(
+            lo + ox,
+            0.0 + oy,
+            lo + oz,
+            hi + ox,
+            f64::from(0.6_f32) + oy,
+            hi + oz,
+        ));
     }
     match shape_kind(s.block().id()) {
         ShapeKind::Fence => {
@@ -139,5 +159,189 @@ pub fn ray_shape<W: BlockView<State = BlockState>>(
             }
         }
         _ => RayShape::Bounds(sel.bounds),
+    }
+}
+
+/// `Block.getOffset` for offset type XZ (`MathHelper.hashCode(x, 0, z)`).
+fn flower_offset(x: i32, z: i32) -> [f64; 3] {
+    let mut l = i64::from(x.wrapping_mul(3_129_871)) ^ i64::from(z).wrapping_mul(116_129_781);
+    l = l
+        .wrapping_mul(l)
+        .wrapping_mul(42_317_861)
+        .wrapping_add(l.wrapping_mul(11));
+    let c = |shift: u32| (f64::from(((l >> shift) & 15) as f32 / 15.0) - 0.5) * 0.5;
+    [c(16), 0.0, c(24)]
+}
+
+/// Redstone wire: `REDSTONE_WIRE_AABB[index of the actual connections]`.
+fn wire_bounds<W: BlockView<State = BlockState>>(w: &W, x: i32, y: i32, z: i32) -> Aabb {
+    // Horizontal directions with their offsets, in the order north, east, south, west.
+    let dirs: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+    let at = |dx: i32, dy: i32, dz: i32| state_at(w, x + dx, y + dy, z + dz);
+    let connected = |(dx, dz): (i32, i32)| -> bool {
+        let n = at(dx, 0, dz);
+        if connects_to(n, Some((dx, 0, dz))) {
+            return true;
+        }
+        if !(n.flags().contains(StateFlags::NORMAL_CUBE) || !is_wire(at(dx, -1, dz))) {
+            return true;
+        }
+        if at(0, 1, 0).flags().contains(StateFlags::NORMAL_CUBE) {
+            return false;
+        }
+        let top = n.flags().contains(StateFlags::TOP_SOLID) || n.block().id() == 89;
+        top && is_wire(at(dx, 1, dz))
+    };
+    let [n, e, so, we] = dirs.map(connected);
+    let mut i = 0usize;
+    // Horizontal indexes: south 0, west 1, north 2, east 3.
+    if n || so && !n && !e && !we {
+        i |= 1 << 2;
+    }
+    if e || we && !n && !e && !so {
+        i |= 1 << 3;
+    }
+    if so || n && !e && !so && !we {
+        i |= 1;
+    }
+    if we || e && !n && !so && !we {
+        i |= 1 << 1;
+    }
+    let lo = |bit: usize, v: f64| if i & bit != 0 { 0.0 } else { v };
+    let hi = |bit: usize, v: f64| if i & bit != 0 { 1.0 } else { v };
+    // field_12731[i]: west (bit 2) lowers min x, east (8) raises max x, north (4) lowers min z,
+    // south (1) raises max z.
+    Aabb::new(
+        lo(2, 0.1875),
+        0.0,
+        lo(4, 0.1875),
+        hi(8, 0.8125),
+        0.0625,
+        hi(1, 0.8125),
+    )
+}
+
+#[inline]
+fn is_wire(s: BlockState) -> bool {
+    s.block().id() == 55
+}
+
+/// `RedstoneWireBlock.connectsTo(state, dir)` (`dir` = from the wire towards the block).
+fn connects_to(s: BlockState, dir: Option<(i32, i32, i32)>) -> bool {
+    let id = s.block().id();
+    if id == 55 {
+        return true;
+    }
+    let horizontal = |meta: u8| [(0, 0, 1), (-1, 0, 0), (0, 0, -1), (1, 0, 0)][(meta & 3) as usize];
+    match id {
+        // Repeaters: along their facing axis.
+        93 | 94 => {
+            let f = horizontal(s.meta());
+            dir.is_some_and(|d| d == f || d == (-f.0, -f.1, -f.2))
+        }
+        // Observer: facing (getById(meta & 7), 6 and 7 wrap to down / up).
+        218 => {
+            let f = [
+                (0, -1, 0),
+                (0, 1, 0),
+                (0, 0, -1),
+                (0, 0, 1),
+                (-1, 0, 0),
+                (1, 0, 0),
+            ][((s.meta() & 7) % 6) as usize];
+            dir == Some(f)
+        }
+        _ => dir.is_some() && emits_power(id),
+    }
+}
+
+/// `Block.emitsRedstonePower` (1.12.2: the power sources).
+fn emits_power(id: u8) -> bool {
+    matches!(
+        id,
+        28 | 69
+            | 70
+            | 72
+            | 75
+            | 76
+            | 77
+            | 93
+            | 94
+            | 131
+            | 143
+            | 146
+            | 147
+            | 148
+            | 149
+            | 150
+            | 151
+            | 152
+            | 178
+            | 218
+    )
+}
+
+/// Vine: the face box when exactly one face is attached (the top counts when the block above has a
+/// solid bottom), else the full cube.
+fn vine_bounds<W: BlockView<State = BlockState>>(
+    w: &W,
+    x: i32,
+    y: i32,
+    z: i32,
+    s: BlockState,
+) -> RayShape {
+    let above = state_at(w, x, y + 1, z);
+    let up = face_shape(w, x, y + 1, z, above, Face::Down) == FaceShape::Solid;
+    let m = s.meta();
+    let (south, west, north, east) = (m & 1 != 0, m & 2 != 0, m & 4 != 0, m & 8 != 0);
+    let mut n = 0;
+    let mut b = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    if up {
+        b = [0.0, 0.9375, 0.0, 1.0, 1.0, 1.0];
+        n += 1;
+    }
+    if north {
+        b = [0.0, 0.0, 0.0, 1.0, 1.0, 0.0625];
+        n += 1;
+    }
+    if east {
+        b = [0.9375, 0.0, 0.0, 1.0, 1.0, 1.0];
+        n += 1;
+    }
+    if south {
+        b = [0.0, 0.0, 0.9375, 1.0, 1.0, 1.0];
+        n += 1;
+    }
+    if west {
+        b = [0.0, 0.0, 0.0, 0.0625, 1.0, 1.0];
+        n += 1;
+    }
+    if n != 1 {
+        b = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    }
+    local(b)
+}
+
+/// Fence gate: lowered (0.8125) when a cobblestone wall is beside it along its axis.
+fn gate_bounds<W: BlockView<State = BlockState>>(
+    w: &W,
+    x: i32,
+    y: i32,
+    z: i32,
+    s: BlockState,
+) -> RayShape {
+    // Direction.fromHorizontal(meta): south, west, north, east; south / north = Z axis.
+    let z_axis = s.meta() & 1 == 0;
+    let wall = |dx: i32, dz: i32| state_at(w, x + dx, y, z + dz).block().id() == 139;
+    let in_wall = if z_axis {
+        wall(-1, 0) || wall(1, 0)
+    } else {
+        wall(0, -1) || wall(0, 1)
+    };
+    let h = if in_wall { 0.8125 } else { 1.0 };
+    if z_axis {
+        local([0.0, 0.0, 0.375, 1.0, h, 0.625])
+    } else {
+        local([0.375, 0.0, 0.0, 0.625, h, 1.0])
     }
 }

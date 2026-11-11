@@ -7,7 +7,7 @@
 //! The version modules supply the box(es) per block ([`crate::v1_8::ray_shape`],
 //! [`crate::v1_12::ray_shape`]).
 
-use super::{BlockHit, Direction, HitKind};
+use super::{BlockHit, Direction, EntityHit, HitKind, PickEntity};
 use crate::math::{cos, sin};
 
 /// What the ray sees at one block.
@@ -81,18 +81,10 @@ fn lerp_for(s: [f64; 3], e: [f64; 3], axis: usize, value: f64) -> Option<[f64; 3
     Some(v3(s[0] + d[0] * g, s[1] + d[1] * g, s[2] + d[2] * g))
 }
 
-/// `Block.rayTrace` / `Block.rayTrace(pos, start, end, box)` for one block-local box: the hit
-/// point (world coordinates) and face, nearest to `start`.
+/// `Box.calculateIntercept(start, end)` (1.8 `Box.method_585`, the same test as
+/// `Block.rayTrace`'s): the crossing of the segment with the box nearest to `start`, and its face.
 #[must_use]
-pub fn box_ray(
-    start: [f64; 3],
-    end: [f64; 3],
-    pos: [i32; 3],
-    b: &crate::math::Aabb,
-) -> Option<([f64; 3], Direction)> {
-    let p = pos.map(f64::from);
-    let s = v3(start[0] + -p[0], start[1] + -p[1], start[2] + -p[2]);
-    let e = v3(end[0] + -p[0], end[1] + -p[1], end[2] + -p[2]);
+pub fn intercept(s: [f64; 3], e: [f64; 3], b: &crate::math::Aabb) -> Option<([f64; 3], Direction)> {
     let yz =
         |v: &[f64; 3]| v[1] >= b.min_y && v[1] <= b.max_y && v[2] >= b.min_z && v[2] <= b.max_z;
     let xz =
@@ -115,7 +107,22 @@ pub fn box_ray(
             best = Some((c, face));
         }
     }
-    best.map(|(h, face)| (v3(h[0] + p[0], h[1] + p[1], h[2] + p[2]), face))
+    best
+}
+
+/// `Block.rayTrace` / `Block.rayTrace(pos, start, end, box)` for one block-local box: the hit
+/// point (world coordinates) and face, nearest to `start`.
+#[must_use]
+pub fn box_ray(
+    start: [f64; 3],
+    end: [f64; 3],
+    pos: [i32; 3],
+    b: &crate::math::Aabb,
+) -> Option<([f64; 3], Direction)> {
+    let p = pos.map(f64::from);
+    let s = v3(start[0] + -p[0], start[1] + -p[1], start[2] + -p[2]);
+    let e = v3(end[0] + -p[0], end[1] + -p[1], end[2] + -p[2]);
+    intercept(s, e, b).map(|(h, face)| (v3(h[0] + p[0], h[1] + p[1], h[2] + p[2]), face))
 }
 
 /// The block test of one position: one box, or the farthest-from-`end` hit of several.
@@ -244,4 +251,141 @@ pub fn trace(
         }
     }
     if return_last { last } else { None }
+}
+
+/// `Vec3d.distanceTo`: `MathHelper.sqrt(double)` rounds to `float`.
+#[inline]
+fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
+    f64::from(sq(a, b).sqrt() as f32)
+}
+
+/// The crosshair target of 1.8.9 / 1.12.2 (`GameRenderer.updateTargetedEntity(1.0F)`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Target {
+    /// Nothing (the block ray returned null and no entity).
+    None,
+    /// The block pick's result (a block, or the miss at the last skipped block).
+    Block(BlockHit),
+    /// An entity (index into the caller's list) and the point on its box.
+    Entity(EntityHit),
+    /// An entity was hit farther than 3 blocks outside creative: a miss at that point, with no
+    /// face (vanilla `new BlockHitResult(MISS, point, null, new BlockPos(point))`).
+    TooFar {
+        /// The hit point.
+        location: [f64; 3],
+        /// `new BlockPos(location)`.
+        pos: [i32; 3],
+    },
+}
+
+/// `GameRenderer.updateTargetedEntity(1.0F)` given the block pick `block` (`Entity.rayTrace(reach,
+/// 1.0F)`), the same `eye` / `look`, the game mode's `reach` (4.5, creative 5.0) and `extended`
+/// (creative: entities to 6.0), the player's bounding box and the pickable entities
+/// (`collides()`, no spectators) in the world's iteration order. 1.8: `same_root_vehicle` means
+/// "is the player's vehicle"; 1.12: "has the same root vehicle".
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn target(
+    block: Option<BlockHit>,
+    eye: [f64; 3],
+    look: [f64; 3],
+    reach: f64,
+    extended: bool,
+    player_bb: &crate::math::Aabb,
+    entities: &[PickEntity],
+) -> Target {
+    let mut d = reach;
+    let mut e = d;
+    let mut limited = false;
+    if extended {
+        d = 6.0;
+        e = 6.0;
+    } else if d > 3.0 {
+        limited = true;
+    }
+    if let Some(b) = &block {
+        e = dist(eye, b.location);
+    }
+    let delta = [look[0] * d, look[1] * d, look[2] * d];
+    let to = v3(eye[0] + delta[0], eye[1] + delta[1], eye[2] + delta[2]);
+    let mut lo = [player_bb.min_x, player_bb.min_y, player_bb.min_z];
+    let mut hi = [player_bb.max_x, player_bb.max_y, player_bb.max_z];
+    for i in 0..3 {
+        if delta[i] < 0.0 {
+            lo[i] += delta[i];
+        } else if delta[i] > 0.0 {
+            hi[i] += delta[i];
+        }
+    }
+    let search = crate::math::Aabb::new(
+        lo[0] - 1.0,
+        lo[1] - 1.0,
+        lo[2] - 1.0,
+        hi[0] + 1.0,
+        hi[1] + 1.0,
+        hi[2] + 1.0,
+    );
+    let mut g = e;
+    let mut found: Option<(usize, [f64; 3])> = None;
+    for (index, en) in entities.iter().enumerate() {
+        let bb = &en.bb;
+        // World.getEntitiesIn: Box.intersects.
+        if !(search.max_x > bb.min_x
+            && search.min_x < bb.max_x
+            && search.max_y > bb.min_y
+            && search.min_y < bb.max_y
+            && search.max_z > bb.min_z
+            && search.min_z < bb.max_z)
+        {
+            continue;
+        }
+        let h = f64::from(en.pick_radius);
+        let b = crate::math::Aabb::new(
+            bb.min_x - h,
+            bb.min_y - h,
+            bb.min_z - h,
+            bb.max_x + h,
+            bb.max_y + h,
+            bb.max_z + h,
+        );
+        let hit = intercept(eye, to, &b).map(|x| x.0);
+        let inside = !(eye[0] <= b.min_x || eye[0] >= b.max_x)
+            && !(eye[1] <= b.min_y || eye[1] >= b.max_y)
+            && !(eye[2] <= b.min_z || eye[2] >= b.max_z);
+        if inside {
+            if g >= 0.0 {
+                found = Some((index, hit.unwrap_or(eye)));
+                g = 0.0;
+            }
+        } else if let Some(p) = hit {
+            let k = dist(eye, p);
+            if k < g || g == 0.0 {
+                if en.same_root_vehicle {
+                    if g == 0.0 {
+                        found = Some((index, p));
+                    }
+                } else {
+                    found = Some((index, p));
+                    g = k;
+                }
+            }
+        }
+    }
+    let mut result = block.map_or(Target::None, Target::Block);
+    if let Some((_, p)) = found
+        && limited
+        && dist(eye, p) > 3.0
+    {
+        found = None;
+        result = Target::TooFar {
+            location: p,
+            pos: p.map(|v| v.floor() as i32),
+        };
+    }
+    if let Some((index, location)) = found
+        && (g < e || matches!(result, Target::None))
+    {
+        return Target::Entity(EntityHit { index, location });
+    }
+    result
 }

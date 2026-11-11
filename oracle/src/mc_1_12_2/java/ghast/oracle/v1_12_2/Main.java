@@ -90,6 +90,12 @@ public final class Main {
             }
             case "recipes" -> write(a.path("--out", golden.resolve("recipes.jsonl.gz")), RecipeDump::lines);
             case "dig-facts" -> write(a.path("--out", golden.resolve("dig_facts.jsonl.gz")), DigDump::facts);
+            case "picks" -> {
+                long seed = a.lng("--seed", 1);
+                int worlds = (int) a.lng("--worlds", PickDump.WORLDS);
+                int rays = (int) a.lng("--rays", PickDump.RAYS);
+                write(a.path("--out", golden.resolve("picks.jsonl.gz")), sink -> picks(seed, worlds, rays, sink));
+            }
             case "dig" -> {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", DigDump.CASES);
@@ -153,6 +159,14 @@ public final class Main {
     /** Golden files are compressed harder; big fuzz runs favour speed. */
     private static boolean bestCompression;
 
+    static void picks(long seed, int worlds, int rays, java.util.function.Consumer<String> sink) {
+        try {
+            PickDump.picks(seed, worlds, rays, sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     static void dig(long seed, int count, java.util.function.Consumer<String> sink) {
         try {
             DigDump.cases(seed, count, sink);
@@ -180,6 +194,7 @@ public final class Main {
         write(dir.resolve("recipes.jsonl.gz"), RecipeDump::lines);
         write(dir.resolve("dig_facts.jsonl.gz"), DigDump::facts);
         write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
+        write(dir.resolve("picks.jsonl.gz"), sink -> picks(1, PickDump.WORLDS, PickDump.RAYS, sink));
         write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
         bestCompression = false;

@@ -5,9 +5,10 @@
 
 use ghast_data::v1_8::BlockState;
 
-use super::BlockHit;
-use super::legacy::{Shape, trace};
+pub use super::legacy::Target;
+use super::legacy::{Shape, target, trace};
 pub use super::legacy::{eye_position, look_vector, ray_end};
+use super::{BlockHit, PickEntity};
 use crate::math::Aabb;
 use crate::v1_8::{RayShape, ray_shape};
 use crate::world::BlockView;
@@ -20,7 +21,12 @@ pub const CREATIVE_REACH: f64 = 5.0;
 /// What the ray sees at a block.
 #[must_use]
 pub fn shape<W: BlockView<State = BlockState>>(world: &W, pos: [i32; 3], liquids: bool) -> Shape {
-    match ray_shape(world, pos[0], pos[1], pos[2], liquids) {
+    let r = ray_shape(world, pos[0], pos[1], pos[2], liquids);
+    // The moving piston's rayTrace returns null: the ray considers it but never hits it.
+    if r != RayShape::None && world.block(pos[0], pos[1], pos[2]).block().id() == 36 {
+        return Shape::Never;
+    }
+    match r {
         RayShape::None => Shape::Skip,
         RayShape::Bounds(b) => Shape::One(b),
         RayShape::Stairs(p) => {
@@ -57,4 +63,29 @@ pub fn pick<W: BlockView<State = BlockState>>(
     reach: f64,
 ) -> Option<BlockHit> {
     clip(world, eye, ray_end(eye, look, reach), false, true)
+}
+
+/// The crosshair target (vanilla `GameRenderer.updateTargetedEntity(1.0F)`): the block pick at the
+/// game mode's reach (4.5, creative 5.0), unless an entity of `entities` is hit nearer along the
+/// ray to the reach (creative: 6.0); outside creative an entity farther than 3 blocks gives a miss
+/// at its hit point ([`Target::TooFar`]). `player_bb` is the player's bounding box; `entities` the
+/// pickable ones (`collides()`, no spectators) in the world's iteration order.
+pub fn pick_target<W: BlockView<State = BlockState>>(
+    world: &W,
+    eye: [f64; 3],
+    look: [f64; 3],
+    creative: bool,
+    player_bb: &Aabb,
+    entities: &[PickEntity],
+) -> Target {
+    let reach = if creative { CREATIVE_REACH } else { REACH };
+    target(
+        pick(world, eye, look, reach),
+        eye,
+        look,
+        reach,
+        creative,
+        player_bb,
+        entities,
+    )
 }

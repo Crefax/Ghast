@@ -1067,6 +1067,29 @@ separate JVM runs produce identical files. (Debug-stick maps: the curated severa
 out of parsing + network round trip with one entry; the cause is not investigated, so only
 single-entry debug-stick maps are in the vectors.)
 
+## Crosshair pick (1.8.9, 1.12.2): `picks.jsonl.gz`
+
+`PickDump` in both old harnesses (`picks [--seed --worlds --rays]`, in `golden`: 16 worlds × 200
+picks). A `pick_world` line: `region`, `blocks` (`[x, y, z, raw]`, raw = id << 4 | meta, every
+valid state, a share of them from a list of partial / neighbour-dependent blocks), `entities` (the
+world's `getEntitiesIn` order: `id`, `class`, `bb`, `margin` (targeting margin), `pickable` =
+`collides()` and not a spectator; entities of earlier worlds stay listed: `ClientWorld.removeEntity`
+leaves them in the chunk lists, removed — end crystals still collide). A `pick` line: `feet`,
+`yaw`, `pitch`, `head_yaw`, `sneaking`, `eye_height`, `creative`, `reach` (random, incl. 0 and 64),
+`bb`, `eyes`, `look`, `raw` = `Entity.rayTrace(reach, 1.0F)`, `target` = `client.result` after the
+real `GameRenderer.updateTargetedEntity(1.0F)` (game-mode reach 4.5 / 5.0, entities to 3 / 6;
+`miss` with `side: null` = an entity hit beyond 3 blocks outside creative), `targeted_entity`.
+About 45 % of the picks aim at an entity (15 % of those from inside it).
+
+Replayed by `crates/ghast-physics/tests/pick_legacy.rs` (also the older `raytrace.jsonl.gz` of both
+versions and every 1.12.2 `selection_boxes.jsonl.gz` entry); cached seeds 2–4 (100 worlds × 400
+picks each, `cache/<v>/picks`) with `--features oracle-cache`. Findings: the block walk and box test
+are the same code in 1.8.9 and 1.12.2; 1.8 looks with the head yaw, 1.12 with the body yaw;
+`Vec3d.distanceTo` rounds to `float` (entity distances); 1.8 torches set their own ray bounds from
+the facing (the table bounds are stale); the moving piston is never hit; 1.12 flowers move their
+box by the model offset, vines take one face box (top when the block above has a solid bottom),
+fence gates beside a wall are 0.8125 high, redstone wire bounds follow its actual connections.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or
