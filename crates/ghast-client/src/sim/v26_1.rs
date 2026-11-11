@@ -25,6 +25,10 @@ pub(crate) struct Sim26 {
     /// `Entity.xo/yo/zo`: the position at the start of the last tick (the pick's eye lerps
     /// from it).
     old_pos: [f64; 3],
+    /// The entity tracker, when entities are tracked.
+    entities: Option<ghast_entity::v26_1::Tracker>,
+    /// Join / respawn packets, replayed into a tracker started mid-session.
+    session: SessionPackets,
 }
 
 /// The interaction ranges with vanilla's defaults and ranges.
@@ -64,10 +68,12 @@ impl Sim26 {
             conduit_power: None,
             ranges: range_attributes(),
             old_pos: [0.0; 3],
+            entities: None,
+            session: SessionPackets::default(),
         }
     }
 
-    /// A sim with options (world contents). Recording, entity tracking and the Grim step
+    /// A sim with options (world contents, entity tracking). Recording and the Grim step
     /// compatibility are not available on 26.1 yet.
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
@@ -80,9 +86,7 @@ impl Sim26 {
                 p.display()
             );
         }
-        if opts.entities.is_some() {
-            log::warn!("entity tracking is not available on 26.1 yet");
-        }
+        s.entities = opts.entities.map(ghast_entity::v26_1::Tracker::new);
         if opts.force_step_position != ForceStepPosition::Off {
             log::warn!("force_step_position has no effect on 26.1");
         }
@@ -141,7 +145,7 @@ impl WorldView for Sim26 {
     }
 
     fn entities(&self) -> Option<&ghast_entity::Entities> {
-        None
+        self.entities.as_deref()
     }
 
     fn loaded_columns(&self) -> usize {
@@ -222,6 +226,14 @@ impl Sim for Sim26 {
 
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         use ghast_protocol::v26_1::play::clientbound as cb;
+        self.session.note(raw, cb::id::LOGIN, cb::id::RESPAWN);
+        // The tracker also reads map_chunk / unload_chunk (which columns tick): the world gets
+        // the same packets below.
+        if let Some(t) = &mut self.entities
+            && t.wants(raw.id)
+        {
+            t.apply(raw)?;
+        }
         match raw.id {
             // Batch timing needs the arrival time: the engine routes these (Inbound).
             cb::id::CHUNK_BATCH_START | cb::id::CHUNK_BATCH_FINISHED => return Ok(()),
@@ -468,15 +480,94 @@ impl Sim for Sim26 {
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {
-        None
+        self.entities.as_ref().map(|t| t.config())
     }
 
     fn set_entities(&mut self, config: Option<ghast_entity::Config>) {
-        let _ = config;
+        if self.entity_config() == config {
+            return;
+        }
+        self.entities = config.map(|c| {
+            let mut t = ghast_entity::v26_1::Tracker::new(c);
+            self.session.replay(|r| {
+                if let Err(e) = t.apply(r) {
+                    log::debug!("entity tracker: session packet 0x{:02x}: {e}", r.id);
+                }
+            });
+            // The columns already loaded tick their entities (the tracker reads only the
+            // column coordinates of map_chunk).
+            use ghast_protocol::v26_1::play::clientbound::id;
+            for (c, _) in self.world.columns().iter() {
+                let mut b = c.x.to_be_bytes().to_vec();
+                b.extend(c.z.to_be_bytes());
+                let r = RawPacket {
+                    id: id::MAP_CHUNK,
+                    body: b.into(),
+                };
+                let _ = t.apply(&r);
+            }
+            t
+        });
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
-        Vec::new()
+        self.entities
+            .as_ref()
+            .map(|t| t.packet_ids().collect())
+            .unwrap_or_default()
+    }
+
+    fn pick_margin(&self, e: &ghast_entity::Entity) -> Option<f32> {
+        let t = self.entities.as_ref()?;
+        t.pickable(e).then(|| ghast_entity::v26_1::pick_radius(e))
+    }
+
+    fn tick_entities(&mut self) {
+        // Assumes a moved interpolation target is free (no Level.noCollision test yet).
+        if let Some(t) = &mut self.entities {
+            t.tick();
+        }
+    }
+
+    fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
+        // The oracle-verified LocalPlayer.pick: block ray to the longer range, then the
+        // entity ray, each filtered to its range attribute.
+        use ghast_physics::pick::v26_1 as pick;
+        let held_block = q
+            .held
+            .and_then(ghast_data::v26_1::Item::from_id)
+            .and_then(ghast_data::v26_1::Item::block);
+        let eye = if q.now {
+            let p = &self.player;
+            pick::eye_position(p.pos, self.old_pos, p.dims.eye_height)
+        } else {
+            [q.eyes.x, q.eyes.y, q.eyes.z]
+        };
+        let view = pick::view_vector(q.rotation.0, q.rotation.1);
+        let (block_range, entity_range) = (self.ranges[0].value(), self.ranges[1].value());
+        if q.entities.is_empty() {
+            // pick_target without entities is the block pick.
+            let hit = pick::pick(
+                &self.world,
+                eye,
+                view,
+                block_range,
+                entity_range,
+                held_block,
+            );
+            return Crosshair::Block(block_hit(&hit, eye));
+        }
+        let t = pick::pick_target(
+            &self.world,
+            &q.player_bb,
+            eye,
+            view,
+            block_range,
+            entity_range,
+            held_block,
+            q.entities,
+        );
+        modern_crosshair(t, eye)
     }
 
     fn predict_air(&mut self, x: i32, y: i32, z: i32) {

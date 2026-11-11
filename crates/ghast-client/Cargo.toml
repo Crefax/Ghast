@@ -21,7 +21,7 @@ default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate", "display-names"]
 v1_8 = ["ghast-protocol/v1_8", "ghast-world/v1_8", "ghast-data/v1_8", "ghast-physics/v1_8", "ghast-inventory/v1_8", "ghast-entity/v1_8"]
 v1_12_2 = ["ghast-protocol/v1_12_2", "ghast-world/v1_12", "ghast-data/v1_12", "ghast-physics/v1_12", "ghast-inventory/v1_12", "ghast-entity/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-world/v1_16_5", "ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-inventory/v1_16_5", "ghast-entity/v1_16_5"]
-v26_1 = ["ghast-protocol/v26_1", "ghast-world/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1", "ghast-inventory/v26_1"]
+v26_1 = ["ghast-protocol/v26_1", "ghast-world/v26_1", "ghast-data/v26_1", "ghast-physics/v26_1", "ghast-inventory/v26_1", "ghast-entity/v26_1"]
 # English display names of blocks, items, entities, biomes, enchantments and effects in
 # ghast-data (`display_name` fields); registry names are always there. Off saves ~120–200 KB.
 display-names = ["ghast-data/display-names"]

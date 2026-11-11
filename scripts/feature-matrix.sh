@@ -33,7 +33,7 @@ if [ -z "${VERSIONS:-}${PACKAGES:-}" ]; then
 fi
 # Lower crates that name 1.12 `v1_12` (ghast-data's names).
 if [ -z "${VERSIONS:-}${PACKAGES:-}" ]; then
-  for spec in "ghast-entity:v1_8 v1_12 v1_16_5" "ghast-inventory:v1_8 v1_12 v1_16_5 v26_1"; do
+  for spec in "ghast-entity:v1_8 v1_12 v1_16_5 v26_1" "ghast-inventory:v1_8 v1_12 v1_16_5 v26_1"; do
     pkg=${spec%%:*}
     for v in ${spec#*:}; do
       echo "== $pkg --features $v"

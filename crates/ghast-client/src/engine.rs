@@ -524,6 +524,19 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
     }
 }
 
+/// 1.8 – 1.16.5: whether the crosshair pick can hit `e` (rays hit it, not a spectator) and its
+/// targeting margin from the type's size table.
+pub(crate) fn legacy_pick_margin(
+    ents: &ghast_entity::Entities,
+    e: &ghast_entity::Entity,
+) -> Option<f32> {
+    let spectator = e.is_player()
+        && ents
+            .player_info(&e.uuid())
+            .is_some_and(|p| p.game_mode == 3);
+    (collidable(e) && !spectator).then(|| e.targeting_margin())
+}
+
 /// The pickable entities near the eyes as the oracle-proven crosshair pick takes them, with
 /// each one's id and position alongside (empty without an entity tracker).
 #[derive(Debug, Default)]
@@ -534,18 +547,24 @@ struct PickList {
 
 impl PickList {
     /// Fills the list: tracked entities within 16 blocks of `eyes` (vanilla's search box only
-    /// drops entities the ray cannot hit, so this radius loses none) that rays hit
-    /// (`collidable`), not spectators, not ourselves.
-    fn fill(&mut self, w: &(impl WorldView + ?Sized), caps: &Capabilities, eyes: Vec3) {
+    /// drops entities the ray cannot hit, so this radius loses none) that the version's pick can
+    /// hit ([`Sim::pick_margin`]), not ourselves.
+    fn fill(&mut self, w: &(impl Sim + ?Sized), caps: &Capabilities, eyes: Vec3) {
         self.entities.clear();
         self.ids.clear();
         if let Some(ents) = w.entities() {
-            self.fill_from(ents, caps, eyes);
+            self.fill_from(w, ents, caps, eyes);
         }
     }
 
     #[inline(never)]
-    fn fill_from(&mut self, ents: &ghast_entity::Entities, caps: &Capabilities, eyes: Vec3) {
+    fn fill_from(
+        &mut self,
+        w: &(impl Sim + ?Sized),
+        ents: &ghast_entity::Entities,
+        caps: &Capabilities,
+        eyes: Vec3,
+    ) {
         use ghast_entity::Entity;
         let me = ents.self_id();
         let root = |mut id: i32| {
@@ -560,15 +579,12 @@ impl PickList {
         let riding = ents.me().and_then(Entity::vehicle);
         let my_root = me.map(root);
         for e in ents.within([eyes.x, eyes.y, eyes.z], 16.0) {
-            if Some(e.id()) == me
-                || !collidable(e)
-                || (e.is_player()
-                    && ents
-                        .player_info(&e.uuid())
-                        .is_some_and(|p| p.game_mode == 3))
-            {
+            if Some(e.id()) == me {
                 continue;
             }
+            let Some(pick_radius) = w.pick_margin(e) else {
+                continue;
+            };
             let Some(b) = e.bounding_box() else {
                 continue;
             };
@@ -580,7 +596,7 @@ impl PickList {
             };
             self.entities.push(ghast_physics::pick::PickEntity {
                 bb: ghast_physics::math::Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5]),
-                pick_radius: e.targeting_margin(),
+                pick_radius,
                 same_root_vehicle,
             });
             let p = e.position();
@@ -1084,6 +1100,7 @@ impl<S: Sim> Engine<S> {
             if c.opts.caps.sends_tick_end && c.joined {
                 c.out.push(Outbound::TickEnd);
             }
+            self.sim.tick_entities();
             return;
         }
 
@@ -1244,6 +1261,8 @@ impl<S: Sim> Engine<S> {
         for p in c.broken_now.drain(..) {
             self.sim.predict_air(p.x, p.y, p.z);
         }
+        // ClientLevel.tickEntities: after this tick's pick and key handling.
+        self.sim.tick_entities();
         // ClientPlayerEntity.tickMovement: a flight toggle is told to the server before the move.
         if let Some(f) = c.want_flying.take() {
             let first = c.out.len();
@@ -2491,6 +2510,70 @@ mod tests {
         assert!((d - 1.6).abs() < 1e-6, "{d}");
         assert_eq!(block, None);
         // Gone, and one at x = 5.0 instead: hit at 5.4, 3.1 away (> 3) but before the block.
+        e.sim
+            .world_packet(&raw(id::ENTITY_DESTROY, vec![1, 50]))
+            .unwrap();
+        e.sim.world_packet(&zombie(51, 5.0)).unwrap();
+        assert_eq!(look(&mut e), (None, None));
+    }
+
+    /// 26.1: the same through the 26.1 tracker and `pick::v26_1::pick_target` (entity range 3,
+    /// block range 4.5, no pick margin).
+    #[test]
+    fn entity_pick_26_1() {
+        use ghast_protocol::v26_1::play::clientbound::id;
+        use std::cell::Cell;
+        let raw = |id: i32, b: Vec<u8>| RawPacket {
+            id,
+            body: bytes::Bytes::from(b),
+        };
+        let zombie = |eid: u8, x: f64| {
+            // entity id, uuid, type 150 (zombie), x y z, zero velocity, pitch yaw head, data.
+            let mut b = vec![eid];
+            b.extend((0x1000u128 + u128::from(eid)).to_be_bytes());
+            b.extend([150, 1]);
+            for v in [x, 64.0, 8.5] {
+                b.extend(v.to_be_bytes());
+            }
+            b.extend([0, 0, 0, 0, 0]);
+            raw(id::SPAWN_ENTITY, b)
+        };
+        let mut e = engine(GameVersion::V26_1);
+        join(&mut e);
+        e.sim.set_entities(Some(ghast_entity::Config::default()));
+        let pos: i64 = (4 << 38) | (8 << 12) | 65;
+        let mut b = pos.to_be_bytes().to_vec();
+        b.push(1);
+        e.sim.world_packet(&raw(id::BLOCK_CHANGE, b)).unwrap();
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let seen = Cell::new((None, None));
+        let look = |e: &mut Engine<Box<dyn Sim>>| {
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                seen.set((
+                    ctx.target_entity().map(|h| (h.id, h.distance)),
+                    ctx.target().map(|t| (t.pos, t.face)),
+                ));
+            });
+            e.tick(&mut b, t0);
+            seen.get()
+        };
+        assert_eq!(
+            look(&mut e),
+            (
+                None,
+                Some((ghast_protocol::BlockPos::new(4, 65, 8), crate::Face::East))
+            )
+        );
+        e.sim.world_packet(&zombie(50, 6.5)).unwrap();
+        let (ent, block) = look(&mut e);
+        let (eid, d) = ent.unwrap();
+        assert_eq!(eid, 50);
+        assert!(
+            (d - (8.5 - 6.5 - f64::from(0.6f32 / 2.0))).abs() < 1e-6,
+            "{d}"
+        );
+        assert_eq!(block, None);
         e.sim
             .world_packet(&raw(id::ENTITY_DESTROY, vec![1, 50]))
             .unwrap();

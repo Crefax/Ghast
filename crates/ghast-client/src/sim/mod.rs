@@ -136,14 +136,24 @@ pub trait WorldView {
 }
 
 /// The join / respawn packets of the session (cheap `Bytes` copies).
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 #[derive(Debug, Default)]
 pub(super) struct SessionPackets {
     login: Option<RawPacket>,
     respawn: Option<RawPacket>,
 }
 
-#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
 impl SessionPackets {
     fn note(&mut self, raw: &RawPacket, login: i32, respawn: i32) {
         if raw.id == login {
@@ -269,6 +279,14 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = held;
         self.crosshair(eyes, rotation, look, crate::hands::REACH)
     }
+    /// Whether the crosshair pick can hit `e` and by how much its box grows (`None`: not
+    /// pickable). Default: the engine's 1.8 – 1.16.5 classification.
+    fn pick_margin(&self, e: &ghast_entity::Entity) -> Option<f32> {
+        crate::engine::legacy_pick_margin(self.entities()?, e)
+    }
+    /// One client tick of the tracked entities (`ClientLevel.tickEntities`), after the tick's
+    /// crosshair pick. Versions whose tracker has no client-side motion do nothing.
+    fn tick_entities(&mut self) {}
     /// The whole crosshair target (vanilla `GameRenderer.updateTargetedEntity`): the block
     /// pick unless one of `q.entities` is hit nearer. Versions without an entity pick yet
     /// pick blocks only.
@@ -465,7 +483,6 @@ pub(super) fn legacy_crosshair(t: ghast_physics::pick::legacy::Target, eye: [f64
 
 /// A modern (1.16.5+) crosshair target as the engine takes it.
 #[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
-#[cfg_attr(not(feature = "v1_16_5"), allow(dead_code))]
 pub(super) fn modern_crosshair(t: ghast_physics::pick::Target, eye: [f64; 3]) -> Crosshair {
     use ghast_physics::pick::Target;
     match t {
@@ -1042,6 +1059,12 @@ impl Sim for Box<dyn Sim> {
     }
     fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
         (**self).crosshair_target(q)
+    }
+    fn pick_margin(&self, e: &ghast_entity::Entity) -> Option<f32> {
+        (**self).pick_margin(e)
+    }
+    fn tick_entities(&mut self) {
+        (**self).tick_entities();
     }
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         (**self).attributes(attributes);
