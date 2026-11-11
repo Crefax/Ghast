@@ -15,14 +15,14 @@ documentation = "https://docs.rs/ghast-ext"
 
 [features]
 default = ["pathfinder", "v1_8", "v1_12_2", "v1_16_5", "v26_1"]
-# `Bot::goto`: physics-validated path finding and following (ghast-pathfinder; 1.8.9, 1.12.2
-# and 1.16.5 — on 26.1 `goto` fails with `FollowError::UnsupportedVersion`).
+# `Bot::goto`: physics-validated path finding and following (ghast-pathfinder; 1.8.9, 1.12.2,
+# 1.16.5 and 26.1).
 pathfinder = ["dep:ghast-pathfinder"]
 # One feature per game version (forwarded to ghast-client, ghast-data and the path finder).
 v1_8 = ["ghast-client/v1_8", "ghast-data/v1_8", "ghast-pathfinder?/v1_8"]
 v1_12_2 = ["ghast-client/v1_12_2", "ghast-data/v1_12", "ghast-pathfinder?/v1_12_2"]
 v1_16_5 = ["ghast-client/v1_16_5", "ghast-data/v1_16_5", "ghast-pathfinder?/v1_16_5"]
-v26_1 = ["ghast-client/v26_1", "ghast-data/v26_1"]
+v26_1 = ["ghast-client/v26_1", "ghast-data/v26_1", "ghast-pathfinder?/v26_1"]
 
 [dependencies]
 # Versions come from this crate's version features (default: all).

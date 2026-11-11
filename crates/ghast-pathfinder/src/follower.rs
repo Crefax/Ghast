@@ -46,6 +46,54 @@ pub(crate) trait Io {
     /// Right-clicks the top face of `against` with the held item if the crosshair is on it;
     /// `true` when the place was sent.
     fn place_on_top(&mut self, against: [i32; 3]) -> bool;
+    /// 26.1: the live client player (attributes, effects, abilities, level).
+    #[cfg(feature = "v26_1")]
+    fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+        None
+    }
+    /// The build height `(min_y, height)` of the player's dimension, when known.
+    fn build_height(&self) -> Option<(i32, i32)> {
+        #[cfg(feature = "v26_1")]
+        if let Some(p) = self.modern_player() {
+            return Some((p.level.min_y, p.level.height));
+        }
+        None
+    }
+}
+
+/// The client's world with the dimension's build height (unknown below it).
+struct Height<'a, W: ?Sized> {
+    world: &'a W,
+    height: Option<(i32, i32)>,
+}
+
+impl<W: BlockSource + ?Sized> BlockSource for Height<'_, W> {
+    #[inline]
+    fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+        if let Some((lo, h)) = self.height
+            && (y < lo || y >= lo + h)
+        {
+            return None;
+        }
+        self.world.raw_block(x, y, z)
+    }
+
+    #[inline]
+    fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.world.is_column_loaded(chunk_x, chunk_z)
+    }
+
+    fn build_height(&self) -> Option<(i32, i32)> {
+        self.height.or_else(|| self.world.build_height())
+    }
+}
+
+/// [`Height`] over an [`Io`]'s world.
+fn world_of<I: Io + ?Sized>(ctx: &I) -> Height<'_, I::World<'_>> {
+    Height {
+        world: ctx.world(),
+        height: ctx.build_height(),
+    }
 }
 
 impl Io for TickContext<'_> {
@@ -128,6 +176,10 @@ impl Io for TickContext<'_> {
             Some(hit) => self.place(against, Face::Up, hit.hit),
             None => false,
         }
+    }
+    #[cfg(feature = "v26_1")]
+    fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+        TickContext::modern_player(self)
     }
 }
 
@@ -321,6 +373,16 @@ enum Planning {
     },
 }
 
+/// The verification of `path` with the live player when the client has one (26.1).
+fn new_sim<I: Io + ?Sized>(ctx: &I, path: &Path, cfg: &ControllerConfig) -> Simulation {
+    #[cfg(feature = "v26_1")]
+    if let Some(p) = ctx.modern_player() {
+        return Simulation::with_modern_player(path, cfg, p);
+    }
+    let _ = ctx;
+    Simulation::new(path, cfg)
+}
+
 /// Plans per goal and replan: the first one and two repairs after failed simulations.
 const VERIFY_ATTEMPTS: u32 = 3;
 
@@ -477,7 +539,7 @@ impl Follower {
                         nodes: self.cfg.budget.nodes,
                         time: left(self.cfg.budget.time),
                     };
-                    match search.step(ctx.world(), budget) {
+                    match search.step(&world_of(ctx), budget) {
                         None => {
                             self.planning = Some(Planning::Search {
                                 search,
@@ -497,7 +559,7 @@ impl Follower {
                             if !self.cfg.verify {
                                 return Ok(Some(self.ready(path, exhausted)));
                             }
-                            let sim = Simulation::new(&path, &self.cfg.controller);
+                            let sim = new_sim(ctx, &path, &self.cfg.controller);
                             self.planning = Some(Planning::Verify {
                                 sim: Box::new(sim),
                                 bans,
@@ -515,7 +577,7 @@ impl Follower {
                 } => {
                     let Some((outcome, reached)) = sim
                         .step(
-                            ctx.world(),
+                            &world_of(ctx),
                             self.cfg.verify_ticks,
                             left(self.cfg.budget.time),
                         )
@@ -618,7 +680,11 @@ impl Follower {
         }
         let obs = ctx.observation();
         let ctrl = self.ctrl.as_mut().expect("planned above");
-        let (yaw, pitch) = ctrl.aim(&obs, ctx.world());
+        #[cfg(feature = "v26_1")]
+        if let Some(p) = ctx.modern_player() {
+            ctrl.set_modern_player(p);
+        }
+        let (yaw, pitch) = ctrl.aim(&obs, &world_of(ctx));
         let done = matches!(
             ctrl.progress(),
             Progress::Arrived | Progress::Stuck | Progress::OffPath
@@ -627,7 +693,7 @@ impl Follower {
             ctx.set_aim(yaw, pitch);
         }
         let look = ctx.planned_look();
-        let cmd = ctrl.keys(&obs, look, ctx.world());
+        let cmd = ctrl.keys(&obs, look, &world_of(ctx));
         match ctrl.progress() {
             Progress::Arrived => {
                 let path = ctrl.path();
@@ -709,7 +775,7 @@ pub(crate) mod tests {
     use ghast_physics::Keys;
 
     use super::{FollowConfig, FollowError, FollowStatus, Follower, Io};
-    use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
+    use crate::physics::{Observation, P12, P16, P18, P26, Physics, SourceView};
     use crate::plan::{Config, Pathfinder, PlanError};
     use crate::sim::Turner;
     use crate::world::BlockSource;
@@ -807,6 +873,10 @@ pub(crate) mod tests {
 
         fn place_on_top(&mut self, _: [i32; 3]) -> bool {
             false
+        }
+
+        fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+            P::as_modern(&self.state)
         }
     }
 
@@ -1121,6 +1191,147 @@ pub(crate) mod tests {
             w.fill_raw([x, 1, 0], [x, top, 0], STONE18);
         }
         w
+    }
+
+    /// A 26.1 block's state id.
+    fn id26(spec: &str) -> u16 {
+        ghast_data::v26_1::BlockState::parse(spec)
+            .unwrap_or_else(|| panic!("{spec}"))
+            .id()
+    }
+
+    /// The lab corridor in a 26.1 world (same layout, 26.1 ids).
+    fn corridor_26() -> ghast_physics::modern::MemoryWorld26 {
+        let mut w = ghast_physics::modern::memory_world_26_1();
+        let stone = id26("stone");
+        w.load_chunks(0, -2, 9, 2);
+        w.fill_raw([0, 0, -32], [159, 0, 47], id26("bedrock"));
+        w.fill_raw([0, 1, -32], [159, 2, 47], id26("dirt"));
+        w.fill_raw([0, 3, -32], [159, 3, 47], id26("grass_block"));
+        for z in [-2, 2] {
+            w.fill_raw([60, 1, z], [123, 7, z], stone);
+        }
+        w.fill_raw([123, 4, -2], [123, 7, 2], stone);
+        let trench = |w: &mut ghast_physics::modern::MemoryWorld26, a: i32, b: i32| {
+            w.fill_raw([a, 1, -1], [b, 3, 1], 0);
+        };
+        trench(&mut w, 66, 66);
+        trench(&mut w, 71, 72);
+        trench(&mut w, 77, 79);
+        trench(&mut w, 84, 84);
+        w.fill_raw([85, 4, -1], [89, 4, 1], stone);
+        trench(&mut w, 90, 91);
+        trench(&mut w, 96, 111);
+        for (x, top) in [(98, 3), (100, 3), (104, 3), (107, 4), (109, 3)] {
+            w.fill_raw([x, 1, 0], [x, top, 0], stone);
+        }
+        w
+    }
+
+    /// The parkour corridor driven by the follower on 26.1.
+    #[test]
+    fn the_lab_parkour_corridor_26_1() {
+        run_corridor::<P26, _>(&corridor_26());
+    }
+
+    /// 26.1: a maze (in negative Y, under the overworld's old floor) and an unreachable goal.
+    #[test]
+    fn mazes_on_26_1() {
+        let n = 15;
+        let (y, stone) = (-40, id26("stone"));
+        let mut w = ghast_physics::modern::memory_world_26_1();
+        w.load_chunks(-6, -6, 6, 6);
+        w.fill_raw([-96, y - 1, -96], [111, y - 1, 111], stone);
+        let size = 2 * n + 1;
+        let (ox, oz) = (-n, -n);
+        w.fill_raw([ox, y, oz], [ox + size - 1, y + 1, oz + size - 1], stone);
+        let mut s = 5u64 | 1;
+        let mut seen = vec![false; (n * n) as usize];
+        let mut stack = vec![(0, 0)];
+        seen[0] = true;
+        let carve = |w: &mut ghast_physics::modern::MemoryWorld26, gx: i32, gz: i32| {
+            w.fill_raw([ox + gx, y, oz + gz], [ox + gx, y + 1, oz + gz], 0);
+        };
+        carve(&mut w, 1, 1);
+        while let Some(&(cx, cz)) = stack.last() {
+            let nb: Vec<(i32, i32)> = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| (cx + dx, cz + dz))
+                .filter(|&(x, z)| x >= 0 && z >= 0 && x < n && z < n && !seen[(z * n + x) as usize])
+                .collect();
+            if nb.is_empty() {
+                stack.pop();
+                continue;
+            }
+            let (nx, nz) = nb[(rng(&mut s) % nb.len() as u64) as usize];
+            seen[(nz * n + nx) as usize] = true;
+            carve(&mut w, 2 * nx + 1, 2 * nz + 1);
+            carve(&mut w, cx + nx + 1, cz + nz + 1);
+            stack.push((nx, nz));
+        }
+        carve(&mut w, 0, 1);
+        carve(&mut w, size - 1, size - 2);
+        let from = [
+            f64::from(-n - 4) + 0.5,
+            f64::from(y),
+            f64::from(n + 4) + 0.5,
+        ];
+        let goal = Goal::Near {
+            pos: [1, y, 1],
+            radius: 1.0,
+        };
+        let d = drive::<P26, _>(&w, from, follower(), goal, 20_000);
+        eprintln!("26.1 maze 31: {d:?}");
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
+        let air = Goal::Near {
+            pos: [1, y + 6, 1],
+            radius: 2.0,
+        };
+        let d = drive::<P26, _>(&w, from, follower(), air, 20_000);
+        assert_eq!(
+            d.status,
+            FollowStatus::Failed(FollowError::Plan(PlanError::NoPath)),
+            "{d:?}"
+        );
+        assert_eq!(d.plans, 1, "{d:?}");
+    }
+
+    /// The live attributes drive the look-ahead and the verification: with jump strength 0
+    /// (a server attribute) a one-block step cannot be climbed, and the follower plans around
+    /// it instead of jumping in place forever.
+    #[test]
+    fn live_attributes_26_1() {
+        use ghast_physics::modern::AttributeKind;
+        let stone = id26("stone");
+        let mut w = ghast_physics::modern::memory_world_26_1();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-32, 63, -32], [31, 63, 31], stone);
+        // A wall one block high across the way, with a gap at z = 6.
+        w.fill_raw([4, 64, -32], [4, 64, 31], stone);
+        w.set_raw(4, 64, 6, 0);
+        let goal = Goal::Block([8, 64, 0]);
+        // Default attributes: straight over the step.
+        let d = drive::<P26, _>(&w, [0.5, 64.0, 0.5], follower(), goal.clone(), 2000);
+        assert_eq!(d.status, FollowStatus::Arrived, "{d:?}");
+        // No jumping: around through the gap.
+        let mut io = SimIo::<P26, _>::new(&w, [0.5, 64.0, 0.5]);
+        io.state
+            .apply_attribute(AttributeKind::JumpStrength, 0.0, &[]);
+        let mut f = follower();
+        f.goto(goal);
+        let mut through_gap = false;
+        let mut status = FollowStatus::Moving;
+        for _ in 0..3000 {
+            status = f.step(&mut io);
+            if status != FollowStatus::Moving {
+                break;
+            }
+            io.advance();
+            let p = io.feet();
+            through_gap |= p[0].floor() as i32 == 4 && p[2].floor() as i32 == 6;
+        }
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert!(through_gap, "the step was not avoided");
     }
 
     fn run_corridor<P: Physics, W: BlockSource>(w: &W) {

@@ -6,9 +6,8 @@ explicit state enum. ghast-ext lets you write the same job as straight-line asyn
 without giving up the tick model.
 
 Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` (default: all, plus
-`pathfinder`), forwarded to ghast-client, ghast-data and the path finder. `goto` needs a version
-the path finder supports (1.8.9, 1.12.2, 1.16.5); on 26.1 it fails with
-`FollowError::UnsupportedVersion`. Item and block names and ids follow the connection's version,
+`pathfinder`), forwarded to ghast-client, ghast-data and the path finder. `goto` works on every
+version (1.8.9, 1.12.2, 1.16.5, 26.1). Item and block names and ids follow the connection's version,
 26.1 included.
 
 ```rust,no_run

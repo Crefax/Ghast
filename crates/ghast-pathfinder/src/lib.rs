@@ -33,7 +33,12 @@
 // Without a version feature the crate builds (nothing can be planned: `Version` has no
 // variant and `Version::from_game` is always `None`) but the per-version machinery is unused.
 #![cfg_attr(
-    not(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5")),
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
     allow(
         dead_code,
         unused_imports,
@@ -80,11 +85,17 @@ pub enum Version {
     /// 1.16.5 (protocol 754).
     #[cfg(feature = "v1_16_5")]
     V1_16_5,
+    /// 26.1 – 26.1.2 (protocol 775): the modern physics core (`ghast_physics::modern`, rule set
+    /// `V26_1`). Attributes, effects and the build height come from the live player when the
+    /// caller provides it ([`Controller::set_modern_player`], [`Simulation::with_modern_player`];
+    /// the `Follower` does it every tick), vanilla defaults otherwise.
+    #[cfg(feature = "v26_1")]
+    V26_1,
 }
 
 impl Version {
     /// The planner's version for a client version: `None` when the planner does not support it
-    /// (26.1) or its feature is off.
+    /// or its feature is off.
     #[cfg(feature = "client")]
     #[must_use]
     pub fn from_game(v: ghast_client::GameVersion) -> Option<Version> {
@@ -95,7 +106,28 @@ impl Version {
             ghast_client::GameVersion::V1_12_2 => Some(Version::V1_12),
             #[cfg(feature = "v1_16_5")]
             ghast_client::GameVersion::V1_16_5 => Some(Version::V1_16_5),
+            #[cfg(feature = "v26_1")]
+            ghast_client::GameVersion::V26_1 => Some(Version::V26_1),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_util {
+    use crate::Version;
+
+    /// Every version this build supports.
+    pub(crate) fn versions() -> Vec<Version> {
+        vec![
+            #[cfg(feature = "v1_8")]
+            Version::V1_8,
+            #[cfg(feature = "v1_12_2")]
+            Version::V1_12,
+            #[cfg(feature = "v1_16_5")]
+            Version::V1_16_5,
+            #[cfg(feature = "v26_1")]
+            Version::V26_1,
+        ]
     }
 }

@@ -1,4 +1,4 @@
-//! Fake worlds of both versions for the integration tests.
+//! Fake worlds of every version for the integration tests.
 
 #![allow(dead_code)]
 
@@ -24,6 +24,16 @@ pub fn raw(v: Version, b: B) -> u16 {
             B::Lava => 11 << 4,
             B::Glass => 20 << 4,
         },
+        Version::V26_1 => {
+            use ghast_data::v26_1::Block;
+            let s = match b {
+                B::Air => Block::AIR.default_state(),
+                B::Stone => Block::STONE.default_state(),
+                B::Lava => Block::LAVA.default_state(),
+                B::Glass => Block::GLASS.default_state(),
+            };
+            s.id()
+        }
         _ => {
             use ghast_data::v1_16_5::Block;
             let s = match b {
@@ -42,9 +52,15 @@ pub enum World {
     V18(ghast_physics::v1_8::MemoryWorld),
     V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
+    V26(ghast_physics::modern::MemoryWorld26),
 }
 
-pub const VERSIONS: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
+pub const VERSIONS: [Version; 4] = [
+    Version::V1_8,
+    Version::V1_12,
+    Version::V1_16_5,
+    Version::V26_1,
+];
 
 impl World {
     /// Chunks -r..=r loaded, a stone floor at y = 63 over all of them.
@@ -52,12 +68,14 @@ impl World {
         let mut w = match v {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
             Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
+            Version::V26_1 => World::V26(ghast_physics::modern::memory_world_26_1()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
             World::V18(m) => m.load_chunks(-r, -r, r, r),
             World::V12(m) => m.load_chunks(-r, -r, r, r),
             World::V16(m) => m.load_chunks(-r, -r, r, r),
+            World::V26(m) => m.load_chunks(-r, -r, r, r),
         }
         w.fill(
             [-16 * r, 63, -16 * r],
@@ -72,6 +90,7 @@ impl World {
             World::V18(_) => Version::V1_8,
             World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
+            World::V26(_) => Version::V26_1,
         }
     }
 
@@ -81,6 +100,7 @@ impl World {
             World::V18(m) => m.fill_raw(a, b, r),
             World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
+            World::V26(m) => m.fill_raw(a, b, r),
         }
     }
 
@@ -94,6 +114,7 @@ impl World {
             World::V18(m) => pf.plan(Version::V1_8, m, from, goal),
             World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
+            World::V26(m) => pf.plan(Version::V26_1, m, from, goal),
         }
     }
 
@@ -108,6 +129,7 @@ impl World {
             World::V18(m) => simulate(path, m, &cfg),
             World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
+            World::V26(m) => simulate(path, m, &cfg),
         }
     }
 }

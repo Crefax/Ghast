@@ -27,7 +27,9 @@ use crate::physics::P12;
 use crate::physics::P16;
 #[cfg(feature = "v1_8")]
 use crate::physics::P18;
-use crate::physics::{Observation, Physics, SourceView};
+#[cfg(feature = "v26_1")]
+use crate::physics::P26;
+use crate::physics::{Live, Observation, Physics, SourceView};
 use crate::plan::{Path, Pathfinder, Place, Step};
 use crate::world::BlockSource;
 
@@ -236,6 +238,8 @@ pub struct Controller {
     recover: bool,
     /// This tick walks toward the last step's centre to line up for the move.
     aligning: bool,
+    /// The live player beyond the observation (26.1 attributes, effects, level).
+    live: Live,
 }
 
 impl Controller {
@@ -261,7 +265,23 @@ impl Controller {
             leap: None,
             recover: false,
             aligning: false,
+            live: Live::default(),
         }
+    }
+
+    /// 26.1: the live client player (`ghast_client::TickContext::modern_player`), whose
+    /// attributes (movement speed, step height, jump strength, scale, ...), effects, abilities,
+    /// input timers and build height the one-tick look-ahead and the pre-jump check simulate
+    /// with. Set it every tick before [`Controller::aim`] (the `Follower` does). Without it the
+    /// look-ahead uses vanilla defaults rebuilt from the [`Observation`].
+    #[cfg(feature = "v26_1")]
+    pub fn set_modern_player(&mut self, player: &ghast_physics::modern::PlayerState) {
+        self.live.set_modern(player);
+    }
+
+    /// The live player for the simulation that drives this controller.
+    pub(crate) fn live_mut(&mut self) -> &mut Live {
+        &mut self.live
     }
 
     /// The path being followed.
@@ -399,6 +419,8 @@ impl Controller {
             Version::V1_12 => self.move_keys::<P12, S>(obs, look, world),
             #[cfg(feature = "v1_16_5")]
             Version::V1_16_5 => self.move_keys::<P16, S>(obs, look, world),
+            #[cfg(feature = "v26_1")]
+            Version::V26_1 => self.move_keys::<P26, S>(obs, look, world),
         };
         Command {
             keys,
@@ -654,7 +676,7 @@ impl Controller {
                     if hdist(obs.pos, t.target()) < 0.15 && level(obs.pos) {
                         return Keys::NONE;
                     }
-                    let rest = rollout::<P, S>(&view, obs, Keys::NONE, look, 40);
+                    let rest = rollout::<P, S>(&view, obs, &self.live, Keys::NONE, look, 40);
                     let fb = Pathfinder::start_block(rest.pos);
                     if fb[0] == t.pos[0]
                         && fb[2] == t.pos[2]
@@ -681,9 +703,13 @@ impl Controller {
                     // Braking only helps when moving: slowly, a touch is unavoidable (a box
                     // grazing a wall), and standing still would never get anywhere.
                     let moving = obs.vel[0].hypot(obs.vel[2]) > 0.03;
+                    // Braking that has made no progress for a while (forward and back taking
+                    // turns at a corridor's mouth, off its axis) gives way to the graze: sliding
+                    // along the wall lines the player up.
+                    let wedged = self.idle >= WEDGED_TICKS;
                     let pick = checks
                         .iter()
-                        .position(|&(floor, clear)| floor && (clear || !moving))
+                        .position(|&(floor, clear)| floor && (clear || !moving || wedged))
                         .or(first_on_floor);
                     let Some(i) = pick else {
                         return back;
@@ -773,7 +799,7 @@ impl Controller {
                 let goal = t.target();
                 let mut best = (f64::INFINITY, Keys::NONE);
                 for c in [Keys::NONE, fwd, back] {
-                    let r = rollout::<P, S>(&view, obs, c, look, 1);
+                    let r = rollout::<P, S>(&view, obs, &self.live, c, look, 1);
                     let score = hdist(r.pos, goal) + if r.collided { 10.0 } else { 0.0 };
                     if score < best.0 {
                         best = (score, c);
@@ -840,7 +866,7 @@ impl Controller {
                     && quiet >= 2;
                 if ready {
                     // The last word: the jump from exactly here, in the physics.
-                    let start = P::from_observation(obs);
+                    let start = P::from_observation(obs, &self.live);
                     let Some(run) = jump::attempt::<P, S>(view, start, mode, look.0, t.pos) else {
                         self.progress = Progress::Stuck;
                         return Keys::NONE;
@@ -905,7 +931,7 @@ impl Controller {
     ) -> Keys {
         let fc = f.target();
         let rest = |keys: Keys| -> Option<f64> {
-            let mut s = P::from_observation(obs);
+            let mut s = P::from_observation(obs, &self.live);
             let mut o = *obs;
             for i in 0..20 {
                 P::tick(
@@ -976,7 +1002,7 @@ impl Controller {
         };
         let mut best = (f64::INFINITY, Keys::NONE);
         let mut try_seq = |first: Keys, n: u32| {
-            let mut s = P::from_observation(obs);
+            let mut s = P::from_observation(obs, &self.live);
             let mut left = !obs.on_ground;
             let mut o = *obs;
             let mut rested = false;
@@ -1046,7 +1072,7 @@ impl Controller {
         keys: Keys,
         look: (f32, f32),
     ) -> (bool, bool) {
-        let mut s = P::from_observation(obs);
+        let mut s = P::from_observation(obs, &self.live);
         let mut clear = true;
         for i in 0..12 {
             let k = if i == 0 { keys } else { Keys::NONE };
@@ -1064,6 +1090,9 @@ impl Controller {
     }
 }
 
+/// Ticks without progress after which the walk accepts grazing a wall instead of braking.
+const WEDGED_TICKS: u32 = 10;
+
 /// A step without digs or places.
 fn plain(s: &Step) -> bool {
     s.dig.is_empty() && s.place.is_none() && s.node == NodeKind::Ground
@@ -1074,11 +1103,12 @@ fn plain(s: &Step) -> bool {
 fn rollout<P: Physics, S: BlockSource + ?Sized>(
     view: &SourceView<'_, P, S>,
     obs: &Observation,
+    live: &Live,
     keys: Keys,
     look: (f32, f32),
     max: u32,
 ) -> Roll {
-    let mut s = P::from_observation(obs);
+    let mut s = P::from_observation(obs, live);
     let mut left = !obs.on_ground;
     let mut collided = false;
     let mut o = *obs;

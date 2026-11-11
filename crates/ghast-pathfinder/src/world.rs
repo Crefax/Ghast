@@ -6,7 +6,7 @@ use crate::Version;
 use crate::class::{Class, Table, table};
 
 /// Read access to raw block states, as the version encodes them on the wire: 1.8
-/// `id << 4 | meta`, 1.16.5 the global palette id.
+/// `id << 4 | meta`, 1.16.5 and 26.1 the global palette id.
 ///
 /// `None` means **unknown** (column not loaded, or below the world): the planner never walks
 /// through unknown blocks. Implemented for ghast-client's `WorldView`, the ghast-world worlds
@@ -19,6 +19,14 @@ pub trait BlockSource {
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         self.raw_block(chunk_x << 4, 0, chunk_z << 4).is_some()
     }
+
+    /// The build height `(min_y, height)` when the source knows it (26.1 dimensions differ:
+    /// the overworld is `(-64, 384)`, the nether `(0, 256)`, data packs choose freely). `None`
+    /// (the default): the version's usual one. Below `min_y` the planner sees unknown blocks,
+    /// at `min_y + height` and above air. 1.8.9 – 1.16.5 always use `(0, 256)`.
+    fn build_height(&self) -> Option<(i32, i32)> {
+        None
+    }
 }
 
 impl<T: BlockSource + ?Sized> BlockSource for &T {
@@ -30,6 +38,49 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
     #[inline]
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         (**self).is_column_loaded(chunk_x, chunk_z)
+    }
+
+    #[inline]
+    fn build_height(&self) -> Option<(i32, i32)> {
+        (**self).build_height()
+    }
+}
+
+/// The build height the planner uses for a version and a source: `[lo, hi)`.
+#[inline]
+pub(crate) fn y_range<S: BlockSource + ?Sized>(version: Version, src: &S) -> (i32, i32) {
+    match version {
+        #[cfg(feature = "v26_1")]
+        Version::V26_1 => {
+            let (min_y, height) = src.build_height().unwrap_or((-64, 384));
+            (min_y, min_y.saturating_add(height.max(0)))
+        }
+        #[allow(unreachable_patterns)]
+        _ => {
+            let _ = src;
+            (0, 256)
+        }
+    }
+}
+
+#[cfg(feature = "v26_1")]
+impl BlockSource for ghast_physics::modern::MemoryWorld26 {
+    #[inline]
+    fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+        use ghast_physics::BlockView;
+        let lo = self.min_y();
+        if y < lo || y >= lo + self.height() || !self.is_chunk_loaded(x >> 4, z >> 4) {
+            return None;
+        }
+        Some(u32::from(self.block(x, y, z).id()))
+    }
+
+    fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        ghast_physics::BlockView::is_chunk_loaded(self, chunk_x, chunk_z)
+    }
+
+    fn build_height(&self) -> Option<(i32, i32)> {
+        Some((self.min_y(), self.height()))
     }
 }
 
@@ -85,10 +136,12 @@ impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_16_5::BlockState>
 mod client_impls {
     use super::BlockSource;
 
+    /// The planner clamps the height per version and dimension itself; this accepts any
+    /// height a 26.1 dimension can have.
     impl BlockSource for dyn ghast_client::WorldView + '_ {
         #[inline]
         fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
-            if !(0..256).contains(&y) {
+            if !(-2048..2048).contains(&y) {
                 return None;
             }
             ghast_client::WorldView::raw_block(self, x, y, z)
@@ -126,6 +179,27 @@ mod client_impls {
 
         fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
             ghast_client::world::v1_12::World::is_column_loaded(self, chunk_x, chunk_z)
+        }
+    }
+
+    #[cfg(feature = "v26_1")]
+    impl BlockSource for ghast_client::world::v26_1::World {
+        #[inline]
+        fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+            if let Some((lo, h)) = self.build_height()
+                && (y < lo || y >= lo + h)
+            {
+                return None;
+            }
+            self.block_state(x, y, z).map(|s| u32::from(s.id()))
+        }
+
+        fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+            ghast_client::world::v26_1::World::is_column_loaded(self, chunk_x, chunk_z)
+        }
+
+        fn build_height(&self) -> Option<(i32, i32)> {
+            self.dimension().map(|d| (d.kind.min_y, d.kind.height))
         }
     }
 
@@ -177,6 +251,9 @@ pub(crate) struct Grid<'w, S: ?Sized> {
     src: &'w S,
     table: &'static Table,
     sections: Sections,
+    /// Build height `[lo, hi)`: unknown below, air above.
+    y_lo: i32,
+    y_hi: i32,
 }
 
 impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
@@ -186,16 +263,25 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
 
     /// A grid over `src` that continues an earlier run's cache.
     pub(crate) fn with_cache(src: &'w S, version: Version, sections: Sections) -> Self {
+        let (y_lo, y_hi) = y_range(version, src);
         Grid {
             src,
             table: table(version),
             sections,
+            y_lo,
+            y_hi,
         }
     }
 
     /// The cache, for the next slice.
     pub(crate) fn into_cache(self) -> Sections {
         self.sections
+    }
+
+    /// The build height `[lo, hi)`.
+    #[inline]
+    pub(crate) fn y_range(&self) -> (i32, i32) {
+        (self.y_lo, self.y_hi)
     }
 
     /// Air's class index (always 0).
@@ -212,8 +298,8 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
     /// Class index at a position (`UNKNOWN` sentinel resolved by [`Grid::class`]).
     #[inline]
     pub(crate) fn index(&mut self, x: i32, y: i32, z: i32) -> u16 {
-        if !(0..256).contains(&y) {
-            return if y >= 256 { Self::AIR } else { UNKNOWN };
+        if y < self.y_lo || y >= self.y_hi {
+            return if y >= self.y_hi { Self::AIR } else { UNKNOWN };
         }
         let key = Self::key(x, y, z);
         let i = (((y & 15) as usize) << 8) | (((z & 15) as usize) << 4) | ((x & 15) as usize);

@@ -119,6 +119,8 @@ pub(crate) fn table(version: Version) -> &'static Table {
     static T12: OnceLock<Table> = OnceLock::new();
     #[cfg(feature = "v1_16_5")]
     static T16: OnceLock<Table> = OnceLock::new();
+    #[cfg(feature = "v26_1")]
+    static T26: OnceLock<Table> = OnceLock::new();
     match version {
         #[cfg(feature = "v1_8")]
         Version::V1_8 => T18.get_or_init(build_1_8),
@@ -126,6 +128,8 @@ pub(crate) fn table(version: Version) -> &'static Table {
         Version::V1_12 => T12.get_or_init(build_1_12),
         #[cfg(feature = "v1_16_5")]
         Version::V1_16_5 => T16.get_or_init(build_1_16_5),
+        #[cfg(feature = "v26_1")]
+        Version::V26_1 => T26.get_or_init(build_26_1),
     }
 }
 
@@ -251,9 +255,16 @@ fn classify(f: &Facts<'_>) -> Class {
         "magma_block" | "magma" | "campfire" | "soul_campfire" | "cactus" => {
             flags |= AVOID_FLOOR | AVOID;
         }
+        // 1.17+: pointed dripstone hurts on landing (and has an offset shape anyway), a lava
+        // cauldron burns, a big dripleaf tilts away under the player, sculk sensors and
+        // shriekers react to steps (a shrieker can summon a warden).
+        "pointed_dripstone" | "lava_cauldron" => flags |= AVOID_FLOOR | AVOID,
+        "big_dripleaf" | "sculk_sensor" | "calibrated_sculk_sensor" | "sculk_shrieker" => {
+            flags |= AVOID_FLOOR;
+        }
         "farmland" | "turtle_egg" => flags |= FRAGILE,
         "sand" | "red_sand" | "gravel" | "anvil" | "chipped_anvil" | "damaged_anvil"
-        | "dragon_egg" => flags |= FALLING,
+        | "dragon_egg" | "suspicious_sand" | "suspicious_gravel" => flags |= FALLING,
         n if n.ends_with("concrete_powder") => flags |= FALLING,
         _ => {}
     }
@@ -395,6 +406,141 @@ fn classify_1_16_5(s: ghast_data::v1_16_5::BlockState) -> Class {
         hardness: info.hardness,
         diggable: info.diggable,
     })
+}
+
+#[cfg(feature = "v26_1")]
+fn build_26_1() -> Table {
+    use ghast_data::v26_1::{BlockState, STATE_COUNT};
+    let mut classes = Vec::new();
+    let mut map = vec![0u16; STATE_COUNT];
+    intern(&mut classes, classify_26_1(BlockState::AIR));
+    for (id, slot) in map.iter_mut().enumerate() {
+        let s = BlockState::from_id(id as u16).unwrap_or(BlockState::AIR);
+        *slot = intern(&mut classes, classify_26_1(s));
+    }
+    Table { classes, map }
+}
+
+/// 26.1: the jar's movement records (`ghast-data` v26_1) in the planner's terms.
+#[cfg(feature = "v26_1")]
+fn classify_26_1(s: ghast_data::v26_1::BlockState) -> Class {
+    use ghast_data::v26_1::{BlockKind, block_flags, state_flags};
+    let block = s.block();
+    let d = block.data();
+    let phys = s.phys();
+    let kind = d.kind;
+    let dependency = if phys.has(state_flags::CONTEXT) {
+        // Scaffolding, powder snow: the shape depends on the player.
+        ShapeDependency::EntityContext
+    } else if phys.has(state_flags::OFFSET) {
+        // Bamboo, pointed dripstone: shifted per position.
+        ShapeDependency::PositionOffset
+    } else if phys.has(state_flags::MOVING_PISTON) || d.name.ends_with("shulker_box") {
+        // The shape follows a block entity (moving piston, opening shulker lid).
+        ShapeDependency::BlockEntity
+    } else {
+        ShapeDependency::None
+    };
+    let mut physics = 0u16;
+    if d.flags & block_flags::CLIMBABLE != 0 {
+        physics |= PhysicsFlags::CLIMBABLE.0;
+    }
+    if d.flags & block_flags::FIRE != 0 {
+        physics |= PhysicsFlags::FIRE.0;
+    }
+    match kind {
+        BlockKind::Cobweb | BlockKind::SweetBerryBush | BlockKind::PowderSnow => {
+            physics |= PhysicsFlags::STUCK.0;
+        }
+        BlockKind::BubbleColumn => physics |= PhysicsFlags::BUBBLE_COLUMN.0,
+        BlockKind::SlimeBlock => physics |= PhysicsFlags::SLIME.0,
+        BlockKind::HoneyBlock => physics |= PhysicsFlags::HONEY.0,
+        _ => {}
+    }
+    let fluid = phys.fluid() >> 6;
+    classify(&Facts {
+        name: d.name,
+        boxes: s.voxel_shape().boxes,
+        dependency,
+        physics: PhysicsFlags(physics),
+        slipperiness: d.friction,
+        speed_factor: f64::from(d.speed_factor),
+        fluid_water: fluid == 1,
+        fluid_lava: fluid == 2,
+        hardness: d.hardness,
+        diggable: d.diggable,
+    })
+}
+
+#[cfg(all(test, feature = "v26_1"))]
+mod tests_26_1 {
+    use super::*;
+    use ghast_data::v26_1::BlockState;
+
+    fn c(spec: &str) -> Class {
+        let t = table(Version::V26_1);
+        let s = BlockState::parse(spec).unwrap_or_else(|| panic!("{spec}"));
+        t.classes[t.index(u32::from(s.id())) as usize]
+    }
+
+    #[test]
+    fn basic_26_1() {
+        assert_eq!(c("air").flags & flag::SOLID, 0);
+        assert!(c("air").has(flag::REPLACEABLE));
+        assert!(c("cave_air").has(flag::REPLACEABLE));
+        let stone = c("stone");
+        assert!(stone.has(flag::SOLID | flag::SUPPORT | flag::DIGGABLE));
+        assert_eq!(stone.top, 1.0);
+        assert!(!c("bedrock").has(flag::DIGGABLE));
+        assert_eq!(c("oak_slab[type=bottom]").top, 0.5);
+        assert_eq!(c("oak_slab[type=top]").bottom, 0.5);
+        assert_eq!(c("soul_sand").top, 0.875);
+        assert!(c("soul_sand").has(flag::SLOW));
+        assert!(c("honey_block").has(flag::SLOW));
+        assert_eq!(c("mud").top, 0.875);
+        assert!(!c("mud").has(flag::SLOW | flag::AVOID | flag::AVOID_FLOOR));
+        assert!(c("oak_fence").top >= 1.5);
+        let ladder = c("ladder[facing=north]");
+        assert!(ladder.has(flag::THIN | flag::CLIMB));
+        assert!(!ladder.blocks_between(0.0, 1.0));
+        assert!(c("vine").has(flag::CLIMB));
+        assert!(c("cave_vines").has(flag::CLIMB));
+        assert!(c("water").has(flag::WATER));
+        assert!(c("oak_slab[type=bottom,waterlogged=true]").has(flag::WATER));
+        assert!(c("lava").has(flag::LAVA));
+        assert!(c("cobweb").has(flag::AVOID));
+        assert!(c("sweet_berry_bush").has(flag::AVOID));
+        assert!(c("fire").has(flag::AVOID));
+        assert!(c("powder_snow").has(flag::AVOID | flag::IRREGULAR));
+        assert!(c("scaffolding").has(flag::AVOID));
+        assert!(c("magma_block").has(flag::AVOID_FLOOR));
+        assert!(c("campfire").has(flag::AVOID_FLOOR));
+        assert!(c("pointed_dripstone").has(flag::AVOID_FLOOR | flag::AVOID));
+        assert!(c("big_dripleaf").has(flag::AVOID_FLOOR));
+        assert!(c("sculk_shrieker").has(flag::AVOID_FLOOR));
+        assert!(c("slime_block").has(flag::BOUNCY));
+        assert!(c("ice").has(flag::SLIPPERY));
+        assert!(c("blue_ice").has(flag::SLIPPERY));
+        assert!(c("sand").has(flag::FALLING));
+        assert!(c("suspicious_gravel").has(flag::FALLING));
+        assert!(c("white_concrete_powder").has(flag::FALLING));
+        assert!(c("farmland").has(flag::FRAGILE));
+        assert!(c("bamboo").has(flag::IRREGULAR));
+        assert!(c("shulker_box").has(flag::IRREGULAR));
+        // Copper grates and sculk are ordinary floors.
+        for name in ["copper_grate", "sculk", "deepslate", "tuff", "moss_block"] {
+            let k = c(name);
+            assert!(k.has(flag::SUPPORT), "{name}");
+            assert_eq!(k.top, 1.0, "{name}");
+            assert!(
+                !k.has(flag::AVOID | flag::AVOID_FLOOR | flag::IRREGULAR),
+                "{name}"
+            );
+        }
+        assert!(c("moss_carpet").has(flag::SUPPORT));
+        assert!(!c("short_grass").has(flag::SOLID));
+        assert!(table(Version::V26_1).classes.len() < u16::MAX as usize);
+    }
 }
 
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]

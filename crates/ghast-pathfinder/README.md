@@ -1,7 +1,7 @@
 # ghast-pathfinder
 
 Path planning and path following for the ghast Minecraft Java Edition bot library, 1.8.9,
-1.12.2 and 1.16.5. The planner is an A* over feet blocks; the follower drives the vanilla-exact
+1.12.2, 1.16.5 and 26.1. The planner is an A* over feet blocks; the follower drives the vanilla-exact
 `ghast-physics` player. Every move type is checked by running it in that physics, both in
 the tests and (by default) before the bot moves.
 
@@ -22,10 +22,27 @@ assert_eq!(run.outcome, SimOutcome::Arrived);
 From a bot, use `Follower` (feature `client`, on by default) in `Behavior::tick`, or
 `ghast-ext`'s `Bot::goto`.
 
-Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5` (default: all three; they
-forward to ghast-data, ghast-physics and, with `client`, ghast-client). 26.1 is not supported
-yet: `Version::from_game(GameVersion::V26_1)` is `None`, and the `Follower` fails with
-`FollowError::UnsupportedVersion` on a 26.1 connection.
+Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` (default: all; they
+forward to ghast-data, ghast-physics and, with `client`, ghast-client).
+
+26.1 (`Version::V26_1`) runs on the modern physics core (`ghast_physics::modern`, rule set
+`V26_1`) and the 26.1 block tables:
+
+- **Live player.** 26.1 servers send movement as attributes (movement speed, step height, jump
+  strength, gravity, scale, ...). The controller's look-ahead, the pre-jump check and the
+  verification simulate with the live client player when they have it
+  (`Controller::set_modern_player`, `Simulation::with_modern_player`; the `Follower` passes
+  `TickContext::modern_player` every tick), vanilla defaults otherwise. The planner's move set
+  and the jump table assume the default attributes; moves the live attributes cannot do fail
+  the verification (or the pre-jump check) and are planned around.
+- **Build height.** From the dimension (`BlockSource::build_height`; the `Follower` takes it
+  from the live player): negative Y works, below the bottom is unknown (never entered), above
+  the top is air.
+- **Blocks.** Classified from the jar's movement records: powder snow, scaffolding, cobwebs,
+  berry bushes, fire and bubble columns are never entered; magma, campfires, pointed dripstone,
+  lava cauldrons, big dripleaves and sculk sensors / shriekers are never stood on; mud (14/16),
+  copper grates, moss and the like are ordinary floors; bamboo, pointed dripstone, shulker boxes
+  and moving pistons are irregular obstacles.
 
 ## Moves
 
@@ -225,7 +242,7 @@ three times) and `follow_path` after the armor stand, **0 failed, 0 Grim flags, 
   `Stuck` otherwise and the follower plans around them).
 - Not modelled: doors and gates (solid), trapdoors, entities in the way, flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
-- 1.16.5 is validated in the simulation only (1.8.9 and 1.12.2 also live); digging and
+- 1.16.5 is validated in the simulation only (1.8.9, 1.12.2 and 26.1 also live); digging and
   placing are validated in the
   simulation only (no live run yet).
 

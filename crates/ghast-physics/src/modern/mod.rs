@@ -95,6 +95,18 @@ impl<S: Copy> ModernMemoryWorld<S> {
         }
     }
 
+    /// Lowest block Y of the build height.
+    #[must_use]
+    pub fn min_y(&self) -> i32 {
+        self.min_y
+    }
+
+    /// Number of block rows of the build height.
+    #[must_use]
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+
     /// Marks the inclusive chunk rectangle `[cx0, cz0] ..= [cx1, cz1]` as loaded.
     pub fn load_chunks(&mut self, cx0: i32, cz0: i32, cx1: i32, cz1: i32) {
         self.loaded_rects.push([cx0, cz0, cx1, cz1]);

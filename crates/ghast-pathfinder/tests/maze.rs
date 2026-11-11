@@ -73,6 +73,7 @@ fn plan_sliced(
             World::V18(m) => search.step(m, Budget::nodes(nodes)),
             World::V12(m) => search.step(m, Budget::nodes(nodes)),
             World::V16(m) => search.step(m, Budget::nodes(nodes)),
+            World::V26(m) => search.step(m, Budget::nodes(nodes)),
         };
         assert!(search.expanded() - before <= nodes);
         if let Some(r) = r {
@@ -99,8 +100,10 @@ fn mazes_of_growing_size() {
                     },
                 ),
             ] {
-                // Corners of one-wide corridors: at most a tick or two of grazing a wall.
-                let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, 2);
+                // Corners of one-wide corridors: at most a few ticks of grazing a wall (26.1
+                // turns one corner of the 63 maze 0.007 blocks early: 3 ticks).
+                let touches = if v == Version::V26_1 { 3 } else { 2 };
+                let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, touches);
                 // Sliced like the follower does it: the same path.
                 let (r, slices, _) = plan_sliced(&w, Config::default(), from, &goal, 2000);
                 assert_eq!(r.as_ref(), Ok(&p), "{v:?} maze {}", 2 * n + 1);
@@ -123,7 +126,8 @@ fn mazes_of_growing_size() {
             pos: centre,
             radius: 1.0,
         };
-        let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, 2);
+        let touches = if v == Version::V26_1 { 3 } else { 2 };
+        let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, touches);
         let straight = f64::from(from[0] - centre[0]).hypot(f64::from(from[2] - centre[2]));
         assert!(
             p.steps.len() as f64 > 3.0 * straight,

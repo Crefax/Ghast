@@ -138,7 +138,10 @@ pub(crate) fn spot<S: BlockSource + ?Sized>(
     y: i32,
     z: i32,
 ) -> Option<Spot> {
-    if !(1..255).contains(&y) {
+    // Feet inside the build height with a floor row below and a head row above (1..255 for
+    // the 0..256 worlds).
+    let (lo, hi) = g.y_range();
+    if y <= lo || y >= hi - 1 {
         return None;
     }
     let c0 = g.class(x, y, z);

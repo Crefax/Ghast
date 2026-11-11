@@ -1,6 +1,6 @@
 [package]
 name = "ghast-pathfinder"
-description = "Physics-exact path planning and path following for the ghast Minecraft Java Edition bot library (1.8.9, 1.12.2 and 1.16.5): every move type is validated against the vanilla-exact ghast-physics"
+description = "Physics-exact path planning and path following for the ghast Minecraft Java Edition bot library (1.8.9, 1.12.2, 1.16.5 and 26.1): every move type is validated against the vanilla-exact ghast-physics"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,14 +14,15 @@ documentation = "https://docs.rs/ghast-pathfinder"
 readme = "README.md"
 
 [features]
-default = ["client", "v1_8", "v1_12_2", "v1_16_5"]
+default = ["client", "v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 # `Follower`: drives a path from a `ghast_client::Behavior` through `TickContext`.
 client = ["dep:ghast-client", "dep:log"]
 # One feature per supported game version (forwarded to ghast-data, ghast-physics and, with
-# `client`, ghast-client). 26.1 is not supported yet: `Version::from_game` gives `None` for it.
+# `client`, ghast-client).
 v1_8 = ["ghast-data/v1_8", "ghast-physics/v1_8", "ghast-client?/v1_8"]
 v1_12_2 = ["ghast-data/v1_12", "ghast-physics/v1_12", "ghast-client?/v1_12_2"]
 v1_16_5 = ["ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-client?/v1_16_5"]
+v26_1 = ["ghast-data/v26_1", "ghast-physics/v26_1", "ghast-client?/v26_1"]
 
 [dependencies]
 ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
@@ -38,23 +39,23 @@ criterion = { workspace = true }
 [[bench]]
 name = "plan"
 harness = false
-required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 
 [[test]]
 name = "incremental"
-required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 
 [[test]]
 name = "maze"
-required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 
 [[test]]
 name = "parkour"
-required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 
 [[test]]
 name = "validation"
-required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1"]
 
 [package.metadata.docs.rs]
 all-features = true

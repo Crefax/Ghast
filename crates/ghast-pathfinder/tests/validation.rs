@@ -1,6 +1,6 @@
 //! Plans on small fake worlds, then runs each path through the vanilla-exact physics with the
 //! controller (`simulate`): the player must reach the goal block without unexpected
-//! collisions, hazards or fall damage. All three versions.
+//! collisions, hazards or fall damage. Every version.
 
 use ghast_pathfinder::{
     Config, ControllerConfig, DigCost, Goal, MoveKind, Path, Pathfinder, SimOutcome, SimReport,
@@ -38,6 +38,22 @@ fn raw(v: Version, b: B) -> u16 {
             B::Fence => 85 << 4,
             B::LadderSouthWall => 65 << 4 | 2,
         },
+        Version::V26_1 => {
+            use ghast_data::v26_1::{Block, BlockState};
+            let s = match b {
+                B::Air => Block::AIR.default_state(),
+                B::Stone => Block::STONE.default_state(),
+                B::Dirt => Block::DIRT.default_state(),
+                B::Slab => BlockState::parse("smooth_stone_slab[type=bottom]").unwrap(),
+                B::SoulSand => Block::SOUL_SAND.default_state(),
+                B::Water => Block::WATER.default_state(),
+                B::Lava => Block::LAVA.default_state(),
+                B::Glass => Block::GLASS.default_state(),
+                B::Fence => Block::OAK_FENCE.default_state(),
+                B::LadderSouthWall => BlockState::parse("ladder[facing=north]").unwrap(),
+            };
+            s.id()
+        }
         _ => {
             use ghast_data::v1_16_5::{Block, Property};
             let s = match b {
@@ -64,6 +80,7 @@ enum World {
     V18(ghast_physics::v1_8::MemoryWorld),
     V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
+    V26(ghast_physics::modern::MemoryWorld26),
 }
 
 impl World {
@@ -72,12 +89,14 @@ impl World {
         let mut w = match v {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
             Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
+            Version::V26_1 => World::V26(ghast_physics::modern::memory_world_26_1()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
             World::V18(m) => m.load_chunks(-4, -4, 4, 4),
             World::V12(m) => m.load_chunks(-4, -4, 4, 4),
             World::V16(m) => m.load_chunks(-4, -4, 4, 4),
+            World::V26(m) => m.load_chunks(-4, -4, 4, 4),
         }
         w.fill([-64, 63, -64], [79, 63, 79], B::Stone);
         w
@@ -88,6 +107,7 @@ impl World {
             World::V18(_) => Version::V1_8,
             World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
+            World::V26(_) => Version::V26_1,
         }
     }
 
@@ -97,6 +117,7 @@ impl World {
             World::V18(m) => m.fill_raw(a, b, r),
             World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
+            World::V26(m) => m.fill_raw(a, b, r),
         }
     }
 
@@ -110,6 +131,7 @@ impl World {
             World::V18(m) => pf.plan(Version::V1_8, m, from, goal),
             World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
+            World::V26(m) => pf.plan(Version::V26_1, m, from, goal),
         };
         r.unwrap_or_else(|e| panic!("{:?}: no plan {from:?} -> {goal:?}: {e}", self.version()))
     }
@@ -120,11 +142,17 @@ impl World {
             World::V18(m) => simulate(path, m, &cfg),
             World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
+            World::V26(m) => simulate(path, m, &cfg),
         }
     }
 }
 
-const VERSIONS: [Version; 3] = [Version::V1_8, Version::V1_12, Version::V1_16_5];
+const VERSIONS: [Version; 4] = [
+    Version::V1_8,
+    Version::V1_12,
+    Version::V1_16_5,
+    Version::V26_1,
+];
 
 /// Plans and simulates; asserts the run reached the goal block cleanly.
 fn check(w: &World, cfg: Config, from: [i32; 3], to: [i32; 3]) -> (Path, SimReport) {
@@ -269,6 +297,7 @@ fn gap_jumps() {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
             World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
+            World::V26(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
         // A gap jump down one block.
@@ -297,6 +326,7 @@ fn water() {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
             World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
+            World::V26(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
     }
@@ -360,6 +390,7 @@ fn goals() {
             World::V18(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
             World::V12(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
+            World::V26(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
         };
         let p = plan(&Goal::Near {
             pos: [10, 64, 10],
@@ -397,6 +428,7 @@ fn verified_plans_repair_failed_moves() {
             World::V18(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
             World::V12(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
             World::V16(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
+            World::V26(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
         }
         .unwrap();
         assert_eq!(sim.outcome, SimOutcome::Arrived);
@@ -445,6 +477,7 @@ fn run_terrain(seed: u64, v: Version) -> Result<(), String> {
         World::V18(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
         World::V12(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
         World::V16(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
+        World::V26(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
     };
     let Ok(path) = r else { return Ok(()) };
     let rep = w.simulate(&path);
@@ -476,8 +509,9 @@ fn random_terrain_paths_run_in_the_physics() {
     }
     assert!(
         fails.is_empty(),
-        "{} of 144 failed:\n{}",
+        "{} of {} failed:\n{}",
         fails.len(),
+        48 * VERSIONS.len(),
         fails.join("\n")
     );
 }
@@ -489,10 +523,58 @@ proptest! {
     /// random terrains still fails (see the crate README).
     #[test]
     #[ignore = "fuzzing; run on demand"]
-    fn fuzz_random_terrain(seed in any::<u64>(), vi in 0usize..3) {
+    fn fuzz_random_terrain(seed in any::<u64>(), vi in 0usize..4) {
         let v = VERSIONS[vi];
         if let Err(e) = run_terrain(seed, v) {
             prop_assert!(false, "{}", e);
         }
     }
+}
+
+/// 26.1: negative heights, 26.x blocks classified for standing, passing and danger.
+#[test]
+fn modern_blocks_and_negative_heights_26_1() {
+    use ghast_data::v26_1::BlockState;
+    let id = |s: &str| BlockState::parse(s).unwrap().id();
+    let mut m = ghast_physics::modern::memory_world_26_1();
+    m.load_chunks(-2, -2, 2, 2);
+    // Deepslate floor at y = -61 (feet at -60).
+    m.fill_raw([-32, -61, -32], [31, -61, 31], id("deepslate"));
+    // Powder snow across the way (a player sinks in it) with one gap at z = 5.
+    m.fill_raw([3, -60, -32], [3, -59, 31], id("powder_snow"));
+    m.fill_raw([3, -60, 5], [3, -59, 5], 0);
+    // Mud makes the floor of the next strip (14/16 high), copper grates the one after.
+    m.fill_raw([6, -61, -32], [6, -61, 31], id("mud"));
+    m.fill_raw([7, -61, -32], [7, -61, 31], id("copper_grate"));
+    // A row of pointed dripstone and magma on the floor except at z = 0.
+    m.fill_raw([9, -60, -32], [9, -60, 31], id("pointed_dripstone"));
+    m.fill_raw([9, -61, -32], [9, -61, 31], id("magma_block"));
+    m.set_raw(9, -60, 0, 0);
+    m.set_raw(9, -61, 0, id("tuff"));
+    let pf = Pathfinder::new(Config::default());
+    let path = pf
+        .plan(Version::V26_1, &m, [0, -60, 0], &Goal::Block([12, -60, 0]))
+        .unwrap();
+    assert!(!path.partial);
+    for s in &path.steps {
+        if s.pos[0] == 3 {
+            assert_eq!(s.pos[2], 5, "through powder snow: {:?}", s.pos);
+        }
+        if s.pos[0] == 9 {
+            assert_eq!(s.pos[2], 0, "over dripstone / magma: {:?}", s.pos);
+        }
+        if s.pos[0] == 6 {
+            assert!(
+                (s.feet_y - (-61.0 + 0.875)).abs() < 1e-9,
+                "mud floor {}",
+                s.feet_y
+            );
+        }
+    }
+    let rep = simulate(&path, &m, &ControllerConfig::default());
+    assert_eq!(rep.outcome, SimOutcome::Arrived, "{rep:?}");
+    // Below the build height is unknown, never walked into: a shaft down to the bottom row.
+    m.fill_raw([-5, -64, -5], [-5, -61, -5], 0);
+    let r = pf.plan(Version::V26_1, &m, [0, -60, 0], &Goal::Block([-5, -64, -5]));
+    assert!(r.is_err() || r.unwrap().partial);
 }

@@ -285,11 +285,14 @@ impl Ord for Open {
     }
 }
 
+/// A node key: 26 bits of x and z, 12 of y (the low 8 in bits 0-7, the high 4 in bits
+/// 60-63, so heights 0..256 keep their old keys; 26.1 builds from -2048 to 2047).
 #[inline]
 pub(crate) fn pack(p: [i32; 3]) -> u64 {
     (p[0] as u32 as u64 & 0x3ff_ffff) << 34
         | (p[2] as u32 as u64 & 0x3ff_ffff) << 8
         | (p[1] as u8 as u64)
+        | ((p[1] >> 8) as u32 as u64 & 0xf) << 60
 }
 
 impl Pathfinder {
@@ -1071,7 +1074,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
         // Same level and drops.
         let lowest = y - (cfg.max_fall.max(cfg.max_water_fall).ceil() as i32) - 1;
         let mut yt = y;
-        while yt >= lowest.max(1) {
+        while yt >= lowest.max(g.y_range().0 + 1) {
             if let Some(t) = spot(g, bx, yt, bz) {
                 let dh = t.floor - f0;
                 let top = t.floor.max(f0) + HEIGHT;
@@ -1511,15 +1514,30 @@ fn fill_hole<S: BlockSource + ?Sized>(
     true
 }
 
-/// 1.16.5 climbs a ladder or vine without a block behind it; the older versions need one.
+/// 1.16.5 and 26.1 climb a ladder or vine without a block behind it; the older versions need
+/// one.
 fn climbs_without_wall(version: Version) -> bool {
-    #[cfg(feature = "v1_16_5")]
-    {
-        matches!(version, Version::V1_16_5)
+    match version {
+        #[cfg(feature = "v1_16_5")]
+        Version::V1_16_5 => true,
+        #[cfg(feature = "v26_1")]
+        Version::V26_1 => true,
+        #[allow(unreachable_patterns)]
+        _ => false,
     }
-    #[cfg(not(feature = "v1_16_5"))]
-    {
-        let _ = version;
-        false
+}
+
+#[cfg(test)]
+mod pack_tests {
+    use super::pack;
+
+    #[test]
+    fn node_keys_are_unique_over_any_build_height() {
+        let mut seen = std::collections::HashSet::new();
+        for y in -2048..2048 {
+            assert!(seen.insert(pack([-3, y, 5])), "y {y}");
+        }
+        // The old keys (0..256) are unchanged.
+        assert_eq!(pack([1, 200, 2]), 1 << 34 | 2 << 8 | 200);
     }
 }
