@@ -749,9 +749,11 @@ where
 
     /// Encodes the engine's outbound packets.
     fn encode_outbound(&mut self) -> Result<(), ClientError> {
+        let tick = self.engine.tick_count();
         let out = self.engine.outbound();
         let mut res = Ok(());
         for p in out.drain(..) {
+            log::trace!(target: "ghast::packets", "t{tick} -> {p:?}");
             if let Err(e) = V::write_play(&mut self.enc, &p, &mut self.wire) {
                 res = Err(e);
                 break;
@@ -765,6 +767,13 @@ where
     fn drain_inbound(&mut self) -> Result<Option<SessionEnd>, ClientError> {
         let mut at = None;
         while let Some(raw) = self.dec.next_packet()? {
+            log::trace!(
+                target: "ghast::packets",
+                "t{} <- 0x{:02x} ({} B)",
+                self.engine.tick_count(),
+                raw.id,
+                raw.body.len()
+            );
             if (0..256).contains(&raw.id)
                 && self.raw_mask[raw.id as usize >> 6] & (1 << (raw.id & 63)) != 0
             {

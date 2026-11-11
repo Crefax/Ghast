@@ -48,7 +48,7 @@ pub const USAGE: &str = "options:
   --view-distance <n>   client view distance in chunks (default 8)
   --entities            track entities (afk: for measurements)
   --burst               attack: hit every 3 ticks (breaks an armor stand), no right clicks
-  -v, --verbose         debug logging";
+  -v, --verbose         debug logging (GHAST_TRACE=1: every packet in and out)";
 
 impl Options {
     /// Parses `std::env::args`; prints usage and exits on errors.
@@ -194,7 +194,10 @@ impl log::Log for Logger {
 
 /// Installs the logger (info, or debug with `verbose`).
 pub fn init_logger(verbose: bool) {
-    let level = if verbose {
+    // GHAST_TRACE=1: also every packet in and out (`ghast::packets` trace lines).
+    let level = if std::env::var_os("GHAST_TRACE").is_some() {
+        log::LevelFilter::Trace
+    } else if verbose {
         log::LevelFilter::Debug
     } else {
         log::LevelFilter::Info

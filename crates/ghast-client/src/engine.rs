@@ -357,6 +357,9 @@ pub(crate) struct Core {
     client_loaded: bool,
     /// Ticks spent waiting for the level (vanilla lets the player in after 30 s).
     load_wait: u32,
+    /// Consecutive ticks the 3x3 columns around the player have been loaded (vanilla compiles
+    /// the player's section only then, and sees it compiled a tick later at the earliest).
+    near_loaded: u8,
     /// Time origin for nanosecond timestamps (chunk batch timing).
     origin: Instant,
     /// Test hook: this tick's look, set instead of a rotation step.
@@ -429,6 +432,7 @@ impl Core {
             level_load_started: false,
             client_loaded: false,
             load_wait: 0,
+            near_loaded: 0,
             origin: Instant::now(),
             #[cfg(test)]
             forced_look: None,
@@ -453,6 +457,7 @@ impl Core {
         self.level_load_started = false;
         self.client_loaded = false;
         self.load_wait = 0;
+        self.near_loaded = 0;
         log::debug!(
             "[{}] t{} {why}: waiting for the server position",
             self.opts.name,
@@ -472,6 +477,14 @@ impl Core {
         let cx = (self.pose.pos.x.floor() as i64 >> 4) as i32;
         let cz = (self.pose.pos.z.floor() as i64 >> 4) as i32;
         world.is_column_loaded(cx, cz)
+    }
+
+    /// The player's column and its 8 neighbours are loaded (`RenderSection.hasAllNeighbors`:
+    /// the condition for vanilla's first compile of the player's section).
+    fn neighbourhood_loaded(&self, world: &dyn WorldView) -> bool {
+        let cx = (self.pose.pos.x.floor() as i64 >> 4) as i32;
+        let cz = (self.pose.pos.z.floor() as i64 >> 4) as i32;
+        (-1..=1).all(|dx| (-1..=1).all(|dz| world.is_column_loaded(cx + dx, cz + dz)))
     }
 }
 
@@ -1082,12 +1095,24 @@ impl<S: Sim> Engine<S> {
         }
         if c.opts.caps.player_loaded_gate && c.joined && !c.client_loaded {
             // 1.21.4+ LevelLoadTracker: after the server's "chunks load start" the level is
-            // ready once the player's chunk is there (spectators and dead players at once);
-            // after 30 s it lets the player in anyway. `player_loaded` goes out from the
-            // connection tick, before the key handling and the player tick.
+            // ready once the player's section is compiled and visible
+            // (`isSectionCompiledAndVisible`; spectators and dead players at once); after 30 s
+            // it lets the player in anyway. The first compile needs the 3x3 columns around the
+            // player (`hasAllNeighbors`) and happens in a frame after the tick that received
+            // them, so the earliest ready tick is the next one (a nearby section has no
+            // fade-in). `player_loaded` goes out from the connection tick, before the key
+            // handling and the player tick.
             c.load_wait += 1;
-            let ready =
-                c.level_load_started && (c.ready || c.game_mode == GameMode::Spectator || c.dead);
+            let near = c.neighbourhood_loaded(&self.sim);
+            c.near_loaded = if near {
+                c.near_loaded.saturating_add(1)
+            } else {
+                0
+            };
+            let ready = c.level_load_started
+                && ((c.ready && c.near_loaded >= 2)
+                    || c.game_mode == GameMode::Spectator
+                    || c.dead);
             if ready || c.load_wait >= 600 {
                 c.client_loaded = true;
                 c.out.push(Outbound::PlayerLoaded);
@@ -2257,7 +2282,12 @@ mod tests {
             dimension_nbt: None,
             respawn_screen: true,
         }));
-        load(e, 0, 0);
+        // The player's column and its neighbours (1.21.4+ loads the level only with all nine).
+        for x in -1..=1 {
+            for z in -1..=1 {
+                load(e, x, z);
+            }
+        }
         e.handle(Inbound::Teleport(Teleport {
             x: 8.5,
             y: 64.0,
@@ -2273,6 +2303,8 @@ mod tests {
             reason: 13,
             value: 0.0,
         });
+        // The nine columns arrived before the previous tick: the level loads on the next one.
+        e.core.near_loaded = 1;
         e.outbound().clear();
     }
 
@@ -2579,6 +2611,54 @@ mod tests {
             .unwrap();
         e.sim.world_packet(&zombie(51, 5.0)).unwrap();
         assert_eq!(look(&mut e), (None, None));
+    }
+
+    /// 1.21.4+ LevelLoadTracker: `player_loaded` waits for the player's column and its eight
+    /// neighbours (vanilla's first compile of the player's section needs them) and goes out a
+    /// tick after they are all there, not before.
+    #[test]
+    fn player_loaded_waits_for_the_neighbourhood() {
+        let mut e = engine(GameVersion::V26_1);
+        e.handle(Inbound::JoinGame(JoinGame {
+            entity_id: 7,
+            game_mode: GameMode::Survival,
+            dimension: "0".into(),
+            hardcore: false,
+            dimension_nbt: None,
+            respawn_screen: true,
+        }));
+        e.handle(Inbound::Teleport(Teleport {
+            x: 8.5,
+            y: 70.0,
+            z: 8.5,
+            teleport_id: Some(1),
+            ..Default::default()
+        }));
+        e.handle(Inbound::GameState {
+            reason: 13,
+            value: 0.0,
+        });
+        load(&mut e, 0, 0);
+        let t0 = Instant::now();
+        let mut b = Idle;
+        let mut loaded_at = None;
+        for t in 0..8 {
+            if t == 3 {
+                for (x, z) in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0)] {
+                    load(&mut e, x, z);
+                }
+            }
+            if t == 5 {
+                load(&mut e, 1, 1);
+            }
+            e.note_inbound(t0);
+            e.tick(&mut b, t0);
+            if std::mem::take(e.outbound()).contains(&Outbound::PlayerLoaded) {
+                loaded_at.get_or_insert(t);
+            }
+        }
+        // All nine from tick 5 on: loaded on tick 6.
+        assert_eq!(loaded_at, Some(6));
     }
 
     #[test]
@@ -3099,14 +3179,17 @@ mod tests {
         // Yaw 90 faces -X.
         assert!(e.core.pose.pos.x < start.x - 0.5, "{:?}", e.core.pose.pos);
         assert_eq!(e.core.pose.pos.y, 64.0);
+        let mut stop = Script(|ctx: &mut TickContext<'_>| {
+            ctx.set_controls(crate::common::Controls::default());
+        });
         for _ in 0..30 {
-            e.tick(&mut idle, t0);
+            e.tick(&mut stop, t0);
         }
         e.outbound().clear();
         for _ in 0..5 {
-            e.tick(&mut idle, t0);
+            e.tick(&mut stop, t0);
         }
-        let _ = idle;
+        let _ = (idle, stop);
         // No idle on-ground packets; at most the position refresh every 20 ticks.
         let still = names(e.outbound());
         assert!(still.len() <= 1 && !still.contains(&"C03"), "{still:?}");

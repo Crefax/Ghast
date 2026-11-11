@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a local lab server (idempotent): ./start.sh <1.8|1.12|1.16>
+# Start a local lab server (idempotent): ./start.sh <1.8|1.12|1.16|26.1>
 # First run downloads Paper + GrimAC into lab/servers/ (git-ignored), builds the lab /fly plugin,
 # writes eula/ops/properties, starts the server in the background and waits for "Done".
 set -euo pipefail
@@ -12,7 +12,14 @@ JAVA="$(java_home "$JAVA_MAJOR")/bin/java"; JDK21="$(java_home 21)"
 fetch "$PAPER_URL" "$DL/$PAPER_JAR" "$PAPER_SHA"
 fetch "$GRIM_URL" "$DL/$GRIM_JAR" "$GRIM_SHA"
 ln -sf "$DL/$PAPER_JAR" "$DIR/$PAPER_JAR"
-cp -f "$DL/$GRIM_JAR" "$DIR/plugins/$GRIM_JAR"
+# LAB_GRIM_JAR=<file in lab/servers/dl>: run that Grim build instead of the pinned one (cross-checks
+# against a newer build); exactly one Grim jar is left in plugins/.
+grim=${LAB_GRIM_JAR:-$GRIM_JAR}
+[ -f "$DL/$grim" ] || { echo "no $DL/$grim" >&2; exit 1; }
+for f in "$DIR"/plugins/grimac-bukkit-*.jar; do
+  if [ -e "$f" ] && [ "$(basename "$f")" != "$grim" ]; then rm -f "$f"; fi
+done
+cp -f "$DL/$grim" "$DIR/plugins/$grim"
 
 # Plugins built from source against the 1.8.8 Bukkit API (Java 8 bytecode; the /fly one loads on 1.16.5 too).
 # build_plugin <src dir> <jar name>: rebuilt only when the source changed; src dir has plugin.yml + src/**.java.
