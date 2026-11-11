@@ -17,10 +17,10 @@ documentation = "https://docs.rs/ghast"
 default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate", "display-names"]
 # Game versions. Each one builds alone; drop the ones you never connect with to cut compile
 # time and binary size (`cargo add ghast --no-default-features --features v1_8,libdeflate`).
-v1_8 = ["ghast-client/v1_8", "ghast-protocol/v1_8", "ghast-data/v1_8"]
-v1_12_2 = ["ghast-client/v1_12_2", "ghast-protocol/v1_12_2", "ghast-data/v1_12"]
-v1_16_5 = ["ghast-client/v1_16_5", "ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
-v26_1 = ["ghast-client/v26_1", "ghast-protocol/v26_1", "ghast-data/v26_1"]
+v1_8 = ["ghast-client/v1_8", "ghast-protocol/v1_8", "ghast-data/v1_8", "ghast-ext?/v1_8", "ghast-pathfinder?/v1_8"]
+v1_12_2 = ["ghast-client/v1_12_2", "ghast-protocol/v1_12_2", "ghast-data/v1_12", "ghast-ext?/v1_12_2", "ghast-pathfinder?/v1_12_2"]
+v1_16_5 = ["ghast-client/v1_16_5", "ghast-protocol/v1_16_5", "ghast-data/v1_16_5", "ghast-ext?/v1_16_5", "ghast-pathfinder?/v1_16_5"]
+v26_1 = ["ghast-client/v26_1", "ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-ext?/v26_1"]
 # English display names in ghast-data (`display_name` fields); registry names are always there.
 display-names = ["ghast-client/display-names", "ghast-data/display-names"]
 # Packet compression with libdeflate (C, faster); without it pure Rust (flate2 + zlib-rs).
@@ -29,7 +29,8 @@ libdeflate = ["ghast-client/libdeflate"]
 microsoft = ["ghast-client/microsoft", "ghast-auth/microsoft"]
 # `ghast::ext`: sequential async helpers (look, dig, place, equip, containers, chat, events).
 ext = ["dep:ghast-ext"]
-# `ghast::pathfinder`: physics-validated path planning and following (and `ext`'s `goto`).
+# `ghast::pathfinder`: physics-validated path planning and following (and `ext`'s `goto`);
+# 1.8.9, 1.12.2 and 1.16.5 (not 26.1 yet).
 pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
 # `ghast::viewer`: the bot screen (a live 3D view of the bot's world in the browser, recordings
 # and replays). Textures are fetched from Mojang's client jar at run time.
@@ -41,7 +42,7 @@ ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-featur
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
 ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
 ghast-ext = { path = "../ghast-ext", version = "0.3.0", optional = true, default-features = false }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true, default-features = false, features = ["client"] }
 ghast-viewer = { path = "../ghast-viewer", version = "0.3.0", optional = true }
 
 [dev-dependencies]

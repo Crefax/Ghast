@@ -55,6 +55,17 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, rust_2018_idioms, unreachable_pub, unnameable_types)]
+// Without a version feature the crate builds (every lookup answers "unknown") but the
+// per-version arms are gone.
+#![cfg_attr(
+    not(any(
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(unused_variables, dead_code, unreachable_code)
+)]
 
 mod actions;
 mod error;

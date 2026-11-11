@@ -22,6 +22,11 @@ assert_eq!(run.outcome, SimOutcome::Arrived);
 From a bot, use `Follower` (feature `client`, on by default) in `Behavior::tick`, or
 `ghast-ext`'s `Bot::goto`.
 
+Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5` (default: all three; they
+forward to ghast-data, ghast-physics and, with `client`, ghast-client). 26.1 is not supported
+yet: `Version::from_game(GameVersion::V26_1)` is `None`, and the `Follower` fails with
+`FollowError::UnsupportedVersion` on a 26.1 connection.
+
 ## Moves
 
 | move | what | cost (ticks) |

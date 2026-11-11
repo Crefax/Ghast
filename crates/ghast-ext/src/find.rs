@@ -57,18 +57,27 @@ impl Block {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self.version {
+            #[cfg(feature = "v1_8")]
             GameVersion::V1_8_9 => u8::try_from(self.raw >> 4)
                 .ok()
                 .and_then(ghast_data::v1_8::Block::from_id)
                 .map_or("", ghast_data::v1_8::Block::name),
+            #[cfg(feature = "v1_12_2")]
             GameVersion::V1_12_2 => u8::try_from(self.raw >> 4)
                 .ok()
                 .and_then(ghast_data::v1_12::Block::from_id)
                 .map_or("", ghast_data::v1_12::Block::name),
-            _ => u16::try_from(self.raw)
+            #[cfg(feature = "v1_16_5")]
+            GameVersion::V1_16_5 => u16::try_from(self.raw)
                 .ok()
                 .and_then(ghast_data::v1_16_5::BlockState::from_id)
                 .map_or("", |s| s.block().name()),
+            #[cfg(feature = "v26_1")]
+            GameVersion::V26_1 => u16::try_from(self.raw)
+                .ok()
+                .and_then(ghast_data::v26_1::BlockState::from_id)
+                .map_or("", |s| s.block().name()),
+            _ => "",
         }
     }
 
@@ -302,14 +311,19 @@ pub struct EntityInfo {
 /// The name of an entity type (1.8 and 1.12 share the legacy mob / object id spaces but not
 /// the names).
 fn entity_name(version: GameVersion, ty: EntityType) -> &'static str {
-    match ty {
-        EntityType::Player => "player",
-        EntityType::Registry(_) => ghast_client::entity::v1_16_5::info(ty).map_or("", |i| i.name),
-        _ if version == GameVersion::V1_12_2 => {
-            ghast_client::entity::v1_12::info(ty).map_or("", |i| i.name)
-        }
-        _ => ghast_client::entity::v1_8::info(ty).map_or("", |i| i.name),
-    }
+    let info: Option<&'static ghast_data::EntityInfo> = match (ty, version) {
+        (EntityType::Player, _) => return "player",
+        #[cfg(feature = "v26_1")]
+        (EntityType::Registry(_), GameVersion::V26_1) => ghast_client::entity::v26_1::info(ty),
+        #[cfg(feature = "v1_16_5")]
+        (EntityType::Registry(_), _) => ghast_client::entity::v1_16_5::info(ty),
+        #[cfg(feature = "v1_12_2")]
+        (_, GameVersion::V1_12_2) => ghast_client::entity::v1_12::info(ty),
+        #[cfg(feature = "v1_8")]
+        (_, GameVersion::V1_8_9) => ghast_client::entity::v1_8::info(ty),
+        _ => None,
+    };
+    info.map_or("", |i| i.name)
 }
 
 pub(crate) fn entity_info(ctx: &TickContext<'_>, id: i32) -> Option<EntityInfo> {

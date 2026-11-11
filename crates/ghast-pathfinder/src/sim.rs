@@ -7,7 +7,13 @@ use crate::Version;
 use crate::class::{flag, table};
 use crate::control::{Controller, ControllerConfig, Progress};
 use crate::moves::MoveKind;
-use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
+#[cfg(feature = "v1_12_2")]
+use crate::physics::P12;
+#[cfg(feature = "v1_16_5")]
+use crate::physics::P16;
+#[cfg(feature = "v1_8")]
+use crate::physics::P18;
+use crate::physics::{Observation, Physics, SourceView};
 use crate::plan::Path;
 use crate::world::BlockSource;
 
@@ -131,7 +137,11 @@ pub fn simulate<S: BlockSource + ?Sized>(
 /// The raw stone state of a version (what a simulated place puts down).
 fn stone(version: Version) -> u32 {
     match version {
-        Version::V1_8 | Version::V1_12 => 1 << 4,
+        #[cfg(feature = "v1_8")]
+        Version::V1_8 => 1 << 4,
+        #[cfg(feature = "v1_12_2")]
+        Version::V1_12 => 1 << 4,
+        #[cfg(feature = "v1_16_5")]
         Version::V1_16_5 => u32::from(ghast_data::v1_16_5::Block::STONE.default_state().id()),
     }
 }
@@ -139,8 +149,11 @@ fn stone(version: Version) -> u32 {
 /// The simulated player of either version.
 #[derive(Clone, Debug)]
 enum Body {
+    #[cfg(feature = "v1_8")]
     V18(<P18 as Physics>::State),
+    #[cfg(feature = "v1_12_2")]
     V12(<P12 as Physics>::State),
+    #[cfg(feature = "v1_16_5")]
     V16(<P16 as Physics>::State),
 }
 
@@ -195,8 +208,11 @@ impl Simulation {
             (-(t[0] - start[0])).atan2(t[2] - start[2]).to_degrees() as f32
         });
         let body = match path.version {
+            #[cfg(feature = "v1_8")]
             Version::V1_8 => Body::V18(P18::new_state(start, yaw0, 0.0)),
+            #[cfg(feature = "v1_12_2")]
             Version::V1_12 => Body::V12(P12::new_state(start, yaw0, 0.0)),
+            #[cfg(feature = "v1_16_5")]
             Version::V1_16_5 => Body::V16(P16::new_state(start, yaw0, 0.0)),
         };
         let max_ticks = (path.cost * 4.0) as u32 + 20 * path.steps.len() as u32 + 200;
@@ -240,10 +256,13 @@ impl Simulation {
         time: Option<std::time::Duration>,
     ) -> Option<&SimReport> {
         if !self.run.done {
-            let done = match &mut self.body {
-                Body::V18(s) => self.run.advance::<P18, S>(s, world, ticks, time),
-                Body::V12(s) => self.run.advance::<P12, S>(s, world, ticks, time),
-                Body::V16(s) => self.run.advance::<P16, S>(s, world, ticks, time),
+            let done = match self.body {
+                #[cfg(feature = "v1_8")]
+                Body::V18(ref mut s) => self.run.advance::<P18, S>(s, world, ticks, time),
+                #[cfg(feature = "v1_12_2")]
+                Body::V12(ref mut s) => self.run.advance::<P12, S>(s, world, ticks, time),
+                #[cfg(feature = "v1_16_5")]
+                Body::V16(ref mut s) => self.run.advance::<P16, S>(s, world, ticks, time),
             };
             self.run.done = done;
         }
@@ -396,7 +415,13 @@ impl Run {
     }
 }
 
-#[cfg(all(test, feature = "client"))]
+#[cfg(all(
+    test,
+    feature = "client",
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5"
+))]
 mod tests {
     use super::Turner;
 

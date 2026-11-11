@@ -26,6 +26,14 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
   `v1_16_5`, `v26_1` on `ghast` / `ghast-client` / `ghast-protocol`; `v1_8`, `v1_12`,
   `v1_16_5`, `v26_1` on the data / world / physics / entity / inventory crates. A
   `GameVersion` whose feature is off returns `ClientError::VersionNotEnabled`.
+  `ghast-ext` (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`) and `ghast-pathfinder` (`v1_8`, `v1_12_2`,
+  `v1_16_5`) have them too (default: all); each publishable crate builds on its own with any one
+  version (checked by `scripts/feature-matrix.sh` in CI).
+- **ghast-pathfinder `Version`**: the variants exist only with their feature, and
+  `From<GameVersion>` is replaced by `Version::from_game(v) -> Option<Version>` (it mapped 26.1
+  to 1.16.5); the `Follower` fails with the new `FollowError::UnsupportedVersion` on 26.1.
+- **ghast-ext** item / block / entity names and ids on 26.1 use the 26.1 tables (they used the
+  1.16.5 ones).
 - **`display-names` feature** (default on) in `ghast-data`, `ghast-client` and `ghast`: the
   English display-name fields of the data records exist only with it. Registry names are
   always there. Builds with `default-features = false` that read display names must enable it.

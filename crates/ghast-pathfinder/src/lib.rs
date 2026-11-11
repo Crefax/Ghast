@@ -30,6 +30,18 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, unnameable_types)]
+// Without a version feature the crate builds (nothing can be planned: `Version` has no
+// variant and `Version::from_game` is always `None`) but the per-version machinery is unused.
+#![cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5")),
+    allow(
+        dead_code,
+        unused_imports,
+        unused_variables,
+        unused_mut,
+        unreachable_code
+    )
+)]
 
 mod class;
 mod control;
@@ -60,20 +72,30 @@ pub use world::BlockSource;
 #[non_exhaustive]
 pub enum Version {
     /// 1.8.9 (protocol 47).
+    #[cfg(feature = "v1_8")]
     V1_8,
     /// 1.12.2 (protocol 340).
+    #[cfg(feature = "v1_12_2")]
     V1_12,
     /// 1.16.5 (protocol 754).
+    #[cfg(feature = "v1_16_5")]
     V1_16_5,
 }
 
-#[cfg(feature = "client")]
-impl From<ghast_client::GameVersion> for Version {
-    fn from(v: ghast_client::GameVersion) -> Self {
+impl Version {
+    /// The planner's version for a client version: `None` when the planner does not support it
+    /// (26.1) or its feature is off.
+    #[cfg(feature = "client")]
+    #[must_use]
+    pub fn from_game(v: ghast_client::GameVersion) -> Option<Version> {
         match v {
-            ghast_client::GameVersion::V1_8_9 => Version::V1_8,
-            ghast_client::GameVersion::V1_12_2 => Version::V1_12,
-            _ => Version::V1_16_5,
+            #[cfg(feature = "v1_8")]
+            ghast_client::GameVersion::V1_8_9 => Some(Version::V1_8),
+            #[cfg(feature = "v1_12_2")]
+            ghast_client::GameVersion::V1_12_2 => Some(Version::V1_12),
+            #[cfg(feature = "v1_16_5")]
+            ghast_client::GameVersion::V1_16_5 => Some(Version::V1_16_5),
+            _ => None,
         }
     }
 }

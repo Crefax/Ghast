@@ -33,6 +33,7 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
     }
 }
 
+#[cfg(feature = "v1_8")]
 impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_8::BlockState> {
     #[inline]
     fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -48,6 +49,7 @@ impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_8::BlockState> {
     }
 }
 
+#[cfg(feature = "v1_12_2")]
 impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_12::BlockState> {
     #[inline]
     fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -63,6 +65,7 @@ impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_12::BlockState> {
     }
 }
 
+#[cfg(feature = "v1_16_5")]
 impl BlockSource for ghast_physics::MemoryWorld<ghast_data::v1_16_5::BlockState> {
     #[inline]
     fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -96,6 +99,7 @@ mod client_impls {
         }
     }
 
+    #[cfg(feature = "v1_8")]
     impl BlockSource for ghast_client::world::v1_8::World {
         #[inline]
         fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -110,6 +114,7 @@ mod client_impls {
         }
     }
 
+    #[cfg(feature = "v1_12_2")]
     impl BlockSource for ghast_client::world::v1_12::World {
         #[inline]
         fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
@@ -124,6 +129,7 @@ mod client_impls {
         }
     }
 
+    #[cfg(feature = "v1_16_5")]
     impl BlockSource for ghast_client::world::v1_16_5::World {
         #[inline]
         fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {

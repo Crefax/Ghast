@@ -113,12 +113,18 @@ impl Table {
 
 /// The table of a version (built on first use: ~1 ms).
 pub(crate) fn table(version: Version) -> &'static Table {
+    #[cfg(feature = "v1_8")]
     static T18: OnceLock<Table> = OnceLock::new();
+    #[cfg(feature = "v1_12_2")]
     static T12: OnceLock<Table> = OnceLock::new();
+    #[cfg(feature = "v1_16_5")]
     static T16: OnceLock<Table> = OnceLock::new();
     match version {
+        #[cfg(feature = "v1_8")]
         Version::V1_8 => T18.get_or_init(build_1_8),
+        #[cfg(feature = "v1_12_2")]
         Version::V1_12 => T12.get_or_init(build_1_12),
+        #[cfg(feature = "v1_16_5")]
         Version::V1_16_5 => T16.get_or_init(build_1_16_5),
     }
 }
@@ -287,6 +293,7 @@ fn intern(classes: &mut Vec<Class>, c: Class) -> u16 {
     (classes.len() - 1) as u16
 }
 
+#[cfg(feature = "v1_8")]
 fn build_1_8() -> Table {
     use ghast_data::v1_8::BlockState;
     let mut classes = Vec::new();
@@ -301,6 +308,7 @@ fn build_1_8() -> Table {
     Table { classes, map }
 }
 
+#[cfg(feature = "v1_8")]
 fn classify_1_8(s: ghast_data::v1_8::BlockState) -> Class {
     let block = s.block();
     let info = block.info();
@@ -321,6 +329,7 @@ fn classify_1_8(s: ghast_data::v1_8::BlockState) -> Class {
     })
 }
 
+#[cfg(feature = "v1_12_2")]
 fn build_1_12() -> Table {
     use ghast_data::v1_12::BlockState;
     let mut classes = Vec::new();
@@ -333,6 +342,7 @@ fn build_1_12() -> Table {
     Table { classes, map }
 }
 
+#[cfg(feature = "v1_12_2")]
 fn classify_1_12(s: ghast_data::v1_12::BlockState) -> Class {
     let block = s.block();
     let info = block.info();
@@ -353,6 +363,7 @@ fn classify_1_12(s: ghast_data::v1_12::BlockState) -> Class {
     })
 }
 
+#[cfg(feature = "v1_16_5")]
 fn build_1_16_5() -> Table {
     use ghast_data::v1_16_5::{BlockState, STATE_COUNT};
     let mut classes = Vec::new();
@@ -365,6 +376,7 @@ fn build_1_16_5() -> Table {
     Table { classes, map }
 }
 
+#[cfg(feature = "v1_16_5")]
 fn classify_1_16_5(s: ghast_data::v1_16_5::BlockState) -> Class {
     let block = s.block();
     let info = block.info();
@@ -385,7 +397,7 @@ fn classify_1_16_5(s: ghast_data::v1_16_5::BlockState) -> Class {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 mod tests {
     use super::*;
 

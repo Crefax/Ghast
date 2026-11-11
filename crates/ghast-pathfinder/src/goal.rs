@@ -41,6 +41,7 @@ impl Goal {
 
     /// Distance in blocks from feet block `p` to the nearest block that satisfies the goal
     /// (0 when reached; `Y`: the height difference).
+    #[cfg_attr(not(feature = "client"), allow(dead_code))]
     pub(crate) fn distance(&self, p: [i32; 3]) -> f64 {
         match self {
             Goal::Block(b) => dist2(*b, p).sqrt(),

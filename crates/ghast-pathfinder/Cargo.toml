@@ -14,13 +14,18 @@ documentation = "https://docs.rs/ghast-pathfinder"
 readme = "README.md"
 
 [features]
-default = ["client"]
+default = ["client", "v1_8", "v1_12_2", "v1_16_5"]
 # `Follower`: drives a path from a `ghast_client::Behavior` through `TickContext`.
 client = ["dep:ghast-client", "dep:log"]
+# One feature per supported game version (forwarded to ghast-data, ghast-physics and, with
+# `client`, ghast-client). 26.1 is not supported yet: `Version::from_game` gives `None` for it.
+v1_8 = ["ghast-data/v1_8", "ghast-physics/v1_8", "ghast-client?/v1_8"]
+v1_12_2 = ["ghast-data/v1_12", "ghast-physics/v1_12", "ghast-client?/v1_12_2"]
+v1_16_5 = ["ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-client?/v1_16_5"]
 
 [dependencies]
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
-ghast-physics = { path = "../ghast-physics", version = "0.3.0" }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
+ghast-physics = { path = "../ghast-physics", version = "0.3.0", default-features = false }
 ghast-client = { path = "../ghast-client", version = "0.3.0", optional = true, default-features = false }
 log = { workspace = true, optional = true }
 
@@ -29,9 +34,27 @@ ghast-client = { path = "../ghast-client", version = "0.3.0" }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
+# The integration tests and the bench run every version.
 [[bench]]
 name = "plan"
 harness = false
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
+[[test]]
+name = "incremental"
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
+[[test]]
+name = "maze"
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
+[[test]]
+name = "parkour"
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
+
+[[test]]
+name = "validation"
+required-features = ["v1_8", "v1_12_2", "v1_16_5"]
 
 [package.metadata.docs.rs]
 all-features = true

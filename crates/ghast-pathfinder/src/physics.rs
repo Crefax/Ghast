@@ -55,10 +55,14 @@ pub(crate) trait Physics: 'static {
     fn air() -> Self::Block;
 }
 
+#[cfg(feature = "v1_8")]
 pub(crate) struct P18;
+#[cfg(feature = "v1_12_2")]
 pub(crate) struct P12;
+#[cfg(feature = "v1_16_5")]
 pub(crate) struct P16;
 
+#[cfg(feature = "v1_8")]
 impl Physics for P18 {
     type State = ghast_physics::v1_8::PlayerState;
     type Block = ghast_data::v1_8::BlockState;
@@ -131,6 +135,7 @@ impl Physics for P18 {
     }
 }
 
+#[cfg(feature = "v1_12_2")]
 impl Physics for P12 {
     type State = ghast_physics::v1_12::PlayerState;
     type Block = ghast_data::v1_12::BlockState;
@@ -203,6 +208,7 @@ impl Physics for P12 {
     }
 }
 
+#[cfg(feature = "v1_16_5")]
 impl Physics for P16 {
     type State = ghast_physics::v1_16_5::PlayerState;
     type Block = ghast_data::v1_16_5::BlockState;

@@ -11,6 +11,7 @@ const fn v(along: i8, side: i8, up: i8) -> Cell {
     Cell { along, side, up, lo: 0.0, hi: 0.0, speed: true }
 }
 
+#[cfg(feature = "v1_8")]
 pub(super) static V1_8: &[Spec] = &[
     Spec {
         gap: 1,
@@ -649,6 +650,7 @@ pub(super) static V1_8: &[Spec] = &[
     },
 ];
 
+#[cfg(feature = "v1_12_2")]
 pub(super) static V1_12: &[Spec] = &[
     Spec {
         gap: 1,
@@ -1256,6 +1258,7 @@ pub(super) static V1_12: &[Spec] = &[
     },
 ];
 
+#[cfg(feature = "v1_16_5")]
 pub(super) static V1_16_5: &[Spec] = &[
     Spec {
         gap: 1,

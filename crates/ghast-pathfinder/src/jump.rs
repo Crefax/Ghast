@@ -48,7 +48,7 @@ pub(crate) const YAW_ERR: f32 = 0.5;
 /// Horizontal speed (blocks per tick) below which the player counts as standing still.
 pub(crate) const REST: f64 = 0.003;
 /// Widest gap measured.
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 pub(crate) const MAX_GAP: u8 = 4;
 /// Height changes measured (landing floor minus take-off floor).
 pub(crate) const DYS: [i8; 4] = [1, 0, -1, -2];
@@ -67,7 +67,7 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) const ALL: [Mode; 4] = [Mode::Walk, Mode::Sprint, Mode::JumpWalk, Mode::JumpSprint];
 
     /// Sprints (needs food > 6).
@@ -130,8 +130,11 @@ impl Jumps {
     pub(crate) fn of(version: Version) -> Jumps {
         Jumps {
             specs: match version {
+                #[cfg(feature = "v1_8")]
                 Version::V1_8 => jump_table::V1_8,
+                #[cfg(feature = "v1_12_2")]
                 Version::V1_12 => jump_table::V1_12,
+                #[cfg(feature = "v1_16_5")]
                 Version::V1_16_5 => jump_table::V1_16_5,
             },
         }
@@ -214,7 +217,10 @@ pub(crate) fn select(
 
 /// A run of the policy that landed.
 #[derive(Clone, Debug)]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    not(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5")),
+    allow(dead_code)
+)]
 pub(crate) struct Landed {
     /// Feet positions after every tick (until at rest on the landing block).
     pub(crate) trace: Vec<[f64; 3]>,
@@ -364,7 +370,7 @@ pub(crate) fn attempt<P: Physics, S: BlockSource + ?Sized>(
 }
 
 /// Measuring the table (tests only: `jump_table.rs` is generated from it).
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 pub(crate) mod measure {
     use std::collections::HashMap;
     use std::fmt::Write as _;
@@ -633,7 +639,7 @@ pub(crate) mod measure {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 mod tests {
     use super::measure::*;
     use super::*;

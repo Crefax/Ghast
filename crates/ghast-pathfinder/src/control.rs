@@ -21,7 +21,13 @@ use crate::Version;
 use crate::class::{Class, Table, flag, table};
 use crate::jump::{self, Jumps, Mode};
 use crate::moves::{MoveKind, NodeKind};
-use crate::physics::{Observation, P12, P16, P18, Physics, SourceView};
+#[cfg(feature = "v1_12_2")]
+use crate::physics::P12;
+#[cfg(feature = "v1_16_5")]
+use crate::physics::P16;
+#[cfg(feature = "v1_8")]
+use crate::physics::P18;
+use crate::physics::{Observation, Physics, SourceView};
 use crate::plan::{Path, Pathfinder, Place, Step};
 use crate::world::BlockSource;
 
@@ -387,8 +393,11 @@ impl Controller {
             Progress::Moving => {}
         }
         let keys = match self.path.version {
+            #[cfg(feature = "v1_8")]
             Version::V1_8 => self.move_keys::<P18, S>(obs, look, world),
+            #[cfg(feature = "v1_12_2")]
             Version::V1_12 => self.move_keys::<P12, S>(obs, look, world),
+            #[cfg(feature = "v1_16_5")]
             Version::V1_16_5 => self.move_keys::<P16, S>(obs, look, world),
         };
         Command {
@@ -1179,7 +1188,7 @@ fn boundary_dist(p: [f64; 3], from: [i32; 3], dx: i32, dz: i32) -> f64 {
     if d.is_infinite() { 0.0 } else { d }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 mod tests {
     use super::*;
 

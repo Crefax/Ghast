@@ -23,8 +23,8 @@ pub(crate) trait Io {
         Self: 'w;
     /// The world as the client knows it.
     fn world(&self) -> &Self::World<'_>;
-    /// The protocol version.
-    fn version(&self) -> Version;
+    /// The planner's version (`None`: not supported by the planner, e.g. 26.1).
+    fn version(&self) -> Option<Version>;
     /// The player.
     fn observation(&self) -> Observation;
     /// The server moved the player this tick (teleport, respawn).
@@ -58,8 +58,8 @@ impl Io for TickContext<'_> {
         TickContext::world(self)
     }
 
-    fn version(&self) -> Version {
-        Version::from(TickContext::version(self))
+    fn version(&self) -> Option<Version> {
+        Version::from_game(TickContext::version(self))
     }
 
     fn observation(&self) -> Observation {
@@ -211,6 +211,8 @@ pub enum FollowError {
     Plan(PlanError),
     /// The replan budget ([`FollowConfig::max_replans`]) is used up.
     GaveUp,
+    /// The planner does not support this game version (26.1) or its feature is off.
+    UnsupportedVersion,
 }
 
 impl std::fmt::Display for FollowError {
@@ -218,6 +220,9 @@ impl std::fmt::Display for FollowError {
         match self {
             FollowError::Plan(e) => write!(f, "planning failed: {e}"),
             FollowError::GaveUp => f.write_str("gave up after too many replans"),
+            FollowError::UnsupportedVersion => {
+                f.write_str("the path finder does not support this game version")
+            }
         }
     }
 }
@@ -434,10 +439,9 @@ impl Follower {
     }
 
     /// Starts a plan from the player's feet block.
-    fn start_plan<I: Io + ?Sized>(&mut self, ctx: &I) {
+    fn start_plan<I: Io + ?Sized>(&mut self, ctx: &I, version: Version) {
         let goal = self.goal.clone().expect("planning without a goal");
         let start = Pathfinder::start_block(ctx.observation().pos);
-        let version = ctx.version();
         self.plans += 1;
         self.plan_ticks = 0;
         self.planning = Some(Planning::Search {
@@ -596,8 +600,11 @@ impl Follower {
         }
         if self.ctrl.is_none() {
             if self.planning.is_none() {
+                let Some(version) = ctx.version() else {
+                    return self.fail(ctx, FollowError::UnsupportedVersion);
+                };
                 self.goal_loaded = self.goal.as_ref().map(|g| goal_loaded(g, ctx.world()));
-                self.start_plan(ctx);
+                self.start_plan(ctx, version);
             }
             match self.work(ctx) {
                 Ok(Some(c)) => self.ctrl = Some(c),
@@ -692,7 +699,7 @@ impl Follower {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 pub(crate) mod tests {
     //! The follower driven tick by tick in the physics (a simulated client): mazes, unreachable
     //! goals, gap jumps.
@@ -756,8 +763,8 @@ pub(crate) mod tests {
             self.world
         }
 
-        fn version(&self) -> Version {
-            P::VERSION
+        fn version(&self) -> Option<Version> {
+            Some(P::VERSION)
         }
 
         fn observation(&self) -> Observation {

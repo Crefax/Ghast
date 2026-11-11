@@ -973,7 +973,7 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
     if cfg.climb && s.climb {
         if let Some(t) = spot(g, x, y + 1, z)
             && t.climb
-            && (climb_wall(g, x, y, z).is_some() || version == Version::V1_16_5)
+            && (climb_wall(g, x, y, z).is_some() || climbs_without_wall(version))
         {
             push(
                 out,
@@ -1509,4 +1509,17 @@ fn fill_hole<S: BlockSource + ?Sized>(
         }),
     });
     true
+}
+
+/// 1.16.5 climbs a ladder or vine without a block behind it; the older versions need one.
+fn climbs_without_wall(version: Version) -> bool {
+    #[cfg(feature = "v1_16_5")]
+    {
+        matches!(version, Version::V1_16_5)
+    }
+    #[cfg(not(feature = "v1_16_5"))]
+    {
+        let _ = version;
+        false
+    }
 }

@@ -79,9 +79,15 @@ impl<F: Fn(&Stack) -> bool + Send + Sync + 'static> From<F> for ItemMatch {
 pub fn item_id(version: GameVersion, name: &str) -> Option<i32> {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
     match version {
+        #[cfg(feature = "v1_8")]
         GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_name(n).map(|i| i32::from(i.id())),
+        #[cfg(feature = "v1_12_2")]
         GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_name(n).map(|i| i32::from(i.id())),
-        _ => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
+        #[cfg(feature = "v1_16_5")]
+        GameVersion::V1_16_5 => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
+        #[cfg(feature = "v26_1")]
+        GameVersion::V26_1 => ghast_data::v26_1::Item::from_name(n).map(|i| i32::from(i.id())),
+        _ => None,
     }
 }
 
@@ -97,9 +103,17 @@ pub fn item_name(version: GameVersion, id: i32) -> &'static str {
         return "";
     };
     match version {
+        #[cfg(feature = "v1_8")]
         GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_id(id).map_or("", |i| i.info().name),
+        #[cfg(feature = "v1_12_2")]
         GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_id(id).map_or("", |i| i.info().name),
-        _ => ghast_data::v1_16_5::Item::from_id(id).map_or("", |i| i.info().name),
+        #[cfg(feature = "v1_16_5")]
+        GameVersion::V1_16_5 => {
+            ghast_data::v1_16_5::Item::from_id(id).map_or("", |i| i.info().name)
+        }
+        #[cfg(feature = "v26_1")]
+        GameVersion::V26_1 => ghast_data::v26_1::Item::from_id(id).map_or("", |i| i.name()),
+        _ => "",
     }
 }
 

@@ -14,15 +14,21 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-ext"
 
 [features]
-default = ["pathfinder"]
-# `Bot::goto`: physics-validated path finding and following (ghast-pathfinder).
+default = ["pathfinder", "v1_8", "v1_12_2", "v1_16_5", "v26_1"]
+# `Bot::goto`: physics-validated path finding and following (ghast-pathfinder; 1.8.9, 1.12.2
+# and 1.16.5 — on 26.1 `goto` fails with `FollowError::UnsupportedVersion`).
 pathfinder = ["dep:ghast-pathfinder"]
+# One feature per game version (forwarded to ghast-client, ghast-data and the path finder).
+v1_8 = ["ghast-client/v1_8", "ghast-data/v1_8", "ghast-pathfinder?/v1_8"]
+v1_12_2 = ["ghast-client/v1_12_2", "ghast-data/v1_12", "ghast-pathfinder?/v1_12_2"]
+v1_16_5 = ["ghast-client/v1_16_5", "ghast-data/v1_16_5", "ghast-pathfinder?/v1_16_5"]
+v26_1 = ["ghast-client/v26_1", "ghast-data/v26_1"]
 
 [dependencies]
-# Versions come from the application (the `ghast` features); tests use all of them.
+# Versions come from this crate's version features (default: all).
 ghast-client = { path = "../ghast-client", version = "0.3.0", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "v1_12", "v1_16_5"] }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.3.0", optional = true, default-features = false, features = ["client"] }
 log = { workspace = true }
 thiserror = { workspace = true }
 
@@ -32,6 +38,15 @@ bytes = { workspace = true }
 ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread"] }
+
+# The tests run every version with the path finder; the lab course drives `goto`.
+[[test]]
+name = "helpers"
+required-features = ["pathfinder", "v1_8", "v1_12_2", "v1_16_5", "v26_1"]
+
+[[example]]
+name = "lab_course"
+required-features = ["pathfinder"]
 
 [package.metadata.docs.rs]
 all-features = true
