@@ -26,6 +26,7 @@ mod attr;
 pub(crate) mod collide;
 mod fluid;
 mod inside;
+mod load;
 pub(crate) mod math;
 mod player;
 mod rules;
@@ -34,6 +35,7 @@ pub use attr::{
     Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash,
     java_string_hash, sprinting_id,
 };
+pub use load::LoadGate;
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
     LevelInfo, PlayerState, Pose, SentState, UseEffects, no_block_collision, on_climbable, tick,

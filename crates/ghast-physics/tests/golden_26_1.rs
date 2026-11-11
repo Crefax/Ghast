@@ -36,6 +36,12 @@ fn scenarios_26_1() {
     check("scenarios.jsonl.gz");
 }
 
+/// Joins through the level-load gate: no ticking until `player_loaded`, then the normal tick.
+#[test]
+fn joins_26_1() {
+    check("joins.jsonl.gz");
+}
+
 #[test]
 fn fuzz_seed1_26_1() {
     check("fuzz_seed1.jsonl.gz");

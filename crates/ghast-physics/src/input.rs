@@ -132,6 +132,9 @@ pub enum Packet {
     },
     /// The modern `player_input` packet: the key state, sent when it changes.
     PlayerInput(Keys),
+    /// The 26.1 `player_loaded` packet: the client has loaded the level (see
+    /// `modern::LoadGate`).
+    PlayerLoaded,
     /// Position and rotation.
     PositionLook {
         /// X.

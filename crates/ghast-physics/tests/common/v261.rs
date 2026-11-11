@@ -387,6 +387,7 @@ pub fn packet_json(p: &Packet) -> Value {
         }
         Packet::Abilities(a) => json!({"name": "abilities", "flying": a.flying}),
         Packet::PlayerInput(k) => json!({"name": "player_input", "input": keys_json(&k)}),
+        Packet::PlayerLoaded => json!({"name": "player_loaded"}),
         Packet::Move {
             pos,
             look,
@@ -416,7 +417,8 @@ pub fn packet_json(p: &Packet) -> Value {
 }
 
 /// Packet names ghast-physics produces for 26.1.
-const PACKETS_26: [&str; 7] = [
+const PACKETS_26: [&str; 8] = [
+    "player_loaded",
     "entity_action",
     "abilities",
     "flying",
@@ -529,6 +531,15 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .is_some_and(|k| k.split(',').any(|n| n == "use"))
     });
     let mut use_key = UseKey::default();
+    let delayed = case.header["setup"]["delayed_load"]
+        .as_bool()
+        .unwrap_or(false);
+    let mut gate = if delayed {
+        modern::LoadGate::waiting()
+    } else {
+        modern::LoadGate::loaded()
+    };
+    let mut compiled = false;
     let mut out = Packets::new();
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
@@ -599,6 +610,9 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .collect();
                         p.apply_attribute(kind, f64_of(&e["base"]), &mods);
                     }
+                    "level_chunks_load_start" => gate.level_chunks_load_start(),
+                    "section_compiled" => compiled = b(&e["compiled"]),
+                    "load_timeout" => gate.time_out(),
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -611,7 +625,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item: use_key.using,
         };
-        modern::tick::<V26_1, _>(&mut p, &ti, &world, &mut out);
+        gate.step::<V26_1, _>(&mut p, &ti, &world, compiled, &mut out);
+        if let Some(l) = rec.get("client_loaded")
+            && l.as_bool() != Some(gate.is_loaded())
+        {
+            return Err(mm(
+                t,
+                (
+                    "client_loaded".into(),
+                    l.to_string(),
+                    gate.is_loaded().to_string(),
+                ),
+            ));
+        }
         sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(d) = diff(
             "state",
