@@ -391,7 +391,8 @@ pub enum ConfigInbound {
     CookieRequest(ByteString),
     /// The server's code of conduct (26.x): the player accepts it to continue.
     CodeOfConduct(String),
-    /// The server sends the client to another server (not supported: logged).
+    /// The server sends the client to another server (`host:port`): the session ends with
+    /// [`crate::SessionEnd::Transferred`] (followed with [`crate::Client::follow_transfers`]).
     Transfer(String),
 }
 
@@ -569,6 +570,14 @@ pub enum Inbound {
     },
     /// The server asks for a cookie (1.20.5+).
     CookieRequest(ByteString),
+    /// The server sends the client to another server (1.20.5+ `transfer`): the session ends
+    /// with [`crate::SessionEnd::Transferred`] (followed with [`crate::Client::follow_transfers`]).
+    Transfer {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
     /// The server stores a cookie (1.20.5+).
     StoreCookie {
         /// Key.

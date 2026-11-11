@@ -1047,6 +1047,8 @@ impl<S: Sim> Engine<S> {
                 c.out.push(Outbound::CookieResponse { key, value: None });
             }
             Inbound::StoreCookie { .. } => {}
+            // The session driver ends the session (or follows the transfer).
+            Inbound::Transfer { .. } => {}
             Inbound::Rotate {
                 yaw,
                 pitch,

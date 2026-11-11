@@ -20,6 +20,15 @@ pub enum SessionEnd {
     Quit(String),
     /// The shutdown future given to [`crate::Client::run_until`] completed.
     Shutdown,
+    /// The server sent the client to another server (1.20.5+ `transfer`, from the
+    /// configuration or the play state) and [`crate::Client::follow_transfers`] is off (or the
+    /// transfer limit was reached). Vanilla connects there with the transfer intent.
+    Transferred {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 }
 
 /// A session failed.

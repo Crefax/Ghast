@@ -193,6 +193,39 @@ pub trait ClientVersion: Version + sealed::Sealed {
     fn write_plugin_response(enc: &mut FrameEncoder, message_id: i32) -> Result<(), EncodeError>;
     /// Decodes a login-state packet; `Ok(None)` for packets the client ignores.
     fn decode_login(raw: &RawPacket) -> Result<Option<LoginInbound>, DecodeError>;
+    /// Queues the handshake of a connection that follows a server transfer (1.20.5+ intent 3,
+    /// `transfer`); older versions have no transfers.
+    fn write_transfer_handshake(
+        enc: &mut FrameEncoder,
+        host: &str,
+        port: u16,
+    ) -> Result<(), EncodeError> {
+        Self::write_handshake(enc, host, port)
+    }
+    /// The cookies the server stored (carried to a transfer target, vanilla `TransferState`).
+    fn take_cookies(
+        wire: &mut Self::Wire,
+    ) -> Vec<(ghast_protocol::types::ByteString, bytes::Bytes)> {
+        let _ = wire;
+        Vec::new()
+    }
+    /// Restores carried cookies into a new connection's wire state.
+    fn put_cookies(
+        wire: &mut Self::Wire,
+        cookies: Vec<(ghast_protocol::types::ByteString, bytes::Bytes)>,
+    ) {
+        let _ = (wire, cookies);
+    }
+    /// A login-state cookie answer from the wire's cookies (a transferred connection has the
+    /// previous server's); default: [`ClientVersion::write_login_cookie_response`].
+    fn write_login_cookie_response_from(
+        enc: &mut FrameEncoder,
+        key: &str,
+        wire: &mut Self::Wire,
+    ) -> Result<(), EncodeError> {
+        let _ = wire;
+        Self::write_login_cookie_response(enc, key)
+    }
     /// Queues a login-state cookie answer (1.20.5+; never called for older versions).
     fn write_login_cookie_response(enc: &mut FrameEncoder, key: &str) -> Result<(), EncodeError> {
         let _ = (enc, key);

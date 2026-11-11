@@ -461,6 +461,39 @@ impl ClientVersion for V26_1 {
         }))
     }
 
+    fn write_transfer_handshake(
+        enc: &mut FrameEncoder,
+        host: &str,
+        port: u16,
+    ) -> Result<(), EncodeError> {
+        // ClientIntent.TRANSFER.
+        enc.write_packet(&handshaking::serverbound::SetProtocol {
+            protocol_version: 775,
+            server_host: ByteString::from(host),
+            server_port: port,
+            next_state: 3,
+        })
+    }
+
+    fn take_cookies(wire: &mut Wire26_1) -> Vec<(ByteString, Bytes)> {
+        std::mem::take(&mut wire.cookies).into_iter().collect()
+    }
+
+    fn put_cookies(wire: &mut Wire26_1, cookies: Vec<(ByteString, Bytes)>) {
+        wire.cookies.extend(cookies);
+    }
+
+    fn write_login_cookie_response_from(
+        enc: &mut FrameEncoder,
+        key: &str,
+        wire: &mut Wire26_1,
+    ) -> Result<(), EncodeError> {
+        enc.write_packet(&login::serverbound::CookieResponse {
+            key: ByteString::from(key),
+            value: wire.cookies.get(key).cloned(),
+        })
+    }
+
     fn write_login_cookie_response(enc: &mut FrameEncoder, key: &str) -> Result<(), EncodeError> {
         // A fresh connection has no cookies (they come with a transfer).
         enc.write_packet(&login::serverbound::CookieResponse {
@@ -657,7 +690,8 @@ impl ClientVersion for V26_1 {
             // Signed player messages must be acknowledged even when nobody reads chat.
             .with(cb::id::PLAYER_CHAT)
             // The command tree decides which commands are signed (kept raw until used).
-            .with(cb::id::DECLARE_COMMANDS);
+            .with(cb::id::DECLARE_COMMANDS)
+            .with(cb::id::TRANSFER);
         for &id in ghast_world::v26_1::PACKET_IDS {
             f.insert(id);
         }
@@ -925,6 +959,13 @@ impl ClientVersion for V26_1 {
                 let p: cb::StoreCookie = raw.decode_as()?;
                 wire.cookies.insert(p.key, p.value);
                 return Ok(None);
+            }
+            cb::id::TRANSFER => {
+                let p: cb::Transfer = raw.decode_as()?;
+                Inbound::Transfer {
+                    host: p.host.to_string(),
+                    port: u16::try_from(p.port).unwrap_or(25565),
+                }
             }
             cb::id::DECLARE_COMMANDS => {
                 // Kept raw: parsed only when a command is sent.
@@ -1258,6 +1299,22 @@ mod tests {
         assert_eq!(checksum, if c as u8 == 0 { 1 } else { c as u8 });
         // Arrays.hashCode([1,2,3]) = 30817.
         assert_eq!(h1, 30817);
+    }
+
+    /// A transfer reconnects with `ClientIntent.TRANSFER` (3).
+    #[test]
+    fn transfer_handshake_has_the_transfer_intent() {
+        let mut enc = FrameEncoder::new();
+        V26_1::write_transfer_handshake(&mut enc, "example.org", 25566).unwrap();
+        let out = enc.out_mut().split().freeze();
+        // length, id 0, protocol 775 (varint 0x87 0x06), host, port, next state.
+        let host = b"example.org";
+        let mut want = vec![0x00, 0x87, 0x06, host.len() as u8];
+        want.extend_from_slice(host);
+        want.extend_from_slice(&25566u16.to_be_bytes());
+        want.push(3);
+        assert_eq!(out[0] as usize, want.len());
+        assert_eq!(&out[1..], &want[..]);
     }
 
     #[test]

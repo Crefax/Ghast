@@ -30,6 +30,8 @@ pub struct Options {
     pub entities: bool,
     /// `--burst`: attack: two quick hits (3 ticks apart), no right clicks.
     pub burst: bool,
+    /// `--follow-transfers`: follow server transfers (1.20.5+).
+    pub follow_transfers: bool,
 }
 
 pub const USAGE: &str = "options:
@@ -48,6 +50,7 @@ pub const USAGE: &str = "options:
   --view-distance <n>   client view distance in chunks (default 8)
   --entities            track entities (afk: for measurements)
   --burst               attack: hit every 3 ticks (breaks an armor stand), no right clicks
+  --follow-transfers    follow server transfers (1.20.5+ `transfer`)
   -v, --verbose         debug logging (GHAST_TRACE=1: every packet in and out)";
 
 impl Options {
@@ -92,6 +95,7 @@ impl Options {
             view_distance: None,
             entities: false,
             burst: false,
+            follow_transfers: false,
         };
         let mut args = args.peekable();
         while let Some(a) = args.next() {
@@ -121,6 +125,7 @@ impl Options {
                 "--grim-compat-up" => o.grim_compat_up = true,
                 "--entities" => o.entities = true,
                 "--burst" => o.burst = true,
+                "--follow-transfers" => o.follow_transfers = true,
                 "--seed" => o.seed = val()?.parse().map_err(|e| format!("--seed: {e}"))?,
                 "--view-distance" => {
                     o.view_distance = Some(
@@ -157,7 +162,9 @@ impl Options {
         if let Some(r) = &self.record {
             c = c.record(r);
         }
-        c = c.force_step_position(self.grim_compat);
+        c = c
+            .force_step_position(self.grim_compat)
+            .follow_transfers(self.follow_transfers);
         if self.grim_compat_up {
             c = c.force_step_position_mode(ghast::ForceStepPosition::StepUpOnly);
         }

@@ -60,6 +60,15 @@ impl std::fmt::Debug for Sim26 {
 }
 
 impl Sim26 {
+    /// SEAM (26.1 item use effects, waiting for ghast-inventory accessors): the
+    /// `minecraft:use_effects` component of the stack in use (`LivingEntity.getUseItem`:
+    /// `can_sprint`, `speed_multiplier`) belongs here. Until the inventory exposes it, every
+    /// item uses the component's default (no sprinting, x0.2), which is exact only for stacks
+    /// whose item has no `use_effects` (not checked per item yet).
+    fn use_effects(&self) -> modern::UseEffects {
+        modern::UseEffects::default()
+    }
+
     pub(crate) fn new() -> Self {
         Sim26 {
             world: ghast_world::v26_1::World::new(config()),
@@ -649,6 +658,11 @@ impl Sim for Sim26 {
             using_item,
         };
         self.packets.clear();
+        self.player.use_effects = if using_item {
+            self.use_effects()
+        } else {
+            modern::UseEffects::default()
+        };
         // Entity.setOldPosAndRot at the start of the entity tick.
         self.old_pos = self.player.pos;
         let p = &mut self.player;

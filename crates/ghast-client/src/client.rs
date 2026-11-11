@@ -112,6 +112,7 @@ pub struct Client {
     world_config: Option<ghast_world::WorldConfig>,
     accept_required_packs: bool,
     signed_chat: bool,
+    follow_transfers: bool,
     /// Profile keys for signed chat, shared by this client's sessions (fetched once, then
     /// reused until they are due for a refresh).
     profile_keys: Arc<std::sync::Mutex<Option<Arc<ProfileKeys>>>>,
@@ -141,6 +142,7 @@ impl Client {
             world_config: None,
             accept_required_packs: true,
             signed_chat: true,
+            follow_transfers: false,
             profile_keys: Arc::default(),
         }
     }
@@ -154,6 +156,18 @@ impl Client {
     #[must_use]
     pub fn signed_chat(mut self, on: bool) -> Self {
         self.signed_chat = on;
+        self
+    }
+
+    /// Follow server transfers (1.20.5+ `transfer`, default off): the client closes the
+    /// connection and logs in to the target with the transfer intent, carrying the cookies the
+    /// server stored, within the same [`Client::run`] (the behaviour stops and starts again, as
+    /// on a reconnect; at most 8 transfers in a row). Off, the session ends with
+    /// [`SessionEnd::Transferred`] and the application decides (vanilla always follows; a
+    /// library should not let a server move a bot to any host, through its proxy, unasked).
+    #[must_use]
+    pub fn follow_transfers(mut self, on: bool) -> Self {
+        self.follow_transfers = on;
         self
     }
 
@@ -318,13 +332,13 @@ impl Client {
         // The version is chosen once: everything below is monomorphised per version.
         match self.version {
             #[cfg(feature = "v1_8")]
-            GameVersion::V1_8_9 => session::<V1_8, B, S>(self, behavior, shutdown).await,
+            GameVersion::V1_8_9 => sessions::<V1_8, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v1_12_2")]
-            GameVersion::V1_12_2 => session::<V1_12_2, B, S>(self, behavior, shutdown).await,
+            GameVersion::V1_12_2 => sessions::<V1_12_2, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v1_16_5")]
-            GameVersion::V1_16_5 => session::<V1_16_5, B, S>(self, behavior, shutdown).await,
+            GameVersion::V1_16_5 => sessions::<V1_16_5, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v26_1")]
-            GameVersion::V26_1 => session::<V26_1, B, S>(self, behavior, shutdown).await,
+            GameVersion::V26_1 => sessions::<V26_1, B, S>(self, behavior, shutdown).await,
             #[allow(unreachable_patterns)]
             v => {
                 let _ = (behavior, shutdown);
@@ -357,7 +371,17 @@ async fn flush<W: AsyncWrite + Unpin>(wr: &mut W, enc: &mut FrameEncoder) -> std
     Ok(())
 }
 
-async fn session<V, B, S>(
+/// A connection that follows a server transfer: the target and the carried cookies.
+struct Hop {
+    address: TargetAddr,
+    cookies: Vec<(ghast_protocol::types::ByteString, bytes::Bytes)>,
+}
+
+/// Most transfers followed in a row.
+const MAX_TRANSFERS: usize = 8;
+
+/// One session, then the sessions of the transfers it follows.
+async fn sessions<V, B, S>(
     client: &Client,
     behavior: &mut B,
     mut shutdown: Pin<&mut S>,
@@ -367,17 +391,73 @@ where
     B: Behavior,
     S: Future<Output = ()>,
 {
+    let mut hop = None;
+    for n in 0.. {
+        let (end, cookies) =
+            session::<V, B, S>(client, behavior, shutdown.as_mut(), hop.take()).await?;
+        match end {
+            SessionEnd::Transferred { host, port }
+                if client.follow_transfers && n < MAX_TRANSFERS =>
+            {
+                match TargetAddr::new(&host, port) {
+                    Ok(address) => {
+                        log::info!(
+                            "[{}] following the transfer to {host}:{port}",
+                            client.account.name()
+                        );
+                        hop = Some(Hop { address, cookies });
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[{}] cannot follow the transfer to {host}:{port}: {e}",
+                            client.account.name()
+                        );
+                        return Ok(SessionEnd::Transferred { host, port });
+                    }
+                }
+            }
+            end => return Ok(end),
+        }
+    }
+    unreachable!()
+}
+
+async fn session<V, B, S>(
+    client: &Client,
+    behavior: &mut B,
+    mut shutdown: Pin<&mut S>,
+    hop: Option<Hop>,
+) -> Result<
+    (
+        SessionEnd,
+        Vec<(ghast_protocol::types::ByteString, bytes::Bytes)>,
+    ),
+    ClientError,
+>
+where
+    V: ClientVersion + HasSim,
+    B: Behavior,
+    S: Future<Output = ()>,
+{
     let name: Arc<str> = client.account.name().into();
     let mut dec = FrameDecoder::new();
     let mut enc = FrameEncoder::new();
     let mut wire = V::Wire::default();
+    let transfer = hop.is_some();
+    let address = match hop {
+        Some(h) => {
+            V::put_cookies(&mut wire, h.cookies);
+            h.address
+        }
+        None => client.address.clone(),
+    };
     // Configuration-state registries, applied to the world once it exists.
     let mut registries = Vec::new();
     // The connection is encrypted (vanilla starts a chat session only then).
     let mut encrypted = false;
 
     let login = async {
-        let stream = client.connector.connect(&client.address).await?;
+        let stream = client.connector.connect(&address).await?;
         let (mut rd, mut wr) = stream.into_split();
         login::<V, _, _>(
             client,
@@ -388,18 +468,27 @@ where
             &mut wire,
             &mut registries,
             &mut encrypted,
+            (&address, transfer),
         )
-        .await?;
-        Ok::<_, ClientError>((rd, wr))
+        .await
+        .map(|end| (rd, wr, end))
     };
-    let (rd, wr) = tokio::select! {
+    let (rd, wr, end) = tokio::select! {
         r = tokio::time::timeout(client.login_timeout, login) => match r {
             Ok(r) => r?,
             Err(_) => return Err(ClientError::Timeout("connect and login")),
         },
-        () = shutdown.as_mut() => return Ok(SessionEnd::Shutdown),
+        () = shutdown.as_mut() => return Ok((SessionEnd::Shutdown, Vec::new())),
     };
-    log::info!("[{name}] logged in to {} ({})", client.address, V::GAME);
+    if let ConfigEnd::Transfer { host, port } = end {
+        // Sent on during the configuration state: the connection closes.
+        drop((rd, wr));
+        return Ok((
+            SessionEnd::Transferred { host, port },
+            V::take_cookies(&mut wire),
+        ));
+    }
+    log::info!("[{name}] logged in to {address} ({})", V::GAME);
 
     let opts = CoreOptions {
         name,
@@ -449,6 +538,7 @@ where
         Ok(SessionEnd::ServerClosed) => "server closed the connection".to_owned(),
         Ok(SessionEnd::Quit(r)) => format!("quit: {r}"),
         Ok(SessionEnd::Shutdown) => "shutdown".to_owned(),
+        Ok(SessionEnd::Transferred { host, port }) => format!("transferred to {host}:{port}"),
         Err(e) => format!("error: {e}"),
     };
     play.engine.stop(behavior, &reason);
@@ -462,7 +552,24 @@ where
         stats.skipped_compressed,
         stats.inflated_bytes
     );
-    result
+    if matches!(result, Ok(SessionEnd::Transferred { .. })) {
+        play.close().await;
+    }
+    let cookies = V::take_cookies(&mut play.wire);
+    result.map(|end| (end, cookies))
+}
+
+/// How a configuration phase ended.
+enum ConfigEnd {
+    /// Finished: the connection is in the play state.
+    Play,
+    /// The server sent a transfer.
+    Transfer {
+        /// Target host.
+        host: String,
+        /// Target port.
+        port: u16,
+    },
 }
 
 /// Handshake and login (and on 1.20.2+ the configuration state). Returns once the
@@ -477,13 +584,18 @@ async fn login<V, R, W>(
     wire: &mut V::Wire,
     registries: &mut Vec<RawPacket>,
     encrypted: &mut bool,
-) -> Result<(), ClientError>
+    (address, transfer): (&TargetAddr, bool),
+) -> Result<ConfigEnd, ClientError>
 where
     V: ClientVersion,
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    V::write_handshake(enc, &client.address.host(), client.address.port())?;
+    if transfer {
+        V::write_transfer_handshake(enc, &address.host(), address.port())?;
+    } else {
+        V::write_handshake(enc, &address.host(), address.port())?;
+    }
     V::write_login_start(enc, client.account.name(), client.account.uuid())?;
     flush(wr, enc).await?;
     loop {
@@ -545,7 +657,7 @@ where
                     *encrypted = true;
                 }
                 Some(LoginInbound::CookieRequest(key)) => {
-                    V::write_login_cookie_response(enc, &key)?;
+                    V::write_login_cookie_response_from(enc, &key, wire)?;
                     flush(wr, enc).await?;
                 }
                 Some(LoginInbound::Success { uuid, username }) => {
@@ -561,9 +673,10 @@ where
                         let settings = ConfigOutbound::Settings(client.settings.clone());
                         V::write_configuration(enc, &settings, wire)?;
                         flush(wr, enc).await?;
-                        configure::<V, _, _>(client, rd, wr, dec, enc, wire, registries).await?;
+                        return configure::<V, _, _>(client, rd, wr, dec, enc, wire, registries)
+                            .await;
                     }
-                    return Ok(());
+                    return Ok(ConfigEnd::Play);
                 }
             }
         }
@@ -592,7 +705,7 @@ async fn configure<V, R, W>(
     enc: &mut FrameEncoder,
     wire: &mut V::Wire,
     registries: &mut Vec<RawPacket>,
-) -> Result<(), ClientError>
+) -> Result<ConfigEnd, ClientError>
 where
     V: ClientVersion,
     R: AsyncRead + Unpin,
@@ -614,7 +727,7 @@ where
                     V::write_configuration(enc, &ConfigOutbound::Finish, wire)?;
                     flush(wr, enc).await?;
                     log::debug!("configuration done ({} registries)", registries.len());
-                    return Ok(());
+                    return Ok(ConfigEnd::Play);
                 }
                 ConfigInbound::Disconnect(reason) => return Err(ClientError::LoginRefused(reason)),
                 ConfigInbound::SelectKnownPacks(packs) => {
@@ -650,8 +763,11 @@ where
                     vec![ConfigOutbound::AcceptCodeOfConduct]
                 }
                 ConfigInbound::Transfer(to) => {
-                    log::warn!("server transfer to {to} is not supported; staying");
-                    continue;
+                    let (host, port) = to.rsplit_once(':').unwrap_or((&to, "25565"));
+                    return Ok(ConfigEnd::Transfer {
+                        host: host.to_owned(),
+                        port: port.parse().unwrap_or(25565),
+                    });
                 }
             };
             for o in &reply {
@@ -1000,6 +1116,14 @@ where
                     self.reconfigure = true;
                     return Ok(None);
                 }
+                Some(Inbound::Transfer { host, port }) => {
+                    // ClientCommonPacketListenerImpl.handleTransfer: leave for the target.
+                    log::info!(
+                        "[{}] server transfer to {host}:{port}",
+                        self.engine.core_name()
+                    );
+                    return Ok(Some(SessionEnd::Transferred { host, port }));
+                }
                 Some(p @ Inbound::JoinGame(_)) => {
                     self.engine.handle(p);
                     self.on_join();
@@ -1019,9 +1143,9 @@ where
     /// Play → configuration → play (1.20.2+ `start_configuration`): acknowledges, runs the
     /// configuration state (no ticks meanwhile, like vanilla without a level) and resumes play;
     /// the server then sends a new join game.
-    async fn reconfigure_if_asked(&mut self) -> Result<(), ClientError> {
+    async fn reconfigure_if_asked(&mut self) -> Result<Option<SessionEnd>, ClientError> {
         if !self.reconfigure {
-            return Ok(());
+            return Ok(None);
         }
         self.reconfigure = false;
         log::info!("[{}] server asked for reconfiguration", self.engine.name());
@@ -1032,7 +1156,7 @@ where
         let play_filter = *self.dec.filter();
         self.dec.set_filter(PacketFilter::all());
         let mut registries = Vec::new();
-        configure::<V, _, _>(
+        let end = configure::<V, _, _>(
             self.client,
             &mut self.rd,
             &mut self.wr,
@@ -1042,13 +1166,16 @@ where
             &mut registries,
         )
         .await?;
+        if let ConfigEnd::Transfer { host, port } = end {
+            return Ok(Some(SessionEnd::Transferred { host, port }));
+        }
         for raw in &registries {
             self.engine.sim.registry_data(raw);
         }
         V::configure_inventory(self.engine.inventory_mut(), &self.wire);
         self.dec.set_filter(play_filter);
         self.engine.note_inbound(Instant::now().into_std());
-        Ok(())
+        Ok(None)
     }
 
     /// Ends the connection the way a client that keeps reading does: half-close (FIN), then
@@ -1094,7 +1221,9 @@ where
         if let Some(end) = self.drain_inbound()? {
             return Ok(end);
         }
-        self.reconfigure_if_asked().await?;
+        if let Some(end) = self.reconfigure_if_asked().await? {
+            return Ok(end);
+        }
         self.encode_outbound()?;
         flush(&mut self.wr, &mut self.enc).await?;
 
@@ -1134,7 +1263,9 @@ where
                     if let Some(end) = self.drain_inbound()? {
                         return Ok(end);
                     }
-                    self.reconfigure_if_asked().await?;
+                    if let Some(end) = self.reconfigure_if_asked().await? {
+                        return Ok(end);
+                    }
                     // Replies (keep-alive, teleport, confirms) go out right away, like
                     // vanilla's per-frame packet handling.
                     self.encode_outbound()?;
@@ -1154,7 +1285,9 @@ where
                                 if let Some(end) = self.drain_inbound()? {
                                     return Ok(end);
                                 }
-                                self.reconfigure_if_asked().await?;
+                                if let Some(end) = self.reconfigure_if_asked().await? {
+                                    return Ok(end);
+                                }
                             }
                         }
                     }
