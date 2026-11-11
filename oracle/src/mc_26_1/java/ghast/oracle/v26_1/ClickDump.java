@@ -247,10 +247,17 @@ final class ClickDump {
             // RecipePropertySet keys sorted: getSynchronizedItemProperties is a plain map
             Map<net.minecraft.resources.ResourceKey<net.minecraft.world.item.crafting.RecipePropertySet>,
                     net.minecraft.world.item.crafting.RecipePropertySet> sets = new LinkedHashMap<>();
+            // ...and their items are hash sets of holders, the stonecutter entries in recipe map
+            // order: both written sorted (item id, recipe id) so every run writes the same bytes
             recipes.getSynchronizedItemProperties().entrySet().stream()
                     .sorted(Comparator.comparing(e -> e.getKey().identifier().toString()))
-                    .forEach(e -> sets.put(e.getKey(), e.getValue()));
-            ClientboundUpdateRecipesPacket p = new ClientboundUpdateRecipesPacket(sets, recipes.getSynchronizedStonecutterRecipes());
+                    .forEach(e -> sets.put(e.getKey(), sortedSet(e.getValue())));
+            var cutter = recipes.getSynchronizedStonecutterRecipes();
+            List<net.minecraft.world.item.crafting.SelectableRecipe.SingleInputEntry<net.minecraft.world.item.crafting.StonecutterRecipe>> entries =
+                    new ArrayList<>(cutter.entries());
+            entries.sort(Comparator.comparing(e -> e.recipe().recipe().map(h -> h.id().identifier().toString()).orElse("")));
+            ClientboundUpdateRecipesPacket p = new ClientboundUpdateRecipesPacket(sets,
+                    new net.minecraft.world.item.crafting.SelectableRecipe.SingleInputSet<>(entries));
             RegistryFriendlyByteBuf buf = Harness.buf();
             ClientboundUpdateRecipesPacket.STREAM_CODEC.encode(buf, p);
             byte[] bytes = new byte[buf.readableBytes()];
@@ -260,6 +267,20 @@ final class ClickDump {
         RegistryFriendlyByteBuf in = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(unhex(recipesHex)), Harness.listener.registryAccess());
         ClientboundUpdateRecipesPacket back = ClientboundUpdateRecipesPacket.STREAM_CODEC.decode(in);
         Harness.listener.handleUpdateRecipes(back);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static net.minecraft.world.item.crafting.RecipePropertySet sortedSet(net.minecraft.world.item.crafting.RecipePropertySet set) {
+        Set<Holder<Item>> items = (Set<Holder<Item>>) Reflect.get(net.minecraft.world.item.crafting.RecipePropertySet.class, set, "items");
+        List<Holder<Item>> sorted = new ArrayList<>(items);
+        sorted.sort(Comparator.comparingInt(h -> BuiltInRegistries.ITEM.getId(h.value())));
+        try {
+            var c = net.minecraft.world.item.crafting.RecipePropertySet.class.getDeclaredConstructor(Set.class);
+            c.setAccessible(true);
+            return c.newInstance(new LinkedHashSet<>(sorted));
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // ------------------------------------------------------------------ random stacks
