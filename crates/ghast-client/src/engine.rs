@@ -507,51 +507,7 @@ fn held_item<W: Sim + ?Sized>(
     let s = inv.held()?;
     let id = u16::try_from(s.id()).ok()?;
     let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
-    Some(with_item_use(
-        inv,
-        s,
-        sim.held_item(id, count, efficiency(s)),
-    ))
-}
-
-/// 26.1: whether an item has a use state comes from its components (`getUseDuration` > 0;
-/// food only below a full bar unless `can_always_eat`), not from the item tables.
-#[cfg_attr(not(feature = "v26_1"), allow(unused_variables, unused_mut))]
-fn with_item_use(
-    inv: &ghast_inventory::Inventory,
-    s: &ghast_inventory::Stack,
-    mut h: hands::HeldItem,
-) -> hands::HeldItem {
-    #[cfg(feature = "v26_1")]
-    if inv.version() == ghast_inventory::Version::V26_1
-        && let Some(u) = ghast_inventory::v26_1::item_use(s)
-    {
-        h.usable = u.duration.is_none_or(|d| d > 0);
-        h.food = u.food.is_some();
-        h.always_edible = u.food.is_some_and(|f| f.can_always_eat);
-    }
-    h
-}
-
-/// 26.1 `useItem` effects for the movement input (`use_effects` of the stack in the used
-/// hand), `None` when not using; `Err(())` when that hand no longer holds the same item
-/// (`updatingUsingItem` → `stopUsingItem`).
-#[cfg_attr(not(feature = "v26_1"), allow(unused_variables))]
-fn use_effects(
-    inv: &ghast_inventory::Inventory,
-    using: Option<(bool, u16)>,
-) -> Result<Option<(bool, f32)>, ()> {
-    #[cfg(feature = "v26_1")]
-    if inv.version() == ghast_inventory::Version::V26_1
-        && let Some((off, id)) = using
-    {
-        let s = if off { inv.offhand() } else { inv.held() };
-        let Some(s) = s.filter(|s| i64::from(s.id()) == i64::from(id)) else {
-            return Err(());
-        };
-        return Ok(ghast_inventory::v26_1::item_use(s).map(|u| (u.can_sprint, u.speed_multiplier)));
-    }
-    Ok(None)
+    Some(sim.item_use_facts(s, sim.held_item(id, count, efficiency(s))))
 }
 
 /// Whether rays hit the entity (`Entity.collides`): living entities, players,
@@ -717,7 +673,7 @@ fn off_held_item<W: Sim + ?Sized>(
     let s = inv.offhand()?;
     let id = u16::try_from(s.id()).ok()?;
     let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
-    Some(with_item_use(inv, s, sim.held_item(id, count, 0)))
+    Some(sim.item_use_facts(s, sim.held_item(id, count, 0)))
 }
 
 /// Efficiency level of a stack (see [`enchant_level`]).
@@ -1414,14 +1370,9 @@ impl<S: Sim> Engine<S> {
             c.aimed = false;
         }
         let first = c.out.len();
-        if c.opts.caps.item_model == crate::version::ItemModel::Components {
-            match use_effects(&c.inv, c.hands.use_item()) {
-                Ok(e) => self.sim.set_use_effects(e),
-                Err(()) => {
-                    c.hands.stop_using();
-                    self.sim.set_use_effects(None);
-                }
-            }
+        // 26.1 updatingUsingItem (the other versions' sims do nothing here).
+        if !self.sim.update_use(&c.inv, c.hands.use_item()) {
+            c.hands.stop_using();
         }
         let using = c.hands.using_item();
         self.sim
@@ -2665,29 +2616,28 @@ mod tests {
         use ghast_inventory::{Inventory, Stack, Version};
         let id = |n| ghast_inventory::v26_1::item_id(n).unwrap();
         let mut inv = Inventory::new(Version::V26_1).unwrap();
-        let sim = crate::sim::Sim26::test_overworld();
-        let facts = |inv: &Inventory| held_item(inv, &sim).unwrap();
+        let mut sim = crate::sim::Sim26::test_overworld();
+        let facts = |inv: &Inventory, sim: &crate::sim::Sim26| held_item(inv, sim).unwrap();
         // A stick has no use state; bread is eaten below a full bar; a shield blocks.
         inv.on_set_slot(0, 36, Some(Stack::new(id("stick"), 1, 0)));
-        assert!(!facts(&inv).usable);
+        assert!(!facts(&inv, &sim).usable);
         inv.on_set_slot(0, 36, Some(Stack::new(id("bread"), 3, 0)));
-        let f = facts(&inv);
+        let f = facts(&inv, &sim);
         assert!(f.usable && f.food && !f.always_edible);
         inv.on_set_slot(0, 36, Some(Stack::new(id("golden_apple"), 1, 0)));
-        assert!(facts(&inv).always_edible);
+        assert!(facts(&inv, &sim).always_edible);
         inv.on_set_slot(0, 36, Some(Stack::new(id("shield"), 1, 0)));
         let shield = u16::try_from(id("shield")).unwrap();
-        assert!(facts(&inv).usable && !facts(&inv).food);
+        assert!(facts(&inv, &sim).usable && !facts(&inv, &sim).food);
         // While using: the stack's use_effects (vanilla default: no sprint, x0.2) ...
-        assert_eq!(
-            use_effects(&inv, Some((false, shield))),
-            Ok(Some((false, 0.2)))
-        );
-        assert_eq!(use_effects(&inv, None), Ok(None));
+        assert!(sim.update_use(&inv, Some((false, shield))));
+        assert_eq!(sim.use_effects_now(), Some((false, 0.2)));
+        assert!(sim.update_use(&inv, None));
+        assert_eq!(sim.use_effects_now(), None);
         // ... and the use stops when the hand no longer holds that item.
         inv.on_set_slot(0, 36, Some(Stack::new(id("stick"), 1, 0)));
-        assert_eq!(use_effects(&inv, Some((false, shield))), Err(()));
-        assert_eq!(use_effects(&inv, Some((true, shield))), Err(()));
+        assert!(!sim.update_use(&inv, Some((false, shield))));
+        assert!(!sim.update_use(&inv, Some((true, shield))));
     }
 
     /// 26.1: the same through the 26.1 tracker and `pick::v26_1::pick_target` (entity range 3,

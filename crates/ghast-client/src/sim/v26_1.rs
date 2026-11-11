@@ -74,6 +74,11 @@ impl Sim26 {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn use_effects_now(&self) -> Option<(bool, f32)> {
+        self.use_effects
+    }
+
     pub(crate) fn new() -> Self {
         Sim26 {
             world: ghast_world::v26_1::World::new(config()),
@@ -335,8 +340,29 @@ impl Sim for Sim26 {
         }
     }
 
-    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
-        self.use_effects = effects;
+    fn item_use_facts(&self, stack: &ghast_inventory::Stack, mut held: HeldItem) -> HeldItem {
+        // getUseDuration > 0; food only below a full bar unless can_always_eat.
+        if let Some(u) = ghast_inventory::v26_1::item_use(stack) {
+            held.usable = u.duration.is_none_or(|d| d > 0);
+            held.food = u.food.is_some();
+            held.always_edible = u.food.is_some_and(|f| f.can_always_eat);
+        }
+        held
+    }
+
+    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
+        self.use_effects = None;
+        let Some((off, id)) = using else {
+            return true;
+        };
+        // updatingUsingItem: the used hand must still hold the same item (useItem follows it).
+        let s = if off { inv.offhand() } else { inv.held() };
+        let Some(s) = s.filter(|s| i64::from(s.id()) == i64::from(id)) else {
+            return false;
+        };
+        self.use_effects =
+            ghast_inventory::v26_1::item_use(s).map(|u| (u.can_sprint, u.speed_multiplier));
+        true
     }
 
     fn drop_level(&mut self) {

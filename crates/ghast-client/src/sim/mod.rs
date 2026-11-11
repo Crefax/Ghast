@@ -209,10 +209,20 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError>;
     /// A new client player (join, respawn).
     fn reset_player(&mut self);
-    /// 26.1: the use effects (`can_sprint`, `speed_multiplier`) of the item in use this tick
-    /// (`None`: not using, or the component default).
-    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
-        let _ = effects;
+    /// The held stack's use facts from the stack itself (26.1: its components decide whether
+    /// it has a use state and whether it is food); other versions keep the table facts.
+    #[inline(always)]
+    fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
+        let _ = stack;
+        held
+    }
+    /// Once per tick before the movement (26.1 `updatingUsingItem`): `using` is the use in
+    /// progress (off hand, item id); the sim takes the used stack's `use_effects` for the
+    /// movement. Returns `false` when that hand no longer holds the item (the use stops).
+    #[inline(always)]
+    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
+        let _ = (inv, using);
+        true
     }
     /// Play → configuration (`start_configuration`): vanilla's `clearClientLevel` drops the
     /// level (chunks, entities) and the player until the next join.
@@ -1086,8 +1096,11 @@ impl Sim for Box<dyn Sim> {
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         (**self).held_item(id, count, efficiency)
     }
-    fn set_use_effects(&mut self, effects: Option<(bool, f32)>) {
-        (**self).set_use_effects(effects);
+    fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
+        (**self).item_use_facts(stack, held)
+    }
+    fn update_use(&mut self, inv: &ghast_inventory::Inventory, using: Option<(bool, u16)>) -> bool {
+        (**self).update_use(inv, using)
     }
     fn crosshair_now(
         &self,
