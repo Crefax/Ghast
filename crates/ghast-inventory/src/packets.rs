@@ -250,7 +250,7 @@ mod v26_1 {
     use ghast_protocol::types::slot::v775::ItemStack;
     use ghast_protocol::v26_1::play::clientbound::{self as cb, ClientboundPlayPacket};
     use ghast_protocol::v26_1::play::serverbound as sb;
-    use ghast_protocol::{DecodeError, PacketSet, RawPacket};
+    use ghast_protocol::{DecodeError, RawPacket};
 
     use crate::inventory::{ContainerClick, Inventory, Outgoing};
     use crate::stack::Stack;
@@ -347,11 +347,7 @@ mod v26_1 {
                     let _ = r;
                     self.reset();
                 }
-                P::OpenWindow(w) => self.on_open_window(
-                    w.window_id,
-                    crate::v26_1::window_kind(w.inventory_type),
-                    ghast_protocol::chat::nbt_to_plain_text(&w.window_title).into(),
-                ),
+                P::OpenWindow(w) => self.open_window_26_1(w),
                 P::CloseWindow(_) => self.on_close_window(),
                 P::WindowItems(w) => self.on_window_items_26_1(
                     w.window_id,
@@ -409,13 +405,39 @@ mod v26_1 {
                     let item = slot(&mut r)?;
                     self.on_set_player_inventory(k, item);
                 }
-                id if PACKET_IDS_26_1.contains(&id) => {
-                    let p = ClientboundPlayPacket::decode_raw(raw)?;
-                    self.apply_v26_1(&p);
+                // decoded as their own type: no whole-protocol decoder is linked
+                cb::id::LOGIN => {
+                    raw.decode_as::<cb::Login>()?;
+                    self.reset();
+                }
+                cb::id::RESPAWN => {
+                    raw.decode_as::<cb::Respawn>()?;
+                    self.reset();
+                }
+                cb::id::OPEN_WINDOW => self.open_window_26_1(&raw.decode_as::<cb::OpenWindow>()?),
+                cb::id::CLOSE_WINDOW => {
+                    raw.decode_as::<cb::CloseWindow>()?;
+                    self.on_close_window();
+                }
+                cb::id::HELD_ITEM_SLOT => {
+                    let h = raw.decode_as::<cb::HeldItemSlot>()?;
+                    self.on_held_slot(i8::try_from(h.slot).unwrap_or(-1));
+                }
+                cb::id::CRAFT_PROGRESS_BAR => {
+                    let c = raw.decode_as::<cb::CraftProgressBar>()?;
+                    self.on_window_property(c.window_id, c.property, c.value);
                 }
                 _ => {}
             }
             Ok(())
+        }
+
+        fn open_window_26_1(&mut self, w: &cb::OpenWindow) {
+            self.on_open_window(
+                w.window_id,
+                crate::v26_1::window_kind(w.inventory_type),
+                ghast_protocol::chat::nbt_to_plain_text(&w.window_title).into(),
+            );
         }
     }
 }

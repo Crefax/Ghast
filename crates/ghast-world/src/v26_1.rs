@@ -644,43 +644,14 @@ impl World {
             P::ChunkBiomes(p) => self.apply_chunk_biomes(p),
             P::UpdateViewPosition(p) => Ok(self.apply_view_position(p)),
             P::UpdateViewDistance(p) => Ok(self.apply_view_distance(p)),
-            P::ChunkBatchStart(_) => {
-                self.on_chunk_batch_start(0);
-                Ok(Applied::Changed)
-            }
-            P::ChunkBatchFinished(p) => {
-                self.on_chunk_batch_finished(p.batch_size, 0);
-                Ok(Applied::Changed)
-            }
+            P::ChunkBatchStart(_) => Ok(self.batch_start()),
+            P::ChunkBatchFinished(p) => Ok(self.batch_finished(p.batch_size)),
             P::InitializeWorldBorder(p) => Ok(self.apply_initialize_border(p)),
-            P::WorldBorderCenter(p) => Ok(self.apply_border(&BorderPacket {
-                action: 2,
-                x: Some(p.x),
-                z: Some(p.z),
-                ..BorderPacket::EMPTY
-            })),
-            P::WorldBorderLerpSize(p) => Ok(self.apply_border(&BorderPacket {
-                action: 1,
-                old_diameter: Some(p.old_diameter),
-                new_diameter: Some(p.new_diameter),
-                speed_ms: Some(i64::from(p.speed).saturating_mul(50)),
-                ..BorderPacket::EMPTY
-            })),
-            P::WorldBorderSize(p) => Ok(self.apply_border(&BorderPacket {
-                action: 0,
-                diameter: Some(p.diameter),
-                ..BorderPacket::EMPTY
-            })),
-            P::WorldBorderWarningDelay(p) => Ok(self.apply_border(&BorderPacket {
-                action: 4,
-                warning_time: Some(p.warning_time),
-                ..BorderPacket::EMPTY
-            })),
-            P::WorldBorderWarningReach(p) => Ok(self.apply_border(&BorderPacket {
-                action: 5,
-                warning_blocks: Some(p.warning_blocks),
-                ..BorderPacket::EMPTY
-            })),
+            P::WorldBorderCenter(p) => Ok(self.apply_border_center(p)),
+            P::WorldBorderLerpSize(p) => Ok(self.apply_border_lerp_size(p)),
+            P::WorldBorderSize(p) => Ok(self.apply_border_size(p)),
+            P::WorldBorderWarningDelay(p) => Ok(self.apply_border_warning_delay(p)),
+            P::WorldBorderWarningReach(p) => Ok(self.apply_border_warning_reach(p)),
             P::TileEntityData(p) if self.config.block_entities => {
                 Ok(self.apply_tile_entity_data(p))
             }
@@ -690,20 +661,118 @@ impl World {
 
     /// Applies a world packet straight from its raw body. `map_chunk` is decoded here without
     /// its heightmaps and light (the cheap path: nothing after the block entities is read);
-    /// other ids are decoded with the generated types and passed to [`World::handle`].
+    /// other ids are decoded as their own packet type (no whole-protocol decoder is linked).
     ///
     /// # Errors
     /// A malformed packet or malformed chunk data.
     pub fn handle_raw(&mut self, raw: &RawPacket) -> Result<Applied, WorldError> {
-        if raw.id == cb::id::MAP_CHUNK {
-            return self.apply_map_chunk_body(&raw.body);
+        macro_rules! decode {
+            ($t:ty) => {
+                &raw.decode_as::<$t>().map_err(WorldError::Decode)?
+            };
         }
-        if !PACKET_IDS.contains(&raw.id) && !BLOCK_ENTITY_IDS.contains(&raw.id) {
-            return Ok(Applied::NotWorldPacket);
+        match raw.id {
+            cb::id::MAP_CHUNK => self.apply_map_chunk_body(&raw.body),
+            cb::id::LOGIN => Ok(self.apply_login(decode!(Login))),
+            cb::id::RESPAWN => Ok(self.apply_respawn(decode!(Respawn))),
+            cb::id::UNLOAD_CHUNK => Ok(self.apply_unload_chunk(decode!(UnloadChunk))),
+            cb::id::BLOCK_CHANGE => Ok(self.apply_block_change(decode!(BlockChange))),
+            cb::id::MULTI_BLOCK_CHANGE => {
+                Ok(self.apply_multi_block_change(decode!(MultiBlockChange)))
+            }
+            cb::id::CHUNK_BIOMES => self.apply_chunk_biomes(decode!(ChunkBiomes)),
+            cb::id::UPDATE_VIEW_POSITION => {
+                Ok(self.apply_view_position(decode!(UpdateViewPosition)))
+            }
+            cb::id::UPDATE_VIEW_DISTANCE => {
+                Ok(self.apply_view_distance(decode!(UpdateViewDistance)))
+            }
+            cb::id::CHUNK_BATCH_START => {
+                let _: &cb::ChunkBatchStart = decode!(cb::ChunkBatchStart);
+                Ok(self.batch_start())
+            }
+            cb::id::CHUNK_BATCH_FINISHED => {
+                Ok(self.batch_finished(decode!(cb::ChunkBatchFinished).batch_size))
+            }
+            cb::id::INITIALIZE_WORLD_BORDER => {
+                Ok(self.apply_initialize_border(decode!(InitializeWorldBorder)))
+            }
+            cb::id::WORLD_BORDER_CENTER => {
+                Ok(self.apply_border_center(decode!(cb::WorldBorderCenter)))
+            }
+            cb::id::WORLD_BORDER_LERP_SIZE => {
+                Ok(self.apply_border_lerp_size(decode!(cb::WorldBorderLerpSize)))
+            }
+            cb::id::WORLD_BORDER_SIZE => Ok(self.apply_border_size(decode!(cb::WorldBorderSize))),
+            cb::id::WORLD_BORDER_WARNING_DELAY => {
+                Ok(self.apply_border_warning_delay(decode!(cb::WorldBorderWarningDelay)))
+            }
+            cb::id::WORLD_BORDER_WARNING_REACH => {
+                Ok(self.apply_border_warning_reach(decode!(cb::WorldBorderWarningReach)))
+            }
+            cb::id::TILE_ENTITY_DATA if self.config.block_entities => {
+                Ok(self.apply_tile_entity_data(decode!(TileEntityData)))
+            }
+            _ => Ok(Applied::NotWorldPacket),
         }
-        use ghast_protocol::PacketSet;
-        let p = ClientboundPlayPacket::decode_raw(raw).map_err(WorldError::Decode)?;
-        self.handle(&p)
+    }
+
+    fn batch_start(&mut self) -> Applied {
+        self.on_chunk_batch_start(0);
+        Applied::Changed
+    }
+
+    fn batch_finished(&mut self, size: i32) -> Applied {
+        self.on_chunk_batch_finished(size, 0);
+        Applied::Changed
+    }
+
+    /// `set_border_center`.
+    pub fn apply_border_center(&mut self, p: &cb::WorldBorderCenter) -> Applied {
+        self.apply_border(&BorderPacket {
+            action: 2,
+            x: Some(p.x),
+            z: Some(p.z),
+            ..BorderPacket::EMPTY
+        })
+    }
+
+    /// `set_border_lerp_size` (lerp time in ticks).
+    pub fn apply_border_lerp_size(&mut self, p: &cb::WorldBorderLerpSize) -> Applied {
+        self.apply_border(&BorderPacket {
+            action: 1,
+            old_diameter: Some(p.old_diameter),
+            new_diameter: Some(p.new_diameter),
+            speed_ms: Some(p.speed.saturating_mul(50)),
+            ..BorderPacket::EMPTY
+        })
+    }
+
+    /// `set_border_size`.
+    pub fn apply_border_size(&mut self, p: &cb::WorldBorderSize) -> Applied {
+        self.apply_border(&BorderPacket {
+            action: 0,
+            diameter: Some(p.diameter),
+            ..BorderPacket::EMPTY
+        })
+    }
+
+    /// `set_border_warning_delay`.
+    pub fn apply_border_warning_delay(&mut self, p: &cb::WorldBorderWarningDelay) -> Applied {
+        self.apply_border(&BorderPacket {
+            action: 4,
+            warning_time: Some(p.warning_time),
+            ..BorderPacket::EMPTY
+        })
+    }
+
+    /// `set_border_warning_distance`.
+    pub fn apply_border_warning_reach(&mut self, p: &cb::WorldBorderWarningReach) -> Applied {
+        self.apply_border(&BorderPacket {
+            action: 5,
+            warning_blocks: Some(p.warning_blocks),
+            ..BorderPacket::EMPTY
+        })
     }
 
     fn apply_border(&mut self, p: &BorderPacket) -> Applied {
@@ -718,7 +787,7 @@ impl World {
             z: Some(p.z),
             old_diameter: Some(p.old_diameter),
             new_diameter: Some(p.new_diameter),
-            speed_ms: Some(i64::from(p.speed).saturating_mul(50)),
+            speed_ms: Some(p.speed.saturating_mul(50)),
             portal_boundary: Some(p.portal_teleport_boundary),
             warning_time: Some(p.warning_time),
             warning_blocks: Some(p.warning_blocks),
