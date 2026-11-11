@@ -1390,11 +1390,18 @@ mod tests {
         let Some(Outgoing::Creative(list)) = echo else {
             panic!("no echo: {echo:?}");
         };
-        // (ghast-inventory decides what is echoed; here: slot 37 is among it.)
-        assert!(
-            list.iter()
-                .any(|c| matches!(c, ghast_inventory::CreativePacket::SetSlot { slot: 37, .. }))
-        );
+        // The Q drop did not broadcast (CreativeModeInventoryScreen.slotClicked THROW), so the
+        // set_slot's broadcast re-sends slot 36 before the server's slot 37, like vanilla.
+        let slots: Vec<(i16, i32)> = list
+            .iter()
+            .map(|c| match c {
+                ghast_inventory::CreativePacket::SetSlot { slot, item } => {
+                    (*slot, item.as_ref().map_or(0, |s| s.count()))
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(slots, vec![(36, 63), (37, 5)]);
         let n = list.len();
         V26_1::write_play(
             &mut enc,
