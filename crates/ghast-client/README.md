@@ -157,6 +157,10 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   20-bit set, checksum; `message_acknowledgement` after 64 pending signed messages), the chat
   session and command tree above, the permission level (entity events 24–28), cookies, chunk
   batch answers with vanilla's chunks-per-tick estimate.
+- **Item use**: the use state, food gating and the movement slowdown come from the used stack's
+  components (`ghast_inventory::v26_1::item_use`: duration, `use_effects`, `food`); the server's
+  entity event 9 completes a use (the client never does it itself); clicks that drop a stack
+  send their swings first.
 - **Physics** is `ghast_physics::modern` (`V26_1`), fed every movement attribute in packet order,
   effects (weaving too), abilities, teleports with all nine relative bits and their delta,
   `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
@@ -175,8 +179,7 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   signatures, the bytes) and acknowledgements, byte-identical; `net_crypto.jsonl.gz` — session
   hash, the `hello` packet, the key packet both ways, AES/CFB8 both directions.
 - **Not yet on 26.1**: incoming signed messages are not verified (a message vanilla would
-  reject as invalid still enters the last-seen list), item `use_effects` other than the
-  default (seam in `Sim26::use_effects`), movement recording, the Grim step compatibility,
+  reject as invalid still enters the last-seen list), movement recording, the Grim step compatibility,
   `WorldView::column` (the 26.1 column type differs). Not verifiable without a real account:
   the real services' responses (`player/certificates` format and key sizes as documented,
   `join` errors) — the lab uses a local stand-in that follows authlib's parsing.
