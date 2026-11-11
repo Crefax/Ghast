@@ -85,6 +85,7 @@ pub struct HeldItem {
     /// Tool speed multiplier per dig group, filled by the version (`tool_multiplier`).
     pub tool_speed: Option<fn(DigMaterial, u16) -> f32>,
     /// 1.20.5+: the item id for the exact destroy progress (`ghast_data::v26_1`).
+    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
     pub(crate) modern_item: Option<u16>,
 }
 

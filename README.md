@@ -134,8 +134,9 @@ ghast = { version = "0.4", default-features = false, features = ["v1_8", "libdef
 ```
 
 A `GameVersion` whose feature is off still exists; running it returns
-`ClientError::VersionNotEnabled`. The `afk` example, stripped, release profile below: about
-3.1 MB with every version, 2.0 MB with 1.8.9 only.
+`ClientError::VersionNotEnabled`. The `afk` example, stripped, release profile below
+(2026-11-11): 5.3 MB with every version; 1.9 MB with 1.8.9 only, 1.9 MB 1.12.2, 2.6 MB 1.16.5,
+3.3 MB 26.1.
 
 ### Recommended release profile
 

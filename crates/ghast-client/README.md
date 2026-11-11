@@ -358,6 +358,28 @@ cargo test -p ghast-client
   `/proc/thread-self/stat`. WSL2 desktop, 2026-11-03: 50 ms CPU in 20 s = **0.25 % of one
   core** at ~900 inbound packets/s.
 
+## Live results: 26.1 (local WSL lab, Paper 26.1.2 build 74 + Grim 2.3.74, 2026-11-11)
+
+Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Version: 26.1`, brand
+`vanilla`. The lab is a superflat world with the surface at y = 3 like the other labs
+(`lab/templates/server-26.1.properties`).
+
+| run | result |
+|---|---|
+| AFK 30 s, then 10.5 min (view distance 8) | 0 Grim flags, 0 kicks |
+| `movement_course` 3 min (walk, sprint, sprint-jump, jump, sneak incl. an edge, slab, block, wall, fence, ice, packed ice, soul sand, slime, water) | 0 flags, 0 setbacks |
+| `chat`: a chat line, `/msg`, `/say` | delivered (`[Not Secure]` = unsigned), whisper and `/say` rendered, no kick |
+| `dig_place` 2 min (grass by hand, dirt placed back) | 94 broken, 94 placed, 0 flags |
+| `inventory_probe` | the chest opens and the first click is sent; the probe then waits for a click result that 26.1's inventory does not report yet |
+
+AFK cost, `lab/bench-afk.sh` (30 s warm-up, 300 s), x86-64 WSL, one bot:
+
+| | CPU (one core) | worst 10 s | RSS | PSS | threads |
+|---|---|---|---|---|---|
+| 26.1, view distance 8 | 0.34 % | 0.50 % | 6.9 MB | 5.3 MB | 1 |
+| 26.1, view distance 2 | 0.33 % | 0.45 % | 6.2 MB | 4.8 MB | 1 |
+| 1.8.9 on the 1.8 lab (view distance 6), same machine | 0.34 % | 0.40 % | 6.5 MB | 5.2 MB | 1 |
+
 ## Live results: 1.12.2 (local WSL lab, Paper 1.12.2 build 1620 + Grim 2.3.73, 2026-11-07)
 
 Account `GhastBot13`, release examples, each run under `timeout -s TERM`, ~33 min in total:
