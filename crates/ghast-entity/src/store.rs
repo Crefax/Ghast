@@ -336,9 +336,14 @@ impl Entities {
         use crate::entity::Era;
         e.era = self.era;
         e.sizer = match self.era {
+            #[cfg(feature = "v1_8")]
             Era::V1_8 => crate::v1_8::vanilla_size(e),
+            #[cfg(feature = "v1_12")]
             Era::V1_12 => crate::v1_12::vanilla_size(e),
+            #[cfg(feature = "v1_16_5")]
             Era::V1_16 => crate::v1_16_5::vanilla_size(e),
+            #[allow(unreachable_patterns)]
+            _ => None,
         };
     }
 

@@ -491,6 +491,7 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
         EntityClass::Item | EntityClass::ExperienceOrb => false,
         EntityClass::Object => match e.entity_type() {
             EntityType::LegacyObject(t) => matches!(t, 1 | 10 | 50 | 51 | 70 | 71 | 77 | 78),
+            #[cfg(feature = "v1_16_5")]
             EntityType::Registry(_) => {
                 ghast_entity::v1_16_5::info(e.entity_type()).is_some_and(|i| {
                     matches!(

@@ -20,7 +20,8 @@ use ghast_protocol::{BlockPos, Decode, DecodeError, RawPacket, Reader};
 
 use crate::Applied;
 use crate::common::{
-    IdMask, R, angle, for_each_varint, legacy_item, own_str, player_info, skip_string,
+    IdMask, R, angle, for_each_varint, legacy_item, own_str, player_info, remove_effect,
+    set_effect, skip_string,
 };
 use crate::entity::{EQUIPMENT_SLOTS, Effect, Entity, EntityType, Item, MetaValue};
 use crate::store::{Config, Entities, Event};
@@ -535,31 +536,6 @@ fn read_metadata(r: &mut Reader<'_>, out: &mut Vec<(u8, MetaValue)>) -> R<()> {
             _ => MetaValue::Rotation([r.read_f32()?, r.read_f32()?, r.read_f32()?]),
         };
         out.push((h & 0x1F, v));
-    }
-}
-
-pub(crate) fn set_effect(s: &mut Entities, eid: i32, effect: Effect) -> bool {
-    match s.map.get_mut(&eid) {
-        Some(e) => {
-            match e.effects.iter_mut().find(|x| x.id == effect.id) {
-                Some(x) => *x = effect,
-                None => e.effects.push(effect),
-            }
-            s.event(Event::Effects(eid));
-            true
-        }
-        None => false,
-    }
-}
-
-pub(crate) fn remove_effect(s: &mut Entities, eid: i32, effect: u8) -> bool {
-    match s.map.get_mut(&eid) {
-        Some(e) => {
-            e.effects.retain(|x| x.id != effect);
-            s.event(Event::Effects(eid));
-            true
-        }
-        None => false,
     }
 }
 

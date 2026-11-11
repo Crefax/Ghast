@@ -24,12 +24,25 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, unnameable_types)]
+// A build with only some versions leaves helpers of the others unused.
+#![cfg_attr(
+    not(all(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    allow(dead_code)
+)]
+// A build with no version at all (a 26.1-only client) keeps only the shared store.
+#![cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")),
+    allow(unused_imports, unused_variables)
+)]
 
 mod common;
 mod entity;
 mod store;
+#[cfg(feature = "v1_12")]
 pub mod v1_12;
+#[cfg(feature = "v1_16_5")]
 pub mod v1_16_5;
+#[cfg(feature = "v1_8")]
 pub mod v1_8;
 
 pub use entity::{

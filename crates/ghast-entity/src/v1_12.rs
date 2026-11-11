@@ -31,9 +31,9 @@ use crate::Applied;
 use crate::common::{
     IdMask, R, angle, for_each_varint, legacy_item, own_nbt, own_str, player_info, skip_string,
 };
+use crate::common::{remove_effect, set_effect};
 use crate::entity::{EQUIPMENT_SLOTS, Effect, Entity, EntityType, Era, Item, MetaValue};
 use crate::store::{Config, Entities, Event};
-use crate::v1_8::{remove_effect, set_effect};
 
 /// Spawn, movement, destroy, riding, pickup, status packets, plus `login` / `respawn`.
 pub const CORE_IDS: &[i32] = &[

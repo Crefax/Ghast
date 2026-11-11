@@ -4,7 +4,7 @@ use bytes::Bytes;
 use ghast_protocol::nbt::RawNbt;
 use ghast_protocol::{DecodeError, Reader};
 
-use crate::entity::Item;
+use crate::entity::{Effect, Item};
 use crate::store::{Entities, Event, PlayerInfo};
 
 pub(crate) type R<T> = Result<T, DecodeError>;
@@ -157,5 +157,32 @@ impl IdMask {
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = i32> + '_ {
         (0..256).filter(|&id| self.contains(id))
+    }
+}
+
+/// Adds or replaces a status effect of a tracked entity.
+pub(crate) fn set_effect(s: &mut Entities, eid: i32, effect: Effect) -> bool {
+    match s.map.get_mut(&eid) {
+        Some(e) => {
+            match e.effects.iter_mut().find(|x| x.id == effect.id) {
+                Some(x) => *x = effect,
+                None => e.effects.push(effect),
+            }
+            s.event(Event::Effects(eid));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Removes a status effect of a tracked entity.
+pub(crate) fn remove_effect(s: &mut Entities, eid: i32, effect: u8) -> bool {
+    match s.map.get_mut(&eid) {
+        Some(e) => {
+            e.effects.retain(|x| x.id != effect);
+            s.event(Event::Effects(eid));
+            true
+        }
+        None => false,
     }
 }
