@@ -181,6 +181,25 @@ pub mod v775 {
         split: u32,
         added: u16,
         removed: u16,
+        /// Added / removed types below 127 as bits; bit 127 = a type outside `0..127` occurs
+        /// (lookups of such types scan). Lets lookups of absent types skip the scan.
+        added_mask: u128,
+        removed_mask: u128,
+    }
+
+    /// The mask bit of a component type.
+    #[inline]
+    fn bit(ty: i32) -> u128 {
+        match u32::try_from(ty) {
+            Ok(t) if t < 127 => 1u128 << t,
+            _ => 1u128 << 127,
+        }
+    }
+
+    /// Whether a mask may contain `ty`.
+    #[inline]
+    fn may_have(mask: u128, ty: i32) -> bool {
+        mask & (bit(ty) | 1u128 << 127) != 0
     }
 
     /// Patches are equal when their bytes are (component order included; see
@@ -206,6 +225,8 @@ pub mod v775 {
             split: 0,
             added: 0,
             removed: 0,
+            added_mask: 0,
+            removed_mask: 0,
         };
 
         /// Reads `added` components and `removed` types by skipping over them.
@@ -217,18 +238,23 @@ pub mod v775 {
                 return Err(DecodeError::Invalid("component count"));
             };
             let start = r.position();
+            let mut added_mask = 0u128;
             for _ in 0..added_n {
+                added_mask |= bit(r.clone().read_varint()?);
                 SlotComponent::skip(r)?;
             }
             let split = (r.position() - start) as u32;
+            let mut removed_mask = 0u128;
             for _ in 0..removed_n {
-                r.read_varint()?;
+                removed_mask |= bit(r.read_varint()?);
             }
             Ok(ComponentPatch {
                 bytes: r.bytes_since(start),
                 split,
                 added,
                 removed,
+                added_mask,
+                removed_mask,
             })
         }
 
@@ -282,18 +308,30 @@ pub mod v775 {
         /// `true` when the patch removes component `ty`.
         #[must_use]
         pub fn removes(&self, ty: i32) -> bool {
-            self.removed().any(|t| t == ty)
+            may_have(self.removed_mask, ty) && self.removed().any(|t| t == ty)
+        }
+
+        /// Whether the patch adds component `ty` (no scan when it certainly does not).
+        #[must_use]
+        pub fn adds(&self, ty: i32) -> bool {
+            may_have(self.added_mask, ty) && self.iter().any(|(t, _)| t == ty)
         }
 
         /// The value bytes of added component `ty` (vanilla keeps the last one of a type).
         #[must_use]
         pub fn get(&self, ty: i32) -> Option<Bytes> {
+            if !may_have(self.added_mask, ty) {
+                return None;
+            }
             self.iter().filter(|(t, _)| *t == ty).last().map(|(_, b)| b)
         }
 
         /// Decodes added component `ty` with the generated type (the last one of that type).
         #[must_use]
         pub fn decode(&self, ty: i32) -> Option<DecodeResult<SlotComponent>> {
+            if !may_have(self.added_mask, ty) {
+                return None;
+            }
             let mut r = Reader::new(&self.bytes);
             let mut last = None;
             for _ in 0..self.added {
@@ -378,6 +416,8 @@ pub mod v775 {
                 split,
                 added: added.len() as u16,
                 removed: removed.len() as u16,
+                added_mask: added.iter().fold(0, |m, (t, _)| m | bit(*t)),
+                removed_mask: removed.iter().fold(0, |m, t| m | bit(*t)),
             }
         }
     }
