@@ -430,7 +430,7 @@ final class Harness {
          * chunk packet data and lets the client chunk cache decode it, as
          * {@code ClientPacketListener.handleLevelChunkWithLight} does (minus light and render scheduling).
          */
-        private void loadChunk(int cx, int cz, List<Scenario.Block> blocks) {
+        void loadChunk(int cx, int cz, List<Scenario.Block> blocks) {
             LevelChunk source = new LevelChunk(level, new ChunkPos(cx, cz));
             for (Scenario.Block b : blocks) {
                 BlockState state = States.byId(b.id());

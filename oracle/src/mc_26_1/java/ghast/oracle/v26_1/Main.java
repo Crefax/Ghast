@@ -57,6 +57,12 @@ public final class Main {
             case "boxes-far" -> Io.write(a.path("--out", golden.resolve("collision_shapes_far.jsonl.gz")), sink -> CollisionDump.farLines(sink));
             case "voxels" -> Io.write(a.path("--out", golden.resolve("voxel_shapes.jsonl.gz")), Main::voxels);
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
+            case "entity-tracking" -> {
+                long seed = a.lng("--seed", 1);
+                int cases = (int) a.lng("--cases", EntityTrackDump.CASES);
+                int ticks = (int) a.lng("--ticks", EntityTrackDump.TICKS);
+                Io.write(a.path("--out", golden.resolve("entity_tracking.jsonl.gz")), sink -> EntityTrackDump.lines(seed, cases, ticks, sink));
+            }
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
             case "items" -> Io.write(a.path("--out", golden.resolve("items.jsonl.gz")), ItemDump::lines);
             case "hashed-stacks" -> Io.write(a.path("--out", golden.resolve("hashed_stacks.jsonl.gz")), HashDump::lines);
@@ -99,6 +105,7 @@ public final class Main {
                   boxes-far [--out FILE]               the same at far positions, absolute
                   voxels [--out FILE]                  voxel grids of every collision shape + per-state facts
                   entity-sizes [--out FILE]            dimensions / eye heights of every entity type, poses, variants
+                  entity-tracking [--seed N] [--cases N] [--ticks N] [--out FILE]  entity packets through the real client
                   selection [--out FILE]               outline / interaction shapes of every block state
                   items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
                   dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
@@ -137,6 +144,7 @@ public final class Main {
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
+        Io.write(dir.resolve("entity_tracking.jsonl.gz"), sink -> EntityTrackDump.lines(1, EntityTrackDump.CASES, EntityTrackDump.TICKS, sink));
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
         Io.write(dir.resolve("items.jsonl.gz"), ItemDump::lines);
         Io.write(dir.resolve("hashed_stacks.jsonl.gz"), HashDump::lines);

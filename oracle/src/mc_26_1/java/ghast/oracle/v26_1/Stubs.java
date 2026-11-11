@@ -177,4 +177,23 @@ final class Stubs {
         public void removePlayer(java.util.UUID id) {
         }
     }
+
+    /**
+     * An entity render dispatcher that extracts an empty render state (the pickup particle of
+     * {@code handleTakeItemEntity} asks for one); nothing renders.
+     */
+    static final class NoEntityRenderers extends net.minecraft.client.renderer.entity.EntityRenderDispatcher {
+        private NoEntityRenderers() {
+            super(null, null, null, null, null, null, null, null, null, null, null); // never called
+        }
+
+        static NoEntityRenderers create() {
+            return Reflect.allocate(NoEntityRenderers.class);
+        }
+
+        @Override
+        public <E extends Entity> net.minecraft.client.renderer.entity.state.EntityRenderState extractEntity(E entity, float partialTicks) {
+            return new net.minecraft.client.renderer.entity.state.EntityRenderState();
+        }
+    }
 }

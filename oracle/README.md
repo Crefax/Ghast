@@ -69,6 +69,7 @@ tests/golden/1.8.9/
   selection_boxes.jsonl.gz   ray-test bounds + canCollide for every block id/meta (crosshair)
   raytrace.jsonl.gz          crosshair raytrace vectors (50 worlds x 40 viewpoints)
   entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
+  entity_tracking.jsonl.gz   (26.1) random entity packets through the real client, entity state per tick
 ```
 
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
@@ -824,7 +825,13 @@ client sends references to the client's own copy of the same data pack, which gi
   fields are replaced by `blocks_motion`, `liquid`, `solid`, `replaceable`, `has_offset`; context lines
   add `fall_distance`, `leather_boots`.
 - `entity_sizes.jsonl.gz`: as 1.16.5; `entity_type` lines add `eye_height`; instances are created with
-  `EntityType.create(level, EntitySpawnReason.LOAD)` (what the add-entity handler does).
+  `EntityType.create(level, EntitySpawnReason.LOAD)` (what the add-entity handler does). Every
+  `entity_size` line carries `poses` (dimensions + eye height per `Pose`, in enum order). The
+  `default` line adds `living` (`instanceof LivingEntity`), `interpolation` (steps of the instance's
+  `InterpolationHandler`, `-1` = none: position packets snap the entity; `0` = displays) and
+  `pickable` (`isPickable()` of the fresh instance). Variant lines add `meta`: the synched data entries
+  that differ from the default instance, `[index, serializer id, value]` (the baby flag, slime size,
+  armor stand client flags: the metadata that selects the variant).
 
 ### 26.1 fuzz
 
@@ -1066,6 +1073,34 @@ arbitrary: IdentityHashMap / HashSet; the server compares contents); `json` has 
 separate JVM runs produce identical files. (Debug-stick maps: the curated several-entry values came
 out of parsing + network round trip with one entry; the cause is not investigated, so only
 single-entry debug-stick maps are in the vectors.)
+
+## `entity_tracking.jsonl.gz` (26.1): entity packets through the real client
+
+`EntityTrackDump`: per case a fresh login (client player id 1 on a 7×7 stone floor at y 60, chunks
+loaded as in an `AIR` scenario), then for every tick random clientbound packets: `add_entity`
+(zombies, pigs, villagers, armor stands, slimes, magma cubes, camels, goats, foxes, cows, chickens,
+endermen, players, end crystals, floating items; ids 100–117, so ids get replaced), the three
+`move_entity_*`, `entity_position_sync` (near and > 64 blocks), `teleport_entity` (random relative
+sets and delta movement), `rotate_head`, `set_entity_motion`, `set_entity_data` (random values of the
+entity's own entries, size entries more often; complex serializers resend the current value),
+`update_attributes` (scale, movement speed, max health with ≤ 1 modifier per operation),
+`remove_entities`, `take_item_entity`, `set_passengers`, `set_entity_link`, `player_info_update` /
+`player_info_remove` (4 profiles), `forget_level_chunk` and chunk reloads. Each packet body is written
+as wire bytes, decoded with the packet's own stream codec (no bytes may be left) and handled by the
+real `ClientPacketListener`; then `Harness.Run.step` ticks the level (`ClientLevel.tickEntities`).
+
+- `case` line: `case`, `seed`, `player_id`, `scale_attribute` (registry id of `minecraft:scale`),
+  `loaded` (rectangles of loaded chunk columns, `[x0, z0, x1, z1]`).
+- `tick` line: `packets` = `[name, body hex]` in handling order (`name` = the packet type's path;
+  `level_chunk_with_light` carries only the chunk x and z as two big-endian ints, the column itself is
+  an empty one), then `entities` = every entity but the client player, by id, as the client holds it
+  **after the packets and before the tick** (when `Minecraft.tick` picks): `pos` (3 × f64 hex), `rot`
+  (yRot, xRot f32 hex), `head` (living only), `ground`, `box` (6 × f64 hex), `pickable`, `spectator`,
+  `ticking` (`isTickingEntity`), `rode` (was named as a passenger since its spawn: its position then
+  comes from the vehicle and is not a tracker fact), `vehicle` (-1 = none), `passengers`, `count`
+  (item entities), and `tab` = `[profile k, name, game mode id (-1 none), latency, has display name]`.
+- Items get no-gravity metadata at spawn and never a velocity, so the client's own item physics leaves
+  them where the packets put them. No collidable entities (boats, minecarts, shulkers) are spawned.
 
 ## Crosshair pick (1.8.9, 1.12.2): `picks.jsonl.gz`
 
