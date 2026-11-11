@@ -59,6 +59,7 @@ public final class Main {
             case "entity-sizes" -> Io.write(a.path("--out", golden.resolve("entity_sizes.jsonl.gz")), EntitySizeDump::lines);
             case "selection" -> Io.write(a.path("--out", golden.resolve("selection_shapes.jsonl.gz")), Main::selection);
             case "items" -> Io.write(a.path("--out", golden.resolve("items.jsonl.gz")), ItemDump::lines);
+            case "hashed-stacks" -> Io.write(a.path("--out", golden.resolve("hashed_stacks.jsonl.gz")), HashDump::lines);
             case "dig" -> {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", DigDump.CASES);
@@ -101,6 +102,7 @@ public final class Main {
                   selection [--out FILE]               outline / interaction shapes of every block state
                   items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
                   dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
+                  hashed-stacks [--out FILE]           item stack wire bytes + the client's HashedStack
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
@@ -137,6 +139,7 @@ public final class Main {
         Io.write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         Io.write(dir.resolve("selection_shapes.jsonl.gz"), Main::selection);
         Io.write(dir.resolve("items.jsonl.gz"), ItemDump::lines);
+        Io.write(dir.resolve("hashed_stacks.jsonl.gz"), HashDump::lines);
         Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;

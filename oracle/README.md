@@ -1025,6 +1025,32 @@ states where they differ from the default state; none)); `item` lines (`id`, `na
 `aqua_affinity` (enchanted helmet), `on_ground`, `creative`; `mining_speed`, `effective_tool`,
 `progress` and `first` as in the 26.1 dump. Replayed by `crates/ghast-data/tests/oracle_dig.rs`.
 
+## `hashed_stacks.jsonl.gz` (26.1): item stack wire bytes and the client's `HashedStack`
+
+`HashDump` (`hashed-stacks`, in `golden`). Since 1.21.5 the container-click packet carries
+`HashedStack`s instead of stacks: item holder, count, and a `HashedPatchMap` of the stack's
+component patch: per added component a 32-bit hash (`ClientPacketListener`'s generator: the
+component's codec encoded with CRC32C `HashOps` in the synced registry context), and the set of
+removed component types. Lines:
+
+- `registry`: `name`, `entries` (every registry the client holds, names in id order: the holder ids
+  in the bytes resolve through these; enchantments, banner patterns, trim materials, variants, ...).
+- `stack` (4000): `k`, `item`, `item_id`, `count` (1–5000), `wire` (hex of
+  `ItemStack.OPTIONAL_STREAM_CODEC` as the server writes it), `added` (sorted by component name:
+  `component`, `id` (data component type id), `hash` (signed int, as the packet carries it),
+  `json` (the value through its codec with registry ops, for debugging)), `removed` (component type
+  names), `hashed_wire` (hex of `HashedStack.STREAM_CODEC`, what the click packet would carry). The
+  stack is decoded from `wire` first and hashed as the client would see it.
+- `component_type` (every type): `id`, `name`, `transient` (no codec, never in a patch:
+  creative_slot_lock, additional_trade_cost, map_post_processing), `values` (pool size) by source
+  (`from_defaults` = some item's default value, `from_generic` = a generic JSON value or a registry
+  entry name the codec accepts, `from_curated`), `cases_added`, `cases_removed`.
+
+Every non-transient type is added in at least 45 cases. Removals only exist for types some item has
+by default: a patch that removes a type the prototype lacks is normalised away when the stack is
+built (as on a real server), so 65 types never appear as removed. Values are validated by a
+network round trip and a hash before use; patches the codecs reject are skipped.
+
 ## Notes for implementers
 
 What a Rust implementation (`ghast-physics`) has to get right to match these vectors. Questions or
