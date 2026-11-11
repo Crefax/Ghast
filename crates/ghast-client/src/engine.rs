@@ -1700,6 +1700,16 @@ impl TickContext<'_> {
         self.world
     }
 
+    /// 26.1: the client player's complete movement state as the physics holds it now (start of
+    /// the tick): the attributes the server sent (movement speed, step height, jump strength,
+    /// scale, ...), effects, abilities and the level's build height. Clone it to simulate
+    /// ahead with `ghast_physics::modern::tick`. `None` on the other versions.
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+        self.world.modern_player()
+    }
+
     /// What happened since the previous tick.
     #[must_use]
     pub fn events(&self) -> &TickEvents {

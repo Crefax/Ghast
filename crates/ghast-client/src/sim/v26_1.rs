@@ -454,6 +454,10 @@ impl Sim for Sim26 {
         self.player.spectator = on;
     }
 
+    fn modern_player(&self) -> Option<&modern::PlayerState> {
+        Some(&self.player)
+    }
+
     fn set_flying(&mut self, flying: bool, out: &mut Vec<Outbound>) {
         let a = &mut self.player.abilities;
         if a.flying == flying || (flying && !a.allow_flying) {

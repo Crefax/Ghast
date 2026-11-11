@@ -231,6 +231,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     }
     /// Spectator game mode (no collision).
     fn spectator(&mut self, on: bool);
+    /// 26.1: the client player's movement state (see [`crate::TickContext::modern_player`]).
+    #[cfg(feature = "v26_1")]
+    fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+        None
+    }
     /// One movement step: physics, then the sprint / sneak / abilities packets and exactly one
     /// movement packet appended to `out`. Updates `pose`.
     fn step(
