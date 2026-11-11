@@ -533,3 +533,64 @@ fn sync_pose_26(pose: &mut Pose, p: &modern::PlayerState) {
     pose.sneaking = p.shift();
     pose.sprinting = p.sprinting;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The engine's teleport path (`Sim26::teleport`, fed from the decoded `Teleport`) lands
+    /// exactly where `modern::PlayerState::apply_teleport` does — the function the oracle's
+    /// teleport goldens (`tests/golden/26.1/teleports.jsonl.gz`) prove — for random
+    /// relative bits, deltas, rotations and prior motion.
+    #[test]
+    fn teleport_matches_the_proven_physics_call() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..2000 {
+            let mut sim = Sim26::new();
+            let start = [rnd() * 64.0 - 32.0, rnd() * 100.0, rnd() * 64.0 - 32.0];
+            sim.player.set_pos(start[0], start[1], start[2]);
+            sim.player.vel = [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5];
+            sim.player.yaw = (rnd() * 720.0 - 360.0) as f32;
+            sim.player.pitch = (rnd() * 180.0 - 90.0) as f32;
+            let mut pose = Pose::default();
+            sync_pose_26(&mut pose, &sim.player);
+            let mut direct = sim.player;
+            let relative = (rnd() * 512.0) as u32 & 0x1ff;
+            let t = Teleport {
+                x: rnd() * 40.0 - 20.0,
+                y: rnd() * 40.0 - 20.0,
+                z: rnd() * 40.0 - 20.0,
+                yaw: (rnd() * 720.0 - 360.0) as f32,
+                pitch: (rnd() * 200.0 - 100.0) as f32,
+                flags: (relative & 0x1f) as i8,
+                teleport_id: Some(1),
+                relative,
+                delta: Vec3::new(
+                    rnd() * 40.0 - 20.0,
+                    rnd() * 40.0 - 20.0,
+                    rnd() * 40.0 - 20.0,
+                ),
+            };
+            sim.teleport(&mut pose, &t);
+            let _ = direct.apply_teleport(
+                [t.x, t.y, t.z],
+                [t.delta.x, t.delta.y, t.delta.z],
+                t.yaw,
+                t.pitch,
+                relative,
+            );
+            assert_eq!(sim.player, direct, "{t:?}");
+            assert_eq!(
+                pose.pos,
+                Vec3::new(direct.pos[0], direct.pos[1], direct.pos[2])
+            );
+            assert_eq!((pose.yaw, pose.pitch), (direct.yaw, direct.pitch));
+        }
+    }
+}

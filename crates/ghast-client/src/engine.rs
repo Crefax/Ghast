@@ -2260,6 +2260,57 @@ mod tests {
         ));
     }
 
+    /// 26.1, as in the oracle's teleport goldens (`tests/golden/26.1/teleports.jsonl.gz`):
+    /// the tick a position packet arrives sends teleport_confirm, then position_look at the
+    /// pose `apply_teleport` gives, then the tick's own movement packet and tick_end.
+    #[test]
+    fn teleport_reply_26_1_matches_the_golden_order() {
+        let mut e = engine(GameVersion::V26_1);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut b = Idle;
+        for _ in 0..3 {
+            e.tick(&mut b, t0);
+        }
+        e.outbound().clear();
+        let tp = Teleport {
+            x: 2.0,
+            y: 0.0,
+            z: -1.0,
+            yaw: 120.0,
+            pitch: -20.0,
+            // Relative x, y, z and yaw (0x1 | 0x2 | 0x4 | 0x8); delta absolute.
+            flags: 0x0f,
+            relative: 0x0f,
+            teleport_id: Some(9),
+            delta: Vec3::new(0.3, 0.42, -0.25),
+        };
+        let before = e.core.pose;
+        e.handle(Inbound::Teleport(tp));
+        e.tick(&mut b, t0);
+        let out = std::mem::take(e.outbound());
+        assert_eq!(out[0], Outbound::TeleportConfirm(9));
+        match out[1] {
+            Outbound::Move(MovePacket::PositionLook {
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+                ..
+            }) => {
+                assert_eq!(
+                    pos,
+                    Vec3::new(before.pos.x + 2.0, before.pos.y, before.pos.z - 1.0)
+                );
+                assert_eq!((yaw, pitch, on_ground), (before.yaw + 120.0, -20.0, false));
+            }
+            ref o => panic!("unexpected {o:?}"),
+        }
+        assert!(matches!(out[2], Outbound::Move(_)), "{out:?}");
+        assert_eq!(out[3..], [Outbound::TickEnd]);
+    }
+
     #[test]
     fn actions_precede_the_single_movement_packet() {
         let mut e = engine(GameVersion::V1_8_9);
