@@ -79,6 +79,13 @@ fn v26_1_entity_tables_match_oracle() {
                     assert_eq!(t.interpolation.map_or(-1, i64::from), i, "{name}");
                     let s = t.size.unwrap();
                     assert_eq!(s.targeting_margin.to_bits(), hex32(&v["targeting_margin"]));
+                    let mob = v["mob"].as_bool().unwrap_or(false);
+                    assert_eq!(t.flags & type_flags::MOB != 0, mob, "{name}");
+                    if mob {
+                        assert_eq!(u64::from(t.max_head_y_rot), v["max_head_y_rot"].as_u64().unwrap());
+                        let default = v["body_control"] == "BodyRotationControl";
+                        assert_eq!(t.flags & type_flags::DEFAULT_BODY != 0, default, "{name}");
+                    }
                 }
                 if t.flags & type_flags::NO_BOX != 0 {
                     assert!(t.dimensions(variant, None, 0).is_none());

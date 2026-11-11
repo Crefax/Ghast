@@ -30,6 +30,11 @@ pub mod type_flags {
     pub const NO_BOX: u8 = 4;
     /// The type's registered dimensions are fixed (not scaled for babies / the scale attribute).
     pub const FIXED: u8 = 8;
+    /// `instanceof Mob`: the client turns its body and head with a `BodyRotationControl`.
+    pub const MOB: u8 = 16;
+    /// The mob uses the default `BodyRotationControl` (not the camel / creaking / happy ghast /
+    /// phantom / shulker / armadillo ones).
+    pub const DEFAULT_BODY: u8 = 32;
 }
 
 /// `LivingEntity.SLEEPING_DIMENSIONS`: every living entity in the sleeping pose (never scaled).
@@ -65,6 +70,11 @@ pub struct EntityTypeData {
     /// experience orbs, fishing bobbers; `Some(0)`: displays, which snap unless metadata sets a
     /// duration). `None`: position packets move the entity at once.
     pub interpolation: Option<u8>,
+    /// Mobs: `getMaxHeadYRot()` (how far the head may turn from the body; 0 for non-mobs).
+    pub max_head_y_rot: u8,
+    /// Bit `1 << pose id` set when that pose's dimensions are fixed (`EntityDimensions.fixed`:
+    /// not scaled by the scale attribute; a player dying, a digging warden, sleeping).
+    pub fixed_poses: u32,
     /// Synched data index of the boolean baby flag.
     pub baby_meta: Option<u8>,
     /// Synched data index of the slime / magma cube size (int).

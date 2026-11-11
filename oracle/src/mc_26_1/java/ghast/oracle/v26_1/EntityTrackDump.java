@@ -288,6 +288,7 @@ final class EntityTrackDump {
         byte xRot = (byte) r.nextInt(256), yRot = (byte) r.nextInt(256), head = (byte) r.nextInt(256);
         int data = r.chance(0.2) ? r.range(0, 5) : 0;
         double fx = x, fy = y, fz = z;
+        Entity before = c.run.level.getEntity(id);
         send(c, "add_entity", ClientboundAddEntityPacket.STREAM_CODEC, b -> {
             b.writeVarInt(id);
             b.writeUUID(uuid);
@@ -301,7 +302,9 @@ final class EntityTrackDump {
             b.writeByte(head);
             b.writeVarInt(data);
         });
-        c.rode.remove(id);
+        if (c.run.level.getEntity(id) != before) {
+            c.rode.remove(id); // a new entity under this id (a refused spawn keeps the old one)
+        }
         if (type == EntityType.ITEM && c.run.level.getEntity(id) instanceof ItemEntity item) {
             // A floating stack: no gravity, so the client-side item physics leaves it where the packets put it.
             List<SynchedEntityData.DataValue<?>> values = new ArrayList<>();
@@ -383,6 +386,10 @@ final class EntityTrackDump {
         Rng r = c.rng;
         int id = targetId(c);
         int flags = r.chance(0.3) ? 0 : r.nextInt(512);
+        boolean item = c.run.level.getEntity(id) instanceof ItemEntity;
+        if (item) {
+            flags &= 0x1f; // no velocity for items (their client physics would move them)
+        }
         Set<Relative> rel = Relative.unpack(flags);
         Vec3 pos = rel.contains(Relative.X) || rel.contains(Relative.Y) || rel.contains(Relative.Z)
                 ? new Vec3(near(r, 0, 2), near(r, 0, 2), near(r, 0, 2)) : target(c, id, r.chance(0.1));
@@ -391,7 +398,7 @@ final class EntityTrackDump {
             pos = new Vec3(rel.contains(Relative.X) ? pos.x : abs.x, rel.contains(Relative.Y) ? pos.y : abs.y,
                     rel.contains(Relative.Z) ? pos.z : abs.z);
         }
-        Vec3 dm = r.chance(0.5) ? Vec3.ZERO : randomVelocity(r);
+        Vec3 dm = item || r.chance(0.5) ? Vec3.ZERO : randomVelocity(r);
         PositionMoveRotation v = new PositionMoveRotation(pos, dm, angle(r), angle(r));
         sendPacket(c, "teleport_entity", ClientboundTeleportEntityPacket.STREAM_CODEC,
                 new ClientboundTeleportEntityPacket(id, v, rel, r.chance(0.5)));
@@ -679,7 +686,7 @@ final class EntityTrackDump {
             j.key("pos").beginArray().value(hex64(p.x)).value(hex64(p.y)).value(hex64(p.z)).endArray();
             j.key("rot").beginArray().value(hex32(e.getYRot())).value(hex32(e.getXRot())).endArray();
             if (e instanceof LivingEntity l) {
-                j.field("head", hex32(l.getYHeadRot()));
+                j.field("head", hex32(l.getYHeadRot())).field("body", hex32(l.yBodyRot));
             }
             j.field("ground", e.onGround());
             AABB b = e.getBoundingBox();

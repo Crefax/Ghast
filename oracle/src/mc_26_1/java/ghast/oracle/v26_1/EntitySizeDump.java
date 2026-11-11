@@ -127,6 +127,11 @@ final class EntitySizeDump {
             j.field("living", e instanceof LivingEntity)
                     .field("interpolation", h == null ? -1 : Reflect.getInt(InterpolationHandler.class, h, "interpolationSteps"))
                     .field("pickable", e.isPickable());
+            if (e instanceof Mob m) {
+                Object control = Reflect.get(Mob.class, m, "bodyRotationControl");
+                j.field("mob", true).field("max_head_y_rot", m.getMaxHeadYRot())
+                        .field("body_control", control.getClass().getSimpleName());
+            }
         } else {
             j.key("meta").beginArray();
             for (SynchedEntityData.DataValue<?> v : all(e)) {
@@ -150,10 +155,16 @@ final class EntitySizeDump {
         j.key("box").beginArray().f64(b.minX).f64(b.minY).f64(b.minZ).f64(b.maxX).f64(b.maxY).f64(b.maxZ).endArray();
         j.fieldF32("targeting_margin", e.getPickRadius());
         j.key("poses").beginObject();
+        // Each pose as the client holds it after a pose update (setPose refreshes the cached
+        // dimensions; some types look at their own pose, e.g. the digging warden), with `fixed`.
+        Pose was = e.getPose();
         for (Pose p : Pose.values()) {
-            EntityDimensions d = e.getDimensions(p);
-            j.key(p.name().toLowerCase()).beginArray().f32(d.width()).f32(d.height()).f32(e.getEyeHeight(p)).endArray();
+            e.setPose(p);
+            EntityDimensions d = e.getDimensions(e.getPose());
+            j.key(p.name().toLowerCase()).beginArray().f32(e.getBbWidth()).f32(e.getBbHeight()).f32(e.getEyeHeight())
+                    .value(d.fixed()).endArray();
         }
+        e.setPose(was);
         j.endObject();
         sink.accept(j.endObject().toString());
     }

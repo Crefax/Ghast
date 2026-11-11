@@ -38,6 +38,13 @@ const NO_BOX: &[&str] = &[
     "interaction",
 ];
 
+/// `Pose` names by id.
+const POSES: [&str; 18] = [
+    "standing", "fall_flying", "sleeping", "swimming", "spin_attack", "crouching", "long_jumping",
+    "dying", "croaking", "using_tongue", "sitting", "roaring", "sniffing", "emerging", "digging",
+    "sliding", "shooting", "inhaling",
+];
+
 fn hex(v: &Value) -> R<u32> {
     let h = v
         .get(1)
@@ -68,6 +75,11 @@ struct Type {
     pickable: bool,
     interpolation: i64,
     margin: u32,
+    mob: bool,
+    /// Poses (by id) whose dimensions are fixed (not scaled), from the default instance.
+    fixed_poses: u32,
+    max_head_y_rot: u64,
+    default_body: bool,
     /// `(variant, dims)`, default first.
     variants: Vec<(String, [u32; 3])>,
     /// `(name, dims)`: poses whose dims differ from their variant's.
@@ -120,6 +132,11 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
                     t.pickable = v["pickable"].as_bool().ok_or("pickable")?;
                     t.interpolation = v["interpolation"].as_i64().ok_or("interpolation")?;
                     t.margin = hex(&v["targeting_margin"])?;
+                    t.mob = v["mob"].as_bool().unwrap_or(false);
+                    if t.mob {
+                        t.max_head_y_rot = v["max_head_y_rot"].as_u64().ok_or("max_head_y_rot")?;
+                        t.default_body = v["body_control"] == "BodyRotationControl";
+                    }
                 } else {
                     for m in v["meta"].as_array().ok_or("meta")? {
                         let (idx, ser) = (m[0].as_u64().ok_or("index")?, m[1].as_u64().ok_or("ser")?);
@@ -140,6 +157,13 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
                 }
                 for (pose, pd) in v["poses"].as_object().ok_or("poses")? {
                     let a = pd.as_array().ok_or("pose dims")?;
+                    let pi = POSES
+                        .iter()
+                        .position(|p| p == pose)
+                        .ok_or_else(|| format!("unknown pose {pose}"))?;
+                    if variant == "default" && a[3].as_bool().ok_or("pose fixed")? {
+                        t.fixed_poses |= 1 << pi;
+                    }
                     let pd = [hex(&a[0])?, hex(&a[1])?, hex(&a[2])?];
                     if pd == d || (pose == "sleeping" && t.living && pd == SLEEPING) {
                         continue;
@@ -276,6 +300,12 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
         if t.fixed {
             flags.push("type_flags::FIXED");
         }
+        if t.mob {
+            flags.push("type_flags::MOB");
+        }
+        if t.default_body {
+            flags.push("type_flags::DEFAULT_BODY");
+        }
         let flags = if flags.is_empty() { "0".to_owned() } else { flags.join(" | ") };
         let interp = if t.interpolation < 0 {
             "None".to_owned()
@@ -287,8 +317,10 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
             .map_or("None".to_owned(), |i| format!("Some(&VANILLA_ENTITY_SIZES[{i}])"));
         let _ = writeln!(
             out,
-            "    EntityTypeData {{ id: {id}, name: {}, flags: {flags}, interpolation: {interp}, baby_meta: {}, size_meta: {}, flags_meta: {}, size: {size} }},",
+            "    EntityTypeData {{ id: {id}, name: {}, flags: {flags}, interpolation: {interp}, max_head_y_rot: {}, fixed_poses: {:#x}, baby_meta: {}, size_meta: {}, flags_meta: {}, size: {size} }},",
             lit(&t.name),
+            t.max_head_y_rot,
+            t.fixed_poses,
             opt(t.baby),
             opt(t.size),
             opt(t.flags),

@@ -826,10 +826,13 @@ client sends references to the client's own copy of the same data pack, which gi
   add `fall_distance`, `leather_boots`.
 - `entity_sizes.jsonl.gz`: as 1.16.5; `entity_type` lines add `eye_height`; instances are created with
   `EntityType.create(level, EntitySpawnReason.LOAD)` (what the add-entity handler does). Every
-  `entity_size` line carries `poses` (dimensions + eye height per `Pose`, in enum order). The
-  `default` line adds `living` (`instanceof LivingEntity`), `interpolation` (steps of the instance's
-  `InterpolationHandler`, `-1` = none: position packets snap the entity; `0` = displays) and
-  `pickable` (`isPickable()` of the fresh instance). Variant lines add `meta`: the synched data entries
+  `entity_size` line carries `poses`: per `Pose` the instance's width, height, eye height and
+  `fixed` after `setPose(pose)` (the cached dimensions the client refreshes on a pose update; some
+  types look at their own pose, e.g. the digging warden). The `default` line adds `living`
+  (`instanceof LivingEntity`), `interpolation` (steps of the instance's `InterpolationHandler`,
+  `-1` = none: position packets snap the entity; `0` = displays), `pickable` (`isPickable()` of the
+  fresh instance), and for mobs `mob`, `max_head_y_rot` and `body_control` (the simple class name of
+  its `BodyRotationControl`). Variant lines add `meta`: the synched data entries
   that differ from the default instance, `[index, serializer id, value]` (the baby flag, slime size,
   armor stand client flags: the metadata that selects the variant).
 
@@ -1095,7 +1098,7 @@ real `ClientPacketListener`; then `Harness.Run.step` ticks the level (`ClientLev
   `level_chunk_with_light` carries only the chunk x and z as two big-endian ints, the column itself is
   an empty one), then `entities` = every entity but the client player, by id, as the client holds it
   **after the packets and before the tick** (when `Minecraft.tick` picks): `pos` (3 × f64 hex), `rot`
-  (yRot, xRot f32 hex), `head` (living only), `ground`, `box` (6 × f64 hex), `pickable`, `spectator`,
+  (yRot, xRot f32 hex), `head` and `body` (living only: yHeadRot, yBodyRot), `ground`, `box` (6 × f64 hex), `pickable`, `spectator`,
   `ticking` (`isTickingEntity`), `rode` (was named as a passenger since its spawn: its position then
   comes from the vehicle and is not a tracker fact), `vehicle` (-1 = none), `passengers`, `count`
   (item entities), and `tab` = `[profile k, name, game mode id (-1 none), latency, has display name]`.
