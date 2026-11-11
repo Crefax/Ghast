@@ -216,6 +216,41 @@ fn dig_timing_changes() {
             }
         }
     }
+    let mut s12 = crate::sim::Sim12::new();
+    s12.world_packet(&crate::sim::test_chunks::v1_12_2(0, 0))
+        .unwrap();
+    for item in [
+        None,
+        Some(278u16),
+        Some(279),
+        Some(277),
+        Some(276),
+        Some(359),
+    ] {
+        let held =
+            item.map(|id| crate::sim::held_item_facts(crate::version::DataSet::V1_12, id, 1, 0));
+        for id in 1..=255u16 {
+            let Some(st) = ghast_data::v1_12::BlockState::from_raw(id << 4) else {
+                continue;
+            };
+            s12.test_set_block(1, 62, 1, st);
+            let Some(b) = s12.block_query(1, 62, 1) else {
+                continue;
+            };
+            let new = relative_hardness(&b, held.as_ref(), f);
+            let mut old_b = b;
+            old_b.exact = None;
+            let old = relative_hardness(&old_b, held.as_ref(), f);
+            if ticks(new) != ticks(old) {
+                println!(
+                    "1.12.2 item {item:?} block {id} {}: {} -> {} ticks",
+                    st.block().info().name,
+                    ticks(old),
+                    ticks(new)
+                );
+            }
+        }
+    }
     let mut s16 = crate::sim::Sim16::new();
     s16.world_packet(&crate::sim::test_chunks::v1_16_5(0, 0))
         .unwrap();

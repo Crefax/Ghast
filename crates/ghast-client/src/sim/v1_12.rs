@@ -73,6 +73,18 @@ impl std::fmt::Debug for Sim12 {
 }
 
 impl Sim12 {
+    /// Test hook: sets one block.
+    #[cfg(test)]
+    pub(crate) fn test_set_block(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        st: ghast_data::v1_12::BlockState,
+    ) {
+        self.world.set_block_state(x, y, z, st);
+    }
+
     pub(crate) fn new() -> Self {
         Sim12 {
             world: ghast_world::v1_12::World::new(config()),
