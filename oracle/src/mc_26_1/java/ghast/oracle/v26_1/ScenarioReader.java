@@ -162,6 +162,7 @@ final class ScenarioReader {
         if (s.has("sprint_window")) {
             sc.sprintWindow = s.get("sprint_window").getAsInt();
         }
+        Ext.readSetup(s, sc);
         return sc;
     }
 
@@ -222,7 +223,13 @@ final class ScenarioReader {
                     case "level_chunks_load_start" -> events.add(new Scenario.LoadStart());
                     case "section_compiled" -> events.add(new Scenario.SectionCompiled(ev.get("compiled").getAsBoolean()));
                     case "load_timeout" -> events.add(new Scenario.LoadTimeout());
-                    default -> throw new IllegalArgumentException("unknown event " + ev);
+                    default -> {
+                        Scenario.VersionEvent ve = Ext.readEvent(ev);
+                        if (ve == null) {
+                            throw new IllegalArgumentException("unknown event " + ev);
+                        }
+                        events.add(ve);
+                    }
                 }
             }
         }

@@ -88,7 +88,8 @@ final class VoxelDump {
                     .field("walls", d.is(BlockTags.WALLS)).field("fence_gates", d.is(BlockTags.FENCE_GATES))
                     .field("trapdoors", d.is(BlockTags.TRAPDOORS)).field("soul_speed_blocks", d.is(BlockTags.SOUL_SPEED_BLOCKS))
                     .field("fire", d.is(BlockTags.FIRE))
-                    .field("fall_damage_resetting", d.is(BlockTags.FALL_DAMAGE_RESETTING));
+                    .field("fall_damage_resetting", d.is(BlockTags.FALL_DAMAGE_RESETTING))
+                    .field("can_glide_through", d.is(BlockTags.CAN_GLIDE_THROUGH));
             j.endObject();
             // The block's class (movement hooks are per class: TrapDoorBlock, FenceGateBlock, BedBlock, ...).
             j.field("class", b.getClass().getSimpleName());

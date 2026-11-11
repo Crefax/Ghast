@@ -302,7 +302,8 @@ final class Harness {
             }
             if (sc.usesItem()) {
                 // A shield in the selected hotbar slot: using it blocks (input x0.2, no sprinting) until released.
-                ItemStack shield = new ItemStack(Items.SHIELD);
+                ItemStack ext = Ext.handItem(sc);
+                ItemStack shield = ext != null ? ext : new ItemStack(Items.SHIELD);
                 if (sc.useSpeed != null || sc.useCanSprint != null) {
                     // An item with its own use effects (a server-defined component): use slowdown and
                     // whether sprinting continues come from it.
@@ -311,6 +312,8 @@ final class Harness {
                 }
                 player.getInventory().setItem(player.getInventory().getSelectedSlot(), shield);
             }
+
+            Ext.applySetup(this);
 
             // --- position packet (absolute) ---
             teleport(sc.x, sc.y, sc.z, sc.yaw, sc.pitch, 0);
@@ -328,6 +331,7 @@ final class Harness {
             if (sc.sprinting) {
                 player.setSprinting(true);
             }
+            Ext.finishSetup(this);
             if (sc.delayedLoad) {
                 // The join as the client lives it: handleLogin's startWaitingForNewLevel started the
                 // level-load tracker (multiplayer: no close delay); the player does not tick until it
@@ -637,6 +641,8 @@ final class Harness {
                 ab.setFlyingSpeed(a.flySpeed());
                 ab.setWalkingSpeed(a.walkSpeed());
                 listener.handlePlayerAbilities(roundTrip(ClientboundPlayerAbilitiesPacket.STREAM_CODEC, new ClientboundPlayerAbilitiesPacket(ab)));
+            } else if (e instanceof Scenario.VersionEvent ve) {
+                Ext.apply(this, ve);
             }
         }
     }

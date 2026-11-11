@@ -19,7 +19,8 @@
 //! player's chunk column and its neighbours received). The gate order on the wire is
 //! `player_loaded`, then the first movement packet of that tick, then `client_tick_end`.
 
-use super::player::{PlayerState, tick};
+use super::ext::PlayerExt;
+use super::player::{PlayerState, tick_ext};
 use super::rules::Rules;
 use crate::input::{Packet, Packets, TickInput};
 use crate::world::BlockView;
@@ -121,6 +122,21 @@ impl LoadGate {
         section_compiled: bool,
         out: &mut Packets,
     ) {
+        let mut x = PlayerExt::default();
+        self.step_ext::<R, W>(p, &mut x, input, world, section_compiled, out);
+    }
+
+    /// [`LoadGate::step`] with the extension state ([`super::tick_ext`]). While the level is not
+    /// loaded nothing of `x` is used (attached rockets do not boost a player that does not tick).
+    pub fn step_ext<R: Rules, W: BlockView<State = R::State>>(
+        &mut self,
+        p: &mut PlayerState,
+        x: &mut PlayerExt,
+        input: &TickInput,
+        world: &W,
+        section_compiled: bool,
+        out: &mut Packets,
+    ) {
         let was_loaded = self.is_loaded();
         if self.tick(p, section_compiled) {
             out.push(Packet::PlayerLoaded);
@@ -130,14 +146,14 @@ impl LoadGate {
             return;
         }
         if was_loaded {
-            tick::<R, W>(p, input, world, out);
+            tick_ext::<R, W>(p, x, input, world, out);
         } else {
             let still = TickInput {
                 yaw: p.yaw,
                 pitch: p.pitch,
                 ..*input
             };
-            tick::<R, W>(p, &still, world, out);
+            tick_ext::<R, W>(p, x, &still, world, out);
         }
     }
 }

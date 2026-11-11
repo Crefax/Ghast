@@ -35,7 +35,13 @@ public final class Scenario {
 
     /** A server packet applied at the start of a tick (before the keys / tick). */
     public sealed interface Event permits Velocity, Teleport, Abilities, SpeedAttribute, Effects, Attribute, LoadStart,
-            SectionCompiled, LoadTimeout {}
+            SectionCompiled, LoadTimeout, VersionEvent {}
+
+    /**
+     * A server packet only one version harness knows (defined, recorded and read back by that harness, e.g.
+     * the 26.1 entity, equipment and vehicle packets); other harnesses never see one.
+     */
+    public non-sealed interface VersionEvent extends Event {}
 
     /** 26.1: the server's {@code LEVEL_CHUNKS_LOAD_START} game event (the client waits for its chunk next). */
     public record LoadStart() implements Event {}
@@ -160,6 +166,11 @@ public final class Scenario {
     public Boolean useCanSprint;
     /** 26.x: the client's sprint double-tap window option (null = vanilla default 7). */
     public Integer sprintWindow;
+    /**
+     * Version-specific setup (an object of the version harness's own type, e.g. 26.1 equipment, vehicles and
+     * nearby entities); null when unused, so the header of older cases keeps its bytes.
+     */
+    public Object versionSetup;
 
     public final List<Tick> ticks = new ArrayList<>();
 

@@ -116,6 +116,8 @@ pub mod block_flags {
     pub const SOUL_SPEED_BLOCKS: u32 = 256;
     /// `#minecraft:fire`.
     pub const FIRE: u32 = 512;
+    /// `#minecraft:can_glide_through` (vines: not climbable for a gliding player).
+    pub const CAN_GLIDE_THROUGH: u32 = 1024;
 }
 
 /// Static per-block data (jar values for everything movement reads).

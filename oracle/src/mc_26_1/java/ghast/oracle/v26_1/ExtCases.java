@@ -1,0 +1,369 @@
+package ghast.oracle.v26_1;
+
+import ghast.oracle.Io;
+import ghast.oracle.Rng;
+import ghast.oracle.Scenario;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import static ghast.oracle.Scenario.BACK;
+import static ghast.oracle.Scenario.FORWARD;
+import static ghast.oracle.Scenario.JUMP;
+import static ghast.oracle.Scenario.LEFT;
+import static ghast.oracle.Scenario.SNEAK;
+import static ghast.oracle.Scenario.SPRINT;
+import static ghast.oracle.Scenario.USE;
+
+/** Hand-written and randomized cases for the mechanics of {@link Ext} (one group per mechanic). */
+final class ExtCases {
+    private ExtCases() {}
+
+    private static int s(String spec) {
+        return States.id(spec);
+    }
+
+    private static Scenario flat(String name) {
+        return new Scenario(name).fill(-48, 63, -48, 48, 63, 48, s("stone"), 0);
+    }
+
+    private static Scenario elytra(Scenario sc) {
+        Ext.setup(sc).chest = "elytra";
+        return sc;
+    }
+
+    private static void addEvent(Scenario sc, int tick, Scenario.Event e) {
+        Scenario.Tick tk = sc.ticks.get(tick);
+        List<Scenario.Event> events = new ArrayList<>(tk.events());
+        events.add(e);
+        sc.ticks.set(tick, new Scenario.Tick(tk.keys(), tk.yaw(), tk.pitch(), List.copyOf(events)));
+    }
+
+    private static final int FF = 0x80;
+
+    /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
+    static final String[] MECHANICS = {"elytra"};
+
+    static List<Scenario> scenarios(String mechanic) {
+        return switch (mechanic) {
+            case "elytra" -> elytra();
+            default -> throw new IllegalArgumentException("mechanic " + mechanic);
+        };
+    }
+
+    static Scenario fuzz(String mechanic, long seed, int index, int ticks) {
+        return switch (mechanic) {
+            case "elytra" -> elytraFuzz(seed, index, ticks);
+            default -> throw new IllegalArgumentException("mechanic " + mechanic);
+        };
+    }
+
+    static List<Scenario> golden(String mechanic) {
+        List<Scenario> l = new ArrayList<>(scenarios(mechanic));
+        for (int i = 0; i < Main.GOLDEN_FUZZ_COUNT; i++) {
+            l.add(fuzz(mechanic, Main.GOLDEN_FUZZ_SEED, i, Main.GOLDEN_FUZZ_TICKS));
+        }
+        return l;
+    }
+
+    static void writeGolden(Path dir) throws IOException {
+        for (String m : MECHANICS) {
+            Io.write(dir.resolve(m + ".jsonl.gz"), sink -> Main.runAll(golden(m), sink));
+        }
+    }
+
+    /**
+     * Commands: {@code <mechanic> [--out FILE]} (its golden file) and {@code ext-fuzz --mechanic M [--seed N]
+     * [--count N] [--ticks N] [--out FILE]}. Returns false for an unknown command.
+     */
+    static boolean command(String cmd, Io.Args a, Path golden) throws IOException {
+        if (List.of(MECHANICS).contains(cmd)) {
+            Io.bestCompression = true;
+            Io.write(a.path("--out", golden.resolve(cmd + ".jsonl.gz")), sink -> Main.runAll(golden(cmd), sink));
+            return true;
+        }
+        if (cmd.equals("jdk-cos")) {
+            jdkCos(Path.of(a.str("--out", null)));
+            return true;
+        }
+        if (cmd.equals("ext-fuzz")) {
+            String m = a.str("--mechanic", "elytra");
+            long seed = a.lng("--seed", 1);
+            int count = (int) a.lng("--count", 100);
+            int ticks = (int) a.lng("--ticks", 100);
+            Path out = a.path("--out", Path.of("cache", Main.VERSION, "fuzz-" + m, m + "_s" + seed + ".jsonl.gz"));
+            Io.write(out, sink -> {
+                for (int i = 0; i < count; i++) {
+                    Main.run(fuzz(m, seed, i, ticks), sink);
+                }
+            });
+            return true;
+        }
+        return false;
+    }
+
+    // ---- elytra ------------------------------------------------------------------------------------
+
+    static List<Scenario> elytra() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(elytra(flat("elytra_start_glide")).desc("fall, press jump in the air: START_FALL_FLYING, glide level, dive, climb")
+                .spawn(0.5, 110, 0.5, 0, 0).run(4, 0).run(1, JUMP).run(30, 0).turn(10, 0, 0, 4).run(15, 0, 0, 40)
+                .turn(20, 0, 0, -5).run(30, 0, 3, -50));
+        l.add(elytra(flat("elytra_jump_from_ground")).desc("jump on the ground (no glide), keep holding (no retrigger), press again in the air")
+                .spawn(0.5, 64, 0.5, 90, 10).run(2, 0).run(8, JUMP | FORWARD).run(1, FORWARD).run(1, JUMP | FORWARD).run(40, FORWARD));
+        Scenario broken = elytra(flat("elytra_broken")).desc("elytra at max damage - 1: jump in the air does not glide")
+                .spawn(0.5, 90, 0.5, 0, 0);
+        Ext.setup(broken).chestDamage = 431;
+        l.add(broken.run(3, 0).run(1, JUMP).run(20, 0).run(1, JUMP).run(10, 0));
+        l.add(new Scenario("elytra_no_chest").fill(-8, 63, -8, 8, 63, 8, s("stone"), 0)
+                .desc("no elytra: jump in the air does nothing").spawn(0.5, 80, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(20, 0));
+        l.add(elytra(flat("elytra_water").fill(-6, 64, -6, 6, 70, 6, s("water"), 0))
+                .desc("in water: no glide; fall into water while gliding (fluid travel first)")
+                .spawn(0.5, 68, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(10, 0));
+        l.add(elytra(flat("elytra_into_water").fill(-6, 60, 10, 6, 66, 30, s("water"), 0))
+                .desc("glide down into a pool: fluid travel while the flag stays set; sprint-swim attempts")
+                .spawn(0.5, 80, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, 0, 0, 30).run(20, FORWARD | SPRINT, 0, 30));
+        Scenario land = elytra(flat("elytra_landing")).desc("glide to the ground: the client keeps gliding until the server clears flag 7")
+                .spawn(0.5, 72, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, 0, 0, 15).run(20, FORWARD);
+        addEvent(land, 52, new Ext.SharedFlags(0, FF));
+        l.add(land);
+        l.add(elytra(flat("elytra_ladder").fill(-1, 64, 12, 1, 90, 12, s("stone"), 0).fill(-1, 64, 11, 1, 90, 11, s("ladder[facing=north]"), 0))
+                .desc("glide into a ladder: onClimbable stops gliding on the client (stopFallFlying)")
+                .spawn(0.5, 85, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, FORWARD, 0, 5));
+        l.add(elytra(flat("elytra_vines").fill(-3, 64, 10, 3, 90, 13, s("vine[south=true]"), 0))
+                .desc("glide through vines (#can_glide_through): not climbable while gliding")
+                .spawn(0.5, 85, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(30, 0, 0, 5).run(1, JUMP).run(10, 0));
+        l.add(elytra(flat("elytra_wall").fill(-5, 64, 8, 5, 100, 8, s("stone"), 0))
+                .desc("glide into a wall (horizontal collision)").spawn(0.5, 90, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(25, 0, 0, 10));
+        Scenario creative = elytra(flat("elytra_creative")).desc("creative: a double tap toggles flight (no glide); flying: cannot glide")
+                .spawn(0.5, 80, 0.5, 0, 0).mode(Scenario.GameMode.CREATIVE);
+        l.add(creative.run(3, 0).run(1, JUMP).run(2, 0).run(1, JUMP).run(10, 0).run(1, JUMP).run(5, 0).run(1, JUMP).run(2, 0)
+                .run(1, JUMP).run(30, 0));
+        Scenario lev = elytra(flat("elytra_levitation")).desc("levitation: cannot glide").spawn(0.5, 80, 0.5, 0, 0)
+                .effect(Scenarios.eff("levitation"), 0);
+        l.add(lev.run(3, 0).run(1, JUMP).run(20, 0));
+        Scenario slow = elytra(flat("elytra_slow_falling")).desc("slow falling while gliding (gravity 0.01 when falling)")
+                .spawn(0.5, 100, 0.5, 0, 0).effect(Scenarios.eff("slow_falling"), 0);
+        l.add(slow.run(3, 0).run(1, JUMP).run(40, 0, 0, 20).run(20, 0, 0, -30));
+        l.add(elytra(flat("elytra_ceiling").fill(-4, 66, 2, 4, 66, 30, s("stone"), 0))
+                .desc("glide under a low ceiling (pose 0.6 high), then the flag is cleared under it")
+                .spawn(0.5, 65.2, 0.5, 0, 0).velocity(0, 0, 1.2).run(1, JUMP).run(12, 0).run(10, FORWARD));
+        Scenario ceil = l.get(l.size() - 1);
+        addEvent(ceil, 8, new Ext.SharedFlags(0, FF));
+        Scenario fw = elytra(flat("elytra_fireworks")).desc("two rockets attached: boost along the look vector, removed by the server")
+                .spawn(0.5, 120, 0.5, 30, 0).run(3, 0).run(1, JUMP).run(10, 0).run(40, 0, 30, -20).run(30, 0, 60, 10);
+        addEvent(fw, 8, new Ext.Firework(1001));
+        addEvent(fw, 20, new Ext.Firework(1002));
+        addEvent(fw, 26, new Ext.Remove(1001));
+        addEvent(fw, 40, new Ext.Remove(1002));
+        addEvent(fw, 50, new Ext.Firework(1003));
+        addEvent(fw, 75, new Ext.Remove(1003));
+        l.add(fw);
+        Scenario fwGround = elytra(flat("elytra_firework_not_gliding")).desc("a rocket attached to a player who is not gliding: no boost")
+                .spawn(0.5, 64, 0.5, 0, -30).run(5, FORWARD);
+        addEvent(fwGround, 1, new Ext.Firework(1001));
+        l.add(fwGround.run(20, FORWARD).run(1, JUMP).run(10, 0));
+        Scenario use = elytra(flat("elytra_firework_use")).desc("use a rocket while gliding: use_item + swing, the server spawns it 2 ticks later")
+                .spawn(0.5, 110, 0.5, 0, 0);
+        Ext.setup(use).hand = "firework_rocket";
+        use.run(3, 0).run(1, USE).run(2, 0).run(1, JUMP).run(5, 0).run(1, USE).run(30, 0);
+        addEvent(use, 14, new Ext.Firework(1001));
+        addEvent(use, 33, new Ext.Remove(1001));
+        l.add(use);
+        Scenario flags = elytra(flat("elytra_server_flags")).desc("server entity data: sprint / swim bits, flag 7 set and cleared from the server")
+                .spawn(0.5, 100, 0.5, 0, 0).run(3, FORWARD);
+        flags.run(10, FORWARD).run(30, FORWARD | SPRINT).run(20, 0);
+        addEvent(flags, 2, new Ext.SharedFlags(FF, 0));
+        addEvent(flags, 12, new Ext.SharedFlags(0x08, 0));
+        addEvent(flags, 20, new Ext.SharedFlags(0x10, 0x08));
+        addEvent(flags, 30, new Ext.SharedFlags(0, 0x90));
+        addEvent(flags, 40, new Ext.SharedFlags(0x88, 0));
+        l.add(flags);
+        Scenario started = elytra(flat("elytra_setup_gliding")).desc("join gliding (flag 7 in the setup entity data), sneak and strafe")
+                .spawn(0.5, 100, 0.5, 45, 10).velocity(1.0, -0.2, 1.0);
+        Ext.setup(started).fallFlying = true;
+        l.add(started.run(10, 0).run(10, SNEAK).run(10, LEFT | FORWARD).run(10, BACK).run(10, JUMP));
+        Scenario unequip = elytra(flat("elytra_unequip")).desc("elytra taken off while gliding: the client keeps gliding; no restart")
+                .spawn(0.5, 110, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(15, 0).run(1, JUMP).run(10, 0);
+        addEvent(unequip, 10, new Ext.Equip("chest", null, 0));
+        addEvent(unequip, 15, new Ext.SharedFlags(0, FF));
+        addEvent(unequip, 22, new Ext.Equip("chest", "elytra", 0));
+        l.add(unequip.run(1, JUMP).run(15, 0));
+        Scenario edge = elytra(new Scenario("elytra_rocket_chunk_edge").outside(Scenario.Outside.UNLOADED)
+                .fill(-16, 63, -96, -1, 63, 15, s("stone"), 0))
+                .desc("glide along a loaded / unloaded chunk border: the rocket at the right hand moves into the unloaded chunk and stops ticking; left-handed next")
+                .spawn(-0.3, 110, 8.5, 180, 0).run(3, 0).run(1, JUMP).run(30, 0);
+        addEvent(edge, 6, new Ext.Firework(1001));
+        addEvent(edge, 16, new Ext.Remove(1001));
+        l.add(edge);
+        Scenario edgeLeft = elytra(new Scenario("elytra_rocket_chunk_edge_left").outside(Scenario.Outside.UNLOADED)
+                .fill(-16, 63, -96, -1, 63, 15, s("stone"), 0))
+                .desc("left-handed: the rocket stays on the loaded side and keeps boosting").spawn(-0.3, 110, 8.5, 180, 0);
+        Ext.setup(edgeLeft).leftHanded = true;
+        edgeLeft.run(3, 0).run(1, JUMP).run(30, 0);
+        addEvent(edgeLeft, 6, new Ext.Firework(1001));
+        addEvent(edgeLeft, 16, new Ext.Remove(1001));
+        l.add(edgeLeft);
+        Scenario steep = elytra(flat("elytra_steep")).desc("look straight down and straight up while gliding (lift, conversion terms)")
+                .spawn(0.5, 200, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(20, 0, 0, 90).run(20, 0, 0, -90).run(20, 0, 0, -45);
+        l.add(steep);
+        return l;
+    }
+
+    /**
+     * Randomized elytra cases: the {@code withExtras} case (terrain, attributes, effects, inbound packets)
+     * with an elytra (sometimes broken or missing), often raised or started gliding, frequent jump presses,
+     * wide pitch changes, and server packets: flag 7 cleared or set, sprint / swim bits, attached rockets
+     * (added and removed), the chest item swapped; big dripleaf is removed from the terrain (see the
+     * oracle README). Cases get an {@code _el} suffix.
+     */
+    static Scenario elytraFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_el");
+        copy(base, sc);
+        // No big dripleaf: an attached rocket's ray that hits one tilts it on the client (the block's
+        // projectile hook runs client-side too), a world change the physics does not model.
+        sc.fills.removeIf(f -> States.name(States.byId(f.id())).startsWith("minecraft:big_dripleaf["));
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x656c79747261L);
+        Ext.Setup st = Ext.setup(sc);
+        if (x.chance(0.92)) {
+            st.chest = "elytra";
+            if (x.chance(0.05)) {
+                st.chestDamage = 431;
+            } else if (x.chance(0.2)) {
+                st.chestDamage = x.range(1, 430);
+            }
+        }
+        if (x.chance(0.6)) {
+            sc.y += x.range(2, 60) + x.nextDouble();
+        }
+        if (x.chance(0.3)) {
+            st.fallFlying = true;
+        }
+        if (x.chance(0.3)) {
+            st.leftHanded = true;
+        }
+        if (x.chance(0.3)) {
+            sc.velocity((x.nextDouble() - 0.5) * 3, (x.nextDouble() - 0.7) * 2, (x.nextDouble() - 0.5) * 3);
+        }
+        // Jump presses and look changes over the base input.
+        float pitch = sc.pitch;
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            Scenario.Tick tk = sc.ticks.get(i);
+            int keys = tk.keys();
+            if (x.chance(0.12)) {
+                keys ^= JUMP;
+            }
+            float p = tk.pitch();
+            if (x.chance(0.7)) {
+                if (x.chance(0.1)) {
+                    pitch = (float) (x.nextDouble() * 180 - 90);
+                } else {
+                    pitch = Math.max(-90f, Math.min(90f, pitch + (float) ((x.nextDouble() - 0.5) * 12)));
+                }
+                p = pitch;
+            }
+            sc.ticks.set(i, new Scenario.Tick(keys, tk.yaw(), p, tk.events()));
+        }
+        int nextId = 2000;
+        List<int[]> live = new ArrayList<>();
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            if (x.chance(0.035)) {
+                addEvent(sc, i, new Ext.SharedFlags(0, FF));
+            }
+            if (x.chance(0.015)) {
+                addEvent(sc, i, new Ext.SharedFlags(FF, 0));
+            }
+            if (x.chance(0.01)) {
+                int bits = x.pick(new int[] {0x08, 0x10, 0x18});
+                addEvent(sc, i, x.chance(0.5) ? new Ext.SharedFlags(bits, 0) : new Ext.SharedFlags(0, bits));
+            }
+            if (x.chance(0.04) && live.size() < 3) {
+                int id = nextId++;
+                addEvent(sc, i, new Ext.Firework(id));
+                live.add(new int[] {id, i + x.range(1, 25)});
+            }
+            for (int k = live.size() - 1; k >= 0; k--) {
+                if (live.get(k)[1] == i) {
+                    addEvent(sc, i, new Ext.Remove(live.get(k)[0]));
+                    live.remove(k);
+                }
+            }
+            if (x.chance(0.01)) {
+                boolean on = x.chance(0.6);
+                addEvent(sc, i, new Ext.Equip("chest", on ? "elytra" : null, on && x.chance(0.2) ? 431 : 0));
+            }
+        }
+        sc.description += ", elytra";
+        return sc;
+    }
+
+    /**
+     * {@code Math.cos} of every float argument from bits 0 to {@code (float) (PI / 2)} + 64 ulps, each as 8
+     * bytes little-endian, for the table of {@code ghast_physics::modern::jdk_math} (gliding reads
+     * {@code Math.cos} of the pitch; this JVM's intrinsic is not the correctly rounded cosine).
+     */
+    static void jdkCos(Path out) throws IOException {
+        int hi = Float.floatToIntBits((float) (Math.PI / 2)) + 64;
+        try (java.io.OutputStream o = new java.io.BufferedOutputStream(java.nio.file.Files.newOutputStream(out), 1 << 20)) {
+            byte[] buf = new byte[8 * 4096];
+            int k = 0;
+            for (int b = 0; b <= hi; b++) {
+                long c = Double.doubleToRawLongBits(Math.cos((double) Float.intBitsToFloat(b)));
+                for (int s = 0; s < 8; s++) {
+                    buf[k++] = (byte) (c >>> (8 * s));
+                }
+                if (k == buf.length) {
+                    o.write(buf);
+                    k = 0;
+                }
+            }
+            o.write(buf, 0, k);
+        }
+    }
+
+    /** Every field a fuzz case sets. */
+    static void copy(Scenario src, Scenario sc) {
+        sc.description = src.description;
+        sc.outside = src.outside;
+        sc.extraChunks.addAll(src.extraChunks);
+        sc.fills.addAll(src.fills);
+        sc.gameMode = src.gameMode;
+        sc.x = src.x;
+        sc.y = src.y;
+        sc.z = src.z;
+        sc.yaw = src.yaw;
+        sc.pitch = src.pitch;
+        sc.vx = src.vx;
+        sc.vy = src.vy;
+        sc.vz = src.vz;
+        sc.onGround = src.onGround;
+        sc.fallDistance = src.fallDistance;
+        sc.sprinting = src.sprinting;
+        sc.flying = src.flying;
+        sc.allowFlying = src.allowFlying;
+        sc.flySpeed = src.flySpeed;
+        sc.walkSpeed = src.walkSpeed;
+        sc.movementSpeedBase = src.movementSpeedBase;
+        sc.foodLevel = src.foodLevel;
+        sc.health = src.health;
+        sc.effects.putAll(src.effects);
+        sc.speedModifiers.addAll(src.speedModifiers);
+        sc.attributeBases.putAll(src.attributeBases);
+        sc.attributeModifiers.addAll(src.attributeModifiers);
+        sc.depthStrider = src.depthStrider;
+        sc.soulSpeed = src.soulSpeed;
+        sc.autoJump = src.autoJump;
+        sc.bb = src.bb;
+        sc.pose = src.pose;
+        sc.leatherBoots = src.leatherBoots;
+        sc.delayedLoad = src.delayedLoad;
+        sc.useSpeed = src.useSpeed;
+        sc.useCanSprint = src.useCanSprint;
+        sc.sprintWindow = src.sprintWindow;
+        sc.ticks.addAll(src.ticks);
+    }
+}

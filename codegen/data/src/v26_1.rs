@@ -77,6 +77,7 @@ const BLOCK_FLAG_BITS: &[(&str, u32)] = &[
     ("tags.fall_damage_resetting", 128),
     ("tags.soul_speed_blocks", 256),
     ("tags.fire", 512),
+    ("tags.can_glide_through", 1024),
 ];
 
 struct OracleBlock {

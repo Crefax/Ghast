@@ -10,6 +10,7 @@ use ghast_data::v26_1::{BlockKind, block_flags as bf, state_flags as sf};
 
 use super::attr::{Attribute, ModifierId, SPRINT_AMOUNT, sprinting_id};
 use super::collide::{Border, Placed, ShapeCtx, World, collide, make_box};
+use super::ext::{self, PlayerExt};
 use super::fluid::kind;
 use super::inside::{Movement, Visited, axis_order, for_each_block_between};
 use super::math::{
@@ -632,7 +633,26 @@ pub fn on_climbable<R: Rules, W: BlockView<State = R::State>>(p: &PlayerState, w
         max_y: p.level.min_y + p.level.height - 1,
         _r: core::marker::PhantomData,
     };
-    climbable::<R, W>(&world, p)
+    climbable::<R, W>(&world, p, false)
+}
+
+/// `true` when the player is on a climbable block (vanilla `onClimbable`), with the extension
+/// state: a gliding player is not on a `#can_glide_through` block (vines).
+#[must_use]
+pub fn on_climbable_ext<R: Rules, W: BlockView<State = R::State>>(
+    p: &PlayerState,
+    x: &PlayerExt,
+    w: &W,
+) -> bool {
+    let border = Border::new(&w.world_border());
+    let world = World::<R, W> {
+        w,
+        border: &border,
+        min_y: p.level.min_y,
+        max_y: p.level.min_y + p.level.height - 1,
+        _r: core::marker::PhantomData,
+    };
+    climbable::<R, W>(&world, p, x.fall_flying)
 }
 
 /// The entity-dependent part of a block collision query (vanilla `EntityCollisionContext`).
@@ -683,6 +703,7 @@ pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
 fn climbable<R: Rules, W: BlockView<State = R::State>>(
     w: &World<'_, R, W>,
     p: &PlayerState,
+    gliding: bool,
 ) -> bool {
     // Player.onClimbable: never while flying; LivingEntity: never for spectators.
     if p.abilities.flying || p.spectator {
@@ -691,6 +712,9 @@ fn climbable<R: Rules, W: BlockView<State = R::State>>(
     let (x, y, z) = (floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
     let s = w.state(x, y, z);
     let d = R::block(s);
+    if gliding && d.flags & bf::CAN_GLIDE_THROUGH != 0 {
+        return false;
+    }
     if d.flags & bf::CLIMBABLE != 0 {
         return true;
     }
@@ -710,8 +734,24 @@ fn climbable<R: Rules, W: BlockView<State = R::State>>(
 /// `input.using_item` is "an item is in use" (`isUsingItem`); its slowdown and sprint rule come
 /// from [`PlayerState::use_effects`]. `tick_end` (sent by `Minecraft.tick` after every tick) is not
 /// part of the output.
+///
+/// The same as [`tick_ext`] with a default [`PlayerExt`] (no glider, not gliding).
 pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     p: &mut PlayerState,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    let mut x = PlayerExt::default();
+    tick_ext::<R, W>(p, &mut x, input, world, out);
+}
+
+/// [`tick`] with the extension state of the mechanics added after 0.4.0 (gliding and rockets, see
+/// [`PlayerExt`]): one `LocalPlayer.tick`, then the tick of every rocket attached to the player
+/// (rockets are entities the client ticks after its player).
+pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -733,16 +773,19 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     };
     let mut t = Ctx {
         p,
+        x,
         w: &w,
         old_pos: V3::ZERO,
         moves: [None; 4],
         using_item: input.using_item,
     };
     t.tick(&input.keys, out);
+    x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
 }
 
 struct Ctx<'a, 'b, R: Rules, W> {
     p: &'a mut PlayerState,
+    x: &'a mut PlayerExt,
     w: &'a World<'b, R, W>,
     old_pos: V3,
     moves: [Option<Movement>; 4],
@@ -980,8 +1023,14 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
                 }
             }
         }
-        // (jump && !just_toggled && !onClimbable && tryToStartFallFlying: needs an elytra, not modelled.)
-        let _ = just_toggled;
+        if self.p.input.keys.jump
+            && !just_toggled
+            && !was_jumping
+            && !self.on_climbable()
+            && self.try_to_start_fall_flying()
+        {
+            out.push(Packet::StartFallFlying);
+        }
         let p = &mut *self.p;
         if p.touching_water && p.input.keys.sneak && !p.abilities.flying {
             p.vel[1] += f64::from(-0.04f32);
@@ -1007,6 +1056,26 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         }
     }
 
+    /// `Player.tryToStartFallFlying`.
+    fn try_to_start_fall_flying(&mut self) -> bool {
+        let p = &self.p;
+        // canGlide: not flying, not on the ground, not riding, no levitation, a usable glider.
+        let can_glide =
+            !p.abilities.flying && !p.on_ground && p.effects.levitation.is_none() && self.x.glider;
+        if !self.x.fall_flying && can_glide && !p.touching_water {
+            self.x.fall_flying = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `isVisuallyCrawling()`: the swimming pose out of water, or (`LivingEntity`) the gliding pose
+    /// kept after gliding stopped.
+    fn visually_crawling(&self) -> bool {
+        self.x.visually_crawling(self.p)
+    }
+
     fn sprinting_possible(&self, allow_shallow: bool) -> bool {
         let p = &self.p;
         let food = p.food_level as f32 > 6.0 || p.abilities.allow_flying;
@@ -1016,11 +1085,12 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     fn can_start_sprinting(&self) -> bool {
         let p = &self.p;
         let slow_using = self.using_item && !p.use_effects.can_sprint;
-        let moving_slowly = p.crouching || p.visually_crawling();
+        let moving_slowly = p.crouching || self.visually_crawling();
         !p.sprinting
             && p.input.has_forward_impulse()
             && self.sprinting_possible(p.abilities.flying)
             && !slow_using
+            && (!self.x.fall_flying || p.is_underwater())
             && (!moving_slowly || p.is_underwater())
     }
 
@@ -1135,6 +1205,10 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             p.no_jump_delay = 0;
         }
         let p = &mut *self.p;
+        // updateFallFlying (client: checkFallDistanceAccumulation only).
+        if self.x.fall_flying && p.vel[1] > -0.5 && p.fall_distance > 1.0 {
+            p.fall_distance = 1.0;
+        }
         let input = V3::new(f64::from(p.xxa), 0.0, f64::from(p.zza));
         if p.effects.slow_falling || p.effects.levitation.is_some() {
             p.fall_distance = 0.0;
@@ -1155,7 +1229,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             x *= k;
             y *= k;
         }
-        if self.p.crouching || self.p.visually_crawling() {
+        if self.p.crouching || self.visually_crawling() {
             let k = self.p.attributes.sneaking_speed.value() as f32;
             x *= k;
             y *= k;
@@ -1218,7 +1292,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     /// `getBlockSpeedFactor` (Player, LivingEntity, Entity).
     fn block_speed_factor(&self) -> f32 {
         let p = &self.p;
-        if p.abilities.flying {
+        if p.abilities.flying || self.x.fall_flying {
             return 1.0;
         }
         let s = self
@@ -1323,8 +1397,25 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             } else {
                 self.travel_in_lava(input, g, falling, old_y);
             }
+        } else if self.x.fall_flying {
+            self.travel_fall_flying(input);
         } else {
             self.travel_in_air(input);
+        }
+    }
+
+    /// `LivingEntity.travelFallFlying` (the client part: no wall damage).
+    fn travel_fall_flying(&mut self, input: V3) {
+        if self.on_climbable() {
+            self.travel_in_air(input);
+            // stopFallFlying
+            self.x.fall_flying = false;
+        } else {
+            let g = self.gravity();
+            let v = ext::glide(self.vel(), self.p.yaw, self.p.pitch, g);
+            self.set_vel(v);
+            let v = self.vel();
+            self.move_self(v);
         }
     }
 
@@ -1445,7 +1536,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     }
 
     fn on_climbable(&self) -> bool {
-        climbable::<R, W>(self.w, self.p)
+        climbable::<R, W>(self.w, self.p, self.x.fall_flying)
     }
 
     /// `handleOnClimbable`.
@@ -2219,6 +2310,8 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         let p = &self.p;
         let desired = if p.is_swimming() {
             Pose::Swimming
+        } else if self.x.fall_flying {
+            Pose::FallFlying
         } else if p.shift() && !p.abilities.flying {
             Pose::Crouching
         } else {

@@ -107,7 +107,11 @@ public final class Main {
             }
             case "selftest" -> selftest();
             case "compare" -> System.exit(Io.compare(Path.of(args[1]), Path.of(args[2])) ? 0 : 1);
-            default -> usage();
+            default -> {
+                if (!ExtCases.command(args[0], a, golden)) {
+                    usage();
+                }
+            }
         }
     }
 
@@ -133,6 +137,8 @@ public final class Main {
                   clicks [--seed N] [--count N] [--out FILE]  window clicks through the real client (every menu type)
                   creative-clicks [--seed N] [--count N] [--out FILE]  the creative inventory screen (set_creative_mode_slot)
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
+                  elytra [--out FILE]                  movement mechanics beyond the plain player (cases + golden fuzz)
+                  ext-fuzz --mechanic M [--seed N] [--count N] [--ticks N] [--out FILE]  randomized cases of one mechanic
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
     }
@@ -163,6 +169,7 @@ public final class Main {
             }
         });
         Io.write(dir.resolve("joins.jsonl.gz"), sink -> runAll(Scenarios26.joins(), sink));
+        ExtCases.writeGolden(dir);
         Io.write(dir.resolve("collision_shapes.jsonl.gz"), CollisionDump::lines);
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
@@ -242,6 +249,9 @@ public final class Main {
         }
         all.addAll(Scenarios26.teleports());
         all.addAll(Scenarios26.joins());
+        for (String m : ExtCases.MECHANICS) {
+            all.addAll(ExtCases.golden(m));
+        }
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -261,9 +271,13 @@ public final class Main {
         int creativeMismatches = ClickDump.creativeReverseMismatches(1, 300);
         System.out.println((creativeMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 300 creative click cases");
         ok &= creativeMismatches == 0;
-        for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
+        List<String> replayFiles = new ArrayList<>(List.of("scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "teleports.jsonl.gz", "joins.jsonl.gz"}) {
+                "teleports.jsonl.gz", "joins.jsonl.gz"));
+        for (String m : ExtCases.MECHANICS) {
+            replayFiles.add(m + ".jsonl.gz");
+        }
+        for (String f : replayFiles) {
             Path replayed = base.resolve("replayed-" + f);
             Io.write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = Io.sha256(replayed).equals(Io.sha256(a.resolve(f)));

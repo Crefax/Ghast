@@ -64,6 +64,12 @@ fn teleports_26_1() {
     check("teleports.jsonl.gz");
 }
 
+/// Gliding with an elytra: start, glide physics, rockets, climbables, the server's shared flags.
+#[test]
+fn elytra_26_1() {
+    check("elytra.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

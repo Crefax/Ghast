@@ -138,6 +138,7 @@ final class Recorder {
         if (sc.health != null) {
             j.fieldF32("health", sc.health);
         }
+        Ext.header(j, sc);
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -220,6 +221,8 @@ final class Recorder {
             j.field("type", "section_compiled").field("compiled", c.compiled());
         } else if (e instanceof Scenario.LoadTimeout) {
             j.field("type", "load_timeout");
+        } else if (e instanceof Scenario.VersionEvent ve) {
+            Ext.event(j, ve);
         }
         j.endObject();
     }

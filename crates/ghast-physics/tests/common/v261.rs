@@ -1,8 +1,8 @@
 //! 26.1 golden replay (format: `oracle/README.md`, section "26.1").
 
 use ghast_physics::modern::{
-    self, AttributeKind, ClientInput, Dimensions, Effects, MemoryWorld26, ModifierId, PlayerState,
-    Pose, SentState, V26_1,
+    self, AttributeKind, ClientInput, Dimensions, Effects, MemoryWorld26, ModifierId, PlayerExt,
+    PlayerState, Pose, SentState, V26_1,
 };
 use ghast_physics::{Abilities, Keys, Packet, Packets, TickInput};
 use serde_json::{Value, json};
@@ -273,8 +273,34 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
     p
 }
 
+/// The extension state from the header's `setup.ext` and the tick-0 record.
+pub fn ext_of(header: &Value, t0: &Value) -> PlayerExt {
+    let mut x = PlayerExt::default();
+    if let Some(e) = header["setup"].get("ext") {
+        x.glider = glider(e.get("chest"), e.get("chest_damage"));
+        x.rocket_arm_left = e.get("left_handed").is_some_and(b);
+    }
+    x.fall_flying = b(&t0["state"]["fall_flying"]);
+    x
+}
+
+/// `canGlideUsing` of a chest item: an elytra whose next damage does not break it (max 432).
+fn glider(item: Option<&Value>, damage: Option<&Value>) -> bool {
+    item.and_then(Value::as_str) == Some("elytra") && damage.map_or(0, i) < 431
+}
+
 /// The state in the oracle's 26.1 record layout.
 pub fn state_json(p: &PlayerState, w: &MemoryWorld26, using_item: bool) -> Value {
+    state_json_ext(p, &PlayerExt::default(), w, using_item)
+}
+
+/// [`state_json`] with the extension state.
+pub fn state_json_ext(
+    p: &PlayerState,
+    x: &PlayerExt,
+    w: &MemoryWorld26,
+    using_item: bool,
+) -> Value {
     let bb = p.bb;
     let a = &p.attributes;
     let fly = if p.abilities.flying {
@@ -317,13 +343,13 @@ pub fn state_json(p: &PlayerState, w: &MemoryWorld26, using_item: bool) -> Value
         "in_powder_snow": p.in_powder_snow,
         "was_in_powder_snow": p.was_in_powder_snow,
         "first_update": p.first_tick,
-        "climbing": modern::on_climbable::<V26_1, _>(p, w),
+        "climbing": modern::on_climbable_ext::<V26_1, _>(p, x, w),
         "swimming": p.is_swimming(),
         "sprinting": p.sprinting,
         "sneaking": p.shift(),
         "in_sneaking_pose": p.crouching,
-        "visually_crawling": p.visually_crawling(),
-        "fall_flying": false,
+        "visually_crawling": x.visually_crawling(p),
+        "fall_flying": x.fall_flying,
         "using_item": using_item,
         "no_clip": p.no_physics,
         "step_height": jf32(p.step_height()),
@@ -388,6 +414,9 @@ pub fn packet_json(p: &Packet) -> Value {
         Packet::Abilities(a) => json!({"name": "abilities", "flying": a.flying}),
         Packet::PlayerInput(k) => json!({"name": "player_input", "input": keys_json(&k)}),
         Packet::PlayerLoaded => json!({"name": "player_loaded"}),
+        Packet::StartFallFlying => {
+            json!({"name": "entity_action", "action": 6, "action_name": "start_fall_flying"})
+        }
         Packet::Move {
             pos,
             look,
@@ -515,6 +544,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let world = world_of(&case.header);
     let t0 = &case.ticks[0];
     let mut p = player_of(&case.header, t0);
+    let mut x = ext_of(&case.header, t0);
     let mm = |tick: i64, (field, expected, actual): (String, String, String)| Mismatch {
         case: name.clone(),
         tick,
@@ -522,14 +552,24 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         expected,
         actual,
     };
-    if let Some(d) = diff("state", &t0["state"], &state_json(&p, &world, false)) {
+    if let Some(d) = diff(
+        "state",
+        &t0["state"],
+        &state_json_ext(&p, &x, &world, false),
+    ) {
         return Err(mm(0, d));
     }
-    let has_item = case.ticks.iter().any(|t| {
-        t["input"]["keys"]
-            .as_str()
-            .is_some_and(|k| k.split(',').any(|n| n == "use"))
-    });
+    // A hand item without a use duration (a firework rocket) is never "in use".
+    let durable_use = case.header["setup"]
+        .get("ext")
+        .and_then(|e| e.get("hand"))
+        .is_none();
+    let has_item = durable_use
+        && case.ticks.iter().any(|t| {
+            t["input"]["keys"]
+                .as_str()
+                .is_some_and(|k| k.split(',').any(|n| n == "use"))
+        });
     let mut use_key = UseKey::default();
     let delayed = case.header["setup"]["delayed_load"]
         .as_bool()
@@ -619,6 +659,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     "level_chunks_load_start" => gate.level_chunks_load_start(),
                     "section_compiled" => compiled = b(&e["compiled"]),
                     "load_timeout" => gate.time_out(),
+                    "shared_flags" => {
+                        let cur = x.shared_flags(&p);
+                        let next = (cur & !(i(&e["clear"]) as u8)) | i(&e["set"]) as u8;
+                        x.apply_shared_flags(&mut p, next);
+                    }
+                    "equipment" => {
+                        assert_eq!(e["slot"], "chest");
+                        x.glider = glider(e.get("item"), e.get("damage"));
+                    }
+                    "firework" => {
+                        assert!(x.attach_rocket(i(&e["id"]), p.pos));
+                    }
+                    "remove_entity" => x.remove_rocket(i(&e["id"])),
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -631,7 +684,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item: use_key.using,
         };
-        gate.step::<V26_1, _>(&mut p, &ti, &world, compiled, &mut out);
+        gate.step_ext::<V26_1, _>(&mut p, &mut x, &ti, &world, compiled, &mut out);
         if let Some(l) = rec.get("client_loaded")
             && l.as_bool() != Some(gate.is_loaded())
         {
@@ -648,7 +701,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         if let Some(d) = diff(
             "state",
             &rec["state"],
-            &state_json(&p, &world, use_key.using),
+            &state_json_ext(&p, &x, &world, use_key.using),
         ) {
             return Err(mm(t, d));
         }

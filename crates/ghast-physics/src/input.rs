@@ -135,6 +135,9 @@ pub enum Packet {
     /// The 26.1 `player_loaded` packet: the client has loaded the level (see
     /// `modern::LoadGate`).
     PlayerLoaded,
+    /// The modern `player_command` `START_FALL_FLYING`: the client started gliding (see
+    /// `modern::PlayerExt`).
+    StartFallFlying,
     /// Position and rotation.
     PositionLook {
         /// X.
