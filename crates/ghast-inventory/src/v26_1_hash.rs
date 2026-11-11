@@ -693,7 +693,7 @@ fn schema(ty: i32) -> Option<S> {
         c::PROVIDES_TRIM_MATERIAL => S::Holder(Reg::Data("minecraft:trim_material")),
         c::JUKEBOX_PLAYABLE => S::Holder(Reg::Data("minecraft:jukebox_song")),
         c::INSTRUMENT => S::Holder(Reg::Data("minecraft:instrument")),
-        c::BREAK_SOUND => S::Holder(Reg::SoundEvent),
+        c::BREAK_SOUND => SOUND,
         c::FOOD => S::Rec(&[
             Field("nutrition", S::VarInt, R),
             Field("saturation", S::Float, R),
