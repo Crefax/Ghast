@@ -1530,12 +1530,12 @@ impl Inventory {
     /// `slotsChanged` recomputes results and remembered state: the anvil's cost and repair
     /// counts, the loom's patterns, the trade, the stonecutter input). `old` is the container
     /// before the packet; the packet's slots are replayed one by one from it.
+    /// Whether the open 26.1 menu reacts to server slot packets (container caps, result hooks).
     #[cfg(feature = "v26_1")]
-    fn inbound_26_1(&mut self, old: Vec<Option<Stack>>, slots: std::ops::Range<usize>) {
+    fn hooks_26_1(&self) -> bool {
         use crate::sim26::Kind;
-        let kind = self.kind_26();
-        if !matches!(
-            kind,
+        matches!(
+            self.kind_26(),
             Kind::Anvil
                 | Kind::Beacon
                 | Kind::Grindstone
@@ -1544,9 +1544,13 @@ impl Inventory {
                 | Kind::Loom
                 | Kind::Cartography
                 | Kind::Merchant
-        ) {
-            return;
-        }
+        )
+    }
+
+    #[cfg(feature = "v26_1")]
+    fn inbound_26_1(&mut self, old: Vec<Option<Stack>>, slots: std::ops::Range<usize>) {
+        use crate::sim26::Kind;
+        let kind = self.kind_26();
         if matches!(kind, Kind::Anvil | Kind::Grindstone | Kind::Loom) {
             self.d26.ensure(&self.reg26.enchantments);
         }
@@ -1991,7 +1995,7 @@ impl Inventory {
         }
         self.correction_26_1(Some(window_id));
         #[cfg(feature = "v26_1")]
-        let old = (window_id != 0).then(|| self.m.container.clone());
+        let old = (window_id != 0 && self.hooks_26_1()).then(|| self.m.container.clone());
         self.on_window_items(window_id, items);
         if window_id == 0 {
             self.state_player = state_id;
@@ -2046,7 +2050,8 @@ impl Inventory {
             _ => {}
         }
         #[cfg(feature = "v26_1")]
-        let old = matches!(l, Loc::Container(_)).then(|| self.m.container.clone());
+        let old =
+            (matches!(l, Loc::Container(_)) && self.hooks_26_1()).then(|| self.m.container.clone());
         let s = self.m.at_mut(l);
         if *s != item {
             *s = item;
