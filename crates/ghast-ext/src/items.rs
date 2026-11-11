@@ -177,7 +177,7 @@ impl Bot {
     /// ```no_run
     /// # async fn f(bot: ghast_ext::Bot) -> Result<(), ghast_ext::Error> {
     /// if let Some((index, stack)) = bot.find_item("bread").await? {
-    ///     println!("{} bread in slot {index}", stack.count);
+    ///     println!("{} bread in slot {index}", stack.count());
     /// }
     /// # Ok(()) }
     /// ```
@@ -226,7 +226,7 @@ impl Bot {
     /// ```no_run
     /// # async fn f(bot: ghast_ext::Bot) -> Result<(), ghast_ext::Error> {
     /// bot.equip("diamond_pickaxe").await?;
-    /// bot.equip(|s: &ghast_client::inventory::Stack| s.id == 278).await?;
+    /// bot.equip(|s: &ghast_client::inventory::Stack| s.id() == 278).await?;
     /// # Ok(()) }
     /// ```
     pub async fn equip(&self, item: impl Into<ItemMatch>) -> Result<u8, Error> {
@@ -543,7 +543,7 @@ impl Bot {
     /// ```no_run
     /// # async fn f(bot: ghast_ext::Bot) -> Result<(), ghast_ext::Error> {
     /// for (slot, stack) in bot.container_items().await? {
-    ///     println!("{slot}: {} x{}", stack.id, stack.count);
+    ///     println!("{slot}: {} x{}", stack.id(), stack.count());
     /// }
     /// # Ok(()) }
     /// ```

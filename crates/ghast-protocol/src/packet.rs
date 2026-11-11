@@ -209,12 +209,19 @@ impl PacketSet for NoPackets {
     }
 }
 
+pub(crate) mod sealed {
+    /// Seals [`super::Version`]: only this crate's generated markers implement it.
+    #[allow(unnameable_types)] // unnameable on purpose: that is what seals the trait
+    pub trait Sealed {}
+}
+
 /// A protocol version: its number and the packet sets of every state and direction.
 ///
 /// Implemented by the generated marker types (e.g. [`crate::v1_8::V1_8`]). A
 /// version-agnostic layer can be written generically over `V: Version` and map each
-/// version's packet enums into common events.
-pub trait Version: Copy + Send + Sync + 'static {
+/// version's packet enums into common events. Sealed: new items can be added without
+/// breaking anyone, so it cannot be implemented outside this crate.
+pub trait Version: sealed::Sealed + Copy + Send + Sync + 'static {
     /// Protocol number sent in the handshake (47 for 1.8.x, 754 for 1.16.5).
     const PROTOCOL: i32;
     /// Human-readable version name (e.g. `"1.8.9"`).

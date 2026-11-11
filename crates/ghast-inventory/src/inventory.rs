@@ -144,6 +144,7 @@ pub const DEFAULT_CLICK_TIMEOUT_TICKS: u32 = 40;
 /// (window 0 when only the player inventory is open); [`OUTSIDE`] (-999) is a click outside the
 /// window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Click {
     /// Mode 0: left click (`right = false`: pick up / put down / swap the whole stack) or right
     /// click (pick up half / put down one). On [`OUTSIDE`] it drops the cursor stack (left) or
@@ -244,6 +245,7 @@ impl std::error::Error for ClickError {}
 
 /// A window click as sent (`window_click`; 1.8 `ClickWindowC2SPacket`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ClickPacket {
     /// Window id (0 = player inventory).
     pub window_id: u8,
@@ -312,6 +314,7 @@ pub struct ContainerClick {
 
 /// What became of a click.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ClickOutcome {
     /// The server agreed with the prediction.
     Accepted,
@@ -332,8 +335,21 @@ pub struct ClickResult {
     pub outcome: ClickOutcome,
 }
 
+impl ClickResult {
+    /// A result as [`Inventory::drain_events`] reports it (for tests and replays).
+    #[must_use]
+    pub fn new(window_id: i32, action: i16, outcome: ClickOutcome) -> ClickResult {
+        ClickResult {
+            window_id,
+            action,
+            outcome,
+        }
+    }
+}
+
 /// Changes since the last [`Inventory::drain_events`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Events {
     /// Something in the player's inventory (window 0, incl. crafting grid) changed.
     pub player_changed: bool,

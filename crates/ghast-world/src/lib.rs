@@ -114,6 +114,7 @@ impl Default for WorldConfig {
 
 /// What applying a packet did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Applied {
     /// The world changed.
     Changed,

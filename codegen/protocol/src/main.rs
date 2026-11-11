@@ -1123,6 +1123,7 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
         m,
         "\n/// Marker type for protocol {proto} (Minecraft {covers}).\n\
          #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]\npub struct {marker};\n\n\
+         impl crate::packet::sealed::Sealed for {marker} {{}}\n\n\
          impl crate::packet::Version for {marker} {{\n\
          \x20   const PROTOCOL: i32 = {proto};\n\
          \x20   const NAME: &'static str = {name:?};\n\

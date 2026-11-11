@@ -20,6 +20,8 @@ pub mod types;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct V1_12_2;
 
+impl crate::packet::sealed::Sealed for V1_12_2 {}
+
 impl crate::packet::Version for V1_12_2 {
     const PROTOCOL: i32 = 340;
     const NAME: &'static str = "1.12.2";

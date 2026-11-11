@@ -45,9 +45,10 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
   unchanged; docs and error messages show the `defs::…` path. A nested or named type that is
   identical in two versions is now one Rust type, so a downstream trait implemented for both
   would conflict.
-- **`ghast_protocol::Version`** has new required items (`INFO`, `ConfigurationClientbound`,
-  `ConfigurationServerbound`); `State::Configuration` is new, so `State::Play as u8` changed
-  (do not rely on such casts).
+- **`ghast_protocol::Version` is sealed** (only ghast-protocol's version markers implement it,
+  so later versions can add items without a break) and has new items (`INFO`,
+  `ConfigurationClientbound`, `ConfigurationServerbound`); `State::Configuration` is new, so
+  `State::Play as u8` changed (do not rely on such casts).
 - **ghast-client**: `MovePacket` gained `horizontal_collision` in every variant and is
   `#[non_exhaustive]`; `Teleport` gained `relative` and `delta` (and `Default`);
   `Inbound::Respawn` gained `keep`; new `Inbound` / `Outbound` variants and the new
@@ -56,10 +57,18 @@ See *Migrating from 0.3* in the README for a short checklist; the full list:
   `ChatMessage::from_json` / `from_text`); `BlockQuery` / `HeldItem` gained crate-private fields;
   `WorldView` gained a defaulted `crosshair` method. The sealed `ClientVersion` trait changed
   (not implementable outside the crate).
-- **`#[non_exhaustive]` on new public types**: `ghast_inventory::{ContainerClick, Enchantment,
-  VersionNotEnabled, ItemText, EnchantmentId}`, `ghast_world::v26_1::{Registries, Dimension,
-  BiomeSection, DimensionType}`, `ghast_world::paletted::Section`,
-  `ghast_client::version::Capabilities`, `ghast_protocol::versions::ProtocolVersion`.
+- **`#[non_exhaustive]`** so that these types can grow in patch releases. A `match` on one of
+  the enums needs a `_ =>` arm; the structs are read as before but cannot be built with a
+  struct literal outside their crate:
+  - enums the library returns or that will grow: `ghast_inventory::{Click, ClickOutcome}`,
+    `ghast_world::Applied`, `ghast_inventory::{ItemText, EnchantmentId}`,
+    `ghast_world::v26_1::BiomeSection`, `ghast_world::paletted::Section`;
+  - output-only structs: `ghast_inventory::{ClickPacket, Events, ContainerClick, Enchantment,
+    VersionNotEnabled}`, `ghast_world::{Border, v26_1::{Registries, Dimension,
+    DimensionType}}`, `ghast_protocol::frame::DecoderStats`,
+    `ghast_client::version::Capabilities`, `ghast_protocol::versions::ProtocolVersion`.
+  - `ghast_inventory::ClickResult` gained `ClickResult::new(window_id, action, outcome)` for
+    tests and replays.
 - New variants in already open enums: `GameVersion::V26_1`, `ghast_inventory::Version::V26_1`,
   `ghast_protocol::State::Configuration`, `Outgoing::ContainerClick`.
 

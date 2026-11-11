@@ -165,12 +165,13 @@ strip = true
    `Stack::new(id, count, damage).with_nbt(nbt)`.
 3. **Fallible constructors.** `Inventory::new(version)` returns a `Result`;
    `Outgoing::to_v1_8()` returns an `Option` (like the other versions' encoders).
-4. **Client events.** New fields in `MovePacket`, `Teleport`, `Inbound::Respawn`; build
-   `ChatMessage` with `from_json` / `from_text`; add `_ =>` arms where you match on the
-   client's open enums.
+4. **Events and results.** New fields in `MovePacket`, `Teleport`, `Inbound::Respawn`; build
+   `ChatMessage` with `from_json` / `from_text`. More enums and output structs are
+   `#[non_exhaustive]` (e.g. `Click`, `ClickOutcome`, `Applied`, `Events`): add `_ =>` arms to
+   matches and read the structs' fields instead of destructuring them fully.
 5. **Protocol.** Packet types are aliases of shared definitions; code that names, builds or
-   matches them is unchanged. `ghast_protocol::Version` gained required items (only matters if
-   you implemented it).
+   matches them is unchanged. `ghast_protocol::Version` is sealed (it cannot be implemented
+   outside ghast-protocol).
 6. **Behaviour.** Block-breaking time and crosshair picks now follow each version's real
    client exactly; break times changed for some blocks on 1.8.9, 1.12.2 and 1.16.5 (listed in
    the changelog).

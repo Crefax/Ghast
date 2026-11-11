@@ -29,6 +29,7 @@ struct Lerp {
 
 /// World border state: centre, diameter (possibly moving) and warning settings.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Border {
     center_x: f64,
     center_z: f64,

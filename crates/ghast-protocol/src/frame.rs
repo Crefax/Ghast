@@ -47,6 +47,7 @@ impl Default for FrameLimits {
 
 /// Decoder counters (useful for profiling what a server sends).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DecoderStats {
     /// Frames split off the stream.
     pub frames: u64,
