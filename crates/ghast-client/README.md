@@ -307,7 +307,7 @@ with their `flags` byte, the reply the client sent in `ghast_reply` — our velo
 ghast's own `state` and packets. Compare with `oracle/cache/replay_compare.py`. Block changes
 after a column was first seen and explosion pushes are not representable (`ghast_note`).
 
-## API stability (0.3)
+## API stability (0.4)
 
 Types the library fills in and may extend are `#[non_exhaustive]`: the events (`TickEvents`,
 `RawInbound`, `TeleportEvent`), the pose and status types (`Pose`, `Health`, `Abilities`,

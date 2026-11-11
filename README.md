@@ -10,14 +10,14 @@ A headless Minecraft: Java Edition client / bot library in Rust.
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
   thread and a few MB of memory.
 
-Status: early (0.3, on crates.io). APIs will still change; see CONTRIBUTING.md for the versioning policy.
+Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md for the versioning policy.
 
 ## Numbers
 
 | | ghast | |
 |---|---|---|
-| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 9.32 million ticks | positions, velocities, flags and packets compared by their bits |
-| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use) | **0 diffs** over 4.0 million ticks | 26.1.1 and 26.1.2 give identical records |
+| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 12.72 million ticks | positions, velocities, flags and packets compared by their bits |
+| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use) | **0 diffs** over 4.20 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
@@ -154,7 +154,7 @@ strip = true
 ## Migrating from 0.3
 
 0.4 breaks the API once, for 26.1 and the shared infrastructure (details in
-[CHANGELOG.md](CHANGELOG.md#040--unreleased)):
+[CHANGELOG.md](CHANGELOG.md#040--2026-11-11)):
 
 1. **Features.** Every version is a feature (default: all). With `default-features = false`,
    add the versions you use (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`) and `display-names` if you

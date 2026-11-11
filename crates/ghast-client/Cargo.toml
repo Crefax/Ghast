@@ -31,13 +31,13 @@ libdeflate = ["ghast-protocol/libdeflate"]
 microsoft = ["ghast-auth/microsoft"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["tokio", "chat-json"] }
-ghast-auth = { path = "../ghast-auth", version = "0.3.0" }
-ghast-world = { path = "../ghast-world", version = "0.3.0", default-features = false, features = ["physics"] }
-ghast-physics = { path = "../ghast-physics", version = "0.3.0", default-features = false }
-ghast-inventory = { path = "../ghast-inventory", version = "0.3.0", default-features = false }
-ghast-entity = { path = "../ghast-entity", version = "0.3.0", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.0", default-features = false, features = ["tokio", "chat-json"] }
+ghast-auth = { path = "../ghast-auth", version = "0.4.0" }
+ghast-world = { path = "../ghast-world", version = "0.4.0", default-features = false, features = ["physics"] }
+ghast-physics = { path = "../ghast-physics", version = "0.4.0", default-features = false }
+ghast-inventory = { path = "../ghast-inventory", version = "0.4.0", default-features = false }
+ghast-entity = { path = "../ghast-entity", version = "0.4.0", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
@@ -45,10 +45,10 @@ log = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
 
 [dev-dependencies]
-ghast-data = { path = "../ghast-data", version = "0.3.0" }
+ghast-data = { path = "../ghast-data", version = "0.4.0" }
 flate2 = { workspace = true }
 serde_json = { workspace = true }
-ghast-protocol = { path = "../ghast-protocol", version = "0.3.0" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.0" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread", "test-util"] }
 
 [package.metadata.docs.rs]

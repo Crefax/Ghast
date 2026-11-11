@@ -24,13 +24,13 @@ v1_12_2 = ["ghast-data/v1_12", "ghast-physics/v1_12", "ghast-client?/v1_12_2"]
 v1_16_5 = ["ghast-data/v1_16_5", "ghast-physics/v1_16_5", "ghast-client?/v1_16_5"]
 
 [dependencies]
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false }
-ghast-physics = { path = "../ghast-physics", version = "0.3.0", default-features = false }
-ghast-client = { path = "../ghast-client", version = "0.3.0", optional = true, default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
+ghast-physics = { path = "../ghast-physics", version = "0.4.0", default-features = false }
+ghast-client = { path = "../ghast-client", version = "0.4.0", optional = true, default-features = false }
 log = { workspace = true, optional = true }
 
 [dev-dependencies]
-ghast-client = { path = "../ghast-client", version = "0.3.0" }
+ghast-client = { path = "../ghast-client", version = "0.4.0" }
 proptest = { workspace = true }
 criterion = { workspace = true }
 

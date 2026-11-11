@@ -6,7 +6,7 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-11-11
 
 Minecraft 26.1 (protocol 775) is the fourth supported version, built on a shared
 infrastructure that is meant to carry every later version: one generated definition per packet
