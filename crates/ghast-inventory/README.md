@@ -178,10 +178,20 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 | anvil | clicks with an empty input slot | clicks the client recomputes the result for (enchantment data); taking the result |
 | villager trading | clicks that leave both payment slots empty | anything with a payment (offers) |
 | bundles | insert into / take out of a bundle (carried or in the slot), nested bundles, weights | a bundle whose contents do not read |
-| creative mode | clone, clone drags, armor with the binding curse comes off, overflow vanishes | window 0 itself (the creative inventory screen sends `set_creative_mode_slot`, not modelled) |
+| creative mode | clone, clone drags, armor with the binding curse comes off, overflow vanishes; window 0 is the creative inventory screen (below) | — |
+
+**Creative inventory screen** (window 0 opened in creative mode, `creative_screen_26_1()`): the
+real client sends no `container_click` there but `set_creative_mode_slot` for every window 0
+slot that differs from the menu's last broadcast (`Outgoing::Creative(Vec<CreativePacket>)`,
+encode each with `CreativePacket::to_v26_1`): opening the screen, every click (Q and drops are
+the screen's own: `swing`, the dropped stack as slot -1, the slot), and every server
+`container_set_slot` while it is open, which the client echoes back
+(`take_creative_echo_26_1`). Drops are throttled like `LocalPlayer.dropSpamThrottler`. Only
+the inventory tab is modelled (the item tabs are a GUI for picking items; a bot sets a slot
+directly).
 
 Not covered: horse / llama / nautilus inventories (opened with `horse_screen_open`, not
-handled), the creative inventory screen, a server that changes tags or recipe item sets
+handled), the creative screen's item tabs, a server that changes tags or recipe item sets
 mid-session (the item facts are vanilla's), a selected bundle item (the bundle scroll wheel).
 
 ## Tests
@@ -236,6 +246,11 @@ cargo test -p ghast-inventory
   239 108 predicted, all byte-identical, 0 differences; 540 unpredicted (anvil 254, merchant 203,
   loom 79, grindstone 4).** Big runs: `MC=26.1 oracle/run.sh clicks --seed 2 --count 30000` then
   `GHAST_CLICK_VECTORS_26_1=$PWD/oracle/cache/26.1/clicks/clicks-seed2-n30000.jsonl.gz cargo test --release -p ghast-inventory --test oracle_clicks_26_1 -- --nocapture`.
+- `tests/oracle_clicks_26_1.rs` `golden_26_1_creative_screen_matches_the_real_client`
+  (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, oracle `creative-clicks`: the real
+  `CreativeModeInventoryScreen.slotClicked` with its listener, random earlier broadcasts,
+  server slots in between): 1000 cases, 7756 events, 19 381 packets, all byte-identical, 0
+  differences.
 - `tests/v26_1.rs` `menus_session_replays` (`fixtures/menus_26_1_2.bin.zz`): `examples/live_clicks_26_1.rs`
   with `MENUS=1` on a vanilla 26.1.2 server (2026-11-12): drags, bundles, a crafting table
   (remainders), a furnace, an anvil, a shulker box and creative clicks — 60 clicks, 59

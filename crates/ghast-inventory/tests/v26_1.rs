@@ -688,3 +688,45 @@ fn item_use_reads_the_real_components() {
     assert_eq!(plain("bow").animation, UseAnimation::Bow);
     assert_eq!(plain("stone").duration, Some(0));
 }
+
+/// The creative screen's drop spam throttle (`LocalPlayer.dropSpamThrottler`: +20 per drop,
+/// -1 per tick, refused from 1280): one drop per tick adds 19, so the 68th drop still goes
+/// out and the 69th is ignored (no packet, nothing changes) until the throttle decays.
+#[test]
+fn creative_drops_are_throttled() {
+    let mut inv = Inventory::new(Version::V26_1).unwrap();
+    inv.set_creative_26_1(true);
+    let stone = item_id("stone").unwrap();
+    let mut w0 = vec![None; 46];
+    for s in &mut w0[36..39] {
+        *s = Some(ghast_inventory::Stack::new(stone, 64, 0));
+    }
+    inv.on_window_items_26_1(0, 1, w0, None);
+    inv.tick();
+    assert!(matches!(
+        inv.open_inventory(),
+        Ok(Some(Outgoing::Creative(_)))
+    ));
+    let mut sent = Vec::new();
+    for _ in 0..70 {
+        inv.tick();
+        let slot = (36..39).find(|&i| inv.window0_slot(i).is_some()).unwrap() as i16;
+        let Ok(Outgoing::Creative(p)) = inv.click(Click::Drop { slot, all: false }) else {
+            panic!()
+        };
+        sent.push(!p.is_empty());
+    }
+    assert!(sent[..68].iter().all(|&s| s));
+    assert!(!sent[68] && !sent[69]);
+    // 20 quiet ticks later drops go out again
+    for _ in 0..20 {
+        inv.tick();
+    }
+    let Ok(Outgoing::Creative(p)) = inv.click(Click::Drop {
+        slot: 38,
+        all: false,
+    }) else {
+        panic!()
+    };
+    assert_eq!(p.len(), 3, "{p:?}"); // swing, drop, the slot
+}

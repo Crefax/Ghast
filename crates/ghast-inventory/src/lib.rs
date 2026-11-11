@@ -71,7 +71,7 @@ mod window;
 
 pub use crafting::RecipeBook;
 pub use inventory::{
-    Click, ClickError, ClickOutcome, ClickPacket, ClickResult, ContainerClick,
+    Click, ClickError, ClickOutcome, ClickPacket, ClickResult, ContainerClick, CreativePacket,
     DEFAULT_CLICK_SETTLE_TICKS, DEFAULT_CLICK_TIMEOUT_TICKS, DragKind, DragStage, Events,
     Inventory, Outgoing, Window,
 };

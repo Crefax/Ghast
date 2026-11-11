@@ -1363,3 +1363,21 @@ the client's own. `selftest` reruns 500 cases in reverse order on the same playe
 write identical files.
 
 Replayed by `crates/ghast-inventory/tests/oracle_clicks_26_1.rs`.
+
+### The creative inventory screen: `clicks_creative_seed1.jsonl.gz`
+
+`creative-clicks` (in `golden` with 1000 cases): window 0 in creative mode is the
+`CreativeModeInventoryScreen`, which sends `set_creative_mode_slot` instead of
+`container_click`. Real: the screen's `slotClicked` (the inventory tab: its `SlotWrapper`s
+around window 0's slots 5–45, its own Q / drop handling, otherwise `inventoryMenu.clicked` +
+`broadcastChanges`), its `CreativeInventoryListener` on the player's `InventoryMenu` (added when
+the screen opens: one broadcast), `ClientPacketListener.handleContainerSetSlot` for server slots
+while it is open (the client echoes them). Faked: the screen is allocated, with the fields its
+click code reads set (minecraft, its `ItemPickerMenu`, the inventory tab, the destroy slot, an
+empty mouse-action list). Per case the menu's `lastSlots` start empty or half known (earlier
+broadcasts) and the player's drop spam throttle starts at 0 (cases never tick the player).
+Lines: `{"type":"creative","case","selected","last":[46 stack hex]` + state `,"open":[packet
+hex…],"events":[{"slot","button","mode","packets"` + state `} | {"server_slot","item",
+"packets"` + state `}]}`; `set_creative_mode_slot` packets are tag 1 + short slot + the stack in
+`OPTIONAL_UNTRUSTED_STREAM_CODEC`'s layout (each component value length-prefixed, components in
+type id order), checked to decode to the client's packet.

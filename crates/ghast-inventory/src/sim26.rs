@@ -326,7 +326,7 @@ impl Drag {
 
 /// What the client knows from elsewhere: the server's recipe item sets, its game mode and
 /// experience level, the open menu's data slots.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct World26 {
     /// `RecipePropertySet`s from `update_recipes` (sorted item ids).
     pub furnace_input: Vec<i32>,
@@ -343,6 +343,26 @@ pub(crate) struct World26 {
     pub xp_level: Option<i32>,
     /// `minecraft:binding_curse` registry id (the `prevent_armor_change` enchantment).
     pub binding_curse: Option<i32>,
+    /// `player.canDropItems()` (the drop spam throttle is below its threshold).
+    pub can_drop: bool,
+}
+
+impl Default for World26 {
+    fn default() -> Self {
+        World26 {
+            furnace_input: Vec::new(),
+            blast_input: Vec::new(),
+            smoker_input: Vec::new(),
+            smithing_base: Vec::new(),
+            smithing_template: Vec::new(),
+            smithing_addition: Vec::new(),
+            cutter_inputs: Some(Vec::new()),
+            creative: false,
+            xp_level: None,
+            binding_curse: None,
+            can_drop: true,
+        }
+    }
 }
 
 fn has(set: &[i32], id: i32) -> bool {
@@ -1351,6 +1371,9 @@ impl Sim26<'_> {
             }
             4 if carried_empty => {
                 let Some(i) = idx else { return Ok(()) };
+                if !self.w.can_drop {
+                    return Ok(());
+                }
                 let amount = if button == 0 {
                     1
                 } else {

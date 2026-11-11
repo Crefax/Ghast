@@ -338,6 +338,26 @@ pub enum Outgoing {
     /// 26.1 `container_click` (no confirm exists: the server applies every click and resends
     /// the slots whose hashes differ from its own result).
     ContainerClick(ContainerClick),
+    /// 26.1 creative inventory screen (window 0 in creative mode): the packets the real
+    /// client sends, in order (often none). See [`CreativePacket`].
+    Creative(Vec<CreativePacket>),
+}
+
+/// One packet the 26.1 creative inventory screen sends (`Outgoing::Creative`): the server
+/// trusts these stacks, so they are exactly what the real client sends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CreativePacket {
+    /// `swing` (main hand): a stack was dropped.
+    Swing,
+    /// `set_creative_mode_slot`: window 0 slot `slot` now holds `item` (`slot` -1: `item` is
+    /// dropped).
+    SetSlot {
+        /// Window 0 slot, or -1 for a drop.
+        slot: i16,
+        /// The stack.
+        item: Option<Stack>,
+    },
 }
 
 /// A 26.1 click as sent: what vanilla `MultiPlayerGameMode.handleContainerInput` writes.
@@ -515,6 +535,21 @@ pub struct Inventory {
     /// 26.1: window 0's and the open container's per-screen click state (drags, …).
     #[cfg(feature = "v26_1")]
     s26: [crate::sim26::Screen26; 2],
+    /// 26.1: window 0's `lastSlots` (what its last `broadcastChanges` saw; the creative
+    /// screen's listener sends every slot that differs).
+    #[cfg(feature = "v26_1")]
+    creative_last: Vec<Option<Stack>>,
+    /// 26.1: the creative inventory screen is open (window 0 in creative mode).
+    #[cfg(feature = "v26_1")]
+    creative_screen: bool,
+    /// 26.1: packets the creative screen sends in answer to server packets
+    /// ([`Inventory::take_creative_echo_26_1`]).
+    #[cfg(feature = "v26_1")]
+    creative_echo: Vec<CreativePacket>,
+    /// 26.1 `LocalPlayer.dropSpamThrottler`: +20 per creative drop, -1 per tick; drops are
+    /// refused from 1280 (`canDropItems`).
+    #[cfg(feature = "v26_1")]
+    drop_throttle: i32,
 }
 
 impl Inventory {
@@ -552,6 +587,14 @@ impl Inventory {
             w26: crate::sim26::World26::default(),
             #[cfg(feature = "v26_1")]
             s26: Default::default(),
+            #[cfg(feature = "v26_1")]
+            creative_last: vec![None; 46],
+            #[cfg(feature = "v26_1")]
+            creative_screen: false,
+            #[cfg(feature = "v26_1")]
+            creative_echo: Vec::new(),
+            #[cfg(feature = "v26_1")]
+            drop_throttle: 0,
         }
     }
 
@@ -604,6 +647,10 @@ impl Inventory {
     /// and ages the pending click.
     pub fn tick(&mut self) {
         self.flags = TickFlags::default();
+        #[cfg(feature = "v26_1")]
+        if self.drop_throttle > 0 {
+            self.drop_throttle -= 1;
+        }
         if let Some(p) = &mut self.pending {
             p.age += 1;
             if self.version == Version::V26_1 && p.age >= self.settle {
@@ -881,6 +928,9 @@ impl Inventory {
         }
         #[cfg(feature = "v26_1")]
         if self.version == Version::V26_1 {
+            if self.creative_screen {
+                return self.creative_click(slot, button, mode);
+            }
             return Ok(self.click_26(slot, button, mode));
         }
         let mut m = self.m.clone();
@@ -984,6 +1034,7 @@ impl Inventory {
         let mut m = self.m.clone();
         let mut scr = self.s26[w].clone();
         self.w26.binding_curse = self.binding_curse();
+        self.w26.can_drop = self.drop_throttle < 1280;
         let (result, swings) = {
             let mut sim = crate::sim26::Sim26 {
                 kind,
@@ -1060,6 +1111,148 @@ impl Inventory {
     #[cfg(feature = "v26_1")]
     pub fn set_creative_26_1(&mut self, creative: bool) {
         self.w26.creative = creative;
+    }
+
+    /// 26.1: the packets the creative inventory screen sent in answer to server packets since
+    /// the last call (vanilla echoes every window 0 slot the server sets while the screen is
+    /// open); send them right away.
+    #[cfg(feature = "v26_1")]
+    pub fn take_creative_echo_26_1(&mut self) -> Vec<CreativePacket> {
+        std::mem::take(&mut self.creative_echo)
+    }
+
+    /// Whether the 26.1 creative inventory screen is open (window 0 opened in creative mode):
+    /// clicks then return [`Outgoing::Creative`].
+    #[cfg(feature = "v26_1")]
+    #[must_use]
+    pub fn creative_screen_26_1(&self) -> bool {
+        self.creative_screen
+    }
+
+    /// `InventoryMenu.broadcastChanges` with the creative listener: every slot that differs
+    /// from the last broadcast is sent.
+    #[cfg(feature = "v26_1")]
+    fn creative_broadcast(&mut self, out: &mut Vec<CreativePacket>) {
+        let lay = Layout::new(Version::V26_1, Screen::Player);
+        for i in 0..46 {
+            let Some(l) = lay.loc(i) else { break };
+            let cur = self.m.at(l);
+            let same = match (&self.creative_last[i], cur) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.count == b.count && a.id == b.id && a.data_eq(b),
+                _ => false,
+            };
+            if !same {
+                self.creative_last[i] = cur.clone();
+                out.push(CreativePacket::SetSlot {
+                    slot: i as i16,
+                    item: cur.clone(),
+                });
+            }
+        }
+    }
+
+    /// A click in the creative inventory screen (`CreativeModeInventoryScreen.slotClicked`,
+    /// inventory tab): Q / drops are the screen's own; everything else runs window 0's click
+    /// and broadcasts. Refused as unpredictable when ghast cannot simulate it (the stacks it
+    /// sends would be wrong).
+    #[cfg(feature = "v26_1")]
+    fn creative_click(&mut self, slot: i16, button: u8, mode: u8) -> Result<Outgoing, ClickError> {
+        let mode = if slot == OUTSIDE && mode == 0 {
+            4
+        } else {
+            mode
+        };
+        let lay = Layout::new(Version::V26_1, Screen::Player);
+        let mut out = Vec::new();
+        let idx = usize::try_from(slot).ok();
+        if mode == 4 && self.drop_throttle >= 1280 {
+            // `canDropItems()` is false: the screen ignores the click
+            self.flags.clicked = true;
+            return Ok(Outgoing::Creative(out));
+        }
+        if mode == 4 {
+            if let Some(i) = idx
+                && let Some(l) = lay.loc(i)
+                && let Some(st) = self.m.at(l).clone()
+            {
+                // slot.remove(button == 0 ? 1 : max stack size): the crafting result is taken
+                // whole, other slots split
+                let n = if button == 0 {
+                    1
+                } else {
+                    crate::v26_1::max_stack_size(&st)
+                };
+                let dropped = if l == Loc::CraftResult {
+                    self.m.at_mut(l).take()
+                } else {
+                    let s = self.m.at_mut(l);
+                    let k = n.min(st.count).max(0);
+                    let d = (k > 0).then(|| st.with_count(k));
+                    if let Some(x) = s {
+                        x.count -= k;
+                        if x.count <= 0 {
+                            *s = None;
+                        }
+                    }
+                    d
+                };
+                if dropped.is_some() {
+                    self.drop_throttle += 20;
+                    out.push(CreativePacket::Swing);
+                    out.push(CreativePacket::SetSlot {
+                        slot: -1,
+                        item: dropped,
+                    });
+                }
+                out.push(CreativePacket::SetSlot {
+                    slot,
+                    item: self.m.at(l).clone(),
+                });
+                self.events.player_changed = true;
+                self.flags.clicked = true;
+                return Ok(Outgoing::Creative(out));
+            }
+            if slot == OUTSIDE
+                && let Some(c) = self.m.cursor.take()
+            {
+                self.drop_throttle += 20;
+                out.push(CreativePacket::Swing);
+                out.push(CreativePacket::SetSlot {
+                    slot: -1,
+                    item: Some(c),
+                });
+                self.events.cursor_changed = true;
+                self.flags.clicked = true;
+                return Ok(Outgoing::Creative(out));
+            }
+        }
+        let mut m = self.m.clone();
+        let mut scr = self.s26[0].clone();
+        self.w26.binding_curse = self.binding_curse();
+        self.w26.can_drop = self.drop_throttle < 1280;
+        let (result, swings) = {
+            let mut sim = crate::sim26::Sim26 {
+                kind: crate::sim26::Kind::Player,
+                m: &mut m,
+                s: &mut scr,
+                w: &self.w26,
+                swings: 0,
+            };
+            let r = sim.click(slot, button as i8, mode);
+            (r, sim.swings)
+        };
+        if result.is_err() {
+            return Err(ClickError::Unpredictable);
+        }
+        for _ in 0..swings {
+            out.push(CreativePacket::Swing);
+        }
+        self.commit(m, lay);
+        self.s26[0] = scr;
+        self.creative_broadcast(&mut out);
+        self.flags.clicked = true;
+        Ok(Outgoing::Creative(out))
     }
 
     /// 26.1: the player's experience level (the anvil's result can only be taken with enough);
@@ -1217,6 +1410,14 @@ impl Inventory {
         }
         self.screen = ScreenState::Inventory;
         self.flags.opened = true;
+        #[cfg(feature = "v26_1")]
+        if self.version == Version::V26_1 && self.w26.creative {
+            // the creative screen adds its listener: one broadcast
+            self.creative_screen = true;
+            let mut out = Vec::new();
+            self.creative_broadcast(&mut out);
+            return Ok((!out.is_empty()).then_some(Outgoing::Creative(out)));
+        }
         Ok((self.version == Version::V1_8).then_some(Outgoing::OpenInventory))
     }
 
@@ -1241,6 +1442,10 @@ impl Inventory {
 
     /// The client side of closing the current screen handler (`closeScreen` + `close`).
     fn close_screen(&mut self) {
+        #[cfg(feature = "v26_1")]
+        {
+            self.creative_screen = false;
+        }
         // 26.1: only the server empties the cursor (`removed` checks for a ServerPlayer); the
         // client's player inventory menu keeps its own, so closing window 0 keeps the cursor,
         // and closing a container returns to window 0's (empty) one.
@@ -1620,12 +1825,24 @@ impl Inventory {
         {
             self.inbound_26_1(k, false);
         }
+        // the creative screen broadcasts window 0 after every server slot
+        #[cfg(feature = "v26_1")]
+        if window_id == 0 && self.creative_screen {
+            let mut out = std::mem::take(&mut self.creative_echo);
+            self.creative_broadcast(&mut out);
+            self.creative_echo = out;
+        }
     }
 
     /// 26.1 `set_cursor_item`: the open menu's carried stack.
     pub fn on_set_cursor(&mut self, item: Option<Stack>) {
         if self.version == Version::V26_1 {
             self.correction_26_1(None);
+            // the creative screen keeps its own cursor
+            #[cfg(feature = "v26_1")]
+            if self.creative_screen {
+                return;
+            }
         }
         let item = self.normalize(item);
         if self.m.cursor != item {

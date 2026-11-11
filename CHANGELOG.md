@@ -54,8 +54,13 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - `v26_1::item_use(&Stack) -> Option<ItemUse>`: use animation and duration, `use_effects`
   (speed multiplier, can sprint), `consumable`, `food` of a 26.1 stack (checked against the
   real client's components in `hashed_stacks.jsonl.gz`).
-- Oracle dump `clicks` (26.1) and `examples/gen_menus_26_1.rs` (the menus' item facts from the
-  click vectors).
+- **26.1 creative inventory screen**: window 0 opened in creative mode sends what the real
+  screen sends (`Outgoing::Creative(Vec<CreativePacket>)`: `set_creative_mode_slot` for the
+  slots that differ from the last broadcast, drops as slot -1 with the arm swing; echoes of
+  server slots from `take_creative_echo_26_1`; the drop spam throttle), proven against the
+  real screen (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, 19 381 packets).
+- Oracle dumps `clicks` and `creative-clicks` (26.1) and `examples/gen_menus_26_1.rs` (the
+  menus' item facts from the click vectors).
 
 ### Changed (behaviour)
 

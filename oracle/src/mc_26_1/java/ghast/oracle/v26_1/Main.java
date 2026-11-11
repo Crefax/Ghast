@@ -68,6 +68,13 @@ public final class Main {
             case "hashed-stacks" -> Io.write(a.path("--out", golden.resolve("hashed_stacks.jsonl.gz")), HashDump::lines);
             case "net-crypto" -> Io.write(a.path("--out", golden.resolve("net_crypto.jsonl.gz")), NetCryptoDump::lines);
             case "chat-signing" -> Io.write(a.path("--out", golden.resolve("chat_signing.jsonl.gz")), ChatSigningDump::lines);
+            case "creative-clicks" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", ClickDump.CREATIVE_CASES);
+                Path out = a.path("--out", Path.of("cache", VERSION, "clicks", "creative-seed" + seed + "-n" + count + ".jsonl.gz"));
+                Io.bestCompression = Boolean.parseBoolean(a.str("--best", "false"));
+                Io.write(out, sink -> ClickDump.creativeLines(seed, count, sink));
+            }
             case "clicks" -> {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", ClickDump.CASES);
@@ -124,6 +131,7 @@ public final class Main {
                   net-crypto [--out FILE]              login encryption: session hash, AES/CFB8, hello / key packets
                   chat-signing [--out FILE]            signed chat: session update, chat / command signatures, acks
                   clicks [--seed N] [--count N] [--out FILE]  window clicks through the real client (every menu type)
+                  creative-clicks [--seed N] [--count N] [--out FILE]  the creative inventory screen (set_creative_mode_slot)
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
@@ -166,6 +174,7 @@ public final class Main {
         Io.write(dir.resolve("net_crypto.jsonl.gz"), NetCryptoDump::lines);
         Io.write(dir.resolve("chat_signing.jsonl.gz"), ChatSigningDump::lines);
         Io.write(dir.resolve("clicks_seed1.jsonl.gz"), sink -> ClickDump.lines(1, ClickDump.CASES, sink));
+        Io.write(dir.resolve("clicks_creative_seed1.jsonl.gz"), sink -> ClickDump.creativeLines(1, ClickDump.CREATIVE_CASES, sink));
         Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
@@ -249,6 +258,9 @@ public final class Main {
         int clickMismatches = ClickDump.reverseMismatches(1, 500);
         System.out.println((clickMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 500 click cases");
         ok &= clickMismatches == 0;
+        int creativeMismatches = ClickDump.creativeReverseMismatches(1, 300);
+        System.out.println((creativeMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 300 creative click cases");
+        ok &= creativeMismatches == 0;
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "teleports.jsonl.gz", "joins.jsonl.gz"}) {

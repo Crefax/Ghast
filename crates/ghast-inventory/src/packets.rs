@@ -81,7 +81,7 @@ impl Outgoing {
                     payload: sb8::ClientCommandPayload(2),
                 })
             }
-            Outgoing::ContainerClick(_) => return None,
+            Outgoing::ContainerClick(_) | Outgoing::Creative(_) => return None,
         })
     }
 
@@ -102,7 +102,9 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb12::ServerboundPlayPacket::CloseWindow(sb12::CloseWindow { window_id: *id })
             }
-            Outgoing::OpenInventory | Outgoing::ContainerClick(_) => return None,
+            Outgoing::OpenInventory | Outgoing::ContainerClick(_) | Outgoing::Creative(_) => {
+                return None;
+            }
         })
     }
 
@@ -123,7 +125,9 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb16::ServerboundPlayPacket::CloseWindow(sb16::CloseWindow { window_id: *id })
             }
-            Outgoing::OpenInventory | Outgoing::ContainerClick(_) => return None,
+            Outgoing::OpenInventory | Outgoing::ContainerClick(_) | Outgoing::Creative(_) => {
+                return None;
+            }
         })
     }
 }
@@ -246,7 +250,7 @@ mod v26_1 {
     use ghast_protocol::v26_1::play::serverbound as sb;
     use ghast_protocol::{DecodeError, RawPacket};
 
-    use crate::inventory::{ContainerClick, Inventory, Outgoing};
+    use crate::inventory::{ContainerClick, CreativePacket, Inventory, Outgoing};
     use crate::stack::Stack;
     use crate::v26_1::{HashRegistries, hashed_slot};
 
@@ -304,9 +308,75 @@ mod v26_1 {
         }
     }
 
+    impl CreativePacket {
+        /// The 26.1 serverbound packet: `swing` (main hand) or `set_creative_mode_slot` (the
+        /// stack in the untrusted layout, components in type id order).
+        #[must_use]
+        pub fn to_v26_1(&self) -> sb::ServerboundPlayPacket {
+            use ghast_protocol::defs::p775::types::{
+                SlotComponentType, UntrustedSlot, UntrustedSlotBodyDefault,
+                UntrustedSlotBodyDefaultRemoveComponents, UntrustedSlotComponent,
+            };
+            match self {
+                CreativePacket::Swing => {
+                    sb::ServerboundPlayPacket::ArmAnimation(sb::ArmAnimation {
+                        hand: sb::ArmAnimationHand(0),
+                    })
+                }
+                CreativePacket::SetSlot { slot, item } => {
+                    let item = match item.as_ref().filter(|s| s.count > 0 && s.id != 0) {
+                        None => UntrustedSlot {
+                            item_count: 0,
+                            body: None,
+                        },
+                        Some(s) => {
+                            let mut components: Vec<UntrustedSlotComponent> = Vec::new();
+                            let mut removed: Vec<i32> = Vec::new();
+                            if let Some(p) = s.components() {
+                                for (t, b) in p.iter() {
+                                    match components.iter_mut().find(|c| c.r#type.0 == t) {
+                                        Some(c) => c.data = b,
+                                        None => components.push(UntrustedSlotComponent {
+                                            r#type: SlotComponentType(t),
+                                            data: b,
+                                        }),
+                                    }
+                                }
+                                removed.extend(p.removed());
+                            }
+                            components.sort_by_key(|c| c.r#type.0);
+                            removed.sort_unstable();
+                            removed.dedup();
+                            UntrustedSlot {
+                                item_count: s.count,
+                                body: Some(UntrustedSlotBodyDefault {
+                                    item_id: s.id,
+                                    added_component_count: components.len() as i32,
+                                    removed_component_count: removed.len() as i32,
+                                    components,
+                                    remove_components: removed
+                                        .into_iter()
+                                        .map(|t| UntrustedSlotBodyDefaultRemoveComponents {
+                                            r#type: SlotComponentType(t),
+                                        })
+                                        .collect(),
+                                }),
+                            }
+                        }
+                    };
+                    sb::ServerboundPlayPacket::SetCreativeSlot(sb::SetCreativeSlot {
+                        slot: *slot,
+                        item,
+                    })
+                }
+            }
+        }
+    }
+
     impl Outgoing {
         /// The 26.1 serverbound packet (`None` for the legacy-only variants, which a 26.1
-        /// inventory never returns).
+        /// inventory never returns, and for [`Outgoing::Creative`], whose packets
+        /// [`CreativePacket::to_v26_1`] encodes one by one).
         #[must_use]
         pub fn to_v26_1(&self, reg: &HashRegistries) -> Option<sb::ServerboundPlayPacket> {
             Some(match self {

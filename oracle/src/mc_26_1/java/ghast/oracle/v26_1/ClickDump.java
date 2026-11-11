@@ -404,6 +404,7 @@ final class ClickDump {
         AbstractContainerMenu w0 = player.inventoryMenu;
         player.containerMenu = w0;
         call(AbstractContainerMenu.class, w0, "resetQuickCraft", new Class<?>[0]);
+        resetDropThrottle(player);
         GameType gm = r.chance(0.15) ? GameType.CREATIVE : GameType.SURVIVAL;
         int menuId = r.chance(0.2) ? -1 : r.nextInt(menus().size());
         if (gm == GameType.CREATIVE && menuId == -1) {
@@ -556,6 +557,16 @@ final class ClickDump {
         };
     }
 
+    /**
+     * The player's drop spam throttle ({@code LocalPlayer.dropSpamThrottler}: +20 per creative
+     * drop, -1 per player tick, drops refused from 1280) back to 0: cases never tick the player,
+     * so without this the creative drops of earlier cases would add up.
+     */
+    private static void resetDropThrottle(LocalPlayer player) {
+        Object t = Reflect.get(LocalPlayer.class, player, "dropSpamThrottler");
+        Reflect.setInt(net.minecraft.util.TickThrottler.class, t, "count", 0);
+    }
+
     private static void data(int containerId, int id, int value) {
         Harness.listener.handleContainerSetData(Harness.roundTrip(ClientboundContainerSetDataPacket.STREAM_CODEC,
                 new ClientboundContainerSetDataPacket(containerId, id, value)));
@@ -654,8 +665,12 @@ final class ClickDump {
         return ByteBufUtil.hexDump(buf);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static void canonicalWire(RegistryFriendlyByteBuf buf, ItemStack stack) {
+        canonicalWire(buf, stack, false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void canonicalWire(RegistryFriendlyByteBuf buf, ItemStack stack, boolean untrusted) {
         if (stack.isEmpty()) {
             buf.writeVarInt(0);
             return;
@@ -680,18 +695,15 @@ final class ClickDump {
         for (Map.Entry<DataComponentType<?>, java.util.Optional<?>> e : entries) {
             if (e.getValue().isPresent()) {
                 net.minecraft.core.component.DataComponentType.STREAM_CODEC.encode(buf, e.getKey());
-                Object v = e.getValue().get();
-                if (v instanceof net.minecraft.world.item.enchantment.ItemEnchantments ench) {
-                    var es = new ArrayList<>(ench.entrySet());
-                    var reg = buf.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
-                    es.sort(Comparator.comparingInt(x -> reg.getId(x.getKey().value())));
-                    buf.writeVarInt(es.size());
-                    for (var x : es) {
-                        net.minecraft.world.item.enchantment.Enchantment.STREAM_CODEC.encode(buf, x.getKey());
-                        buf.writeVarInt(x.getIntValue());
-                    }
+                if (untrusted) {
+                    // the value as a length-prefixed byte array of its trusted encoding
+                    RegistryFriendlyByteBuf value = new RegistryFriendlyByteBuf(Unpooled.buffer(), buf.registryAccess());
+                    writeValue(value, e.getKey(), e.getValue().get());
+                    byte[] bytes = new byte[value.readableBytes()];
+                    value.readBytes(bytes);
+                    buf.writeByteArray(bytes);
                 } else {
-                    ((net.minecraft.network.codec.StreamCodec) e.getKey().streamCodec()).encode(buf, v);
+                    writeValue(buf, e.getKey(), e.getValue().get());
                 }
             }
         }
@@ -699,6 +711,22 @@ final class ClickDump {
             if (e.getValue().isEmpty()) {
                 net.minecraft.core.component.DataComponentType.STREAM_CODEC.encode(buf, e.getKey());
             }
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void writeValue(RegistryFriendlyByteBuf buf, DataComponentType<?> type, Object v) {
+        if (v instanceof net.minecraft.world.item.enchantment.ItemEnchantments ench) {
+            var es = new ArrayList<>(ench.entrySet());
+            var reg = buf.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
+            es.sort(Comparator.comparingInt(x -> reg.getId(x.getKey().value())));
+            buf.writeVarInt(es.size());
+            for (var x : es) {
+                net.minecraft.world.item.enchantment.Enchantment.STREAM_CODEC.encode(buf, x.getKey());
+                buf.writeVarInt(x.getIntValue());
+            }
+        } else {
+            ((net.minecraft.network.codec.StreamCodec) type.streamCodec()).encode(buf, v);
         }
     }
 
@@ -734,9 +762,17 @@ final class ClickDump {
                 throw new IllegalStateException("hand-written container_click differs: " + p + " / " + back);
             }
         } else if (q instanceof ServerboundSetCreativeModeSlotPacket p) {
+            // STREAM_CODEC: short slot, ItemStack.OPTIONAL_UNTRUSTED_STREAM_CODEC (each component
+            // value length-prefixed), components in type id order
             buf.writeVarInt(1);
             buf.writeShort(p.slotNum());
-            canonicalWire(buf, p.itemStack());
+            canonicalWire(buf, p.itemStack(), true);
+            RegistryFriendlyByteBuf in = new RegistryFriendlyByteBuf(buf.copy(), buf.registryAccess());
+            in.readVarInt();
+            ServerboundSetCreativeModeSlotPacket back = ServerboundSetCreativeModeSlotPacket.STREAM_CODEC.decode(in);
+            if (in.readableBytes() != 0 || back.slotNum() != p.slotNum() || !ItemStack.matches(back.itemStack(), p.itemStack())) {
+                throw new IllegalStateException("hand-written set_creative_mode_slot differs: " + p + " / " + back);
+            }
         } else {
             buf.writeVarInt(2);
             buf.writeUtf(q.type().toString());
@@ -779,6 +815,177 @@ final class ClickDump {
             out[i] = (byte) Integer.parseInt(s.substring(2 * i, 2 * i + 2), 16);
         }
         return out;
+    }
+
+    // ------------------------------------------------------------------ the creative inventory screen
+
+    static final int CREATIVE_CASES = 1000;
+
+    private static String creativeLine(Harness.Run run, long seed, int i) {
+        return creativeCase(run, new Rng(seed * 1_000_303L + i + 11), "creative26_s" + seed + "_" + i);
+    }
+
+    /**
+     * Window 0 in creative mode: the real {@code CreativeModeInventoryScreen} (allocated; the fields
+     * its click code reads are set: minecraft, its {@code ItemPickerMenu}, the inventory tab with
+     * the {@code SlotWrapper}s it builds, the destroy slot) with its {@code CreativeInventoryListener}
+     * on the player's {@code InventoryMenu}: opening it broadcasts (every slot that differs from
+     * the menu's last broadcast is sent as {@code set_creative_mode_slot}), clicks go through its
+     * {@code slotClicked} (THROW handled by the screen, the rest through
+     * {@code inventoryMenu.clicked} + {@code broadcastChanges}), and a server {@code container_set_slot}
+     * while it is open is echoed back the same way.
+     */
+    static void creativeLines(long seed, int count, Consumer<String> sink) {
+        Harness.Run run = newRun();
+        // the creative packets carry whole stacks: no registries or item facts needed
+        header(s -> {});
+        for (int i = 0; i < count; i++) {
+            sink.accept(creativeLine(run, seed, i));
+        }
+    }
+
+    static int creativeReverseMismatches(long seed, int count) {
+        Harness.Run run = newRun();
+        header(s -> {});
+        List<String> forward = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            forward.add(creativeLine(run, seed, i));
+        }
+        int bad = 0;
+        for (int i = count - 1; i >= 0; i--) {
+            if (!creativeLine(run, seed, i).equals(forward.get(i))) {
+                System.out.println("DIFF reverse-order rerun of 26.1 creative case " + i);
+                bad++;
+            }
+        }
+        return bad;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String creativeCase(Harness.Run run, Rng r, String name) {
+        LocalPlayer player = run.player;
+        AbstractContainerMenu w0 = player.inventoryMenu;
+        player.containerMenu = w0;
+        call(AbstractContainerMenu.class, w0, "resetQuickCraft", new Class<?>[0]);
+        if (mode != GameType.CREATIVE) {
+            setMode(run, GameType.CREATIVE);
+        }
+        resetDropThrottle(player);
+        // a fresh player's menu: nothing broadcast yet
+        NonNullList<ItemStack> last = (NonNullList<ItemStack>) Reflect.get(AbstractContainerMenu.class, w0, "lastSlots");
+        for (int k = 0; k < last.size(); k++) {
+            last.set(k, ItemStack.EMPTY);
+        }
+        Harness.listener.handleSetHeldSlot(Harness.roundTrip(ClientboundSetHeldSlotPacket.STREAM_CODEC, new ClientboundSetHeldSlotPacket(r.nextInt(9))));
+        double fill = 0.2 + r.nextDouble() * 0.6;
+        List<ItemStack> w0Items = new ArrayList<>();
+        for (int k = 0; k < 46; k++) {
+            ItemStack s = k < 5 ? (r.chance(0.15) ? stack(r, ITEMS) : ItemStack.EMPTY)
+                    : k < 9 ? (r.chance(0.3) ? stack(r, ARMOR) : ItemStack.EMPTY) : maybe(r, fill, ITEMS);
+            w0Items.add(s);
+        }
+        content(0, r.nextInt(32768), w0Items, ItemStack.EMPTY);
+        // when the screen opened, earlier broadcasts may have happened (some slots already known)
+        if (r.chance(0.5)) {
+            for (int k = 0; k < 46; k++) {
+                if (r.chance(0.5)) {
+                    last.set(k, w0.getSlot(k).getItem().copy());
+                }
+            }
+        }
+        StringBuilder b = new StringBuilder(8192);
+        b.append("{\"type\":\"creative\",\"case\":\"").append(name).append("\",\"selected\":").append(player.getInventory().getSelectedSlot());
+        b.append(",\"last\":[");
+        for (int k = 0; k < 46; k++) {
+            b.append(k > 0 ? "," : "").append('"').append(hex(last.get(k))).append('"');
+        }
+        b.append(']');
+        state(b, player, w0, w0);
+        // open the screen
+        net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen screen =
+                Reflect.allocate(net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.class);
+        Reflect.set(net.minecraft.client.gui.screens.Screen.class, screen, "minecraft", Harness.client);
+        var picker = new net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.ItemPickerMenu(player);
+        Reflect.set(net.minecraft.client.gui.screens.inventory.AbstractContainerScreen.class, screen, "menu", picker);
+        Reflect.set(net.minecraft.client.gui.screens.inventory.AbstractContainerScreen.class, screen, "itemSlotMouseActions", new ArrayList<>());
+        net.minecraft.world.item.CreativeModeTab inventoryTab = null;
+        for (net.minecraft.world.item.CreativeModeTab t : BuiltInRegistries.CREATIVE_MODE_TAB) {
+            if (t.getType() == net.minecraft.world.item.CreativeModeTab.Type.INVENTORY) {
+                inventoryTab = t;
+            }
+        }
+        Reflect.set(net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.class, null, "selectedTab", inventoryTab);
+        picker.slots.clear();
+        List<net.minecraft.world.inventory.Slot> wrappers = new ArrayList<>();
+        try {
+            Class<?> wc = Class.forName("net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen$SlotWrapper");
+            var ctor = wc.getDeclaredConstructor(net.minecraft.world.inventory.Slot.class, int.class, int.class, int.class);
+            ctor.setAccessible(true);
+            for (int k = 0; k < w0.slots.size(); k++) {
+                var wrap = (net.minecraft.world.inventory.Slot) ctor.newInstance(w0.slots.get(k), k, 0, 0);
+                wrappers.add(wrap);
+                picker.slots.add(wrap);
+            }
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException(ex);
+        }
+        Object container = Reflect.get(net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.class, null, "CONTAINER");
+        Reflect.set(net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.class, screen, "destroyItemSlot",
+                new net.minecraft.world.inventory.Slot((net.minecraft.world.Container) container, 0, 173, 112));
+        Reflect.set(net.minecraft.client.Minecraft.class, Harness.client, "screen", screen);
+        var listener = new net.minecraft.client.gui.screens.inventory.CreativeInventoryListener(Harness.client);
+        Harness.connection.sent.clear();
+        w0.addSlotListener(listener);
+        b.append(",\"open\":[");
+        packets(b);
+        b.append("],\"events\":[");
+        int events = r.range(1, 10);
+        int written = 0;
+        for (int e = 0; e < events; e++) {
+            List<int[]> seq;
+            boolean server = r.chance(0.2);
+            if (server) {
+                int slot = 5 + r.nextInt(41);
+                ItemStack st = maybe(r, 0.7, ITEMS);
+                Harness.connection.sent.clear();
+                Harness.listener.handleContainerSetSlot(Harness.roundTrip(
+                        net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket.STREAM_CODEC,
+                        new net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket(0, w0.incrementStateId(), slot, st)));
+                b.append(written++ > 0 ? "," : "").append("{\"server_slot\":").append(slot).append(",\"item\":\"").append(hex(st)).append("\",\"packets\":[");
+                packets(b);
+                b.append(']');
+                state(b, player, w0, w0);
+                b.append('}');
+                continue;
+            }
+            // the screen only shows window 0's slots 5..45 (the crafting grid is off screen)
+            seq = gesture(r, w0, true);
+            for (int[] g : seq) {
+                int slotId = g[0] >= 0 && g[0] < 5 ? 5 + r.nextInt(41) : g[0];
+                var slot = slotId >= 0 ? wrappers.get(slotId) : null;
+                Harness.connection.sent.clear();
+                call(net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen.class, screen, "slotClicked",
+                        new Class<?>[] {net.minecraft.world.inventory.Slot.class, int.class, int.class, ContainerInput.class},
+                        slot, slotId, g[1], ContainerInput.values()[g[2]]);
+                b.append(written++ > 0 ? "," : "").append("{\"slot\":").append(slotId).append(",\"button\":").append(g[1])
+                        .append(",\"mode\":").append(g[2]).append(",\"packets\":[");
+                packets(b);
+                b.append(']');
+                state(b, player, w0, w0);
+                b.append('}');
+            }
+        }
+        b.append("]}");
+        w0.removeSlotListener(listener);
+        Reflect.set(net.minecraft.client.Minecraft.class, Harness.client, "screen", null);
+        return b.toString();
+    }
+
+    private static void packets(StringBuilder b) {
+        int pk = 0;
+        for (Packet<?> q : Harness.connection.sent) {
+            b.append(pk++ > 0 ? "," : "").append('"').append(packetHex(q)).append('"');
+        }
     }
 
     /** Calls a (possibly protected) method with exactly these parameter types. */

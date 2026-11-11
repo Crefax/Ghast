@@ -366,3 +366,140 @@ fn big_26_1_click_runs() {
     report(&st);
     assert_eq!(st.diffs, 0);
 }
+
+/// The creative inventory screen (oracle `creative-clicks`, `clicks_creative_seed1.jsonl.gz`:
+/// the real `CreativeModeInventoryScreen.slotClicked` with its listener on the player's
+/// `InventoryMenu`): opening it, every click and every server `container_set_slot` while it
+/// is open must make ghast send the same `set_creative_mode_slot` / `swing` packets byte for
+/// byte, and leave the same window 0 and cursor.
+#[test]
+fn golden_26_1_creative_screen_matches_the_real_client() {
+    use ghast_inventory::CreativePacket;
+    const VECTORS: &[u8] =
+        include_bytes!("../../../tests/golden/26.1/clicks_creative_seed1.jsonl.gz");
+    let reader = BufReader::new(flate2::read::GzDecoder::new(VECTORS));
+    let reg = HashRegistries::default();
+    let (mut cases, mut events, mut packets, mut diffs) = (0, 0, 0, Vec::new());
+    let encode = |p: &CreativePacket| -> Vec<u8> {
+        let mut b = BytesMut::new();
+        match p.to_v26_1() {
+            ghast_protocol::v26_1::play::serverbound::ServerboundPlayPacket::SetCreativeSlot(s) => {
+                b.extend_from_slice(&[1]);
+                s.encode(&mut b).unwrap();
+            }
+            _ => b.extend_from_slice(&[2]),
+        }
+        b.to_vec()
+    };
+    let java = |v: &Value| -> Vec<Vec<u8>> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                let b = hex(p.as_str().unwrap());
+                // a swing is tag 2 + its type name
+                if b[0] == 2 { vec![2] } else { b.to_vec() }
+            })
+            .collect()
+    };
+    for line in reader.lines() {
+        let c: Value = serde_json::from_str(&line.unwrap()).unwrap();
+        if c["type"] != "creative" {
+            continue;
+        }
+        cases += 1;
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        inv.set_creative_26_1(true);
+        inv.on_held_slot(c["selected"].as_i64().unwrap() as i8);
+        // the menu's last broadcast: open and close the screen once over those stacks
+        let last = stacks(&c["last"]);
+        inv.on_window_items_26_1(0, 0, last, None);
+        inv.tick();
+        let _ = inv.open_inventory().unwrap();
+        inv.tick();
+        inv.close().unwrap();
+        inv.tick();
+        inv.on_window_items_26_1(
+            0,
+            c["state_id"].as_i64().unwrap() as i32,
+            stacks(&c["w0"]),
+            None,
+        );
+        let open = match inv.open_inventory().unwrap() {
+            Some(Outgoing::Creative(p)) => p,
+            None => Vec::new(),
+            other => panic!("{other:?}"),
+        };
+        let ours: Vec<Vec<u8>> = open.iter().map(encode).collect();
+        packets += ours.len();
+        if ours != java(&c["open"]) {
+            diffs.push(format!(
+                "{} open: ghast {} packets, client {}",
+                c["case"],
+                ours.len(),
+                java(&c["open"]).len()
+            ));
+        }
+        for e in c["events"].as_array().unwrap() {
+            events += 1;
+            inv.tick();
+            let ours: Vec<CreativePacket> = if let Some(slot) = e["server_slot"].as_i64() {
+                inv.on_set_slot_26_1(0, 1, slot as i16, stack(&e["item"]));
+                inv.take_creative_echo_26_1()
+            } else {
+                let slot = e["slot"].as_i64().unwrap() as i16;
+                let button = e["button"].as_i64().unwrap() as u8;
+                let mode = e["mode"].as_i64().unwrap() as u8;
+                match inv.click(click_of(slot, button, mode)) {
+                    Ok(Outgoing::Creative(p)) => p,
+                    other => {
+                        diffs.push(format!(
+                            "{} click {slot}/{button}/{mode}: {other:?}",
+                            c["case"]
+                        ));
+                        break;
+                    }
+                }
+            };
+            let ours: Vec<Vec<u8>> = ours.iter().map(encode).collect();
+            packets += ours.len();
+            let want = java(&e["packets"]);
+            let mut problems = Vec::new();
+            if ours != want {
+                problems.push(format!(
+                    "packets ghast {:?} client {:?}",
+                    ours.iter().map(|b| hexs(b)).collect::<Vec<_>>(),
+                    want.iter().map(|b| hexs(b)).collect::<Vec<_>>()
+                ));
+            }
+            for (i, w) in stacks(&e["w0"]).iter().enumerate() {
+                if !same(inv.window0_slot(i), w.as_ref(), &reg) {
+                    problems.push(format!("w0 slot {i}"));
+                }
+            }
+            if !same(inv.cursor(), stack(&e["carried"]).as_ref(), &reg) {
+                problems.push("carried".into());
+            }
+            if !problems.is_empty() {
+                diffs.push(format!(
+                    "{} event {e_short}: {}",
+                    c["case"],
+                    problems.join("; "),
+                    e_short = e
+                        .get("mode")
+                        .map_or("server".to_string(), |m| m.to_string())
+                ));
+                break;
+            }
+        }
+    }
+    println!(
+        "26.1 creative screen: {cases} cases, {events} events, {packets} packets, {} differences",
+        diffs.len()
+    );
+    for d in diffs.iter().take(20) {
+        println!("DIFF {d}");
+    }
+    assert!(cases >= 1000);
+    assert!(diffs.is_empty());
+}
