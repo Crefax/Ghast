@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use bytes::BytesMut;
 use ghast_inventory::v26_1::HashRegistries;
-use ghast_inventory::{Click, Inventory, OUTSIDE, Outgoing, Stack, Version};
+use ghast_inventory::{Click, DragKind, DragStage, Inventory, OUTSIDE, Outgoing, Stack, Version};
 use ghast_protocol::types::Uuid;
 use ghast_protocol::v26_1::play::clientbound::{self as cb, ClientboundPlayPacket as P};
 use ghast_protocol::v26_1::play::serverbound as sb;
@@ -123,6 +123,17 @@ impl Lab {
                     println!("    <- correction {:#04x}", raw.id);
                 }
             }
+            if raw.id == cb::id::OPEN_WINDOW || raw.id == cb::id::CLOSE_WINDOW {
+                println!(
+                    "    <- {} ({} bytes)",
+                    if raw.id == cb::id::OPEN_WINDOW {
+                        "open_screen"
+                    } else {
+                        "container_close"
+                    },
+                    raw.body.len()
+                );
+            }
             if let Err(e) = self.inv.apply_raw_v26_1(&raw) {
                 println!("DECODE ERROR {:#04x}: {e}", raw.id);
                 let dir = std::env::var("GHAST_DUMP_DIR").unwrap_or_else(|_| ".".into());
@@ -162,6 +173,14 @@ impl Lab {
     }
 
     fn send_out(&mut self, out: &Outgoing) {
+        // the real client swings its arm for every stack a click drops, before the click
+        if let Outgoing::ContainerClick(c) = out {
+            for _ in 0..c.swings {
+                self.c.send(&sb::ArmAnimation {
+                    hand: sb::ArmAnimationHand(0),
+                });
+            }
+        }
         let p = self.inv.encode_v26_1(out).expect("26.1 packet");
         match p {
             sb::ServerboundPlayPacket::WindowClick(c) => self.c.send(&c),
@@ -323,6 +342,564 @@ fn hash_batches(lab: &mut Lab, batches: usize) {
     }
 }
 
+/// Every slot of the current screen and the cursor.
+fn snapshot(inv: &Inventory) -> (Vec<Option<Stack>>, Option<Stack>) {
+    (
+        (0..inv.slot_count())
+            .map(|i| inv.slot(i).cloned())
+            .collect(),
+        inv.cursor().cloned(),
+    )
+}
+
+/// `MENUS=1`: drags, bundles, a crafting table, a furnace, an anvil, a shulker box and creative
+/// clicks (the driver gives the items and places the blocks around the player). A step's
+/// mispredictions are the slots (and the cursor) the server's packets changed after ghast's
+/// prediction; crafting results the server sends after a grid change are not counted (the
+/// real client receives them too).
+fn menus(lab: &mut Lab) {
+    let v = Version::V26_1;
+    let mut total = (0usize, 0usize, 0usize); // clicks, predicted, mispredicted clicks
+    let mut step = |lab: &mut Lab, label: &str, click: Option<Click>, ignore: &[usize]| {
+        let Some(click) = click else {
+            println!("{label:40} skipped (setup)");
+            return;
+        };
+        lab.inv.tick();
+        lab.inv.tick();
+        let out = match lab.inv.click(click) {
+            Ok(o) => o,
+            Err(e) => {
+                println!("{label:40} refused: {e}");
+                return;
+            }
+        };
+        let Outgoing::ContainerClick(c) = &out else {
+            panic!("{out:?}")
+        };
+        let (predicted, swings, changed) = (c.predicted, c.swings, c.changed.len());
+        let before = snapshot(&lab.inv);
+        lab.send_out(&out);
+        lab.corrections = 0;
+        lab.pump(700);
+        let after = snapshot(&lab.inv);
+        let mut diff: Vec<String> = Vec::new();
+        for (i, (a, b)) in before.0.iter().zip(&after.0).enumerate() {
+            if a != b && !ignore.contains(&i) {
+                diff.push(format!("slot {i}"));
+            }
+        }
+        if before.1 != after.1 {
+            diff.push("cursor".into());
+        }
+        total.0 += 1;
+        total.1 += usize::from(predicted);
+        if predicted && !diff.is_empty() {
+            total.2 += 1;
+        }
+        println!(
+            "{label:40} predicted {predicted:5} changed {changed:2} swings {swings} -> server changed {:?}",
+            diff
+        );
+    };
+    let find = |lab: &Lab, name: &str| lab.inv.find(|s| s.item_name(v) == Some(name));
+    let empty = |lab: &Lab, from: usize, skip: &[usize]| {
+        (from..lab.inv.slot_count())
+            .filter(|i| !skip.contains(i))
+            .find(|&i| lab.inv.slot(i).is_none())
+            .map(|i| i as i16)
+    };
+    let drag =
+        |slot: i16, stage: DragStage, kind: DragKind| Some(Click::QuickCraft { slot, stage, kind });
+    lab.inv.tick();
+    lab.inv.open_inventory().unwrap();
+
+    // window 0: drags
+    let stone = find(lab, "stone");
+    step(
+        lab,
+        "w0: pickup 64 stone",
+        stone.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let e: Vec<i16> = (9..36)
+        .filter(|&i| lab.inv.slot(i).is_none())
+        .take(3)
+        .map(|i| i as i16)
+        .collect();
+    step(
+        lab,
+        "w0: drag split start",
+        drag(OUTSIDE, DragStage::Start, DragKind::Split),
+        &[],
+    );
+    for &slot in &e {
+        step(
+            lab,
+            "w0: drag split slot",
+            drag(slot, DragStage::Slot, DragKind::Split),
+            &[],
+        );
+    }
+    step(
+        lab,
+        "w0: drag split end (3 x 21)",
+        drag(OUTSIDE, DragStage::End, DragKind::Split),
+        &[],
+    );
+    step(
+        lab,
+        "w0: pickup 21",
+        e.first().map(|&slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let e2: Vec<i16> = (9..36)
+        .filter(|&i| lab.inv.slot(i).is_none())
+        .take(2)
+        .map(|i| i as i16)
+        .collect();
+    step(
+        lab,
+        "w0: drag one start",
+        drag(OUTSIDE, DragStage::Start, DragKind::One),
+        &[],
+    );
+    for &slot in &e2 {
+        step(
+            lab,
+            "w0: drag one slot",
+            drag(slot, DragStage::Slot, DragKind::One),
+            &[],
+        );
+    }
+    step(
+        lab,
+        "w0: drag one end",
+        drag(OUTSIDE, DragStage::End, DragKind::One),
+        &[],
+    );
+    step(
+        lab,
+        "w0: double click gather",
+        e.first().map(|&slot| Click::PickupAll { slot }),
+        &[],
+    );
+    step(
+        lab,
+        "w0: put stone down",
+        e.first().map(|&slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+
+    // window 0: bundle
+    let bundle = find(lab, "bundle");
+    step(
+        lab,
+        "w0: pickup bundle",
+        bundle.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let pearl = find(lab, "ender_pearl");
+    step(
+        lab,
+        "w0: bundle onto pearls (insert)",
+        pearl.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let egg = find(lab, "egg");
+    step(
+        lab,
+        "w0: bundle onto eggs (insert)",
+        egg.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let e = empty(lab, 9, &[]);
+    step(
+        lab,
+        "w0: bundle right-click empty (take one out)",
+        e.map(|slot| Click::Pickup { slot, right: true }),
+        &[],
+    );
+    let e = empty(lab, 9, &[]);
+    step(
+        lab,
+        "w0: put bundle down",
+        e.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let bundle = find(lab, "bundle");
+    step(
+        lab,
+        "w0: right-click bundle (take one)",
+        bundle.map(|slot| Click::Pickup { slot, right: true }),
+        &[],
+    );
+    let e = empty(lab, 9, &[]);
+    step(
+        lab,
+        "w0: put the taken stack down",
+        e.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let pearl = find(lab, "ender_pearl");
+    step(
+        lab,
+        "w0: pickup pearls",
+        pearl.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let bundle = find(lab, "bundle");
+    step(
+        lab,
+        "w0: pearls onto bundle (insert)",
+        bundle.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+    let e = empty(lab, 9, &[]);
+    step(
+        lab,
+        "w0: put the rest down",
+        e.map(|slot| Click::Pickup { slot, right: false }),
+        &[],
+    );
+
+    let p = lab.pos;
+    let at = |dx: i32, dz: i32| BlockPos {
+        x: p[0].floor() as i32 + dx,
+        y: p[1].floor() as i32,
+        z: p[2].floor() as i32 + dz,
+    };
+    let open = |lab: &mut Lab, pos: BlockPos| -> bool {
+        lab.inv.tick();
+        if let Ok(o) = lab.inv.close() {
+            lab.send_out(&o);
+        }
+        lab.pump(300);
+        lab.c.send(&sb::BlockPlace {
+            hand: sb::BlockPlaceHand(0),
+            location: pos,
+            direction: 1,
+            cursor_x: 0.5,
+            cursor_y: 1.0,
+            cursor_z: 0.5,
+            inside_block: false,
+            world_border_hit: false,
+            sequence: 2,
+        });
+        lab.c.send(&sb::ArmAnimation {
+            hand: sb::ArmAnimationHand(0),
+        });
+        lab.pump(1000);
+        match lab.inv.window() {
+            Some(w) => {
+                println!(
+                    "opened window {} {:?} menu {:?}",
+                    w.id(),
+                    w.kind(),
+                    w.menu_26_1()
+                );
+                true
+            }
+            None => {
+                println!("no window opened at {pos:?}");
+                false
+            }
+        }
+    };
+
+    // crafting table: planks -> crafting table; honey bottle -> sugar (glass bottle remains)
+    if open(lab, at(2, 0)) {
+        let planks = find(lab, "oak_planks");
+        step(
+            lab,
+            "craft: pickup planks",
+            planks.map(|slot| Click::Pickup { slot, right: false }),
+            &[0],
+        );
+        for g in [1i16, 2, 4, 5] {
+            step(
+                lab,
+                "craft: one plank into the grid",
+                Some(Click::Pickup {
+                    slot: g,
+                    right: true,
+                }),
+                &[0],
+            );
+        }
+        let e = empty(lab, 10, &[]);
+        step(
+            lab,
+            "craft: put planks down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[0],
+        );
+        println!(
+            "  result: {:?}",
+            lab.inv.slot(0).map(|s| (s.item_name(v), s.count()))
+        );
+        step(
+            lab,
+            "craft: take the result",
+            Some(Click::Pickup {
+                slot: 0,
+                right: false,
+            }),
+            &[0],
+        );
+        let e = empty(lab, 10, &[]);
+        step(
+            lab,
+            "craft: put the result down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[0],
+        );
+        let honey = find(lab, "honey_bottle");
+        step(
+            lab,
+            "craft: quick move honey into the grid",
+            honey.map(|slot| Click::QuickMove { slot, right: false }),
+            &[0],
+        );
+        println!(
+            "  result: {:?}",
+            lab.inv.slot(0).map(|s| (s.item_name(v), s.count()))
+        );
+        step(
+            lab,
+            "craft: shift-click the result (sugar)",
+            Some(Click::QuickMove {
+                slot: 0,
+                right: false,
+            }),
+            &[0],
+        );
+        let bottle = (1..10)
+            .find(|&i| lab.inv.slot(i).is_some())
+            .map(|i| i as i16);
+        step(
+            lab,
+            "craft: quick move the bottle out",
+            bottle.map(|slot| Click::QuickMove { slot, right: false }),
+            &[0],
+        );
+    }
+    // furnace: shift-click into input and fuel (never both at once: nothing smelts)
+    if open(lab, at(2, 2)) {
+        let iron = find(lab, "raw_iron");
+        step(
+            lab,
+            "furnace: quick move raw iron -> input",
+            iron.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "furnace: quick move input back",
+            Some(Click::QuickMove {
+                slot: 0,
+                right: false,
+            }),
+            &[],
+        );
+        let coal = find(lab, "coal");
+        step(
+            lab,
+            "furnace: quick move coal -> fuel",
+            coal.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "furnace: quick move fuel back",
+            Some(Click::QuickMove {
+                slot: 1,
+                right: false,
+            }),
+            &[],
+        );
+        let bucket = find(lab, "bucket");
+        step(
+            lab,
+            "furnace: pickup bucket",
+            bucket.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "furnace: bucket into the fuel slot",
+            Some(Click::Pickup {
+                slot: 1,
+                right: false,
+            }),
+            &[],
+        );
+        step(
+            lab,
+            "furnace: take the bucket",
+            Some(Click::Pickup {
+                slot: 1,
+                right: false,
+            }),
+            &[],
+        );
+        let e = empty(lab, 3, &[]);
+        step(
+            lab,
+            "furnace: put the bucket down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+    }
+    // anvil: its result is computed by the client from data ghast does not model (unpredicted)
+    if open(lab, at(0, 2)) {
+        let sword = find(lab, "diamond_sword");
+        step(
+            lab,
+            "anvil: quick move sword in (unpredicted)",
+            sword.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "anvil: quick move sword out (unpredicted)",
+            Some(Click::QuickMove {
+                slot: 0,
+                right: false,
+            }),
+            &[],
+        );
+        let stone = find(lab, "stone");
+        step(
+            lab,
+            "anvil: pickup stone",
+            stone.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        let e = empty(lab, 3, &[]);
+        step(
+            lab,
+            "anvil: put stone down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+    }
+    // shulker box: shulker boxes do not go in
+    if open(lab, at(3, 0)) {
+        let boxed = find(lab, "red_shulker_box");
+        step(
+            lab,
+            "shulker: quick move a shulker box (stays)",
+            boxed.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "shulker: pickup the shulker box",
+            boxed.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "shulker: shulker box onto slot 0 (refused)",
+            Some(Click::Pickup {
+                slot: 0,
+                right: false,
+            }),
+            &[],
+        );
+        step(
+            lab,
+            "shulker: put it back",
+            boxed.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        let stone = find(lab, "stone");
+        step(
+            lab,
+            "shulker: quick move stone in",
+            stone.map(|slot| Click::QuickMove { slot, right: false }),
+            &[],
+        );
+        step(
+            lab,
+            "shulker: drag-free double click",
+            Some(Click::Pickup {
+                slot: 0,
+                right: false,
+            }),
+            &[],
+        );
+        let e = empty(lab, 27, &[]);
+        step(
+            lab,
+            "shulker: put stone down",
+            e.map(|slot| Click::Pickup { slot, right: false }),
+            &[],
+        );
+        // creative: middle click clones, clone drags (the driver switches the game mode now)
+        println!("waiting for creative mode");
+        lab.pump(3000);
+        let stone = find(lab, "stone");
+        step(
+            lab,
+            "creative: clone stone",
+            stone.map(|slot| Click::Clone { slot }),
+            &[],
+        );
+        let e: Vec<i16> = (0..27)
+            .filter(|&i| lab.inv.slot(i).is_none())
+            .take(2)
+            .map(|i| i as i16)
+            .collect();
+        step(
+            lab,
+            "creative: drag clone start",
+            drag(OUTSIDE, DragStage::Start, DragKind::Clone),
+            &[],
+        );
+        for &slot in &e {
+            step(
+                lab,
+                "creative: drag clone slot",
+                drag(slot, DragStage::Slot, DragKind::Clone),
+                &[],
+            );
+        }
+        step(
+            lab,
+            "creative: drag clone end",
+            drag(OUTSIDE, DragStage::End, DragKind::Clone),
+            &[],
+        );
+        step(
+            lab,
+            "creative: drop the cursor outside",
+            Some(Click::Pickup {
+                slot: OUTSIDE,
+                right: false,
+            }),
+            &[],
+        );
+        let e = e.first().copied();
+        step(
+            lab,
+            "creative: Q a cloned stack",
+            e.map(|slot| Click::Drop { slot, all: true }),
+            &[],
+        );
+        lab.inv.tick();
+        if let Ok(o) = lab.inv.close() {
+            lab.send_out(&o);
+        }
+        lab.pump(500);
+    }
+    println!(
+        "RESULT MENUS: {} clicks, {} predicted, {} predicted clicks the server corrected",
+        total.0, total.1, total.2
+    );
+}
+
 fn write_capture(path: Option<&str>, lab: &mut Lab) {
     if let (Some(path), Some(buf)) = (path, lab.c.capture.take()) {
         let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
@@ -449,6 +1026,14 @@ fn main() {
     // The inventory reset on login drops the registries: set them again after login.
     lab.pump(2000);
     lab.inv.set_registries_26_1(reg);
+    if std::env::var("MENUS").is_ok() {
+        println!("waiting for items");
+        lab.pump(9000);
+        dump(&lab.inv);
+        menus(&mut lab);
+        write_capture(capture.as_deref(), &mut lab);
+        return;
+    }
     if let Ok(n) = std::env::var("HASH_BATCHES") {
         hash_batches(&mut lab, n.parse().unwrap_or(1));
         write_capture(capture.as_deref(), &mut lab);

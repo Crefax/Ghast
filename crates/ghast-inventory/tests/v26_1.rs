@@ -61,9 +61,23 @@ fn click_of(c: &sb::WindowClick) -> Click {
             slot: c.slot,
             hotbar: b,
         },
+        3 => Click::Clone { slot: c.slot },
         4 => Click::Drop {
             slot: c.slot,
             all: b == 1,
+        },
+        5 => Click::QuickCraft {
+            slot: c.slot,
+            stage: match b & 3 {
+                0 => ghast_inventory::DragStage::Start,
+                1 => ghast_inventory::DragStage::Slot,
+                _ => ghast_inventory::DragStage::End,
+            },
+            kind: match (b >> 2) & 3 {
+                0 => ghast_inventory::DragKind::Split,
+                1 => ghast_inventory::DragKind::One,
+                _ => ghast_inventory::DragKind::Clone,
+            },
         },
         6 => Click::PickupAll { slot: c.slot },
         m => panic!("mode {m}"),
@@ -233,6 +247,29 @@ fn component_hashes_session_replays() {
     // only the batch ends: the driver's `/clear` lands before the batch's last click settles
     eprintln!("hash session: {clicks} clicks, {rejected} rejected");
     assert!(rejected <= 5, "{rejected}: {outcomes:?}");
+}
+
+/// `fixtures/menus_26_1_2.bin.zz`: `live_clicks_26_1` with `MENUS=1` on a vanilla 26.1.2 server
+/// (2026-11-12): drags (split, one each), bundles (insert, take out), a crafting table (a
+/// result taken, honey bottle -> sugar leaving the glass bottle), a furnace (shift-clicks into
+/// the input and fuel slots, a bucket as fuel), an anvil, a shulker box (shulker boxes refused)
+/// and creative clicks (clone, clone drag, Q). The server corrected none of the 59 predicted
+/// clicks; the one sent unpredicted is the anvil's (its result is computed from data ghast does
+/// not model). The replay reproduces every click byte for byte.
+#[test]
+fn menus_session_replays() {
+    const MENUS: &[u8] = include_bytes!("fixtures/menus_26_1_2.bin.zz");
+    let (clicks, unpredicted, outcomes) = replay(MENUS);
+    assert_eq!(clicks, 60);
+    assert_eq!(unpredicted, 1);
+    use ghast_inventory::ClickOutcome as O;
+    let rejected = outcomes.iter().filter(|o| **o == O::Rejected).count();
+    // "rejected" counts any container packet that arrives while a click settles: the anvil
+    // click's correction, the crafting table's new result after grid changes and the window
+    // resends around opening and closing GUIs (the real client receives all of them too; the
+    // live run compared every slot after each click and found no misprediction)
+    eprintln!("menus session: {clicks} clicks, {rejected} rejected");
+    assert_eq!(rejected, 12, "{outcomes:?}");
 }
 
 #[test]
