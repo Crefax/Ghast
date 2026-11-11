@@ -346,6 +346,14 @@ impl Entity {
         }
     }
 
+    /// How much the crosshair pick grows this entity's box (vanilla `getCollisionBorderSize` /
+    /// `getTargetingMargin`, from the type's size table: 0.1 for most 1.8 types, 0 since 1.9,
+    /// 1.0 for fireballs); 0 when the type has no size entry.
+    #[must_use]
+    pub fn targeting_margin(&self) -> f32 {
+        self.sizer.map_or(0.0, |s| s.targeting_margin)
+    }
+
     /// `(width, height)` of [`Entity::dimensions`].
     #[must_use]
     pub fn size(&self) -> Option<(f32, f32)> {

@@ -152,6 +152,38 @@ impl WorldView for Sim16 {
 }
 
 impl Sim for Sim16 {
+    fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
+        // The oracle-verified GameRenderer.updateTargetedEntity (outline shapes, model
+        // offsets, interaction shapes, then the entity ray).
+        use ghast_physics::pick::v1_16_5 as pick;
+        let held_block = q
+            .held
+            .and_then(ghast_data::v1_16_5::Item::from_id)
+            .and_then(|i| ghast_data::v1_16_5::Block::from_name(i.info().name));
+        let eye = [q.eyes.x, q.eyes.y, q.eyes.z];
+        let look = pick::rotation_vector(q.rotation.0, q.rotation.1);
+        if q.entities.is_empty() {
+            // pick_target without entities is its block pick.
+            let reach = if q.creative {
+                pick::CREATIVE_REACH
+            } else {
+                pick::REACH
+            };
+            let hit = pick::pick(&self.world, eye, look, reach, held_block);
+            return Crosshair::Block(block_hit(&hit, eye));
+        }
+        let t = pick::pick_target(
+            &self.world,
+            &q.player_bb,
+            eye,
+            look,
+            q.creative,
+            held_block,
+            q.entities,
+        );
+        modern_crosshair(t, eye)
+    }
+
     fn crosshair_now(
         &self,
         eyes: Vec3,

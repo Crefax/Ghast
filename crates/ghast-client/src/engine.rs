@@ -32,7 +32,7 @@ use crate::common::{
 use crate::hands::{self, BlockHit, Buttons, DigFactors, Hands, HandsIo};
 use crate::interest::Interests;
 use crate::rotation::Rotation;
-use crate::sim::{Sim, WorldView};
+use crate::sim::{Crosshair, PickQuery, Sim, WorldView};
 use crate::version::{Capabilities, GameVersion};
 
 /// Pending chat messages kept for the behaviour; more are dropped (and counted) while the
@@ -343,6 +343,8 @@ pub(crate) struct Core {
     aqua_affinity: bool,
     /// Blocks broken on the client this tick (predicted air).
     broken_now: Vec<ghast_protocol::BlockPos>,
+    /// The crosshair pick's entity list (kept to reuse the allocation).
+    pick: PickList,
     /// Flight wanted by the behaviour this tick ([`TickContext::set_flying`]).
     want_flying: Option<bool>,
     /// Turns held back because they would have moved the crosshair off a clicked block.
@@ -420,6 +422,7 @@ impl Core {
             effects: std::collections::BTreeMap::new(),
             aqua_affinity: false,
             broken_now: Vec::new(),
+            pick: PickList::default(),
             want_flying: None,
             held_turns: 0,
             swings: 0,
@@ -492,13 +495,18 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
         EntityClass::Player | EntityClass::Mob | EntityClass::Painting => true,
         EntityClass::Item | EntityClass::ExperienceOrb => false,
         EntityClass::Object => match e.entity_type() {
-            EntityType::LegacyObject(t) => matches!(t, 1 | 10 | 50 | 51 | 70 | 71 | 77 | 78),
+            // 63: the large fireball (`EntityFireball.canBeCollidedWith`; small fireballs and
+            // wither skulls are not).
+            EntityType::LegacyObject(t) => {
+                matches!(t, 1 | 10 | 50 | 51 | 63 | 70 | 71 | 77 | 78)
+            }
             #[cfg(feature = "v1_16_5")]
             EntityType::Registry(_) => {
                 ghast_entity::v1_16_5::info(e.entity_type()).is_some_and(|i| {
                     matches!(
                         i.name,
                         "boat"
+                            | "fireball"
                             | "tnt"
                             | "end_crystal"
                             | "falling_block"
@@ -516,27 +524,105 @@ fn collidable(e: &ghast_entity::Entity) -> bool {
     }
 }
 
-/// The entity under the crosshair from `eyes` along `look` (vanilla `GameRenderer.updateTargetedEntity`), if
-/// entities are tracked.
-fn entity_pick<W: WorldView + ?Sized>(
-    w: &W,
-    caps: &Capabilities,
-    eyes: Vec3,
-    look: Vec3,
-    block_distance: Option<f64>,
-) -> Option<hands::EntityHit> {
-    let ents = w.entities()?;
-    let riding = ents.me().and_then(ghast_entity::Entity::vehicle);
-    // 1.8 grows entity boxes by the 0.1 collision border; 1.9+ does not.
-    let border = caps.entity_pick_border;
-    let cands = ents
-        .within([eyes.x, eyes.y, eyes.z], 8.0)
-        .filter(|e| collidable(e))
-        .filter_map(|e| {
+/// The pickable entities near the eyes as the oracle-proven crosshair pick takes them, with
+/// each one's id and position alongside (empty without an entity tracker).
+#[derive(Debug, Default)]
+struct PickList {
+    entities: Vec<ghast_physics::pick::PickEntity>,
+    ids: Vec<(i32, Vec3)>,
+}
+
+impl PickList {
+    /// Fills the list: tracked entities within 16 blocks of `eyes` (vanilla's search box only
+    /// drops entities the ray cannot hit, so this radius loses none) that rays hit
+    /// (`collidable`), not spectators, not ourselves.
+    fn fill(&mut self, w: &(impl WorldView + ?Sized), caps: &Capabilities, eyes: Vec3) {
+        self.entities.clear();
+        self.ids.clear();
+        if let Some(ents) = w.entities() {
+            self.fill_from(ents, caps, eyes);
+        }
+    }
+
+    #[inline(never)]
+    fn fill_from(&mut self, ents: &ghast_entity::Entities, caps: &Capabilities, eyes: Vec3) {
+        use ghast_entity::Entity;
+        let me = ents.self_id();
+        let root = |mut id: i32| {
+            for _ in 0..16 {
+                match ents.get(id).and_then(Entity::vehicle) {
+                    Some(v) => id = v,
+                    None => break,
+                }
+            }
+            id
+        };
+        let riding = ents.me().and_then(Entity::vehicle);
+        let my_root = me.map(root);
+        for e in ents.within([eyes.x, eyes.y, eyes.z], 16.0) {
+            if Some(e.id()) == me
+                || !collidable(e)
+                || (e.is_player()
+                    && ents
+                        .player_info(&e.uuid())
+                        .is_some_and(|p| p.game_mode == 3))
+            {
+                continue;
+            }
+            let Some(b) = e.bounding_box() else {
+                continue;
+            };
+            // 1.8: the vehicle we sit on; 1.9+: anything with our root vehicle.
+            let same_root_vehicle = if caps.entity_pick_root_vehicle {
+                my_root.is_some_and(|r| root(e.id()) == r)
+            } else {
+                riding == Some(e.id())
+            };
+            self.entities.push(ghast_physics::pick::PickEntity {
+                bb: ghast_physics::math::Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5]),
+                pick_radius: e.targeting_margin(),
+                same_root_vehicle,
+            });
             let p = e.position();
-            Some((e.id(), e.bounding_box()?, Vec3::new(p[0], p[1], p[2])))
-        });
-    hands::pick_entity(cands, eyes, look, block_distance, border, riding)
+            self.ids.push((e.id(), Vec3::new(p[0], p[1], p[2])));
+        }
+    }
+
+    /// The pick result as the hands take it: the block (none when an entity is in front or
+    /// beyond the 3-block limit) and the entity.
+    fn split(&self, t: Crosshair, eyes: Vec3) -> (Option<BlockHit>, Option<hands::EntityHit>) {
+        match t {
+            Crosshair::Block(b) => (b, None),
+            Crosshair::Entity { index, hit } => {
+                let (id, entity_pos) = self.ids[index];
+                let d = [hit.x - eyes.x, hit.y - eyes.y, hit.z - eyes.z];
+                let distance = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                (
+                    None,
+                    Some(hands::EntityHit {
+                        id,
+                        hit,
+                        entity_pos,
+                        distance,
+                    }),
+                )
+            }
+        }
+    }
+}
+
+/// The player's box at `pos` for the pick's entity search (standing 0.6 x 1.8: the search
+/// box only filters out entities the ray cannot reach, so the pose's exact box is not needed).
+fn pick_box(pos: Vec3) -> ghast_physics::math::Aabb {
+    let h = f64::from(0.6f32 / 2.0);
+    ghast_physics::math::Aabb::new(
+        pos.x - h,
+        pos.y,
+        pos.z - h,
+        pos.x + h,
+        pos.y + f64::from(1.8f32),
+        pos.z + h,
+    )
 }
 
 /// The off-hand stack's facts (1.9+).
@@ -1096,8 +1182,20 @@ impl<S: Sim> Engine<S> {
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
             let held_id = c.inv.held().and_then(|s| u16::try_from(s.id()).ok());
-            let target = sim.crosshair_now(eyes, (c.pose.yaw, c.pose.pitch), look, held_id);
-            let entity = entity_pick(sim, c.opts.caps, eyes, look, target.map(|t| t.distance));
+            // GameRenderer.updateTargetedEntity before the key handling: one oracle-proven
+            // pick for the block and the entity.
+            c.pick.fill(sim, c.opts.caps, eyes);
+            let crosshair = sim.crosshair_target(&PickQuery {
+                eyes,
+                rotation: (c.pose.yaw, c.pose.pitch),
+                look,
+                held: held_id,
+                now: true,
+                creative: c.game_mode == GameMode::Creative,
+                player_bb: pick_box(c.pose.pos),
+                entities: &c.pick.entities,
+            });
+            let (target, entity) = c.pick.split(crosshair, eyes);
             let in_water = blocks(
                 eyes.x.floor() as i32,
                 eyes.y.floor() as i32,
@@ -1470,7 +1568,7 @@ const ACTION_LOOK_REACH: f64 = 6.0;
 /// movement packet.
 pub struct TickContext<'a> {
     core: &'a mut Core,
-    world: &'a dyn WorldView,
+    world: &'a dyn Sim,
     held: Option<hands::HeldItem>,
 }
 
@@ -1735,10 +1833,9 @@ impl TickContext<'_> {
         self.core.buttons
     }
 
-    /// What the crosshair is on as the server judges it: the first block within reach 4.5
-    /// along the **sent** look from the sent eyes.
-    #[must_use]
-    pub fn target(&self) -> Option<BlockHit> {
+    /// The crosshair as the server judges it: vanilla's pick (block at the game mode's reach,
+    /// then the entity ray) along the **sent** look from the sent eyes.
+    fn sent_crosshair(&self) -> (Option<BlockHit>, Option<hands::EntityHit>) {
         let s = &self.core.sent;
         let v = self.core.opts.caps;
         let eye = if s.sneaking {
@@ -1746,12 +1843,27 @@ impl TickContext<'_> {
         } else {
             v.eye_height
         };
-        self.world.crosshair(
-            Vec3::new(s.pos.x, s.pos.y + eye, s.pos.z),
-            (s.yaw, s.pitch),
-            hands::look_vector(s.yaw, s.pitch),
-            hands::REACH,
-        )
+        let eyes = Vec3::new(s.pos.x, s.pos.y + eye, s.pos.z);
+        let mut list = PickList::default();
+        list.fill(self.world, v, eyes);
+        let t = self.world.crosshair_target(&PickQuery {
+            eyes,
+            rotation: (s.yaw, s.pitch),
+            look: hands::look_vector(s.yaw, s.pitch),
+            held: None,
+            now: false,
+            creative: self.core.game_mode == GameMode::Creative,
+            player_bb: pick_box(s.pos),
+            entities: &list.entities,
+        });
+        list.split(t, eyes)
+    }
+
+    /// The block the crosshair is on as the server judges it (from the sent pose): `None` when
+    /// nothing is in reach or an entity is in front of it.
+    #[must_use]
+    pub fn target(&self) -> Option<BlockHit> {
+        self.sent_crosshair().0
     }
 
     /// The tracked entities (behaviours that ask for [`Interests::ENTITIES`]).
@@ -1761,20 +1873,11 @@ impl TickContext<'_> {
     }
 
     /// The entity the crosshair is on as the server judges it (from the sent pose; vanilla's
-    /// entity pick: reach 3, 1.8 boxes grown by 0.1, closer than the block hit).
+    /// pick: within 3 blocks outside creative, nearer than the block hit, boxes grown by the
+    /// type's targeting margin).
     #[must_use]
     pub fn target_entity(&self) -> Option<hands::EntityHit> {
-        let s = &self.core.sent;
-        let v = self.core.opts.caps;
-        let eye = if s.sneaking {
-            v.sneak_eye_height
-        } else {
-            v.eye_height
-        };
-        let eyes = Vec3::new(s.pos.x, s.pos.y + eye, s.pos.z);
-        let look = hands::look_vector(s.yaw, s.pitch);
-        let block = self.target().map(|t| t.distance);
-        entity_pick(self.world, v, eyes, look, block)
+        self.sent_crosshair().1
     }
 
     /// Attacks `entity` (`use_entity` attack and the arm swing in the version's order; 1.16
@@ -2309,6 +2412,76 @@ mod tests {
         }
         assert!(matches!(out[2], Outbound::Move(_)), "{out:?}");
         assert_eq!(out[3..], [Outbound::TickEnd]);
+    }
+
+    /// The crosshair is one pick (`ghast_physics::pick::v1_8::pick_target`, oracle-proven on
+    /// `tests/golden/1.8.9/picks.jsonl.gz`) over the tracked entities: a zombie in front is the
+    /// target and hides the block; one hit beyond 3 blocks but before the block leaves neither
+    /// (vanilla's miss), so the block behind it is not dug either.
+    #[test]
+    fn entity_pick_uses_the_tracker_and_the_proven_pick() {
+        use ghast_protocol::v1_8::play::clientbound::id;
+        use std::cell::Cell;
+        let raw = |id: i32, b: Vec<u8>| RawPacket {
+            id,
+            body: bytes::Bytes::from(b),
+        };
+        let zombie = |eid: u8, x: f64| {
+            let mut b = vec![eid, 54];
+            for v in [x, 64.0, 8.5] {
+                b.extend(((v * 32.0) as i32).to_be_bytes());
+            }
+            b.extend([0, 0, 0, 0, 0, 0, 0, 0, 0, 0x7f]);
+            raw(id::SPAWN_ENTITY_LIVING, b)
+        };
+        let mut e = engine(GameVersion::V1_8_9);
+        let mut login = 7i32.to_be_bytes().to_vec();
+        login.extend([0, 0, 2, 20, 7]);
+        login.extend(b"default");
+        login.push(0);
+        e.sim.world_packet(&raw(id::LOGIN, login)).unwrap();
+        e.sim.set_entities(Some(ghast_entity::Config::default()));
+        join(&mut e);
+        // Stone at (4, 65, 8): its east face is 3.5 blocks west of the eyes (8.5, 65.62, 8.5),
+        // which look west (yaw 90).
+        let pos: i64 = (4 << 38) | (65 << 26) | 8;
+        let mut b = pos.to_be_bytes().to_vec();
+        b.push(1 << 4);
+        e.sim.world_packet(&raw(id::BLOCK_CHANGE, b)).unwrap();
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let seen = Cell::new((None, None));
+        let look = |e: &mut Engine<Box<dyn Sim>>| {
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                seen.set((
+                    ctx.target_entity().map(|h| (h.id, h.distance)),
+                    ctx.target().map(|t| (t.pos, t.face)),
+                ));
+            });
+            e.tick(&mut b, t0);
+            seen.get()
+        };
+        assert_eq!(
+            look(&mut e),
+            (
+                None,
+                Some((ghast_protocol::BlockPos::new(4, 65, 8), crate::Face::East))
+            )
+        );
+        // A zombie 2 blocks west: its box (0.6 wide) grown by the 1.8 margin 0.1 is hit at
+        // x = 6.9, 1.6 away; the block behind is not the target.
+        e.sim.world_packet(&zombie(50, 6.5)).unwrap();
+        let (ent, block) = look(&mut e);
+        let (eid, d) = ent.unwrap();
+        assert_eq!(eid, 50);
+        assert!((d - 1.6).abs() < 1e-6, "{d}");
+        assert_eq!(block, None);
+        // Gone, and one at x = 5.0 instead: hit at 5.4, 3.1 away (> 3) but before the block.
+        e.sim
+            .world_packet(&raw(id::ENTITY_DESTROY, vec![1, 50]))
+            .unwrap();
+        e.sim.world_packet(&zombie(51, 5.0)).unwrap();
+        assert_eq!(look(&mut e), (None, None));
     }
 
     #[test]

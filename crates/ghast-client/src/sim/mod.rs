@@ -31,6 +31,45 @@ pub(crate) use v1_16_5::Sim16;
 #[cfg(feature = "v26_1")]
 pub(crate) use v26_1::Sim26;
 
+/// The crosshair pick's inputs besides the world (vanilla `GameRenderer.updateTargetedEntity`).
+#[cfg_attr(
+    not(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5")),
+    allow(dead_code)
+)]
+pub(crate) struct PickQuery<'a> {
+    /// The eyes (feet + eye height of the pose judged).
+    pub eyes: Vec3,
+    /// `(yaw, pitch)` of that pose.
+    pub rotation: (f32, f32),
+    /// The generic look vector (`hands::look_vector`); versions use their own.
+    pub look: Vec3,
+    /// The main-hand item id (1.16.5+: a held block changes some interaction shapes).
+    pub held: Option<u16>,
+    /// Pick from the sim's own current state (this tick's key handling: 26.1 eye lerp and
+    /// range attributes) instead of `eyes`.
+    pub now: bool,
+    /// Creative reach (blocks 5, entities 6, no 3-block entity limit).
+    pub creative: bool,
+    /// The player's bounding box (the entity search box grows from it).
+    pub player_bb: ghast_physics::math::Aabb,
+    /// The pickable entities near the eyes, in the tracker's order.
+    pub entities: &'a [ghast_physics::pick::PickEntity],
+}
+
+/// The crosshair target.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Crosshair {
+    /// A block, or nothing (a miss, or an entity beyond the 3-block limit).
+    Block(Option<crate::BlockHit>),
+    /// An entity: index into [`PickQuery::entities`] and the point hit.
+    Entity {
+        /// Index into the query's entities.
+        index: usize,
+        /// The point on its (grown) box; the eyes when they are inside it.
+        hit: Vec3,
+    },
+}
+
 /// Why a world packet could not be applied.
 #[derive(Debug)]
 pub(crate) enum SimError {
@@ -230,6 +269,16 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = held;
         self.crosshair(eyes, rotation, look, crate::hands::REACH)
     }
+    /// The whole crosshair target (vanilla `GameRenderer.updateTargetedEntity`): the block
+    /// pick unless one of `q.entities` is hit nearer. Versions without an entity pick yet
+    /// pick blocks only.
+    fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
+        Crosshair::Block(if q.now {
+            self.crosshair_now(q.eyes, q.rotation, q.look, q.held)
+        } else {
+            self.crosshair(q.eyes, q.rotation, q.look, crate::hands::REACH)
+        })
+    }
     /// 1.20.5+ movement attributes of our entity, in packet order.
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         let _ = attributes;
@@ -398,6 +447,34 @@ pub(super) fn activates_1_16(name: &str) -> bool {
         || (name.ends_with("_door") && name != "iron_door")
         || (name.ends_with("_trapdoor") && name != "iron_trapdoor")
         || name.starts_with("potted_")
+}
+
+/// A legacy (1.8.9 / 1.12.2) crosshair target as the engine takes it.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+pub(super) fn legacy_crosshair(t: ghast_physics::pick::legacy::Target, eye: [f64; 3]) -> Crosshair {
+    use ghast_physics::pick::legacy::Target;
+    match t {
+        Target::Block(h) => Crosshair::Block(block_hit(&h, eye)),
+        Target::Entity(e) => Crosshair::Entity {
+            index: e.index,
+            hit: Vec3::new(e.location[0], e.location[1], e.location[2]),
+        },
+        Target::None | Target::TooFar { .. } => Crosshair::Block(None),
+    }
+}
+
+/// A modern (1.16.5+) crosshair target as the engine takes it.
+#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg_attr(not(feature = "v1_16_5"), allow(dead_code))]
+pub(super) fn modern_crosshair(t: ghast_physics::pick::Target, eye: [f64; 3]) -> Crosshair {
+    use ghast_physics::pick::Target;
+    match t {
+        Target::Block(h) => Crosshair::Block(block_hit(&h, eye)),
+        Target::Entity(e) => Crosshair::Entity {
+            index: e.index,
+            hit: Vec3::new(e.location[0], e.location[1], e.location[2]),
+        },
+    }
 }
 
 /// A pick result as the hands take it (`None` for a miss).
@@ -962,6 +1039,9 @@ impl Sim for Box<dyn Sim> {
         held: Option<u16>,
     ) -> Option<crate::BlockHit> {
         (**self).crosshair_now(eyes, rotation, look, held)
+    }
+    fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
+        (**self).crosshair_target(q)
     }
     fn attributes(&mut self, attributes: &[crate::common::AttributeUpdate]) {
         (**self).attributes(attributes);

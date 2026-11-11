@@ -711,88 +711,6 @@ pub(crate) fn ray_hits_cube(eyes: Vec3, look: Vec3, pos: BlockPos, reach: f64) -
     inside || box_intercept(&b, eyes, end).is_some()
 }
 
-/// One pickable entity: id, box (absolute), position.
-pub type PickCandidate = (i32, [f64; 6], Vec3);
-
-/// `GameRenderer.updateTargetedEntity`: the entity whose box grown by `border` (1.8:
-/// 0.1, 1.9+: 0) the look ray (reach 4.5) hits first, closer than the block hit; dropped
-/// beyond 3 blocks (survival). `riding` = the vehicle id (only picked when nothing else is).
-#[must_use]
-pub fn pick_entity(
-    candidates: impl Iterator<Item = PickCandidate>,
-    eyes: Vec3,
-    look: Vec3,
-    block_distance: Option<f64>,
-    border: f64,
-    riding: Option<i32>,
-) -> Option<EntityHit> {
-    let d0 = REACH;
-    let d1 = block_distance.unwrap_or(d0);
-    let end = Vec3::new(
-        eyes.x + look.x * d0,
-        eyes.y + look.y * d0,
-        eyes.z + look.z * d0,
-    );
-    let mut best: Option<EntityHit> = None;
-    let mut d2 = d1;
-    for (id, b, pos) in candidates {
-        let g = [
-            b[0] - border,
-            b[1] - border,
-            b[2] - border,
-            b[3] + border,
-            b[4] + border,
-            b[5] + border,
-        ];
-        let hit = box_intercept(&g, eyes, end);
-        let inside = eyes.x > g[0]
-            && eyes.x < g[3]
-            && eyes.y > g[1]
-            && eyes.y < g[4]
-            && eyes.z > g[2]
-            && eyes.z < g[5];
-        if inside {
-            if d2 >= 0.0 {
-                best = Some(EntityHit {
-                    id,
-                    hit: hit.unwrap_or(eyes),
-                    entity_pos: pos,
-                    distance: 0.0,
-                });
-                d2 = 0.0;
-            }
-        } else if let Some(h) = hit {
-            let d3 = sq_dist(eyes, h).sqrt();
-            if d3 < d2 || d2 == 0.0 {
-                if riding == Some(id) {
-                    if d2 == 0.0 {
-                        best = Some(EntityHit {
-                            id,
-                            hit: h,
-                            entity_pos: pos,
-                            distance: d3,
-                        });
-                    }
-                } else {
-                    best = Some(EntityHit {
-                        id,
-                        hit: h,
-                        entity_pos: pos,
-                        distance: d3,
-                    });
-                    d2 = d3;
-                }
-            }
-        }
-    }
-    let e = best?;
-    // Survival: the entity counts only within 3 blocks, and only when closer than the block.
-    if sq_dist(eyes, e.hit).sqrt() > 3.0 {
-        return None;
-    }
-    (d2 < d1 || block_distance.is_none()).then_some(e)
-}
-
 /// Mouse buttons held in the world (kept until changed; released by a join or respawn).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Buttons {
@@ -1483,33 +1401,6 @@ mod tests {
                 assert_eq!(h.broken, want as u64);
             }
         }
-    }
-
-    #[test]
-    fn entity_pick_rules() {
-        let eyes = Vec3::new(0.5, 1.62, 0.5);
-        let look = look_vector(0.0, 0.0); // +z
-        let at = |z: f64| {
-            (
-                7,
-                [0.2, 1.0, z, 0.8, 2.0, z + 0.6],
-                Vec3::new(0.5, 1.0, z + 0.3),
-            )
-        };
-        // 2 blocks ahead: hit on the north face, grown by the 1.8 border.
-        let hit = pick_entity([at(2.5)].into_iter(), eyes, look, None, 0.1, None).unwrap();
-        assert_eq!(hit.id, 7);
-        assert!((hit.hit.z - 2.4).abs() < 1e-9, "{hit:?}");
-        // Behind a block hit at 1.5: not picked.
-        assert!(pick_entity([at(2.5)].into_iter(), eyes, look, Some(1.5), 0.1, None).is_none());
-        // Beyond 3 blocks: not picked (survival).
-        assert!(pick_entity([at(3.6)].into_iter(), eyes, look, None, 0.0, None).is_none());
-        // Eyes inside the box: picked at distance 0.
-        let inside = (8, [0.0, 1.0, 0.0, 1.0, 2.0, 1.0], Vec3::new(0.5, 1.0, 0.5));
-        assert_eq!(
-            pick_entity([inside].into_iter(), eyes, look, None, 0.0, None).map(|h| h.distance),
-            Some(0.0)
-        );
     }
 
     /// 1.16 left click: block_dig start, then the swing (1.8: swing first).

@@ -182,6 +182,27 @@ impl WorldView for Sim12 {
 }
 
 impl Sim for Sim12 {
+    fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
+        // The oracle-verified GameRenderer.updateTargetedEntity: block ray at the game
+        // mode's reach, then the entity ray.
+        use ghast_physics::pick::v1_12 as pick;
+        let eye = [q.eyes.x, q.eyes.y, q.eyes.z];
+        let look = pick::look_vector(q.rotation.0, q.rotation.1);
+        if q.entities.is_empty() {
+            // pick_target without entities is its block pick (`target` returns it as is).
+            let reach = if q.creative {
+                pick::CREATIVE_REACH
+            } else {
+                pick::REACH
+            };
+            return Crosshair::Block(
+                pick::pick(&self.world, eye, look, reach).and_then(|h| block_hit(&h, eye)),
+            );
+        }
+        let t = pick::pick_target(&self.world, eye, look, q.creative, &q.player_bb, q.entities);
+        legacy_crosshair(t, eye)
+    }
+
     fn world_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         {
             use ghast_protocol::v1_12_2::play::clientbound::id;

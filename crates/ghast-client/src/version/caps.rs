@@ -65,8 +65,9 @@ pub struct Capabilities {
     pub item_model: ItemModel,
     /// 1.9 combat: attack cooldown, swing sent after the click packet, the off hand.
     pub combat_1_9: bool,
-    /// Entity boxes grow by this border for the crosshair pick (0.1 in 1.8, none since 1.9).
-    pub entity_pick_border: f64,
+    /// The crosshair pick skips entities with the player's root vehicle (1.9+), not only the
+    /// vehicle the player sits on (1.8).
+    pub entity_pick_root_vehicle: bool,
     /// Eye height above the feet while standing.
     pub eye_height: f64,
     /// Eye height while sneaking (1.54 in 1.8 – 1.12, the crouching pose's 1.27 since 1.14).
@@ -110,7 +111,7 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     data: DataSet::V1_8,
     item_model: ItemModel::LegacyNbt,
     combat_1_9: false,
-    entity_pick_border: 0.1,
+    entity_pick_root_vehicle: false,
     eye_height: f(1.62),
     // `1.62F - 0.08F` in float.
     sneak_eye_height: f(1.62 - 0.08),
@@ -135,7 +136,7 @@ pub(crate) const V1_12_2: Capabilities = Capabilities {
     physics: PhysicsRules::V1_12,
     data: DataSet::V1_12,
     combat_1_9: true,
-    entity_pick_border: 0.0,
+    entity_pick_root_vehicle: true,
     chat_limit: 256,
     seed_planting_prediction: false,
     teleport_confirm: true,
