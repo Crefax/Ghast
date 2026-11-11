@@ -48,6 +48,10 @@ final class Ext {
         boolean fallFlying;
         /** Main arm left (the player's main hand entity data, from the client information). */
         boolean leftHanded;
+        /** Riptide level of the hand item (a trident). */
+        int riptide;
+        /** It rains (the server's start-raining and rain-level game events at setup). */
+        boolean raining;
     }
 
     static Setup setup(Scenario sc) {
@@ -69,6 +73,13 @@ final class Ext {
      */
     record SharedFlags(int set, int clear) implements Scenario.VersionEvent {}
 
+    /**
+     * The server's entity data for the player's living-entity flags byte (index 8): the client's current
+     * byte with its item use (bits 1, 2) as the server sees it, then {@code clear} cleared and {@code set}
+     * set (value 4: riptide spin attack).
+     */
+    record LivingFlags(int set, int clear) implements Scenario.VersionEvent {}
+
     /** Equipment packet for the player: {@code item} (null = empty) in {@code slot} with a damage value. */
     record Equip(String slot, String item, int damage) implements Scenario.VersionEvent {}
 
@@ -83,7 +94,15 @@ final class Ext {
     /** The hand item for the use key ({@code null}: the harness's shield). */
     static ItemStack handItem(Scenario sc) {
         Setup s = of(sc);
-        return s == null || s.hand == null ? null : new ItemStack(item(s.hand));
+        if (s == null || s.hand == null) {
+            return null;
+        }
+        ItemStack stack = new ItemStack(item(s.hand));
+        if (s.riptide > 0) {
+            stack.enchant(Harness.registries.lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                    .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.RIPTIDE), s.riptide);
+        }
+        return stack;
     }
 
     /** Applied in setup after equipment, before the position packet. */
@@ -94,6 +113,14 @@ final class Ext {
         }
         if (s.chest != null) {
             equip(run, "chest", s.chest, s.chestDamage);
+        }
+        if (s.raining) {
+            Harness.listener.handleGameEvent(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundGameEventPacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundGameEventPacket(
+                            net.minecraft.network.protocol.game.ClientboundGameEventPacket.START_RAINING, 0.0F)));
+            Harness.listener.handleGameEvent(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundGameEventPacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundGameEventPacket(
+                            net.minecraft.network.protocol.game.ClientboundGameEventPacket.RAIN_LEVEL_CHANGE, 1.0F)));
         }
         if (s.leftHanded) {
             @SuppressWarnings("unchecked")
@@ -116,6 +143,8 @@ final class Ext {
     static void apply(Harness.Run run, Scenario.VersionEvent e) {
         if (e instanceof SharedFlags f) {
             sharedFlags(run, f.set(), f.clear());
+        } else if (e instanceof LivingFlags f) {
+            livingFlags(run, f.set(), f.clear());
         } else if (e instanceof Equip q) {
             equip(run, q.slot(), q.item(), q.damage());
         } else if (e instanceof Firework f) {
@@ -136,6 +165,19 @@ final class Ext {
         List<SynchedEntityData.DataValue<?>> values = List.of(SynchedEntityData.DataValue.create(flags, next));
         Harness.listener.handleSetEntityData(Harness.roundTrip(ClientboundSetEntityDataPacket.STREAM_CODEC,
                 new ClientboundSetEntityDataPacket(Harness.PLAYER_ENTITY_ID, values)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void livingFlags(Harness.Run run, int set, int clear) {
+        EntityDataAccessor<Byte> flags = (EntityDataAccessor<Byte>) Reflect.get(net.minecraft.world.entity.LivingEntity.class, null,
+                "DATA_LIVING_ENTITY_FLAGS");
+        int cur = run.player.getEntityData().get(flags);
+        // The server's byte carries its own view of the item use (bits 1 and 2): a server that agrees
+        // with the client (a cleared bit 1 would stop the client's use).
+        int use = run.player.isUsingItem() ? 1 | (run.player.getUsedItemHand() == net.minecraft.world.InteractionHand.OFF_HAND ? 2 : 0) : 0;
+        byte next = (byte) ((((cur & ~3) | use) & ~clear) | set);
+        Harness.listener.handleSetEntityData(Harness.roundTrip(ClientboundSetEntityDataPacket.STREAM_CODEC,
+                new ClientboundSetEntityDataPacket(Harness.PLAYER_ENTITY_ID, List.of(SynchedEntityData.DataValue.create(flags, next)))));
     }
 
     private static void equip(Harness.Run run, String slot, String item, int damage) {
@@ -196,12 +238,20 @@ final class Ext {
         if (s.leftHanded) {
             j.field("left_handed", true);
         }
+        if (s.riptide != 0) {
+            j.field("riptide", s.riptide);
+        }
+        if (s.raining) {
+            j.field("raining", true);
+        }
         j.endObject();
     }
 
     static void event(Json j, Scenario.VersionEvent e) {
         if (e instanceof SharedFlags f) {
             j.field("type", "shared_flags").field("set", f.set()).field("clear", f.clear());
+        } else if (e instanceof LivingFlags f) {
+            j.field("type", "living_flags").field("set", f.set()).field("clear", f.clear());
         } else if (e instanceof Equip q) {
             j.field("type", "equipment").field("slot", q.slot()).field("item", q.item());
             if (q.damage() != 0) {
@@ -231,12 +281,15 @@ final class Ext {
         }
         st.fallFlying = x.has("fall_flying") && x.get("fall_flying").getAsBoolean();
         st.leftHanded = x.has("left_handed") && x.get("left_handed").getAsBoolean();
+        st.riptide = x.has("riptide") ? x.get("riptide").getAsInt() : 0;
+        st.raining = x.has("raining") && x.get("raining").getAsBoolean();
     }
 
     /** An event this class knows, or null. */
     static Scenario.VersionEvent readEvent(JsonObject ev) {
         return switch (ev.get("type").getAsString()) {
             case "shared_flags" -> new SharedFlags(ev.get("set").getAsInt(), ev.get("clear").getAsInt());
+            case "living_flags" -> new LivingFlags(ev.get("set").getAsInt(), ev.get("clear").getAsInt());
             case "equipment" -> new Equip(ev.get("slot").getAsString(), ev.get("item").isJsonNull() ? null : ev.get("item").getAsString(),
                     ev.has("damage") ? ev.get("damage").getAsInt() : 0);
             case "firework" -> new Firework(ev.get("id").getAsInt());

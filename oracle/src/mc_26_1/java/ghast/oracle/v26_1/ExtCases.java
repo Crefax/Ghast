@@ -44,11 +44,12 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra"};
+    static final String[] MECHANICS = {"elytra", "riptide"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
             case "elytra" -> elytra();
+            case "riptide" -> riptide();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -56,6 +57,7 @@ final class ExtCases {
     static Scenario fuzz(String mechanic, long seed, int index, int ticks) {
         return switch (mechanic) {
             case "elytra" -> elytraFuzz(seed, index, ticks);
+            case "riptide" -> riptideFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -323,6 +325,124 @@ final class ExtCases {
             }
             o.write(buf, 0, k);
         }
+    }
+
+    // ---- riptide -----------------------------------------------------------------------------------
+
+    private static Scenario trident(Scenario sc, int level) {
+        Ext.Setup st = Ext.setup(sc);
+        st.hand = "trident";
+        st.riptide = level;
+        return sc;
+    }
+
+    private static Scenario pool(String name) {
+        return flat(name).fill(-8, 60, -8, 8, 62, 8, s("stone"), 0).fill(-7, 61, -7, 7, 63, 7, s("water"), 0);
+    }
+
+    static List<Scenario> riptide() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        Scenario w = trident(pool("riptide_water"), 3).desc("riptide III in water: hold 12 ticks, release looking up; the server's spin flag a tick later")
+                .spawn(0.5, 62, 0.5, 0, -40).run(3, 0).run(12, USE).run(30, 0);
+        addEvent(w, 16, new Ext.LivingFlags(4, 0));
+        addEvent(w, 36, new Ext.LivingFlags(0, 4));
+        l.add(w);
+        l.add(trident(pool("riptide_short_hold"), 3).desc("released after 6 ticks: nothing").spawn(0.5, 62, 0.5, 0, -40)
+                .run(3, 0).run(6, USE).run(10, 0).run(9, USE).run(10, 0).run(10, USE).run(15, 0));
+        l.add(trident(flat("riptide_dry"), 3).desc("on land without rain: the trident cannot be used").spawn(0.5, 64, 0.5, 0, -30)
+                .run(3, 0).run(15, USE).run(10, 0));
+        Scenario rain = trident(flat("riptide_rain"), 2).desc("in the rain on open ground: move up 1.2 first, then the push").spawn(0.5, 64, 0.5, 45, -20);
+        Ext.setup(rain).raining = true;
+        l.add(rain.run(3, 0).run(12, USE).run(40, 0));
+        Scenario roof = trident(flat("riptide_rain_roof").fill(-3, 67, -3, 3, 67, 3, s("stone"), 0), 2)
+                .desc("rain under a roof: no riptide").spawn(0.5, 64, 0.5, 45, -20);
+        Ext.setup(roof).raining = true;
+        l.add(roof.run(3, 0).run(12, USE).run(10, 0));
+        Scenario wall = trident(pool("riptide_wall").fill(-7, 61, 5, 7, 75, 5, s("stone"), 0), 3)
+                .desc("launch into a wall: a horizontal collision ends the spin counter").spawn(0.5, 62, 0.5, 0, -10);
+        wall.run(3, 0).run(11, USE).run(25, 0);
+        addEvent(wall, 15, new Ext.LivingFlags(4, 0));
+        addEvent(wall, 30, new Ext.LivingFlags(0, 4));
+        l.add(wall);
+        for (int lvl = 1; lvl <= 3; lvl++) {
+            Scenario c = trident(pool("riptide_level" + lvl), lvl).desc("riptide " + lvl + " straight up, then down into the pool")
+                    .spawn(0.5, 62, 0.5, 0, -90).run(2, 0).run(10, USE).run(40, 0, 0, 30);
+            addEvent(c, 13, new Ext.LivingFlags(4, 0));
+            addEvent(c, 33, new Ext.LivingFlags(0, 4));
+            l.add(c);
+        }
+        Scenario low = trident(pool("riptide_spin_pose").fill(-7, 65, -7, 7, 65, 7, s("stone"), 0), 3)
+                .desc("spin pose (0.6 high) under a ceiling until the flag clears").spawn(0.5, 62, 0.5, 90, 0);
+        low.run(2, 0).run(10, USE).run(30, FORWARD);
+        addEvent(low, 13, new Ext.LivingFlags(4, 0));
+        addEvent(low, 25, new Ext.LivingFlags(0, 4));
+        l.add(low);
+        Scenario glide = trident(pool("riptide_then_glide"), 3).desc("riptide out of the water, then glide (elytra)")
+                .spawn(0.5, 62, 0.5, 0, -60);
+        Ext.setup(glide).chest = "elytra";
+        glide.run(2, 0).run(10, USE).run(8, 0).run(1, JUMP).run(30, 0, 0, 10);
+        addEvent(glide, 13, new Ext.LivingFlags(4, 0));
+        addEvent(glide, 33, new Ext.LivingFlags(0, 4));
+        l.add(glide);
+        return l;
+    }
+
+    /**
+     * Randomized riptide cases: the {@code withExtras} case, often with a pool at the spawn and rain, a
+     * trident with riptide I-III in the hand, use-key spans of 3-25 ticks, wide pitch changes, the
+     * server's spin flag set and cleared, sometimes an elytra. Cases get an {@code _rt} suffix.
+     */
+    static Scenario riptideFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_rt");
+        copy(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x7269707469L);
+        trident(sc, x.range(1, 3));
+        Ext.Setup st = Ext.setup(sc);
+        if (x.chance(0.7)) {
+            int bx = (int) Math.floor(sc.x), by = (int) Math.floor(sc.y), bz = (int) Math.floor(sc.z);
+            int r = x.range(2, 6), d = x.range(1, 4);
+            sc.fill(bx - r, by - d, bz - r, bx + r, by + x.range(0, 2), bz + r, s("water"), 0);
+        }
+        if (x.chance(0.3)) {
+            st.raining = true;
+        }
+        if (x.chance(0.2)) {
+            st.chest = "elytra";
+        }
+        boolean held = false;
+        int span = 0;
+        float pitch = sc.pitch;
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            Scenario.Tick tk = sc.ticks.get(i);
+            if (span-- <= 0) {
+                held = !held;
+                span = held ? x.range(3, 25) : x.range(1, 12);
+            }
+            int keys = (tk.keys() & ~USE) | (held ? USE : 0);
+            if (x.chance(0.08)) {
+                keys ^= JUMP;
+            }
+            if (x.chance(0.5)) {
+                pitch = x.chance(0.15) ? (float) (x.nextDouble() * 180 - 90)
+                        : Math.max(-90f, Math.min(90f, pitch + (float) ((x.nextDouble() - 0.5) * 20)));
+            }
+            sc.ticks.set(i, new Scenario.Tick(keys, tk.yaw(), pitch, tk.events()));
+        }
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            if (x.chance(0.04)) {
+                addEvent(sc, i, new Ext.LivingFlags(4, 0));
+            }
+            if (x.chance(0.04)) {
+                addEvent(sc, i, new Ext.LivingFlags(0, 4));
+            }
+            if (st.chest != null && x.chance(0.02)) {
+                addEvent(sc, i, new Ext.SharedFlags(0, FF));
+            }
+        }
+        sc.description += ", riptide";
+        return sc;
     }
 
     /** Every field a fuzz case sets. */

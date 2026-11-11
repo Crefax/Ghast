@@ -503,10 +503,13 @@ struct UseKey {
     clicks: u32,
     delay: i32,
     using: bool,
+    /// Player ticks the current use has lasted.
+    held: u32,
 }
 
 impl UseKey {
-    fn tick(&mut self, down: bool, can_use: bool) {
+    /// Returns how long the use lasted when the key released it this tick.
+    fn tick(&mut self, down: bool, can_use: bool) -> Option<u32> {
         if down && !self.down {
             self.clicks += 1;
         }
@@ -514,9 +517,11 @@ impl UseKey {
         if self.delay > 0 {
             self.delay -= 1;
         }
+        let mut released = None;
         if self.using {
             if !down {
                 self.using = false;
+                released = Some(self.held);
             }
             self.clicks = 0;
         } else {
@@ -528,12 +533,14 @@ impl UseKey {
         if down && self.delay == 0 && !self.using {
             self.start(can_use);
         }
+        released
     }
 
     fn start(&mut self, can_use: bool) {
         self.delay = 4;
         if can_use {
             self.using = true;
+            self.held = 0;
         }
     }
 }
@@ -560,10 +567,16 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         return Err(mm(0, d));
     }
     // A hand item without a use duration (a firework rocket) is never "in use".
-    let durable_use = case.header["setup"]
-        .get("ext")
-        .and_then(|e| e.get("hand"))
-        .is_none();
+    let ext = case.header["setup"].get("ext");
+    let hand = ext.and_then(|e| e.get("hand")).and_then(Value::as_str);
+    let durable_use = hand.is_none() || hand == Some("trident");
+    let riptide = ext.and_then(|e| e.get("riptide")).map_or(0, i);
+    let raining = ext
+        .and_then(|e| e.get("raining"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    // The riptide enchantment's trident_spin_attack_strength: 1.5 + 0.75 per level above I.
+    let strength = 1.5f32 + 0.75 * (riptide - 1) as f32;
     let has_item = durable_use
         && case.ticks.iter().any(|t| {
             t["input"]["keys"]
@@ -668,6 +681,11 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         assert_eq!(e["slot"], "chest");
                         x.glider = glider(e.get("item"), e.get("damage"));
                     }
+                    "living_flags" => {
+                        let cur = x.living_flags();
+                        let next = (cur & !(i(&e["clear"]) as u8)) | i(&e["set"]) as u8;
+                        x.apply_living_flags(next);
+                    }
                     "firework" => {
                         assert!(x.attach_rocket(i(&e["id"]), p.pos));
                     }
@@ -677,7 +695,26 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             }
         }
         let (keys, use_down) = keys_of(input["keys"].as_str().unwrap());
-        use_key.tick(use_down, has_item && !p.spectator);
+        // Mouse turning happens before the key handling: a release launches along the new look.
+        let (yaw, pitch) = (f32_of(&input["yaw"]), f32_of(&input["pitch"]));
+        let (old_yaw, old_pitch) = (p.yaw, p.pitch);
+        if riptide > 0 {
+            p.yaw = yaw;
+            p.pitch = pitch;
+        }
+        let wet = modern::in_water_or_rain::<V26_1, _>(&p, &world, raining);
+        let can_use = has_item && !p.spectator && (riptide == 0 || wet);
+        if let Some(held) = use_key.tick(use_down, can_use)
+            && riptide > 0
+            && held >= 10
+            && wet
+        {
+            modern::riptide::<V26_1, _>(&mut p, &mut x, &world, strength);
+        }
+        if riptide > 0 && !gate.is_loaded() {
+            p.yaw = old_yaw;
+            p.pitch = old_pitch;
+        }
         let ti = TickInput {
             keys,
             yaw: f32_of(&input["yaw"]),
@@ -685,6 +722,9 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             using_item: use_key.using,
         };
         gate.step_ext::<V26_1, _>(&mut p, &mut x, &ti, &world, compiled, &mut out);
+        if use_key.using {
+            use_key.held += 1;
+        }
         if let Some(l) = rec.get("client_loaded")
             && l.as_bool() != Some(gate.is_loaded())
         {

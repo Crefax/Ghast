@@ -10,7 +10,7 @@ use super::math::{V3, clamp, floor, frac, sign};
 use crate::math::Aabb;
 
 /// One recorded movement (`Entity.Movement`).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Movement {
     pub from: V3,
     pub to: V3,

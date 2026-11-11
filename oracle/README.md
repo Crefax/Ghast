@@ -998,6 +998,18 @@ jump presses, pitch changes, flag events, rockets and chest swaps. Quirks seen i
   runs client-side); the elytra fuzz removes big dripleaf from its terrain because the physics
   does not model that block change.
 
+**`riptide`** (12 cases + 100 fuzz): a trident with riptide I-III in the hand (`setup.ext.hand`
+`trident`, `riptide`), the use key held 6-12 ticks and released (`block_dig`
+`release_use_item`): in water, too short, on dry land (the use itself fails), in the rain on open
+ground (`setup.ext.raining`: the server's start-raining and rain-level game events) and under a
+roof, into a wall, straight up and back into the pool, the spin pose under a ceiling, riptide
+then gliding. Event `{"type":"living_flags","set","clear"}`: `set_entity_data` of the player's
+living entity flags (index 8) — the client's byte with the item use bits (1, 2) as the server
+sees them (a server that cleared bit 1 would stop the client's use), then the masks (4: spin
+attack). Fuzz (`ExtCases.riptideFuzz`, cases `…_x_rt`): the `withExtras` case, often a pool at
+the spawn and rain, use spans of 3-25 ticks, pitch changes, spin flag events, sometimes an elytra.
+Quirk: the launch reads the rotation the tick's mouse turning set (key handling runs after it).
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

@@ -41,8 +41,8 @@ pub use ext::PlayerExt;
 pub use load::LoadGate;
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
-    LevelInfo, PlayerState, Pose, SentState, UseEffects, no_block_collision, on_climbable,
-    on_climbable_ext, tick, tick_ext,
+    LevelInfo, PlayerState, Pose, SentState, UseEffects, in_water_or_rain, no_block_collision,
+    on_climbable, on_climbable_ext, riptide, tick, tick_ext,
 };
 pub use rules::{Rules, V26_1};
 

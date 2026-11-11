@@ -155,7 +155,10 @@ so `modern::jdk_math` reproduces it (correctly rounded cosine + a 44,355-entry e
 generated from the JVM; another JVM platform, e.g. aarch64, may differ in the last bit). Not
 modelled there: a rocket that hits a big dripleaf tilts it on the client before the server does.
 
-Not modelled: riptide, vehicles, entity collision and push, pistons, block entities, a
+Riptide: `modern::riptide` (the client's launch on releasing the trident), `in_water_or_rain`,
+the spin counter and pose in `PlayerExt`; touching other entities while spinning is not modelled.
+
+Not modelled: vehicles, entity collision and push, pistons, block entities, a
 moving world border; the nether's `fast_lava` is supported only as a flag (no oracle vector yet).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every

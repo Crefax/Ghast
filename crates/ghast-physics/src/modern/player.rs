@@ -742,7 +742,7 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     world: &W,
     out: &mut Packets,
 ) {
-    tick_core::<R, W>(p, &mut Glide::default(), input, world, out);
+    tick_core::<R, W>(p, &mut Glide::default(), None, input, world, out);
 }
 
 /// [`tick`] with the extension state of the mechanics added after 0.4.0 (gliding and rockets, see
@@ -758,9 +758,13 @@ pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
     let mut g = Glide {
         fall_flying: x.fall_flying,
         glider: x.glider,
+        spin_attack: x.spin_attack,
+        auto_spin_ticks: x.auto_spin_ticks,
     };
-    tick_core::<R, W>(p, &mut g, input, world, out);
+    let pending = x.pending_move.take();
+    tick_core::<R, W>(p, &mut g, pending, input, world, out);
     x.fall_flying = g.fall_flying;
+    x.auto_spin_ticks = g.auto_spin_ticks;
     x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
 }
 
@@ -770,11 +774,14 @@ pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
 struct Glide {
     fall_flying: bool,
     glider: bool,
+    spin_attack: bool,
+    auto_spin_ticks: i32,
 }
 
 fn tick_core<R: Rules, W: BlockView<State = R::State>>(
     p: &mut PlayerState,
     x: &mut Glide,
+    pending: Option<Movement>,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -796,17 +803,107 @@ fn tick_core<R: Rules, W: BlockView<State = R::State>>(
     };
     let mut t = Ctx {
         p,
-        x: Glide {
-            fall_flying: x.fall_flying,
-            glider: x.glider,
-        },
+        x: *x,
         w: &w,
         old_pos: V3::ZERO,
-        moves: [None; 4],
+        moves: [pending, None, None, None],
         using_item: input.using_item,
     };
     t.tick(&input.keys, out);
-    x.fall_flying = t.x.fall_flying;
+    *x = t.x;
+}
+
+/// The client's riptide launch (`TridentItem.releaseUsing` with riptide, on the client), in vanilla
+/// order: the push along the look vector with `strength`, the 20-tick spin counter, and on the
+/// ground a move 1.2 blocks up (`LocalPlayer.move`, collisions and auto-jump included).
+///
+/// Call it where the client releases the use key (before the tick, in `Minecraft.handleKeybinds`)
+/// when vanilla's conditions hold: the trident was in use for at least 10 player ticks, its
+/// riptide strength (`EnchantmentHelper.getTridentSpinAttackStrength`, from the enchantment's
+/// `minecraft:trident_spin_attack_strength` effect) is above 0, the player is in water or rain
+/// ([`in_water_or_rain`]) and not riding, and the next point of damage will not break the
+/// trident. The release packet (`player_action` `RELEASE_USE_ITEM`) is the caller's.
+pub fn riptide<R: Rules, W: BlockView<State = R::State>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    world: &W,
+    strength: f32,
+) {
+    let d = DEG_TO_RAD;
+    let (yaw, pitch) = (p.yaw, p.pitch);
+    let mut xd = -m::sin(f64::from(yaw * d)) * m::cos(f64::from(pitch * d));
+    let mut yd = -m::sin(f64::from(pitch * d));
+    let mut zd = m::cos(f64::from(yaw * d)) * m::cos(f64::from(pitch * d));
+    let dist = sqrt_f(xd * xd + yd * yd + zd * zd);
+    xd *= strength / dist;
+    yd *= strength / dist;
+    zd *= strength / dist;
+    // Entity.push(double, double, double)
+    let (fx, fy, fz) = (f64::from(xd), f64::from(yd), f64::from(zd));
+    if fx.is_finite() && fy.is_finite() && fz.is_finite() {
+        let v = V3::of(p.vel).add(V3::new(fx, fy, fz));
+        if v.is_finite() {
+            p.vel = v.arr();
+        }
+    }
+    x.auto_spin_ticks = 20;
+    if p.on_ground {
+        let cache = TickCache::new(world, floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
+        let border = Border::new(&world.world_border());
+        let w = World::<R, TickCache<'_, W>> {
+            w: &cache,
+            border: &border,
+            min_y: p.level.min_y,
+            max_y: p.level.min_y + p.level.height - 1,
+            _r: core::marker::PhantomData,
+        };
+        let mut t = Ctx {
+            p,
+            x: Glide {
+                fall_flying: x.fall_flying,
+                glider: x.glider,
+                spin_attack: x.spin_attack,
+                auto_spin_ticks: x.auto_spin_ticks,
+            },
+            w: &w,
+            old_pos: V3::ZERO,
+            moves: [None; 4],
+            using_item: false,
+        };
+        t.old_pos = t.pos();
+        t.move_self(V3::new(0.0, f64::from(1.199_999_9f32), 0.0));
+        // The move is recorded for the tick's inside-block sweep (Entity.movementThisTick).
+        x.pending_move = t.moves[0];
+    }
+}
+
+/// `isInWaterOrRain()`: in water, or `raining` and rain reaches the block position or the block
+/// at the top of the box: it is not below the world and no motion-blocking block (one that
+/// `blocksMotion()` or holds a fluid) is at or above it in its column. Biome precipitation and sky light are the caller's (`raining`:
+/// the level rains and the biome at the player has rain; vanilla also needs sky light there).
+#[must_use]
+pub fn in_water_or_rain<R: Rules, W: BlockView<State = R::State>>(
+    p: &PlayerState,
+    world: &W,
+    raining: bool,
+) -> bool {
+    if p.touching_water {
+        return true;
+    }
+    if !raining {
+        return false;
+    }
+    let (bx_, bz) = (floor(p.pos[0]), floor(p.pos[2]));
+    let top = p.level.min_y + p.level.height;
+    // The MOTION_BLOCKING heightmap is at least the bottom of the world: below it no rain.
+    let open = |y: i32| {
+        y >= p.level.min_y
+            && (y..top).all(|yy| {
+                let ph = R::phys(world.block(bx_, yy, bz));
+                ph.flags() & sf::BLOCKS_MOTION == 0 && kind(ph.fluid()) == 0
+            })
+    };
+    open(floor(p.pos[1])) || open(floor(p.bb.max_y))
 }
 
 struct Ctx<'a, 'b, R: Rules, W> {
@@ -1244,6 +1341,13 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         }
         self.player_travel(input);
         self.apply_effects_from_blocks();
+        // checkAutoSpinAttack (no other entities: a horizontal collision ends the spin counter).
+        if self.x.auto_spin_ticks > 0 {
+            self.x.auto_spin_ticks -= 1;
+            if self.p.horizontal_collision {
+                self.x.auto_spin_ticks = 0;
+            }
+        }
     }
 
     /// `LocalPlayer.modifyInput`.
@@ -2341,6 +2445,8 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             Pose::Swimming
         } else if self.x.fall_flying {
             Pose::FallFlying
+        } else if self.x.spin_attack {
+            Pose::SpinAttack
         } else if p.shift() && !p.abilities.flying {
             Pose::Crouching
         } else {

@@ -1,5 +1,5 @@
 //! Player state for the movement mechanics added after 0.4.0, kept next to [`PlayerState`] so the
-//! 0.4.0 types stay as they were: gliding (elytra) with firework rockets.
+//! 0.4.0 types stay as they were: gliding (elytra) with firework rockets, and riptide.
 //!
 //! [`tick_ext`](super::tick_ext) runs the same tick as [`tick`](super::tick) with this state; with a
 //! default [`PlayerExt`] the two are identical.
@@ -25,6 +25,18 @@
 //!   boosts). Register it with [`PlayerExt::attach_rocket`] (its spawn position) and drop it with
 //!   [`PlayerExt::remove_rocket`] when the server removes the entity.
 
+//!
+//! # Riptide, as the 26.1 client does it
+//!
+//! * **Launch.** On releasing the use key with a riptide trident (used for at least 10 player
+//!   ticks, in water or rain, not riding, not about to break) the client itself calls
+//!   [`riptide`](super::riptide): a push along the look vector (after the tick's mouse turning),
+//!   a 20-tick counter ([`PlayerExt::auto_spin_ticks`]) and, on the ground, a 1.2-block move up.
+//!   Starting the use already needs water or rain ([`in_water_or_rain`](super::in_water_or_rain)).
+//! * **Spin.** Each tick the counter goes down; a horizontal collision zeroes it (so does touching
+//!   another entity, which is not modelled here). The spin pose (0.6 x 0.6) follows the server's
+//!   living entity flag ([`PlayerExt::apply_living_flags`]), not the counter.
+
 use super::math::{self as m, DEG_TO_RAD, V3};
 use super::player::{PlayerState, Pose};
 
@@ -45,8 +57,16 @@ pub struct PlayerExt {
     /// the main arm is left (client option), or rockets are only in the off hand of a right-handed
     /// player. Default: right.
     pub rocket_arm_left: bool,
+    /// Living entity flag 4, `isAutoSpinAttack()`: the riptide spin (pose `SpinAttack`). Set and
+    /// cleared only by the server's entity data ([`PlayerExt::apply_living_flags`]).
+    pub spin_attack: bool,
+    /// The client's riptide spin counter (`autoSpinAttackTicks`): 20 after a launch
+    /// ([`riptide`](super::riptide)), counted down each tick, zeroed by a horizontal collision.
+    pub auto_spin_ticks: i32,
     rocket_count: u8,
     rockets: [Rocket; MAX_ROCKETS],
+    /// A movement made before the tick (the riptide lift), swept by the tick's inside-block effects.
+    pub(super) pending_move: Option<super::inside::Movement>,
 }
 
 /// Attached rockets [`PlayerExt`] keeps track of.
@@ -161,6 +181,20 @@ impl PlayerExt {
         for &id in &discarded[..n] {
             self.remove_rocket(id);
         }
+    }
+
+    /// The bit of the player's living entity flags byte (entity data index 8) that movement reads:
+    /// 4, the riptide spin.
+    #[must_use]
+    pub fn living_flags(&self) -> u8 {
+        u8::from(self.spin_attack) << 2
+    }
+
+    /// The server's entity data for the player's living entity flags byte (index 8): the riptide
+    /// spin (bit value 4) decides the pose. (Bit value 1, "using an item", is the client's own
+    /// use state; a server that clears it stops the client's use, which is the caller's.)
+    pub fn apply_living_flags(&mut self, flags: u8) {
+        self.spin_attack = flags & 4 != 0;
     }
 
     /// The server's entity data for the player's own shared flags byte (`set_entity_data`, entity

@@ -70,6 +70,12 @@ fn elytra_26_1() {
     check("elytra.jsonl.gz");
 }
 
+/// Riptide: the trident launch on release, the spin counter, the server's spin flag and pose.
+#[test]
+fn riptide_26_1() {
+    check("riptide.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {
