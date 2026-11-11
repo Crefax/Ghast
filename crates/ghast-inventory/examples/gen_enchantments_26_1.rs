@@ -1,10 +1,11 @@
 //! Generates `src/generated/enchantments_26_1.rs`: the vanilla enchantment definitions the anvil
-//! reads (max level, anvil cost, supported items, exclusive set), from the `registry_data` line
+//! reads (max level, anvil cost, supported items, exclusive set) and the trident spin attack
+//! strength effect, from the `registry_data` line
 //! of the oracle's 26.1 click vectors (the vanilla data pack as a server sends it). Used for
 //! enchantments a server sends without data (the client knows the vanilla pack).
 //!
 //! ```text
-//! cargo run -p ghast-inventory --example gen_enchantments_26_1 -- tests/golden/26.1/clicks_seed1.jsonl.gz
+//! cd crates/ghast-inventory && cargo run --example gen_enchantments_26_1 -- ../../tests/golden/26.1/clicks_seed1.jsonl.gz
 //! ```
 
 use std::fmt::Write as _;
@@ -34,13 +35,18 @@ fn main() {
         );
         let _ = writeln!(
             out,
-            "/// Vanilla enchantments: name, max level, anvil cost, supported items, exclusive set.\n\
-             pub(super) static ENCHANTMENTS: [(&str, i32, i32, &str, &str); {}] = [",
+            "/// Vanilla enchantments: name, max level, anvil cost, supported items, exclusive set,\n\
+             /// trident spin attack strength (text form of `ench_value::Fx`).\n\
+             pub(super) static ENCHANTMENTS: [(&str, i32, i32, &str, &str, &str); {}] = [",
             specs.len()
         );
         for (name, d) in &specs {
-            let (m, a, s, e) = d.clone().expect("every vanilla entry has data");
-            let _ = writeln!(out, "    ({name:?}, {m}, {a}, {s:?}, {e:?}),");
+            let (m, a, s, e, x) = d.clone().expect("every vanilla entry has data");
+            assert_ne!(
+                x, "?",
+                "{name}: a spin attack strength effect ghast does not read"
+            );
+            let _ = writeln!(out, "    ({name:?}, {m}, {a}, {s:?}, {e:?}, {x:?}),");
         }
         out.push_str("];\n");
         std::fs::write("src/generated/enchantments_26_1.rs", out).unwrap();

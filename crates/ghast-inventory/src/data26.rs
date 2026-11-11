@@ -18,13 +18,16 @@ pub(crate) enum Holders {
     Ids(Vec<i32>),
 }
 
-/// What the anvil reads off an enchantment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the anvil (and the trident spin) reads off an enchantment.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Ench {
     pub max_level: i32,
     pub anvil_cost: i32,
     pub supported: Holders,
     pub exclusive: Option<Holders>,
+    /// The `minecraft:trident_spin_attack_strength` effect: `None` without one, `Some(None)`
+    /// when it does not read.
+    pub spin: Option<Option<crate::ench_value::Fx>>,
 }
 
 /// The tag registries the menus read.
@@ -87,8 +90,9 @@ fn names_spec(t: &Tag) -> Option<String> {
 }
 
 /// One enchantment entry: name and, when sent with data, `(max_level, anvil_cost,
-/// supported_items, exclusive_set)`.
-pub type EnchantmentSpec = (String, Option<(i32, i32, String, String)>);
+/// supported_items, exclusive_set, trident_spin_attack_strength)` (the effect in the text form
+/// of `ench_value::Fx`, `""` without one, `"?"` when it does not read).
+pub type EnchantmentSpec = (String, Option<(i32, i32, String, String, String)>);
 
 /// `(name, max_level, anvil_cost, supported_items, exclusive_set)` of every enchantment entry
 /// with data in a `registry_data` body (holder sets as `#tag` or comma-separated names).
@@ -119,6 +123,7 @@ pub(crate) fn enchantment_specs(body: &[u8]) -> Option<Vec<EnchantmentSpec>> {
                 get("exclusive_set")
                     .and_then(names_spec)
                     .unwrap_or_default(),
+                spin_spec(get("effects")),
             ))
         } else {
             None
@@ -126,6 +131,24 @@ pub(crate) fn enchantment_specs(body: &[u8]) -> Option<Vec<EnchantmentSpec>> {
         out.push((key, def));
     }
     Some(out)
+}
+
+/// The text form of an `effects` compound's `minecraft:trident_spin_attack_strength`.
+fn spin_spec(effects: Option<&Tag>) -> String {
+    let Some(c) = effects.and_then(Tag::as_compound) else {
+        return String::new();
+    };
+    match c
+        .0
+        .iter()
+        .rev()
+        .find(|(n, _)| n == "minecraft:trident_spin_attack_strength")
+    {
+        None => String::new(),
+        Some((_, t)) => {
+            crate::ench_value::Fx::from_tag(t).map_or_else(|| "?".into(), |fx| fx.to_string())
+        }
+    }
 }
 
 impl Data26 {
@@ -177,8 +200,11 @@ impl Data26 {
                 .as_ref()
                 .and_then(|v| v.get(i))
                 .and_then(|(_, d)| d.clone())
-                .or_else(|| builtin(name).map(|(m, a, s, e)| (m, a, s.to_string(), e.to_string())));
-            defs.push(spec.and_then(|(max_level, anvil_cost, s, e)| {
+                .or_else(|| {
+                    builtin(name)
+                        .map(|(m, a, s, e, x)| (m, a, s.to_string(), e.to_string(), x.to_string()))
+                });
+            defs.push(spec.and_then(|(max_level, anvil_cost, s, e, x)| {
                 Some(Ench {
                     max_level,
                     anvil_cost,
@@ -188,6 +214,7 @@ impl Data26 {
                     } else {
                         Some(holders_from_names(&e, id_of)?)
                     },
+                    spin: (!x.is_empty()).then(|| crate::ench_value::Fx::parse(&x)),
                 })
             }));
         }
@@ -260,10 +287,10 @@ mod builtin_table {
 }
 
 /// The vanilla definition of an enchantment (`max_level`, `anvil_cost`, supported items,
-/// exclusive set).
-fn builtin(name: &str) -> Option<(i32, i32, &'static str, &'static str)> {
+/// exclusive set, trident spin attack strength effect).
+fn builtin(name: &str) -> Option<(i32, i32, &'static str, &'static str, &'static str)> {
     builtin_table::ENCHANTMENTS
         .iter()
         .find(|e| e.0 == name)
-        .map(|e| (e.1, e.2, e.3, e.4))
+        .map(|e| (e.1, e.2, e.3, e.4, e.5))
 }

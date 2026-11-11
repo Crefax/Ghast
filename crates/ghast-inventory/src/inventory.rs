@@ -1319,6 +1319,34 @@ impl Inventory {
         Ok(Some(Outgoing::RenameItem(filtered)))
     }
 
+    /// 26.1 `EnchantmentHelper.getTridentSpinAttackStrength(stack)`: 0 run through the
+    /// `minecraft:trident_spin_attack_strength` effect of every enchantment in the stack's
+    /// `enchantments` (in their order), as the server's enchantment registry defines it
+    /// (`registry_data` with data, else vanilla's definition: riptide adds `1.5 + 0.75 ×
+    /// (level - 1)`). `Some(0.0)` without such an enchantment.
+    ///
+    /// `None` when it cannot be computed: an enchantment whose definition is unknown (not sent
+    /// with data and not vanilla), an effect that does not read, or one that draws on the
+    /// holder's random (`remove_binomial`). The first call parses the raw registry data and
+    /// tags (hence `&mut self`).
+    #[cfg(feature = "v26_1")]
+    pub fn trident_spin_attack_strength_26_1(&mut self, stack: &Stack) -> Option<f32> {
+        let list = crate::v26_1::enchantments(stack, false).unwrap_or_default();
+        if list.is_empty() {
+            return Some(0.0);
+        }
+        self.d26.ensure(&self.reg26.enchantments);
+        let mut v = 0.0f32;
+        for (id, level) in list {
+            match &self.d26.enchantment(id)?.spin {
+                None => {}
+                Some(None) => return None,
+                Some(Some(fx)) => v = fx.process(level, v)?,
+            }
+        }
+        Some(v)
+    }
+
     /// 26.1 loom: clicks pattern button `index` (`LoomMenu.clickMenuButton`). Returns the
     /// `container_button_click` when the loom accepts it (`Ok(None)`: not a selectable pattern).
     ///

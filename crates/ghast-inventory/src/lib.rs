@@ -59,6 +59,8 @@
 mod crafting;
 #[cfg(feature = "v26_1")]
 mod data26;
+#[cfg(feature = "v26_1")]
+mod ench_value;
 mod inventory;
 mod item;
 mod packets;

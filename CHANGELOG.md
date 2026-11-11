@@ -69,6 +69,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   component, the elytra by default) works from and `LivingEntity.canGlideUsing` (not when the
   next damage breaks it).
 - `Inventory::enchantment_name_26_1(id)`: an enchantment's registry name (`minecraft:sharpness`).
+- `Inventory::trident_spin_attack_strength_26_1(&Stack) -> Option<f32>`
+  (`EnchantmentHelper.getTridentSpinAttackStrength`): the `trident_spin_attack_strength` effect
+  of the stack's enchantments as the server's enchantment registry defines it (vanilla's
+  definition for entries sent without data; level-based values and value effects evaluated
+  like the game).
 - **26.1 creative inventory screen**: window 0 opened in creative mode sends what the real
   screen sends (`Outgoing::Creative(Vec<CreativePacket>)`: `set_creative_mode_slot` for the
   slots that differ from the last broadcast, drops as slot -1 with the arm swing; echoes of

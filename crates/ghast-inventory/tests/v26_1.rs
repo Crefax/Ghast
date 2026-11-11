@@ -763,3 +763,120 @@ fn enchantment_names_from_the_registries() {
     assert_eq!(inv.enchantment_name_26_1(2), None);
     assert_eq!(inv.enchantment_name_26_1(-1), None);
 }
+
+/// A trident with `enchantments` = `(id, level)` pairs (`ItemEnchantments.STREAM_CODEC`:
+/// count, then holder id and level varints; every value below 128).
+fn enchanted_trident(list: &[(i32, i32)]) -> ghast_inventory::Stack {
+    let mut v = vec![list.len() as u8];
+    for &(id, level) in list {
+        v.extend([id as u8, level as u8]);
+    }
+    let p = ghast_protocol::types::slot::v775::ComponentPatch::from_parts(
+        &[(component::ENCHANTMENTS, &v)],
+        &[],
+    );
+    ghast_inventory::Stack::new(item_id("trident").unwrap(), 1, 0)
+        .with_data(ItemData::Components(Box::new(p)))
+}
+
+/// The enchantment registry ids of `names` in `inv`.
+fn ench_ids(inv: &Inventory, names: &[&str]) -> Vec<i32> {
+    names
+        .iter()
+        .map(|n| {
+            inv.registries_26_1()
+                .enchantments()
+                .iter()
+                .position(|x| x == n)
+                .unwrap() as i32
+        })
+        .collect()
+}
+
+#[test]
+fn trident_spin_attack_strength() {
+    // the live server's configuration (vanilla pack: entries sent without data, the built-in
+    // definitions apply) and the oracle's (entries with data)
+    let golden = {
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(
+            &include_bytes!("../../../tests/golden/26.1/clicks_seed1.jsonl.gz")[..],
+        )
+        .read_to_string(&mut text)
+        .unwrap();
+        text.lines()
+            .find(|l| l.contains("\"registry\":\"minecraft:enchantment\""))
+            .map(|l| {
+                let v: serde_json::Value = serde_json::from_str(l).unwrap();
+                let h = v["packet"].as_str().unwrap();
+                Bytes::from(
+                    (0..h.len() / 2)
+                        .map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())
+                        .collect::<Vec<u8>>(),
+                )
+            })
+            .unwrap()
+    };
+    let live = Inventory::new(Version::V26_1).unwrap();
+    let mut setups = vec![live];
+    let mut with_data = Inventory::new(Version::V26_1).unwrap();
+    let mut r = Reader::new(&golden);
+    let _ = r.read_string().unwrap();
+    let n = r.read_varint().unwrap();
+    let mut keys = Vec::new();
+    for _ in 0..n {
+        keys.push(r.read_string().unwrap().to_string());
+        if r.read_bool().unwrap() {
+            ghast_protocol::nbt::AnonNbt::read(&mut r).unwrap();
+        }
+    }
+    let mut reg = HashRegistries::default();
+    reg.add("minecraft:enchantment", keys.iter().map(String::as_str));
+    with_data.set_registries_26_1(reg);
+    with_data.on_registry_data_26_1(golden.clone());
+    setups.push(with_data);
+    {
+        let live = &mut setups[0];
+        let mut reg = HashRegistries::default();
+        for (state, _, raw) in records(include_bytes!("fixtures/menus_26_1_2.bin.zz")) {
+            if state != 3 {
+                continue;
+            }
+            match ClientboundConfigurationPacket::decode_raw(&raw).unwrap() {
+                ClientboundConfigurationPacket::RegistryData(d) => {
+                    reg.add(&d.id, d.entries.iter().map(|e| &*e.key));
+                    live.on_registry_data_26_1(raw.body.clone());
+                }
+                ClientboundConfigurationPacket::Tags(_) => {
+                    live.on_update_tags_26_1(raw.body.clone())
+                }
+                _ => {}
+            }
+        }
+        live.set_registries_26_1(reg);
+    }
+    for inv in &mut setups {
+        let ids = ench_ids(
+            inv,
+            &[
+                "minecraft:riptide",
+                "minecraft:unbreaking",
+                "minecraft:impaling",
+            ],
+        );
+        let (riptide, unbreaking, impaling) = (ids[0], ids[1], ids[2]);
+        let s = |inv: &mut Inventory, list: &[(i32, i32)]| {
+            inv.trident_spin_attack_strength_26_1(&enchanted_trident(list))
+        };
+        assert_eq!(s(inv, &[]), Some(0.0));
+        assert_eq!(s(inv, &[(riptide, 1)]), Some(1.5));
+        assert_eq!(s(inv, &[(riptide, 2)]), Some(2.25));
+        assert_eq!(
+            s(inv, &[(unbreaking, 3), (riptide, 3), (impaling, 5)]),
+            Some(3.0)
+        );
+        assert_eq!(s(inv, &[(impaling, 5)]), Some(0.0));
+        // an id the registry does not have: not computable
+        assert_eq!(s(inv, &[(120, 1)]), None);
+    }
+}
