@@ -310,6 +310,12 @@ fn chunks_respawn_and_pickups() {
         40.0,
         "no interpolation in an unloaded chunk"
     );
+    t.mark_column_loaded(2, 2);
+    assert!(t.is_ticking(t.get(10).unwrap()));
+    t.tick();
+    assert!(t.get(10).unwrap().position()[0] > 40.0);
+    t.mark_column_unloaded(2, 2);
+    assert!(!t.is_ticking(t.get(10).unwrap()));
     // A floating item with 5 in its stack: picking up 2 leaves 3, then 3 more removes it.
     spawn(&mut t, 11, ITEM, [0.0, 64.0, 0.0], [0; 3]);
     metadata(
