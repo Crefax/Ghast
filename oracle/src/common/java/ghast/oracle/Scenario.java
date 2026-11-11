@@ -118,6 +118,8 @@ public final class Scenario {
     /** Base value of the movement speed attribute (what the server's entity properties packet sets). */
     public double movementSpeedBase = 0.1;
     public int foodLevel = 20;
+    /** 26.1: the health of the set-health packet at join ({@code null} = 20). */
+    public Float health;
     /** Status effects: id -> amplifier (speed = 1, slowness = 2, jump boost = 8). */
     public final Map<Integer, Integer> effects = new LinkedHashMap<>();
 

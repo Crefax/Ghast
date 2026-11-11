@@ -539,6 +539,12 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     } else {
         modern::LoadGate::loaded()
     };
+    if case.header["setup"]
+        .get("health")
+        .is_some_and(|h| f32_of(h) <= 0.0)
+    {
+        gate.player_alive(false);
+    }
     let mut compiled = false;
     let mut out = Packets::new();
     for rec in &case.ticks[1..] {

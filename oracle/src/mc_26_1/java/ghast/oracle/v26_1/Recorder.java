@@ -135,6 +135,9 @@ final class Recorder {
         if (sc.delayedLoad) {
             j.field("delayed_load", true);
         }
+        if (sc.health != null) {
+            j.fieldF32("health", sc.health);
+        }
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();

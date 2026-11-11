@@ -36,6 +36,7 @@ enum Stage {
 pub struct LoadGate {
     stage: Stage,
     timed_out: bool,
+    dead: bool,
 }
 
 impl Default for LoadGate {
@@ -51,6 +52,7 @@ impl LoadGate {
         LoadGate {
             stage: Stage::WaitingForServer,
             timed_out: false,
+            dead: false,
         }
     }
 
@@ -60,6 +62,7 @@ impl LoadGate {
         LoadGate {
             stage: Stage::Loaded,
             timed_out: false,
+            dead: false,
         }
     }
 
@@ -74,6 +77,12 @@ impl LoadGate {
     /// the player in once the server's load start arrived).
     pub fn time_out(&mut self) {
         self.timed_out = true;
+    }
+
+    /// Whether the player is alive (`isAlive()`: health above 0, from `set_health`). A dead
+    /// player does not wait for its section. Alive by default.
+    pub fn player_alive(&mut self, alive: bool) {
+        self.dead = !alive;
     }
 
     /// `hasClientLoaded()`.
@@ -93,7 +102,7 @@ impl LoadGate {
         let y = p.pos[1].floor();
         let outside =
             y < f64::from(p.level.min_y) || y >= f64::from(p.level.min_y + p.level.height);
-        if self.timed_out || outside || p.spectator || section_compiled {
+        if self.timed_out || outside || p.spectator || self.dead || section_compiled {
             self.stage = Stage::Loaded;
             return true;
         }

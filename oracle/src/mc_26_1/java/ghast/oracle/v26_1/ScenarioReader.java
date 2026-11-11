@@ -151,6 +151,9 @@ final class ScenarioReader {
         }
         sc.leatherBoots = s.has("leather_boots") && s.get("leather_boots").getAsBoolean();
         sc.delayedLoad = s.has("delayed_load") && s.get("delayed_load").getAsBoolean();
+        if (s.has("health")) {
+            sc.health = f32(s.get("health"));
+        }
         if (s.has("use_effects")) {
             JsonObject u = s.getAsJsonObject("use_effects");
             sc.useCanSprint = u.get("can_sprint").getAsBoolean();

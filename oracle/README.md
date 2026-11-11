@@ -896,7 +896,9 @@ harness does not turn the player (the loading screen holds the mouse; it closes 
 tick). Tick lines add `client_loaded` (`hasClientLoaded()`), and the first record keeps what the
 client sent during setup (teleport confirm + position/look). Cases: feet on the ground, 1, 1.5 and
 5 blocks above it, in water; section compiled 0, 1, 5, 20 ticks after the load start; compiled
-before the load start; the timeout; a second position packet while loading; no load start.
+before the load start; the timeout; a second position packet while loading; no load start; dead at
+join (`setup.health` 0, the set-health packet's value: the tracker lets a dead player in without
+the section).
 
 ### 26.1 teleports with delta movement (`teleports.jsonl.gz`)
 

@@ -281,7 +281,7 @@ final class Harness {
                     new ClientboundUpdateAttributesPacket(PLAYER_ENTITY_ID, attrs)));
 
             // --- health / food, effects, equipment ---
-            listener.handleSetHealth(roundTrip(ClientboundSetHealthPacket.STREAM_CODEC, new ClientboundSetHealthPacket(20.0F, sc.foodLevel, 5.0F)));
+            listener.handleSetHealth(roundTrip(ClientboundSetHealthPacket.STREAM_CODEC, new ClientboundSetHealthPacket(sc.health != null ? sc.health : 20.0F, sc.foodLevel, 5.0F)));
             for (Map.Entry<Integer, Integer> e : sc.effects.entrySet()) {
                 addEffect(e.getKey(), e.getValue());
             }
