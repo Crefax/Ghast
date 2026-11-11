@@ -148,7 +148,14 @@ vanilla's queries make.
 Unloaded chunks: the caller must not tick the player before its level is loaded (26.1's
 `player_loaded` gate); "never treat unloaded chunks as air" is enforced in the client, one layer up.
 
-Not modelled: elytra, riptide, vehicles, entity collision and push, pistons, block entities, a
+Gliding (elytra) and firework rockets: `PlayerExt` + `tick_ext` (module docs of `modern::PlayerExt`
+say what the client must feed: the server's shared entity flags, the equipped glider, attached
+rockets). The glide reads `Math.cos(pitch)`; HotSpot x86-64's intrinsic is not correctly rounded,
+so `modern::jdk_math` reproduces it (correctly rounded cosine + a 44,355-entry exception table
+generated from the JVM; another JVM platform, e.g. aarch64, may differ in the last bit). Not
+modelled there: a rocket that hits a big dripleaf tilts it on the client before the server does.
+
+Not modelled: riptide, vehicles, entity collision and push, pistons, block entities, a
 moving world border; the nether's `fast_lava` is supported only as a flag (no oracle vector yet).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every

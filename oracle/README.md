@@ -957,6 +957,47 @@ classes, mirroring `ClientPacketListener.setKeyPair` / `sendChat` / `sendCommand
 Deterministic. Read by `crates/ghast-client/src/version/v26_1_chat_golden.rs` (every body
 byte-identical).
 
+### 26.1 movement mechanics beyond the plain player (`Ext`, `ExtCases`)
+
+One golden file per mechanic, `tests/golden/26.1/<mechanic>.jsonl.gz` (hand-written cases + 100
+golden fuzz cases, part of `golden` / `verify` / `selftest`); `MC=26.1 oracle/run.sh <mechanic>`
+writes it, `ext-fuzz --mechanic <m> --seed S --count N --ticks T --out F` writes cached fuzz
+(`oracle/cache/26.1/fuzz-<m>/`, replayed by the Rust large-fuzz test). A case uses this only when
+it has a version setup (`setup.ext` in the header), so older files keep their bytes. Server packets
+of these cases (all through the real `ClientPacketListener`):
+
+- `{"type":"shared_flags","set","clear"}`: `set_entity_data` of the player's shared flags byte
+  (the client's current byte with `clear` cleared and `set` set; bit 3 sprinting, 4 swimming, 7
+  fall flying).
+- `{"type":"equipment","slot","item","damage"?}`: `set_equipment` for the player.
+- `{"type":"firework","id"}`: the server's rocket for a gliding player — a `FireworkRocketEntity`
+  built with the server constructor (at the player, attached to it, owned by it), sent as
+  `add_entity` (owner id as its data) + its non-default entity data. `{"type":"remove_entity","id"}`:
+  `remove_entities`.
+
+`setup.ext`: `chest` (`elytra`) and `chest_damage`, `hand` (the use-key item instead of the shield,
+e.g. `firework_rocket`: never "in use"), `fall_flying` (flag 7 in the setup entity data),
+`left_handed` (the player's main-hand entity data).
+
+**`elytra`** (23 cases + 100 fuzz): start (jump in the air: `entity_action` `start_fall_flying`),
+not on the ground / in water / with levitation / creative flight / a broken elytra (damage 431),
+glide physics at every pitch, landing (the client keeps gliding until the server clears flag 7),
+a ladder stops it client-side, vines (`#can_glide_through`) do not, walls, ceilings, slow
+falling, rockets (one to three, used with the use key, attached to a player who does not glide,
+crossing into an unloaded chunk with either arm), server sprint / swim / glide bits, joining
+while gliding, the elytra taken off. Fuzz (`ExtCases.elytraFuzz`, cases `…_x_el`): the
+`withExtras` case with an elytra (sometimes broken or missing), raised spawns, glide at the start,
+jump presses, pitch changes, flag events, rockets and chest swaps. Quirks seen in the vectors:
+
+- A rocket is an entity: it ticks only in a loaded chunk (a rocket spawned where the client has
+  no chunk never boosts) and is discarded more than 64 blocks below the world.
+- `Math.cos` (glide lift) is HotSpot x86-64's intrinsic, not the correctly rounded cosine:
+  `jdk-cos --out F` writes it for every float in `[0, pi/2]` for the Rust table (see
+  `crates/ghast-physics/src/modern/jdk_math.rs`).
+- An attached rocket's ray that hits a big dripleaf tilts it on the client (`onProjectileHit`
+  runs client-side); the elytra fuzz removes big dripleaf from its terrain because the physics
+  does not model that block change.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

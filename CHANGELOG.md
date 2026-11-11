@@ -82,6 +82,17 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   the hotbar from the component item model. `BotView::build_height` (defaulted).
   `afk_viewer --version 26.1`.
 - `ghast_physics::modern::ModernMemoryWorld::{min_y, height}`.
+- **26.1 gliding (elytra) and firework rockets**, proven against the real client (oracle
+  `elytra`, `tests/golden/26.1/elytra.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs):
+  `ghast_physics::modern::PlayerExt` (glide flag, usable glider, attached rockets, rocket arm)
+  with `tick_ext` / `LoadGate::step_ext`, `PlayerExt::apply_shared_flags` (the server's shared
+  entity flags: sprinting, swimming, gliding), `attach_rocket` / `remove_rocket`,
+  `on_climbable_ext`, `Packet::StartFallFlying`. The glide uses `Math.cos` exactly as the
+  HotSpot x86-64 JVM computes it (`modern::jdk_math`, a generated exception table).
+  `ghast_data::v26_1::block_flags::CAN_GLIDE_THROUGH`.
+- `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
+  `tests/golden/<mc>/`).
+
 
 ### Changed (behaviour)
 
