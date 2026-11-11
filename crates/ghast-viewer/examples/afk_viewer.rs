@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run --release --example afk_viewer -- <host:port> <name> [viewer port] [minutes]
-//!     [--record <dir>] [--token <token>]
+//!     [--record <dir>] [--token <token>] [--version 1.8.9|26.1]
 //! ```
 //!
 //! Then open `http://127.0.0.1:<viewer port>/` (third person: `?mode=tp`). Recordings made with
@@ -50,6 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let record = flag(&mut args, "--record");
     let token = flag(&mut args, "--token");
+    let version = match flag(&mut args, "--version").as_deref() {
+        None | Some("1.8.9") => GameVersion::V1_8_9,
+        Some("26.1") => GameVersion::V26_1,
+        Some(v) => return Err(format!("version {v}: 1.8.9 or 26.1").into()),
+    };
     let addr = args
         .first()
         .cloned()
@@ -74,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let at = viewer.start().await?;
         log::info!("bot screen: http://{at}/");
         let mut rec = record.as_ref().map(|d| FeedRecorder::start(&viewer, d));
-        let client = Client::new(addr.parse()?, GameVersion::V1_8_9, Account::offline(&name)?)
+        let client = Client::new(addr.parse()?, version, Account::offline(&name)?)
             .world_config(ghast_viewer::world_config());
         let mut bot = viewer.watch(Afk {
             started: Instant::now(),

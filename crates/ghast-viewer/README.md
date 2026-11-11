@@ -14,7 +14,14 @@ dash cam and replays on the same page.
 - **No game assets in the crate.** Textures and block models are built at run time from the
   vanilla client jar, downloaded from Mojang's servers into a local `.cache/ghast-viewer`
   (feature `download`, on by default), or read from a local copy (`ViewerConfig::client_jar`).
-- Only 1.8.9 sessions are drawn for now.
+- 1.8.9 and 26.1 sessions are drawn (26.1 with the `v26_1` feature, on by default).
+  The page draws with the 1.8.9 assets: a 26.1 world is mapped onto them (blocks and items
+  1.8 has keep their state, newer ones become a look-alike, see `ghast_viewer::v26_1`), and
+  the page shows the 256 rows of the dimension around the bot (it moves the window and redraws
+  when the bot leaves it). Entities are listed from the 26.1 tracker (mob models where 1.8 has
+  the mob, else a box of the entity's size; dropped items show their stack); other entities'
+  held items and armour, chest lids, particles, weather, experience and other players' block
+  cracks are 1.8-only.
 
 ## Use
 

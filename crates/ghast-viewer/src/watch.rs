@@ -205,4 +205,7 @@ impl BotView for View<'_, '_> {
     fn respawned(&self) -> bool {
         self.0.events().respawned
     }
+    fn build_height(&self) -> Option<(i32, i32)> {
+        self.0.world().build_height()
+    }
 }

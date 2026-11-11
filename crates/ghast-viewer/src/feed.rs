@@ -92,6 +92,20 @@ pub trait BotView {
     fn joined(&self) -> bool;
     /// A respawn happened since the last tick.
     fn respawned(&self) -> bool;
+    /// The dimension's build height `(min_y, height)` when it is not the fixed `0..256` (26.1).
+    fn build_height(&self) -> Option<(i32, i32)> {
+        None
+    }
+}
+
+/// Whether the page can show sessions of this version.
+fn drawn(v: GameVersion) -> bool {
+    match v {
+        GameVersion::V1_8_9 => true,
+        #[cfg(feature = "v26_1")]
+        GameVersion::V26_1 => true,
+        _ => false,
+    }
 }
 
 /// 1.8 clientbound packet ids the feed reads while someone watches.
@@ -267,6 +281,10 @@ pub struct Feed {
     self_id: i32,
     dimension: String,
     has_sky: bool,
+    /// 26.1: blocks, items and entities are mapped onto 1.8 ones (see [`crate::v26_1`]).
+    modern: bool,
+    /// The lowest world row the page shows (page `y` = world `y − lo`; 0 for 1.8).
+    lo: i32,
     center: Option<(i32, i32)>,
     pose: Option<Pose>,
     reliable: Writer,
@@ -337,6 +355,8 @@ impl Feed {
             self_id: i32::MIN,
             dimension: String::new(),
             has_sky: true,
+            modern: false,
+            lo: 0,
             center: None,
             pose: None,
             reliable: Writer::with_capacity(1024),
@@ -533,8 +553,8 @@ impl Feed {
 
     /// Applies the raw packets of a tick while nobody watches (state only, no frames).
     pub fn observe(&mut self, v: &dyn BotView) {
-        self.live = v.version() == GameVersion::V1_8_9;
-        if !self.live {
+        self.live = drawn(v.version());
+        if v.version() != GameVersion::V1_8_9 {
             return;
         }
         for p in v.raw() {
@@ -613,9 +633,9 @@ impl Feed {
     /// One client tick while somebody watches.
     pub fn tick(&mut self, v: &dyn BotView) -> TickFrames {
         let mut out = TickFrames::default();
-        if v.version() != GameVersion::V1_8_9 {
-            // only 1.8 is drawn so far: say so instead of showing a wrong world
-            self.message = "Only 1.8 sessions can be shown".into();
+        if !drawn(v.version()) {
+            // say so instead of showing a wrong world
+            self.message = "Only 1.8 and 26.1 sessions can be shown".into();
             self.live = false;
             if self.in_game {
                 self.unbind();
@@ -631,7 +651,7 @@ impl Feed {
             }
             out.notices.push(Notice::Reset);
             self.bind(v);
-        } else if v.respawned() && v.dimension() != self.dimension {
+        } else if (v.respawned() && v.dimension() != self.dimension) || !self.keeps_window(v) {
             self.unbind();
             out.notices.push(Notice::Reset);
             self.bind(v);
@@ -687,9 +707,50 @@ impl Feed {
         out
     }
 
+    /// 26.1: whether the bot is still inside the shown 256 rows.
+    fn keeps_window(&self, v: &dyn BotView) -> bool {
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            let h = v.build_height().unwrap_or((-64, 384));
+            return crate::v26_1::Window { lo: self.lo }.keeps(v.pose().pos.y, h);
+        }
+        let _ = v;
+        true
+    }
+
+    /// A world height on the page (`None`: outside the shown rows).
+    fn page_y(&self, y: i32) -> Option<u8> {
+        u8::try_from(y - self.lo).ok()
+    }
+
+    /// A block state on the page (1.8 `id << 4 | meta`).
+    fn page_state(&self, state: u32) -> u16 {
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            return crate::v26_1::block(state);
+        }
+        state as u16
+    }
+
+    /// An inventory stack on the page (1.8 `id, meta`).
+    fn page_item(&self, st: &Stack) -> (u16, u16) {
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            return crate::v26_1::item(st.id(), st.damage());
+        }
+        (st.id() as u16, st.damage() as u16)
+    }
+
     fn bind(&mut self, v: &dyn BotView) {
         self.in_game = true;
         self.live = true;
+        self.modern = v.version() != GameVersion::V1_8_9;
+        self.lo = 0;
+        #[cfg(feature = "v26_1")]
+        if self.modern {
+            let h = v.build_height().unwrap_or((-64, 384));
+            self.lo = crate::v26_1::Window::around(v.pose().pos.y, h).lo;
+        }
         self.self_id = v.entity_id();
         self.dimension = v.dimension().to_string();
         let d = self.dimension.as_str();
@@ -855,10 +916,10 @@ impl Feed {
                 for (i, s) in st.iter_mut().enumerate() {
                     let (x, y, z) = (
                         x0 + (i & 15) as i32,
-                        (sy * 16 + (i >> 8)) as i32,
+                        (sy * 16 + (i >> 8)) as i32 + self.lo,
                         z0 + ((i >> 4) & 15) as i32,
                     );
-                    let raw = v.raw_block(x, y, z).unwrap_or(0) as u16;
+                    let raw = self.page_state(v.raw_block(x, y, z).unwrap_or(0));
                     any |= raw != 0;
                     *s = raw;
                 }
@@ -920,8 +981,9 @@ impl Feed {
         // a block that changed is not being broken any more
         self.breaking
             .retain(|_, c| !(c.0 == x && c.1 == y && c.2 == z));
-        let Ok(yy) = u8::try_from(y) else { return };
-        self.blocks.push((x, yy, z, state as u16));
+        let Some(yy) = self.page_y(y) else { return };
+        let st = self.page_state(state);
+        self.blocks.push((x, yy, z, st));
         let k = (x >> 4, z >> 4);
         *self.versions.entry(k).or_insert(0) += 1;
         self.cache.remove(&k);
@@ -950,6 +1012,7 @@ impl Feed {
         };
         let stamp = self.ticks;
         let me = v.entity_id();
+        let lo = f64::from(self.lo);
         for e in ents.iter() {
             if e.id() == me {
                 continue;
@@ -964,6 +1027,7 @@ impl Feed {
                 Some(k) => {
                     k.seen = stamp;
                     let p = e.position();
+                    let p = [p[0], p[1] - lo, p[2]];
                     let rot = [e.yaw(), e.pitch(), e.head_yaw()];
                     if p != k.pos || rot != k.rot {
                         k.pos = p;
@@ -1060,7 +1124,7 @@ impl Feed {
         let looks = looks_of(e);
         let mut k = Known {
             seen: stamp,
-            pos: e.position(),
+            pos: self.page_pos(e.position()),
             rot: [e.yaw(), e.pitch(), e.head_yaw()],
             item: stack_of(e),
             variant: variant_of(e),
@@ -1085,6 +1149,11 @@ impl Feed {
             k.skin = Some(key);
         }
         self.known.insert(id, k);
+    }
+
+    /// An entity position on the page.
+    fn page_pos(&self, p: [f64; 3]) -> [f64; 3] {
+        [p[0], p[1] - f64::from(self.lo), p[2]]
     }
 
     /// `flags|skin|cape` of a profile (the paths '' until downloaded; downloads are started).
@@ -1490,7 +1559,7 @@ impl Feed {
             m.f64(t)
                 .u32(v.tick() as u32)
                 .f64(p.pos.x)
-                .f64(p.pos.y)
+                .f64(p.pos.y - f64::from(self.lo))
                 .f64(p.pos.z)
                 .f32(yaw_rad(p.yaw))
                 .f32(pitch_rad(p.pitch))
@@ -1555,10 +1624,10 @@ impl Feed {
         m.u8(v.held_slot());
         for k in 0..9 {
             match v.hotbar(k).filter(|s| s.id() > 0 && s.count() > 0) {
-                Some(st) => m
-                    .u16(st.id() as u16)
-                    .u16(st.damage() as u16)
-                    .u8(st.count().clamp(0, 255) as u8),
+                Some(st) => {
+                    let (id, meta) = self.page_item(st);
+                    m.u16(id).u16(meta).u8(st.count().clamp(0, 255) as u8)
+                }
                 None => m.u16(0).u16(0).u8(0),
             };
         }
@@ -1575,7 +1644,8 @@ impl Feed {
         for slot in 1..=4u8 {
             if let Some(st) = v.armor(4 - usize::from(slot)).filter(|s| s.id() > 0) {
                 let color = st.nbt().map_or(NO_COLOR, leather_color_nbt);
-                armour.push((slot, st.id() as u16, st.damage() as u16, color));
+                let (id, meta) = self.page_item(st);
+                armour.push((slot, id, meta, color));
             }
         }
         let mut m = Writer::with_capacity(64);
@@ -1633,9 +1703,9 @@ impl Feed {
         let at = m.begin(s::CRACKS);
         m.u16(list.len().min(0xffff) as u16);
         for &(x, y, z, stage) in list.iter().take(0xffff) {
-            let state = v.raw_block(x, y, z).unwrap_or(0) as u16;
+            let state = self.page_state(v.raw_block(x, y, z).unwrap_or(0));
             m.i32(x)
-                .u8(y.clamp(0, 255) as u8)
+                .u8((y - self.lo).clamp(0, 255) as u8)
                 .i32(z)
                 .u16(state)
                 .u8(stage);

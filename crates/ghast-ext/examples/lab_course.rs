@@ -1,12 +1,13 @@
 //! Drives the pathfinder through the parkour corridor and the maze that
-//! `lab/pathfinder-course.sh` builds on the local 1.8 or 1.12 lab, then follows an armor stand through
+//! `lab/pathfinder-course.sh` builds on the local 1.8, 1.12 or 26.1 lab, then follows an armor stand through
 //! the maze with `Bot::follow_path`. Server teleports (setbacks) are counted; Grim's flags are
 //! in the server console (`lab/alerts.sh 1.8 --all`).
 //!
 //! ```text
 //! lab/pathfinder-course.sh 1.8 build          # or 1.12
 //! timeout -s TERM 600 cargo run -p ghast-ext --release --example lab_course -- \
-//!     127.0.0.1 25618 GhastBot12 480 2 1.8.9      # or: 127.0.0.1 25612 ... 2 1.12.2
+//!     127.0.0.1 25618 GhastBot12 480 2 1.8.9      # or: 127.0.0.1 25612 ... 2 1.12.2,
+//!                                                  #     127.0.0.1 25626 ... 2 26.1
 //! ```
 //! Teleport the bot to the corridor start with `lab/pathfinder-course.sh 1.8 tp GhastBot12`
 //! (it need not be an op) and move the armor stand with `... follow` once it prints `FOLLOW`.
@@ -53,7 +54,8 @@ fn main() {
     let version = match args.get(5).map(String::as_str) {
         None | Some("1.8.9") => GameVersion::V1_8_9,
         Some("1.12.2") => GameVersion::V1_12_2,
-        Some(v) => panic!("version {v}: 1.8.9 or 1.12.2 (the lab course scripts)"),
+        Some("26.1") => GameVersion::V26_1,
+        Some(v) => panic!("version {v}: 1.8.9, 1.12.2 or 26.1 (the lab course scripts)"),
     };
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

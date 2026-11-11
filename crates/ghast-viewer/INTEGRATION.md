@@ -6,8 +6,8 @@ a dash cam that saves the last minutes when something happens. The full example 
 [`examples/dashcam_nearby.rs`](examples/dashcam_nearby.rs).
 
 The viewer is read-only. It watches the bot's ticks and never writes to the game connection, and
-the page can only send clock pings, flow-control ACKs and playback controls. Only 1.8 sessions
-are drawn for now.
+the page can only send clock pings, flow-control ACKs and playback controls. 1.8.9 and 26.1
+sessions are drawn; 26.1 through the 1.8.9 assets (see the README).
 
 ## 1. Wrap the behaviour
 

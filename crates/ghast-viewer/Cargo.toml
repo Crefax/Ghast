@@ -15,7 +15,10 @@ documentation = "https://docs.rs/ghast-viewer"
 include = ["src/**", "web/dist/**", "docs/**", "examples/**", "tests/**", "README.md", "INTEGRATION.md", "LICENSE-*", "Cargo.toml"]
 
 [features]
-default = ["download"]
+default = ["download", "v26_1"]
+# 26.1 sessions (drawn with the 1.8 assets: blocks, items and entities mapped to 1.8 look-alikes).
+# Without it a 26.1 session shows a notice instead of the world.
+v26_1 = ["ghast-data/v26_1"]
 # Fetch the vanilla client jar (for textures and models) from Mojang's version manifest when no
 # jar is configured. Without it, `ViewerConfig::client_jar` must point at a local copy.
 download = ["dep:ureq"]

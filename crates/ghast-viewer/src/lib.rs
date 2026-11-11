@@ -29,7 +29,8 @@
 //! # }
 //! ```
 //!
-//! Wire protocol: `docs/protocol.md`. Only 1.8 sessions are drawn for now.
+//! Wire protocol: `docs/protocol.md`. 1.8.9 and 26.1 (feature `v26_1`, mapped onto the 1.8.9
+//! assets, see [`v26_1`]) sessions are drawn.
 
 #![forbid(unsafe_code)]
 #![warn(rust_2018_idioms)]
@@ -40,6 +41,8 @@ pub mod dashcam;
 pub mod entities;
 pub mod feed;
 pub mod hub;
+#[cfg(feature = "v26_1")]
+mod legacy_table;
 pub mod protocol;
 pub mod record;
 pub mod replay;
@@ -47,6 +50,8 @@ mod server;
 pub mod skins;
 pub mod stream;
 pub mod tiles;
+#[cfg(feature = "v26_1")]
+pub mod v26_1;
 mod watch;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

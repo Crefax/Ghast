@@ -61,6 +61,27 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   real screen (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, 19 381 packets).
 - Oracle dumps `clicks` and `creative-clicks` (26.1) and `examples/gen_menus_26_1.rs` (the
   menus' item facts from the click vectors).
+- **Path finding on 26.1** (`ghast-pathfinder` feature `v26_1`, default on, forwarded by
+  `ghast-ext` and the facade): `Version::V26_1` on the modern physics core. Block classes come
+  from the jar's 26.1 movement records (powder snow, scaffolding, cobwebs, berry bushes, fire
+  never entered; magma, campfires, pointed dripstone, lava cauldrons, big dripleaves, sculk
+  sensors / shriekers never stood on); move costs and the gap-jump table are measured with
+  `modern::tick`. The look-ahead, the pre-jump check and the verification simulate with the
+  live player (server attributes such as step height, jump strength, movement speed and scale,
+  effects, abilities): `Controller::set_modern_player`, `Simulation::with_modern_player`; the
+  `Follower` feeds `TickContext::modern_player` every tick. Build height from the dimension
+  (negative Y; below the bottom is unknown): `BlockSource::build_height` (defaulted).
+  `Bot::goto` works on 26.1. Live: the lab parkour corridor and maze on Paper 26.1.2 + Grim
+  2.3.74, 0 flags, 0 setbacks.
+- `ghast_client::TickContext::modern_player` (26.1 movement state) and
+  `WorldView::build_height` (defaulted; 26.1 from the dimension).
+- **Bot screen for 26.1** (`ghast-viewer` feature `v26_1`, default on; the facade's `v26_1`
+  forwards it): a 26.1 world is drawn with the 1.8.9 assets — blocks and items mapped onto
+  their 1.8 states (exact where 1.8 has them, look-alikes for newer ones, by shape otherwise;
+  `ghast_viewer::v26_1`), the 256 rows around the bot shown, entities from the 26.1 tracker,
+  the hotbar from the component item model. `BotView::build_height` (defaulted).
+  `afk_viewer --version 26.1`.
+- `ghast_physics::modern::ModernMemoryWorld::{min_y, height}`.
 
 ### Changed (behaviour)
 
@@ -77,6 +98,9 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   used hand no longer holds that item. The client writes the swings of a dropping click
   (`ContainerClick::swings`) before the `container_click`, and lets `update_recipes`,
   `abilities` and `experience` through to the inventory.
+- Path following (all versions): a walk that brakes before a wall without progress for 10
+  ticks now accepts grazing it (an exact look-ahead could otherwise alternate forward and back
+  at a corridor's mouth).
 - 26.1 clicks: the changed slots are written in the real client's map order and each hashed
   stack's components in type id order (both are maps the server compares by content); bundle
   clicks, crafting results and the other menus above are predicted instead of sent

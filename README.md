@@ -108,8 +108,8 @@ protocol are served by the same code.
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows, hashed clicks and their results (lab probe: 30 clicks accepted, 0 differences) |
 | entities: tracking, crosshair, attack / interact | yes | yes | yes | not yet |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
-| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested | not yet |
-| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | not yet |
+| path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | simulation-tested | lab-tested, 0 Grim flags |
+| bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | live view (1.8.9 assets, look-alikes for newer blocks); recordings untested |
 | movement recording / trace replay (`Client::record`) | yes | not yet | yes | not yet |
 
 Planned: more versions from 1.8 up, family by family, each verified the same way. Not

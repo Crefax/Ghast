@@ -114,8 +114,26 @@ pub fn name_of(e: &Entity) -> String {
         EntityType::Player => "player".into(),
         EntityType::ExperienceOrb => "XPOrb".into(),
         EntityType::Painting => "Painting".into(),
+        #[cfg(feature = "v26_1")]
+        t @ EntityType::Registry(_) => ghast_entity::v26_1::info(t)
+            .map_or_else(String::new, |i| crate::v26_1::entity_name(i.name)),
         t => ghast_entity::v1_8::info(t).map_or_else(String::new, |i| i.name.to_string()),
     }
+}
+
+/// 26.1 (registry) types: the item ids are 26.1 ids, the metadata is 26.1's.
+fn modern(e: &Entity) -> bool {
+    matches!(e.entity_type(), EntityType::Registry(_))
+}
+
+/// An entity's item `(id, damage)` as the page's 1.8 `(id, meta)`.
+fn page_item(e: &Entity, id: i32, damage: i16) -> (u16, u16) {
+    #[cfg(feature = "v26_1")]
+    if modern(e) {
+        return crate::v26_1::item(id, damage);
+    }
+    let _ = e;
+    (id as u16, damage as u16)
 }
 
 /// The English display name of a mob (the page's fallback label).
@@ -124,6 +142,10 @@ pub fn display_name(e: &Entity) -> &'static str {
     match e.entity_type() {
         EntityType::LegacyMob(_) => {
             ghast_entity::v1_8::info(e.entity_type()).map_or("", |i| i.display_name)
+        }
+        #[cfg(feature = "v26_1")]
+        EntityType::Registry(_) if e.class() == EntityClass::Mob => {
+            ghast_entity::v26_1::info(e.entity_type()).map_or("", |i| i.display_name)
         }
         _ => "",
     }
@@ -155,6 +177,11 @@ pub fn size_of_entity(e: &Entity) -> (f32, f32) {
     }
     e.size()
         .or_else(|| {
+            #[cfg(feature = "v26_1")]
+            if modern(e) {
+                return ghast_entity::v26_1::info(e.entity_type())
+                    .and_then(|i| Some((i.width?, i.height?)));
+            }
             ghast_entity::v1_8::info(e.entity_type()).and_then(|i| Some((i.width?, i.height?)))
         })
         .unwrap_or((0.6, 1.8))
@@ -179,10 +206,16 @@ pub fn stack_of(e: &Entity) -> (u16, u16) {
     match e.class() {
         EntityClass::ExperienceOrb => return (0, e.data().clamp(0, 0xffff) as u16),
         EntityClass::Item => {
+            #[cfg(feature = "v26_1")]
+            if modern(e) {
+                // 26.1 keeps the item entity's stack in the component model.
+                return ghast_entity::v26_1::item_stack(e)
+                    .map_or((0, 0), |st| crate::v26_1::item(st.id, 0));
+            }
             return e
                 .item()
                 .filter(|it| it.id > 0)
-                .map_or((0, 0), |it| (it.id as u16, it.damage as u16));
+                .map_or((0, 0), |it| page_item(e, it.id, it.damage));
         }
         _ => {}
     }
@@ -195,7 +228,7 @@ pub fn stack_of(e: &Entity) -> (u16, u16) {
     }
     e.equipment(0)
         .filter(|it| it.id > 0)
-        .map_or((0, 0), |it| (it.id as u16, it.damage as u16))
+        .map_or((0, 0), |it| page_item(e, it.id, it.damage))
 }
 
 /// Minecart display blocks by class (each class's default display tile, facing north).
@@ -252,7 +285,8 @@ pub fn mob_variant(name: &str, at: impl Fn(u8) -> i32) -> u16 {
 /// The variant of a tracked entity (mobs and objects only).
 #[must_use]
 pub fn variant_of(e: &Entity) -> u16 {
-    if !matches!(e.class(), EntityClass::Mob) && object_info(e).is_none() {
+    if modern(e) || (!matches!(e.class(), EntityClass::Mob) && object_info(e).is_none()) {
+        // 26.1: the variant indices are 1.8's (not read: the plain model).
         return 0;
     }
     let m = e.metadata();
@@ -317,6 +351,23 @@ pub fn looks_of(e: &Entity) -> Option<Looks> {
     let name = name_of(e);
     let m = e.metadata();
     let at = |i: u8| num(m.get(i));
+    if modern(e) {
+        // 26.1: the armour only (baby flags and stand poses sit at other indices). Its
+        // equipment slots: 0 main hand, 1 off hand, 2 feet, 3 legs, 4 chest, 5 head.
+        let mut armour = Vec::new();
+        for slot in 1..=4u8 {
+            if let Some(it) = e.equipment(usize::from(slot) + 1).filter(|it| it.id > 0) {
+                let (id, meta) = page_item(e, it.id, it.damage);
+                armour.push((slot, id, meta, NO_COLOR));
+            }
+        }
+        let l = Looks {
+            flags: 0,
+            armour,
+            pose: None,
+        };
+        return (!l.is_plain()).then_some(l);
+    }
     let baby = if AGEABLE.contains(&name.as_str()) {
         at(12) < 0
     } else if name == "Zombie" || name == "PigZombie" {
@@ -358,6 +409,13 @@ pub fn looks_of(e: &Entity) -> Option<Looks> {
 #[must_use]
 pub fn estate_flags(e: &Entity, sleeping: bool) -> u8 {
     use crate::protocol::eflag;
+    #[cfg(feature = "v26_1")]
+    if modern(e) {
+        // 26.1's bit 4 is swimming, not using an item.
+        let meta = ghast_entity::v26_1::flags(e);
+        return (meta & (eflag::FIRE | eflag::SNEAK | eflag::SPRINT | eflag::INVISIBLE))
+            | if sleeping { eflag::SLEEP } else { 0 };
+    }
     let meta = ghast_entity::v1_8::flags(e);
     (meta & (eflag::FIRE | eflag::SNEAK | eflag::SPRINT | eflag::USE | eflag::INVISIBLE))
         | if sleeping { eflag::SLEEP } else { 0 }

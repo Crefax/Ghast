@@ -7,8 +7,8 @@
 #   scripts/feature-matrix.sh                 # everything below
 #   PACKAGES="ghast-ext" scripts/feature-matrix.sh   # only these crates
 #
-# Version features per crate (lower crates name 1.12 `v1_12`, as ghast-data does; ghast-auth and
-# ghast-viewer have no version features).
+# Version features per crate (lower crates name 1.12 `v1_12`, as ghast-data does; ghast-auth has
+# no version features; ghast-viewer draws 1.8.9 always and 26.1 with `v26_1`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 status=0
@@ -32,7 +32,7 @@ crates=(
   "ghast-client:v1_8 v1_12_2 v1_16_5 v26_1::all"
   "ghast-pathfinder:v1_8 v1_12_2 v1_16_5 v26_1:client:all"
   "ghast-ext:v1_8 v1_12_2 v1_16_5 v26_1:pathfinder:all"
-  "ghast-viewer:::"
+  "ghast-viewer:v26_1:download:all"
   "ghast:v1_8 v1_12_2 v1_16_5 v26_1::all"
 )
 want() { [ -z "${PACKAGES:-}" ] || [[ " $PACKAGES " == *" $1 "* ]]; }

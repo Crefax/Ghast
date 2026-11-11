@@ -232,6 +232,11 @@ The same course on the 1.12 lab (Paper 1.12.2 + Grim 2.3.73, local, 2026-11-07, 
 `... lab_course ... 1.12.2`): two sessions, 16 legs (the corridor 5 times each way, the maze
 three times) and `follow_path` after the armor stand, **0 failed, 0 Grim flags, 0 setbacks**.
 
+26.1 lab (Paper 26.1.2 + Grim 2.3.74, local, 2026-11-12, `GhastBot12`,
+`lab/pathfinder-course.sh 26.1 build`, `... lab_course -- 127.0.0.1 25626 GhastBot12 640 2 26.1`):
+the corridor twice each way (16–17 s per leg), the maze centre, out and back in, then 150 s of
+`follow_path` after the armor stand: **7 of 7 legs ok, 0 Grim flags, 0 setbacks**.
+
 ## Known limits
 
 - About 1 in 1000 fuzzed rough terrains still ends `Stuck` / `OffPath` in the simulation
