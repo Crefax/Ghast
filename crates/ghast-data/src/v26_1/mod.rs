@@ -119,6 +119,7 @@ pub struct BlockData {
     /// Registry name without namespace.
     pub name: &'static str,
     /// English display name (minecraft-data).
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Destroy time (minecraft-data; `None` = unbreakable).
     pub hardness: Option<f32>,

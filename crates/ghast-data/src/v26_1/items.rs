@@ -23,6 +23,7 @@ pub struct ItemData {
     /// Registry name without namespace.
     pub name: &'static str,
     /// English display name (minecraft-data).
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Default `minecraft:max_stack_size`.
     pub max_stack_size: u8,

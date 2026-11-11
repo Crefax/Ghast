@@ -26,7 +26,7 @@ ghast-entity = { path = "../ghast-entity", version = "0.3.0" }
 ghast-protocol = { path = "../ghast-protocol", version = "0.3.0", default-features = false, features = ["v1_8", "v1_16_5"] }
 ghast-world = { path = "../ghast-world", version = "0.3.0", default-features = false, features = ["v1_8", "v1_16_5"] }
 ghast-inventory = { path = "../ghast-inventory", version = "0.3.0" }
-ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8"] }
+ghast-data = { path = "../ghast-data", version = "0.3.0", default-features = false, features = ["v1_8", "display-names"] }
 bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net", "time", "sync", "macros"] }
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "ws", "query"] }

@@ -54,6 +54,7 @@ fn to_arrays(a: &[ghast_data::Aabb]) -> Vec<[f64; 6]> {
 fn check_info(info: &ghast_data::BlockInfo, b: &Value) {
     let name = b["name"].as_str().unwrap();
     assert_eq!(info.name, name);
+    #[cfg(feature = "display-names")]
     assert_eq!(
         info.display_name,
         b["displayName"].as_str().unwrap(),
@@ -173,6 +174,7 @@ fn v1_8_matches_source() {
             info.max_durability.map(u64::from),
             i["maxDurability"].as_u64()
         );
+        #[cfg(feature = "display-names")]
         assert_eq!(
             info.variations.len(),
             i["variations"].as_array().map_or(0, Vec::len)

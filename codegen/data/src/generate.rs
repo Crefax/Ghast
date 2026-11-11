@@ -132,7 +132,7 @@ fn block_info_lit(b: &Block, p: &Physics) -> R<String> {
         .collect();
     let tools: Vec<String> = b.harvest_tools.iter().map(u16::to_string).collect();
     Ok(format!(
-        "BlockInfo {{ id: {}, name: {}, display_name: {}, hardness: {}, resistance: {}, stack_size: {}, diggable: {}, transparent: {}, emit_light: {}, filter_light: {}, bounding_box: BoundingBox::{}, material: {material}, harvest_tools: &[{}], drops: &[{}], physics: {} }}",
+        "BlockInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, hardness: {}, resistance: {}, stack_size: {}, diggable: {}, transparent: {}, emit_light: {}, filter_light: {}, bounding_box: BoundingBox::{}, material: {material}, harvest_tools: &[{}], drops: &[{}], physics: {} }}",
         b.id,
         lit(&b.name),
         lit(&b.display_name),
@@ -298,7 +298,7 @@ pub(crate) fn items_file(module: &str, src: &str, items: &[model::Item]) -> R<St
             .collect();
         let _ = writeln!(
             out,
-            "    ItemInfo {{ id: {}, name: {}, display_name: {}, stack_size: {}, max_durability: {}, variations: &[{}] }},",
+            "    ItemInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, stack_size: {}, max_durability: {}, #[cfg(feature = \"display-names\")] variations: &[{}] }},",
             i.id,
             lit(&i.name),
             lit(&i.display_name),
@@ -364,7 +364,7 @@ pub(crate) fn misc_files(
     for e in &ents {
         let _ = writeln!(
             out,
-            "    EntityInfo {{ id: {}, name: {}, display_name: {}, kind: EntityKind::{}, category: {}, width: {}, height: {} }},",
+            "    EntityInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, kind: EntityKind::{}, category: {}, width: {}, height: {} }},",
             e.id,
             lit(&e.name),
             lit(&e.display_name),
@@ -402,7 +402,7 @@ pub(crate) fn misc_files(
     for b in &biomes {
         let _ = writeln!(
             out,
-            "    BiomeInfo {{ id: {}, name: {}, display_name: {}, category: {}, temperature: {}, rainfall: {}, precipitation: {}, dimension: {} }},",
+            "    BiomeInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, category: {}, temperature: {}, rainfall: {}, precipitation: {}, dimension: {} }},",
             b.id,
             lit(&b.name),
             lit(&b.display_name),
@@ -441,7 +441,7 @@ pub(crate) fn misc_files(
         let ex: Vec<String> = e.exclude.iter().map(|x| lit(x)).collect();
         let _ = writeln!(
             out,
-            "    EnchantmentInfo {{ id: {}, name: {}, display_name: {}, max_level: {}, min_cost: EnchantCost {{ a: {}, b: {} }}, max_cost: EnchantCost {{ a: {}, b: {} }}, exclude: &[{}], category: {}, weight: {}, treasure_only: {}, curse: {} }},",
+            "    EnchantmentInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, max_level: {}, min_cost: EnchantCost {{ a: {}, b: {} }}, max_cost: EnchantCost {{ a: {}, b: {} }}, exclude: &[{}], category: {}, weight: {}, treasure_only: {}, curse: {} }},",
             e.id,
             lit(&e.name),
             lit(&e.display_name),
@@ -540,7 +540,7 @@ pub(crate) fn misc_files(
     for e in &eff {
         let _ = writeln!(
             out,
-            "    EffectInfo {{ id: {}, name: {}, display_name: {}, good: {} }},",
+            "    EffectInfo {{ id: {}, name: {}, #[cfg(feature = \"display-names\")] display_name: {}, good: {} }},",
             e.id,
             lit(&e.name),
             lit(&e.display_name),

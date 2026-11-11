@@ -408,6 +408,7 @@ pub struct BlockInfo {
     /// Registry name without namespace (`"stone"`).
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Hardness (vanilla "strength"); `None` when minecraft-data lists `null` (unbreakable in 1.8).
     /// Note: 1.16 data lists unbreakable blocks (bedrock, barrier, ...) with hardness `0` and
@@ -511,12 +512,14 @@ pub struct ItemInfo {
     /// Registry name without namespace.
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Max stack size.
     pub stack_size: u8,
     /// Durability for damageable items.
     pub max_durability: Option<u16>,
     /// 1.8 metadata variants `(meta, display name)`; empty for 1.16.
+    #[cfg(feature = "display-names")]
     pub variations: &'static [(u8, &'static str)],
 }
 
@@ -540,6 +543,7 @@ pub struct EntityInfo {
     /// Name as listed by minecraft-data (1.8: legacy CamelCase names such as `"PigZombie"`).
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Mob / object.
     pub kind: EntityKind,
@@ -677,6 +681,7 @@ pub struct BiomeInfo {
     /// Registry name.
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Category (`"ocean"`, `"plains"`, ...).
     pub category: &'static str,
@@ -708,6 +713,7 @@ pub struct EnchantmentInfo {
     /// Registry name.
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// Highest level.
     pub max_level: u8,
@@ -750,6 +756,7 @@ pub struct EffectInfo {
     /// Name as listed by minecraft-data (`"Speed"`).
     pub name: &'static str,
     /// English display name.
+    #[cfg(feature = "display-names")]
     pub display_name: &'static str,
     /// `true` for beneficial effects.
     pub good: bool,

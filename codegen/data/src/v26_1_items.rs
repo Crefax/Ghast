@@ -200,7 +200,7 @@ pub fn generate(
             }
         };
         item_rows.push(format!(
-            "    ItemData {{ name: {}, display_name: {}, max_stack_size: {stack}, max_damage: {}, block: {block}, food: {food}, tool: {tool} }},",
+            "    ItemData {{ name: {}, #[cfg(feature = \"display-names\")] display_name: {}, max_stack_size: {stack}, max_damage: {}, block: {block}, food: {food}, tool: {tool} }},",
             lit(name),
             lit(&m.display_name),
             damage.map_or("None".into(), |d| format!("Some({d})")),

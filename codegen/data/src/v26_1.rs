@@ -679,7 +679,7 @@ pub fn generate(
         };
         let _ = writeln!(
             out,
-            "    BlockData {{ name: {}, display_name: {}, hardness: {}, resistance: {}, diggable: {}, transparent: {}, emit_light: {}, filter_light: {}, friction: {}, speed_factor: {}, jump_factor: {}, flags: {}, kind: BlockKind::{}, offset: {offset} }},",
+            "    BlockData {{ name: {}, #[cfg(feature = \"display-names\")] display_name: {}, hardness: {}, resistance: {}, diggable: {}, transparent: {}, emit_light: {}, filter_light: {}, friction: {}, speed_factor: {}, jump_factor: {}, flags: {}, kind: BlockKind::{}, offset: {offset} }},",
             lit(&b.name),
             lit(&b.display_name),
             b.hardness

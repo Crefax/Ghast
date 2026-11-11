@@ -64,6 +64,7 @@ fn constants() {
     assert_eq!(Block::SOUL_SAND.id(), 88);
     assert_eq!(Item::DIAMOND_PICKAXE.id(), 278);
     assert_eq!(Item::DIAMOND_PICKAXE.info().max_durability, Some(1561));
+    #[cfg(feature = "display-names")]
     assert_eq!(Item::STONE.info().variations.len(), 7);
 }
 
