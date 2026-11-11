@@ -20,7 +20,7 @@ default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "libdeflate", "display-names"]
 v1_8 = ["ghast-client/v1_8", "ghast-protocol/v1_8", "ghast-data/v1_8", "ghast-ext?/v1_8", "ghast-pathfinder?/v1_8"]
 v1_12_2 = ["ghast-client/v1_12_2", "ghast-protocol/v1_12_2", "ghast-data/v1_12", "ghast-ext?/v1_12_2", "ghast-pathfinder?/v1_12_2"]
 v1_16_5 = ["ghast-client/v1_16_5", "ghast-protocol/v1_16_5", "ghast-data/v1_16_5", "ghast-ext?/v1_16_5", "ghast-pathfinder?/v1_16_5"]
-v26_1 = ["ghast-client/v26_1", "ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-ext?/v26_1", "ghast-pathfinder?/v26_1"]
+v26_1 = ["ghast-client/v26_1", "ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-ext?/v26_1", "ghast-pathfinder?/v26_1", "ghast-viewer?/v26_1"]
 # English display names in ghast-data (`display_name` fields); registry names are always there.
 display-names = ["ghast-client/display-names", "ghast-data/display-names"]
 # Packet compression with libdeflate (C, faster); without it pure Rust (flate2 + zlib-rs).
@@ -43,7 +43,7 @@ ghast-auth = { path = "../ghast-auth", version = "0.4.0" }
 ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
 ghast-ext = { path = "../ghast-ext", version = "0.4.0", optional = true, default-features = false }
 ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.4.0", optional = true, default-features = false, features = ["client"] }
-ghast-viewer = { path = "../ghast-viewer", version = "0.4.0", optional = true }
+ghast-viewer = { path = "../ghast-viewer", version = "0.4.0", optional = true, default-features = false, features = ["download"] }
 
 [dev-dependencies]
 log = { workspace = true }
@@ -79,6 +79,10 @@ name = "inventory_probe"
 
 [[example]]
 name = "server_switch"
+
+[[example]]
+name = "creative_probe"
+required-features = ["v26_1"]
 
 [[example]]
 name = "online_chat"

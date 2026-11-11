@@ -1014,6 +1014,12 @@ impl ClientVersion for V26_1 {
             || ghast_inventory::PACKET_IDS_26_1.contains(&raw.id)
         {
             inv.apply_raw_v26_1(raw)?;
+            // CreativeInventoryListener.slotChanged → handleCreativeModeItemAdd: the open creative
+            // screen answers each window 0 slot the server sets, while the packet is handled.
+            let echo = inv.take_creative_echo_26_1();
+            if !echo.is_empty() {
+                return Ok(Some(ghast_inventory::Outgoing::Creative(echo)));
+            }
         }
         Ok(None)
     }
@@ -1265,6 +1271,24 @@ impl ClientVersion for V26_1 {
                     enc.write_packet(&p)
                 }
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
+                None => match o {
+                    // The creative screen: swings and set_creative_mode_slot, in order.
+                    ghast_inventory::Outgoing::Creative(list) => {
+                        for c in list {
+                            match c.to_v26_1() {
+                                sb::ServerboundPlayPacket::ArmAnimation(p) => {
+                                    enc.write_packet(&p)?
+                                }
+                                sb::ServerboundPlayPacket::SetCreativeSlot(p) => {
+                                    enc.write_packet(&p)?;
+                                }
+                                _ => {}
+                            }
+                        }
+                        Ok(())
+                    }
+                    _ => Ok(()),
+                },
                 _ => Ok(()),
             },
             // No transactions since 1.17.
@@ -1315,6 +1339,84 @@ mod tests {
         assert_eq!(checksum, if c as u8 == 0 { 1 } else { c as u8 });
         // Arrays.hashCode([1,2,3]) = 30817.
         assert_eq!(h1, 30817);
+    }
+
+    /// The creative screen: a drop click writes its swing and set_creative_mode_slot packets;
+    /// a slot the server sets while the screen is open is echoed back at once.
+    #[test]
+    fn creative_screen_packets_and_echo() {
+        use ghast_inventory::{Click, Inventory, Outgoing, Stack, Version};
+        let mut inv = Inventory::new(Version::V26_1).unwrap();
+        inv.set_creative_26_1(true);
+        let stone = ghast_inventory::v26_1::item_id("stone").unwrap();
+        let mut w0 = vec![None; 46];
+        w0[36] = Some(Stack::new(stone, 64, 0));
+        inv.on_window_items_26_1(0, 1, w0, None);
+        inv.tick();
+        let open = inv.open_inventory().unwrap();
+        assert!(matches!(open, Some(Outgoing::Creative(_))));
+        inv.tick();
+        let o = inv
+            .click(Click::Drop {
+                slot: 36,
+                all: false,
+            })
+            .unwrap();
+        let mut enc = FrameEncoder::new();
+        let mut wire = Wire26_1::default();
+        V26_1::write_play(&mut enc, &Outbound::Inventory(o), &mut wire).unwrap();
+        let ids = frame_ids(&mut enc);
+        assert_eq!(ids[0], sb::id::ARM_ANIMATION);
+        assert!(
+            ids[1..].iter().all(|&i| i == sb::id::SET_CREATIVE_SLOT),
+            "{ids:?}"
+        );
+        assert!(ids.len() >= 2);
+        // The server sets window 0 slot 37 (5 stone): the screen echoes it.
+        let mut body = vec![0x00, 0x02, 0x00, 37, 0x05];
+        let mut id = stone as u32;
+        loop {
+            let b = (id & 0x7f) as u8;
+            id >>= 7;
+            if id == 0 {
+                body.push(b);
+                break;
+            }
+            body.push(b | 0x80);
+        }
+        body.extend_from_slice(&[0, 0]);
+        let raw = RawPacket::new(cb::id::SET_SLOT, Bytes::from(body));
+        let echo = V26_1::inventory_packet(&mut inv, &raw).unwrap();
+        let Some(Outgoing::Creative(list)) = echo else {
+            panic!("no echo: {echo:?}");
+        };
+        // (ghast-inventory decides what is echoed; here: slot 37 is among it.)
+        assert!(
+            list.iter()
+                .any(|c| matches!(c, ghast_inventory::CreativePacket::SetSlot { slot: 37, .. }))
+        );
+        let n = list.len();
+        V26_1::write_play(
+            &mut enc,
+            &Outbound::Inventory(Outgoing::Creative(list)),
+            &mut wire,
+        )
+        .unwrap();
+        assert_eq!(frame_ids(&mut enc), vec![sb::id::SET_CREATIVE_SLOT; n]);
+    }
+
+    /// Packet ids of the frames written (no compression).
+    fn frame_ids(enc: &mut FrameEncoder) -> Vec<i32> {
+        let out = enc.out_mut().split().freeze();
+        let mut v = Vec::new();
+        let mut r = &out[..];
+        while !r.is_empty() {
+            let (len, rest) = (usize::from(r[0]), &r[1..]);
+            assert!(r[0] < 0x80, "long frame");
+            v.push(i32::from(rest[0]));
+            r = &rest[len..];
+        }
+        v
     }
 
     /// The play filter passes every packet the inventory reads.
