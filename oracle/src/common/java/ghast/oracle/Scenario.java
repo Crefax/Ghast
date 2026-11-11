@@ -34,7 +34,17 @@ public final class Scenario {
     public record Fill(int x0, int y0, int z0, int x1, int y1, int z1, int id, int meta) {}
 
     /** A server packet applied at the start of a tick (before the keys / tick). */
-    public sealed interface Event permits Velocity, Teleport, Abilities, SpeedAttribute, Effects, Attribute {}
+    public sealed interface Event permits Velocity, Teleport, Abilities, SpeedAttribute, Effects, Attribute, LoadStart,
+            SectionCompiled, LoadTimeout {}
+
+    /** 26.1: the server's {@code LEVEL_CHUNKS_LOAD_START} game event (the client waits for its chunk next). */
+    public record LoadStart() implements Event {}
+
+    /** 26.1: the player's chunk section is (or stops being) compiled and visible in the level renderer. */
+    public record SectionCompiled(boolean compiled) implements Event {}
+
+    /** 26.1: the client's 30 s level-load timeout has run out. */
+    public record LoadTimeout() implements Event {}
 
     /** Entity velocity packet: raw protocol units (1/8000 block per tick). */
     public record Velocity(int x, int y, int z) implements Event {}
@@ -138,6 +148,11 @@ public final class Scenario {
 
     /** 26.x: leather boots in the feet slot (walk on powder snow); enchanted with the boots enchantments. */
     public boolean leatherBoots;
+    /**
+     * 26.1: the level is not loaded at the start; the real {@code LevelLoadTracker} gates the player
+     * ({@link LoadStart}, {@link SectionCompiled}, {@link LoadTimeout} events drive it).
+     */
+    public boolean delayedLoad;
     /** 26.x: the used item's {@code use_effects} component (null = the item's default). */
     public Float useSpeed;
     public Boolean useCanSprint;

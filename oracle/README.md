@@ -70,6 +70,7 @@ tests/golden/1.8.9/
   raytrace.jsonl.gz          crosshair raytrace vectors (50 worlds x 40 viewpoints)
   entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
   entity_tracking.jsonl.gz   (26.1) random entity packets through the real client, entity state per tick
+  joins.jsonl.gz             (26.1) joins through the level-load gate (delayed load)
 ```
 
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
@@ -879,6 +880,23 @@ MC=26.1 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 
 ```
 
 (`physics_s11` of the first 26.1 run holds 1600 cases, `physics_use_s21` 400.)
+
+### 26.1 joins through the level-load gate (`joins.jsonl.gz`)
+
+Scenarios with `setup.delayed_load: true` start like a real join: the harness does not call
+`notifyPlayerLoaded`; `handleLogin`'s `LevelLoadTracker.startClientLoad` runs (the multiplayer
+tracker of `ConnectScreen`, no close delay) and every step runs the level-load part of
+`ClientPacketListener.tick` where `MultiPlayerGameMode.tick` calls it (after the tick's packets,
+before the entities tick). Events drive it: `level_chunks_load_start` (the server's game event 13,
+through the real `handleGameEvent`), `section_compiled` (what the stub level renderer's
+`isSectionCompiledAndVisible` returns from then on: the real renderer compiles the player's section
+some frames after its chunk arrived, which a scenario places at a tick), `load_timeout` (the 30 s
+wall-clock deadline of the tracker's client state set to 0). While the level is not loaded the
+harness does not turn the player (the loading screen holds the mouse; it closes during the gate
+tick). Tick lines add `client_loaded` (`hasClientLoaded()`), and the first record keeps what the
+client sent during setup (teleport confirm + position/look). Cases: feet on the ground, 1, 1.5 and
+5 blocks above it, in water; section compiled 0, 1, 5, 20 ticks after the load start; compiled
+before the load start; the timeout; a second position packet while loading; no load start.
 
 ### 26.1 teleports with delta movement (`teleports.jsonl.gz`)
 

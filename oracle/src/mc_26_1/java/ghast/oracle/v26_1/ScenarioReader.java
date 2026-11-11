@@ -150,6 +150,7 @@ final class ScenarioReader {
             }
         }
         sc.leatherBoots = s.has("leather_boots") && s.get("leather_boots").getAsBoolean();
+        sc.delayedLoad = s.has("delayed_load") && s.get("delayed_load").getAsBoolean();
         if (s.has("use_effects")) {
             JsonObject u = s.getAsJsonObject("use_effects");
             sc.useCanSprint = u.get("can_sprint").getAsBoolean();
@@ -215,6 +216,9 @@ final class ScenarioReader {
                         }
                         events.add(new Scenario.Attribute(attr, f64(ev.get("base")), List.copyOf(mods)));
                     }
+                    case "level_chunks_load_start" -> events.add(new Scenario.LoadStart());
+                    case "section_compiled" -> events.add(new Scenario.SectionCompiled(ev.get("compiled").getAsBoolean()));
+                    case "load_timeout" -> events.add(new Scenario.LoadTimeout());
                     default -> throw new IllegalArgumentException("unknown event " + ev);
                 }
             }

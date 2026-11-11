@@ -132,6 +132,9 @@ final class Recorder {
         if (sc.sprintWindow != null) {
             j.field("sprint_window", sc.sprintWindow);
         }
+        if (sc.delayedLoad) {
+            j.field("delayed_load", true);
+        }
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -154,6 +157,9 @@ final class Recorder {
                 j.endArray();
             }
             j.endObject();
+        }
+        if (run.sc.delayedLoad) {
+            j.field("client_loaded", Harness.listener.hasClientLoaded());
         }
         j.key("state");
         state(j, run.player);
@@ -205,6 +211,12 @@ final class Recorder {
             j.field("type", "abilities").field("invulnerable", a.invulnerable()).field("flying", a.flying())
                     .field("allow_flying", a.allowFlying()).field("creative", a.creative())
                     .fieldF32("fly_speed", a.flySpeed()).fieldF32("walk_speed", a.walkSpeed());
+        } else if (e instanceof Scenario.LoadStart) {
+            j.field("type", "level_chunks_load_start");
+        } else if (e instanceof Scenario.SectionCompiled c) {
+            j.field("type", "section_compiled").field("compiled", c.compiled());
+        } else if (e instanceof Scenario.LoadTimeout) {
+            j.field("type", "load_timeout");
         }
         j.endObject();
     }

@@ -105,6 +105,17 @@ final class Stubs {
             return Reflect.allocate(NoLevelRenderer.class);
         }
 
+        /**
+         * Whether the player's section counts as compiled and visible (the real renderer compiles
+         * sections asynchronously some frames after their chunk arrived; scenarios set when).
+         */
+        static boolean compiled;
+
+        @Override
+        public boolean isSectionCompiledAndVisible(BlockPos pos) {
+            return compiled;
+        }
+
         @Override
         public void blockChanged(BlockGetter level, BlockPos pos, BlockState old, BlockState current, int flags) {
         }

@@ -32,6 +32,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveMobEffectPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
@@ -327,6 +328,15 @@ final class Harness {
             if (sc.sprinting) {
                 player.setSprinting(true);
             }
+            if (sc.delayedLoad) {
+                // The join as the client lives it: handleLogin's startWaitingForNewLevel started the
+                // level-load tracker (multiplayer: no close delay); the player does not tick until it
+                // reports the level ready. What the client sent so far stays in the first record.
+                Stubs.NoLevelRenderer.compiled = false;
+                LevelLoadTracker tracker = (LevelLoadTracker) Reflect.get(ClientPacketListener.class, listener, "levelLoadTracker");
+                tracker.startClientLoad(player, level, client.levelRenderer);
+                return;
+            }
             // The level counts as loaded (LevelLoadTracker ready): the client tells the server and the
             // player starts ticking.
             invoke(ClientPacketListener.class, listener, "notifyPlayerLoaded");
@@ -465,17 +475,63 @@ final class Harness {
                 applyEvent(e);
             }
             setKeys(t.keys());
-            player.setYRot(t.yaw());
-            player.setXRot(t.pitch());
+            // While the level-loading screen is open the mouse is not grabbed: no turning until the
+            // tick after the gate (the screen closes during the gate tick).
+            if (!sc.delayedLoad || listener.hasClientLoaded()) {
+                player.setYRot(t.yaw());
+                player.setXRot(t.pitch());
+            }
             level.tickRateManager().tick();
             if (rightClickDelay > 0) {
                 rightClickDelay--;
             }
             client.gameMode.tick();
+            // MultiPlayerGameMode.tick -> Connection.tick -> ClientPacketListener.tick: the level-load
+            // part of the listener tick.
+            tickLevelLoad();
             useKey();
             level.tickEntities();
             listener.send(ServerboundClientTickEndPacket.INSTANCE);
             tick++;
+        }
+
+        private void tickLevelLoad() {
+            LevelLoadTracker tracker = (LevelLoadTracker) Reflect.get(ClientPacketListener.class, listener, "levelLoadTracker");
+            if (tracker != null) {
+                tracker.tickClientLoad();
+                if (tracker.isLevelReady()) {
+                    invoke(ClientPacketListener.class, listener, "notifyPlayerLoaded");
+                    Reflect.set(ClientPacketListener.class, listener, "levelLoadTracker", null);
+                }
+            }
+        }
+
+        /** The 30 s timeout of the level-load tracker runs out: its client state's deadline becomes 0. */
+        private void loadTimeout() {
+            LevelLoadTracker tracker = (LevelLoadTracker) Reflect.get(ClientPacketListener.class, listener, "levelLoadTracker");
+            if (tracker == null) {
+                return;
+            }
+            Object state = Reflect.get(LevelLoadTracker.class, tracker, "clientState");
+            if (state == null || !state.getClass().isRecord() || state.getClass().getRecordComponents().length != 4) {
+                return; // ready already
+            }
+            try {
+                java.lang.reflect.RecordComponent[] rc = state.getClass().getRecordComponents();
+                Object[] args = new Object[4];
+                Class<?>[] types = new Class<?>[4];
+                for (int i = 0; i < 4; i++) {
+                    types[i] = rc[i].getType();
+                    rc[i].getAccessor().setAccessible(true);
+                    args[i] = rc[i].getAccessor().invoke(state);
+                }
+                args[3] = 0L;
+                java.lang.reflect.Constructor<?> c = state.getClass().getDeclaredConstructor(types);
+                c.setAccessible(true);
+                Reflect.set(LevelLoadTracker.class, tracker, "clientState", c.newInstance(args));
+            } catch (ReflectiveOperationException ex) {
+                throw new IllegalStateException(ex);
+            }
         }
 
         /**
@@ -526,7 +582,14 @@ final class Harness {
         }
 
         private void applyEvent(Scenario.Event e) {
-            if (e instanceof Scenario.Velocity v) {
+            if (e instanceof Scenario.LoadStart) {
+                listener.handleGameEvent(roundTrip(ClientboundGameEventPacket.STREAM_CODEC,
+                        new ClientboundGameEventPacket(ClientboundGameEventPacket.LEVEL_CHUNKS_LOAD_START, 0.0F)));
+            } else if (e instanceof Scenario.SectionCompiled sc) {
+                Stubs.NoLevelRenderer.compiled = sc.compiled();
+            } else if (e instanceof Scenario.LoadTimeout) {
+                loadTimeout();
+            } else if (e instanceof Scenario.Velocity v) {
                 // The scenario format keeps the classic 1/8000 units; 26.1 sends the vector as an LpVec3.
                 listener.handleSetEntityMotion(roundTrip(ClientboundSetEntityMotionPacket.STREAM_CODEC,
                         new ClientboundSetEntityMotionPacket(PLAYER_ENTITY_ID, new Vec3(v.x() / 8000.0, v.y() / 8000.0, v.z() / 8000.0))));

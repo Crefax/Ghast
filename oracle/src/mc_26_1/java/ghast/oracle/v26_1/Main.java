@@ -77,6 +77,7 @@ public final class Main {
                 int rays = (int) a.lng("--rays", SelectionDump.RAY_RAYS);
                 Io.write(a.path("--out", golden.resolve("raytrace.jsonl.gz")), sink -> SelectionDump.rays(seed, worlds, rays, sink));
             }
+            case "joins" -> Io.write(a.path("--out", golden.resolve("joins.jsonl.gz")), sink -> runAll(Scenarios26.joins(), sink));
             case "teleports" -> Io.write(a.path("--out", golden.resolve("teleports.jsonl.gz")), sink -> {
                 runAll(Scenarios26.teleports(), sink);
                 for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
@@ -109,6 +110,7 @@ public final class Main {
                   selection [--out FILE]               outline / interaction shapes of every block state
                   items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
                   dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
+                  joins [--out FILE]                   joins through the level-load gate (delayed load)
                   hashed-stacks [--out FILE]           item stack wire bytes + the client's HashedStack
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   list | selftest | compare DIR_A DIR_B
@@ -140,6 +142,7 @@ public final class Main {
                 run(Fuzz.withTeleports(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS), sink);
             }
         });
+        Io.write(dir.resolve("joins.jsonl.gz"), sink -> runAll(Scenarios26.joins(), sink));
         Io.write(dir.resolve("collision_shapes.jsonl.gz"), CollisionDump::lines);
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
@@ -214,6 +217,7 @@ public final class Main {
             all.add(Fuzz.withTeleports(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
         }
         all.addAll(Scenarios26.teleports());
+        all.addAll(Scenarios26.joins());
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -229,7 +233,7 @@ public final class Main {
         ok &= mismatches == 0;
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
                 "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "fuzz_extras_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "teleports.jsonl.gz"}) {
+                "teleports.jsonl.gz", "joins.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             Io.write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = Io.sha256(replayed).equals(Io.sha256(a.resolve(f)));

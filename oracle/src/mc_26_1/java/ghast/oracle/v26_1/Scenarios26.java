@@ -113,4 +113,59 @@ final class Scenarios26 {
 
         return l;
     }
+
+    /**
+     * Joins with the level-load gate (the real {@code LevelLoadTracker}): the player is placed by the
+     * login position packet, the server's {@code LEVEL_CHUNKS_LOAD_START} arrives, the player's
+     * section compiles {@code delay} ticks later (or the 30 s timeout fires), then the player ticks.
+     */
+    static List<Scenario> joins() {
+        Harness.init();
+        List<Scenario> l = new java.util.ArrayList<>();
+        int stone = s("stone");
+        int water = s("water");
+        // (name, feet y, water?)
+        Object[][] places = {
+            {"ground", 64.0, false}, {"float1", 65.0, false}, {"float5", 69.0, false}, {"float1_5", 65.5, false},
+            {"water", 65.0, true},
+        };
+        for (Object[] pl : places) {
+            for (int delay : new int[] {0, 1, 5, 20}) {
+                Scenario sc = flat("join_" + pl[0] + "_ready" + delay).spawn(0.5, (double) pl[1], 0.5, 90, 10);
+                if ((boolean) pl[2]) {
+                    sc.fill(-16, 64, -16, 16, 66, 16, water, 0);
+                }
+                sc.delayedLoad = true;
+                sc.description = "join at y " + pl[1] + (((boolean) pl[2]) ? " in water" : "")
+                        + ", level-load start at tick 2, section compiled " + delay + " ticks later";
+                sc.run(1, 0).event(0, new Scenario.LoadStart());
+                if (delay == 0) {
+                    sc.ticks.set(1, new Scenario.Tick(0, 90, 10, List.of(new Scenario.LoadStart(), new Scenario.SectionCompiled(true))));
+                } else {
+                    sc.run(delay - 1, 0).event(0, new Scenario.SectionCompiled(true));
+                }
+                sc.run(12, 0);
+                l.add(sc);
+            }
+        }
+        // Compiled before the server's load start; the timeout path; a second position packet while
+        // loading; load start never arriving within the run.
+        l.add(flat("join_float1_compiled_first").spawn(0.5, 65, 0.5, 90, 10).run(1, 0)
+                .event(0, new Scenario.SectionCompiled(true)).run(3, 0).event(0, new Scenario.LoadStart()).run(12, 0));
+        l.add(flat("join_float1_timeout").spawn(0.5, 65, 0.5, 90, 10).event(0, new Scenario.LoadStart()).run(8, 0)
+                .event(0, new Scenario.LoadTimeout()).run(12, 0));
+        l.add(flat("join_float1_teleport_while_loading").spawn(0.5, 65, 0.5, 90, 10).event(0, new Scenario.LoadStart())
+                .run(2, 0).event(0, new Scenario.Teleport(2.5, 66.0, 0.5, 0, 0, 0)).run(2, 0)
+                .event(0, new Scenario.SectionCompiled(true)).run(12, 0));
+        l.add(flat("join_float1_never_loaded").spawn(0.5, 65, 0.5, 90, 10).run(2, 0)
+                .event(0, new Scenario.SectionCompiled(true)).run(20, 0));
+        for (Scenario sc : l.subList(l.size() - 4, l.size())) {
+            sc.delayedLoad = true;
+        }
+        l.get(l.size() - 4).description = "section compiled at tick 2, level-load start at tick 6";
+        l.get(l.size() - 3).description = "never compiled; the 30 s timeout fires at tick 10";
+        l.get(l.size() - 2).description = "a second position packet (2.5, 66, 0.5) while the level loads";
+        l.get(l.size() - 1).description = "compiled, but the server never sends the level-load start";
+        return l;
+    }
 }
