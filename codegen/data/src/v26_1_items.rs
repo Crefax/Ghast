@@ -247,17 +247,23 @@ pub fn generate(
         let _ = writeln!(out, "    {t},");
     }
     out.push_str("];\n\n/// Block sets the tool rules test: named tags (resolved by the jar), then direct block lists.\n");
-    let _ = writeln!(
-        out,
-        "pub(crate) static BLOCK_SET_NAMES: [&str; {}] = [",
-        sets.len()
-    );
+    // plain data: the names concatenated, each one's end offset
+    let mut text = String::new();
+    let mut ends = Vec::new();
     for (n, _) in &sets {
-        let _ = writeln!(out, "    {},", lit(n));
+        text.push_str(n);
+        ends.push(text.len().to_string());
     }
     let _ = writeln!(
         out,
-        "];\n\npub(crate) static BLOCK_SETS: [[u64; {words}]; {}] = [",
+        "pub(crate) const BLOCK_SET_NAMES_TEXT: &str = {};\n/// End of each set's name in `BLOCK_SET_NAMES_TEXT` (an empty name: a direct block list).\npub(crate) static BLOCK_SET_NAMES: [u16; {}] = [{}];",
+        lit(&text),
+        ends.len(),
+        ends.join(", ")
+    );
+    let _ = writeln!(
+        out,
+        "\npub(crate) static BLOCK_SETS: [[u64; {words}]; {}] = [",
         sets.len()
     );
     for (_, ids) in &sets {

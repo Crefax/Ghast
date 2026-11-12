@@ -785,6 +785,14 @@ pub(crate) fn lookup_name<T: Copy>(text: &str, index: &[(u32, T)], name: &str) -
     None
 }
 
+/// The boxes of one collision shape: `span` = `(start, end)` in the version's `SHAPE_BOXES`.
+#[cfg(feature = "v1_16_5")]
+#[inline]
+pub(crate) fn shape_boxes(all: &'static [Aabb], span: (u16, u16)) -> &'static [Aabb] {
+    all.get(usize::from(span.0)..usize::from(span.1))
+        .unwrap_or(&[])
+}
+
 /// Binary search in an id-sorted slice by a key function.
 #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
 pub(crate) fn lookup_id<T, K: Ord>(
@@ -801,14 +809,16 @@ pub(crate) fn lookup_id<T, K: Ord>(
 /// Looks a tool's multiplier up in a generated `TOOL_MULTIPLIERS` table.
 #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
 pub(crate) fn tool_multiplier(
-    table: &[(DigMaterial, &[(u16, f32)])],
+    table: &[(DigMaterial, (u16, u16))],
+    list: &[(u16, f32)],
     material: DigMaterial,
     tool: u16,
 ) -> f32 {
     table
         .iter()
         .find(|(m, _)| *m == material)
-        .and_then(|(_, tools)| tools.iter().find(|(t, _)| *t == tool))
+        .and_then(|(_, (a, b))| list.get(usize::from(*a)..usize::from(*b)))
+        .and_then(|tools| tools.iter().find(|(t, _)| *t == tool))
         .map_or(1.0, |(_, x)| *x)
 }
 
@@ -855,3 +865,23 @@ pub fn break_time(progress: f32, destroy_delay: u32, limit: u32) -> BreakTime {
 /// by block, effective blocks sorted.
 #[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
 pub(crate) type ItemDig = (u16, &'static [(u16, f32)], &'static [u16]);
+
+/// A version's generated `ITEM_DIG` row: item id and `(start, end)` spans into its
+/// `ITEM_DIG_SPEEDS` / `ITEM_DIG_BLOCKS` (plain data, no slices).
+#[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
+pub(crate) type ItemDigRow = (u16, (u16, u16), (u16, u16));
+
+/// The [`ItemDig`] of a generated row.
+#[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
+pub(crate) fn item_dig(
+    row: &ItemDigRow,
+    speeds: &'static [(u16, f32)],
+    blocks: &'static [u16],
+) -> ItemDig {
+    let span = |(a, b): (u16, u16)| usize::from(a)..usize::from(b);
+    (
+        row.0,
+        speeds.get(span(row.1)).unwrap_or(&[]),
+        blocks.get(span(row.2)).unwrap_or(&[]),
+    )
+}

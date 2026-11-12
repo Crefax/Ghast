@@ -764,18 +764,28 @@ pub fn generate(
         "pub(crate) static LAYOUTS: [StateLayout; {}] = [",
         blocks.len()
     );
+    let mut flat: Vec<String> = Vec::new();
     for (b, props) in blocks.iter().zip(&block_props) {
-        let ps: Vec<String> = props.iter().map(usize::to_string).collect();
+        let start = flat.len();
+        flat.extend(props.iter().map(usize::to_string));
         let _ = writeln!(
             out,
-            "    StateLayout {{ min_state: {}, state_count: {}, default_state: {}, properties: &[{}] }},",
+            "    StateLayout {{ min_state: {}, state_count: {}, default_state: {}, properties: ({}, {}) }},",
             b.min_state,
             b.max_state + 1 - b.min_state,
             b.default_state,
-            ps.join(", ")
+            start,
+            props.len()
         );
     }
-    out.push_str("];\n\n/// Block id per state.\n");
+    out.push_str("];\n\n");
+    let _ = writeln!(
+        out,
+        "/// Property definition indices of every block, block after block (`StateLayout::properties`).\npub(crate) static LAYOUT_PROPERTIES: [u8; {}] = [{}];\n",
+        flat.len(),
+        flat.join(", ")
+    );
+    out.push_str("/// Block id per state.\n");
     crate::emit::num_table(
         &mut out,
         "pub(crate) static STATE_BLOCK",

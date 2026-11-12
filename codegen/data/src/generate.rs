@@ -199,12 +199,19 @@ fn shape_table(src: &model::Shapes, used: &BTreeSet<u32>) -> R<ShapeTable> {
 }
 
 pub(crate) fn emit_shapes(out: &mut String, t: &ShapeTable) {
+    emit_shape_spans(out, &t.shapes);
+}
+
+/// Collision shapes as slices (`SHAPES: [&[Aabb]; n]`). Used where the shape lookup is the
+/// physics hot path (1.8.9 / 1.12.2 `collision()`): one load per state there, and the table is
+/// smaller than a page, so its relocations cost one page per process at most.
+pub(crate) fn emit_shape_slices(out: &mut String, shapes: &[Vec<[f64; 6]>], doc: &str) {
     let _ = writeln!(
         out,
-        "pub(crate) static SHAPES: [&[Aabb]; {}] = [",
-        t.shapes.len()
+        "{doc}pub(crate) static SHAPES: [&[Aabb]; {}] = [",
+        shapes.len()
     );
-    for s in &t.shapes {
+    for s in shapes {
         let boxes: Vec<String> = s
             .iter()
             .map(|b| {
@@ -222,6 +229,41 @@ pub(crate) fn emit_shapes(out: &mut String, t: &ShapeTable) {
         let _ = writeln!(out, "    &[{}],", boxes.join(", "));
     }
     out.push_str("];\n");
+}
+
+/// Collision shapes as plain data: every shape's boxes in one `SHAPE_BOXES` array and
+/// `SHAPES[i] = (start, end)` into it (no slices of slices, so no load-time relocations).
+pub(crate) fn emit_shape_spans(out: &mut String, shapes: &[Vec<[f64; 6]>]) {
+    let total: usize = shapes.iter().map(Vec::len).sum();
+    let _ = writeln!(
+        out,
+        "/// The boxes of every collision shape, shape after shape (see `SHAPES`).\npub(crate) static SHAPE_BOXES: [Aabb; {total}] = ["
+    );
+    let mut spans = Vec::new();
+    let mut at = 0usize;
+    for s in shapes {
+        for b in s {
+            let _ = writeln!(
+                out,
+                "    Aabb::new({}, {}, {}, {}, {}, {}),",
+                f64l(b[0]),
+                f64l(b[1]),
+                f64l(b[2]),
+                f64l(b[3]),
+                f64l(b[4]),
+                f64l(b[5])
+            );
+        }
+        spans.push(format!("({at}, {})", at + s.len()));
+        at += s.len();
+    }
+    out.push_str("];\n");
+    let _ = writeln!(
+        out,
+        "/// Each shape's `(start, end)` in `SHAPE_BOXES`.\npub(crate) static SHAPES: [(u16, u16); {}] = [{}];",
+        spans.len(),
+        spans.join(", ")
+    );
 }
 
 pub(crate) fn emit_dependencies(out: &mut String, deps: &[Option<Dep>]) {
@@ -569,27 +611,36 @@ pub(crate) fn misc_files(
     out.push_str("use crate::common::DigMaterial;\n\n");
     let _ = writeln!(
         out,
-        "pub(crate) static TOOL_MULTIPLIERS: [(DigMaterial, &[(u16, f32)]); {}] = [",
+        "/// `(material, (start, end) in TOOL_MULTIPLIER_LIST)`.\npub(crate) static TOOL_MULTIPLIERS: [(DigMaterial, (u16, u16)); {}] = [",
         mats.len()
     );
+    let mut list: Vec<String> = Vec::new();
     for (m, tools) in &mats {
         for (id, _) in tools {
             if !by_name.values().any(|x| x == id) {
                 return Err(format!("materials {m}: tool {id} is not an item"));
             }
         }
-        let t: Vec<String> = tools
-            .iter()
-            .map(|(id, x)| format!("({id}, {})", f32l(*x as f32)))
-            .collect();
+        let start = list.len();
+        list.extend(
+            tools
+                .iter()
+                .map(|(id, x)| format!("({id}, {})", f32l(*x as f32))),
+        );
         let _ = writeln!(
             out,
-            "    (DigMaterial::{}, &[{}]),",
+            "    (DigMaterial::{}, ({start}, {})),",
             dig_material(m)?,
-            t.join(", ")
+            list.len()
         );
     }
     out.push_str("];\n");
+    let _ = writeln!(
+        out,
+        "/// `(tool item id, multiplier)` of every material, material after material.\npub(crate) static TOOL_MULTIPLIER_LIST: [(u16, f32); {}] = [{}];",
+        list.len(),
+        list.join(", ")
+    );
     files.push(("materials.rs".to_string(), out));
     Ok(files)
 }
@@ -717,7 +768,7 @@ pub fn v1_8(
     );
     emit_blocks_common(&mut out, "v1_8", &blocks, &phys)?;
     out.push('\n');
-    emit_shapes(&mut out, &table);
+    emit_shape_slices(&mut out, &table.shapes, "");
     out.push('\n');
     emit_dependencies(&mut out, &deps);
     out.push_str("\n/// Shape index per raw state `id << 4 | meta`.\n");
@@ -940,18 +991,28 @@ pub fn v1_16_5(
         "pub(crate) static LAYOUTS: [StateLayout; {}] = [",
         blocks.len()
     );
+    let mut flat: Vec<String> = Vec::new();
     for (b, pr) in blocks.iter().zip(&block_props) {
-        let ps: Vec<String> = pr.iter().map(usize::to_string).collect();
+        let start = flat.len();
+        flat.extend(pr.iter().map(usize::to_string));
         let _ = writeln!(
             out,
-            "    StateLayout {{ min_state: {}, state_count: {}, default_state: {}, properties: &[{}] }},",
+            "    StateLayout {{ min_state: {}, state_count: {}, default_state: {}, properties: ({}, {}) }},",
             b.min_state,
             b.max_state - b.min_state + 1,
             b.default_state,
-            ps.join(", ")
+            start,
+            pr.len()
         );
     }
     out.push_str("];\n\n");
+    let _ = writeln!(
+        out,
+        "/// Property definition indices of every block, block after block (`StateLayout::properties`).\npub(crate) static LAYOUT_PROPERTIES: [u8; {}] = [{}];\n",
+        flat.len(),
+        flat.join(", ")
+    );
+    out.push_str("");
     emit_shapes(&mut out, &table);
     out.push('\n');
     emit_dependencies(&mut out, &deps);
@@ -1167,6 +1228,7 @@ fn emit_world_coords(
         });
         idx[raw] = i as u32 + 1;
     }
+    // slices (the 1.8.9 collision hot path; the table is a few hundred bytes)
     let _ = writeln!(
         out,
         "\n/// Float world-coordinate rule sets (index 0 = none, plain double placement).\npub(crate) static WORLD_COORDS: [Option<&[WorldCoords]>; {}] = [\n    None,",

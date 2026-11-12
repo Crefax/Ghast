@@ -61,8 +61,23 @@ pub struct StateLayout {
     pub state_count: u16,
     /// Default state id.
     pub default_state: u16,
+    /// Indices into the property definition table, most significant first: `(start, len)` in
+    /// the generated `LAYOUT_PROPERTIES` (plain data, no pointer).
+    pub(crate) properties: (u16, u8),
+}
+
+impl StateLayout {
     /// Indices into the property definition table, most significant first.
-    pub(crate) properties: &'static [u8],
+    #[inline]
+    pub(crate) fn property_ids(&self) -> &'static [u8] {
+        let (start, len) = (
+            usize::from(self.properties.0),
+            usize::from(self.properties.1),
+        );
+        g::blocks::LAYOUT_PROPERTIES
+            .get(start..start + len)
+            .unwrap_or(&[])
+    }
 }
 
 /// Blocks the movement code treats specially.
@@ -352,7 +367,7 @@ impl Block {
     /// The block's properties, most significant first.
     pub fn properties(self) -> impl ExactSizeIterator<Item = &'static PropertyDef> {
         self.layout()
-            .properties
+            .property_ids()
             .iter()
             .map(|&i| &g::blocks::PROPERTY_DEFS[i as usize])
     }
@@ -461,7 +476,7 @@ impl BlockState {
     pub fn get_index(self, prop: Property) -> Option<usize> {
         let layout = self.block().layout();
         let mut rem = usize::from(self.0 - layout.min_state);
-        for &d in layout.properties.iter().rev() {
+        for &d in layout.property_ids().iter().rev() {
             let def = &g::blocks::PROPERTY_DEFS[d as usize];
             let n = def.values.len();
             if def.property == prop {
@@ -484,7 +499,7 @@ impl BlockState {
     pub fn with(self, prop: Property, value: &str) -> Option<BlockState> {
         let layout = self.block().layout();
         let mut stride = 1usize;
-        for &d in layout.properties.iter().rev() {
+        for &d in layout.property_ids().iter().rev() {
             let def = &g::blocks::PROPERTY_DEFS[d as usize];
             let n = def.values.len();
             if def.property == prop {

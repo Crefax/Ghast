@@ -65,16 +65,15 @@ impl BlockSet {
     /// The tag name (`"minecraft:mineable/pickaxe"`); `None` for a direct block list.
     #[must_use]
     pub fn tag(self) -> Option<&'static str> {
-        let n = g::items::BLOCK_SET_NAMES[self.0 as usize];
+        let n = set_name(self.0 as usize)?;
         (!n.is_empty()).then_some(n)
     }
 
     /// The set of a block tag the tool rules use, by name (`"minecraft:mineable/axe"`).
     #[must_use]
     pub fn from_tag(name: &str) -> Option<BlockSet> {
-        g::items::BLOCK_SET_NAMES
-            .iter()
-            .position(|n| !n.is_empty() && *n == name)
+        (0..g::items::BLOCK_SET_NAMES.len())
+            .position(|i| set_name(i).is_some_and(|n| !n.is_empty() && n == name))
             .map(|i| BlockSet(i as u16))
     }
 }
@@ -247,4 +246,15 @@ impl BlockState {
     pub fn requires_correct_tool_for_drops(self) -> bool {
         self.block().requires_correct_tool_for_drops()
     }
+}
+
+/// The name of block set `i` (empty for a direct block list).
+fn set_name(i: usize) -> Option<&'static str> {
+    let end = usize::from(*g::items::BLOCK_SET_NAMES.get(i)?);
+    let start = if i == 0 {
+        0
+    } else {
+        usize::from(g::items::BLOCK_SET_NAMES[i - 1])
+    };
+    g::items::BLOCK_SET_NAMES_TEXT.get(start..end)
 }

@@ -290,30 +290,15 @@ pub fn generate(
     let slots: Vec<u32> = slot.iter().map(|&s| u32::from(s)).collect();
     num_table(&mut out, "pub(crate) static BLOCK_SLOT", "u8", &slots, 32);
 
-    let _ = writeln!(
-        out,
-        "\n/// Distinct collision shapes (oracle `alone` boxes, block-local; index 0 = empty).\npub(crate) static SHAPES: [&[Aabb]; {}] = [",
-        shapes.len()
+    out.push_str(
+        "\n/// Distinct collision shapes (oracle `alone` boxes, block-local; index 0 = empty).\n",
     );
-    for s in &shapes {
-        let boxes: Vec<String> = s
-            .iter()
-            .map(|b| {
-                let f = b.map(f64::from_bits);
-                format!(
-                    "Aabb::new({}, {}, {}, {}, {}, {})",
-                    f64l(f[0]),
-                    f64l(f[1]),
-                    f64l(f[2]),
-                    f64l(f[3]),
-                    f64l(f[4]),
-                    f64l(f[5])
-                )
-            })
-            .collect();
-        let _ = writeln!(out, "    &[{}],", boxes.join(", "));
-    }
-    out.push_str("];\n\n");
+    let spans: Vec<Vec<[f64; 6]>> = shapes
+        .iter()
+        .map(|s| s.iter().map(|b| b.map(f64::from_bits)).collect())
+        .collect();
+    generate::emit_shape_slices(&mut out, &spans, "");
+    out.push('\n');
     let mut deps_by_id = vec![None; 256];
     for (b, d) in blocks.iter().zip(&deps) {
         deps_by_id[usize::from(b.id)] = *d;

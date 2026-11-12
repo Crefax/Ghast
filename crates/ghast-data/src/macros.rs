@@ -165,7 +165,12 @@ macro_rules! common_api {
         /// [`BlockInfo::can_harvest_with`].
         #[must_use]
         pub fn tool_multiplier(material: DigMaterial, tool: u16) -> f32 {
-            crate::common::tool_multiplier(&g::materials::TOOL_MULTIPLIERS, material, tool)
+            crate::common::tool_multiplier(
+                &g::materials::TOOL_MULTIPLIERS,
+                &g::materials::TOOL_MULTIPLIER_LIST,
+                material,
+                tool,
+            )
         }
     };
 }

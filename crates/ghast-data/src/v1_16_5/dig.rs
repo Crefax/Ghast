@@ -46,11 +46,13 @@ impl Default for DigConditions {
     }
 }
 
-fn item_entry(item: u16) -> Option<&'static crate::common::ItemDig> {
-    g::dig::ITEM_DIG
-        .binary_search_by_key(&item, |e| e.0)
-        .ok()
-        .map(|i| &g::dig::ITEM_DIG[i])
+fn item_entry(item: u16) -> Option<crate::common::ItemDig> {
+    let i = g::dig::ITEM_DIG.binary_search_by_key(&item, |e| e.0).ok()?;
+    Some(crate::common::item_dig(
+        &g::dig::ITEM_DIG[i],
+        &g::dig::ITEM_DIG_SPEEDS,
+        &g::dig::ITEM_DIG_BLOCKS,
+    ))
 }
 
 /// `ItemStack.getMiningSpeedMultiplier(block)` of a stack of `item` (1 for every other pair).

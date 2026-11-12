@@ -3061,25 +3061,9 @@ pub(crate) static TOOLS: [Tool; 31] = [
 ];
 
 /// Block sets the tool rules test: named tags (resolved by the jar), then direct block lists.
-pub(crate) static BLOCK_SET_NAMES: [&str; 17] = [
-    "minecraft:incorrect_for_copper_tool",
-    "minecraft:incorrect_for_diamond_tool",
-    "minecraft:incorrect_for_gold_tool",
-    "minecraft:incorrect_for_iron_tool",
-    "minecraft:incorrect_for_netherite_tool",
-    "minecraft:incorrect_for_stone_tool",
-    "minecraft:incorrect_for_wooden_tool",
-    "minecraft:leaves",
-    "minecraft:mineable/axe",
-    "minecraft:mineable/hoe",
-    "minecraft:mineable/pickaxe",
-    "minecraft:mineable/shovel",
-    "minecraft:sword_efficient",
-    "minecraft:sword_instantly_mines",
-    "minecraft:wool",
-    "",
-    "",
-];
+pub(crate) const BLOCK_SET_NAMES_TEXT: &str = "minecraft:incorrect_for_copper_toolminecraft:incorrect_for_diamond_toolminecraft:incorrect_for_gold_toolminecraft:incorrect_for_iron_toolminecraft:incorrect_for_netherite_toolminecraft:incorrect_for_stone_toolminecraft:incorrect_for_wooden_toolminecraft:leavesminecraft:mineable/axeminecraft:mineable/hoeminecraft:mineable/pickaxeminecraft:mineable/shovelminecraft:sword_efficientminecraft:sword_instantly_minesminecraft:wool";
+/// End of each set's name in `BLOCK_SET_NAMES_TEXT` (an empty name: a direct block list).
+pub(crate) static BLOCK_SET_NAMES: [u16; 17] = [35, 71, 104, 137, 175, 209, 244, 260, 282, 304, 330, 355, 380, 411, 425, 425, 425];
 
 pub(crate) static BLOCK_SETS: [[u64; 19]; 17] = [
     [0xc0000000000, 0x0, 0x400000000000, 0x3802, 0x18000, 0x0, 0x8c000, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x780000, 0x0, 0x0, 0x800000000000000, 0x0],

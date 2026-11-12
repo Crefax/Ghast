@@ -111,19 +111,36 @@ pub fn generate(
         ws.join(", ")
     );
     out.push_str("/// `(item id, (block, speed multiplier) sorted, effective blocks sorted)` for every item\n/// with a multiplier other than 1 or an effective block (sorted by item id).\n");
+    out.push_str("/// Spans are `(start, end)` in `ITEM_DIG_SPEEDS` / `ITEM_DIG_BLOCKS` (plain data, no slices).\n");
     let _ = writeln!(
         out,
-        "pub(crate) static ITEM_DIG: [(u16, &[(u16, f32)], &[u16]); {}] = [",
+        "pub(crate) static ITEM_DIG: [(u16, (u16, u16), (u16, u16)); {}] = [",
         items.len()
     );
+    let (mut all_s, mut all_e): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     for (id, speeds, eff) in &items {
-        let s: Vec<String> = speeds
-            .iter()
-            .map(|(b, sp)| format!("({b}, {})", f32l(*sp)))
-            .collect();
-        let e: Vec<String> = eff.iter().map(u16::to_string).collect();
-        let _ = writeln!(out, "    ({id}, &[{}], &[{}]),", s.join(", "), e.join(", "));
+        let (s0, e0) = (all_s.len(), all_e.len());
+        all_s.extend(speeds.iter().map(|(b, sp)| format!("({b}, {})", f32l(*sp))));
+        all_e.extend(eff.iter().map(u16::to_string));
+        let _ = writeln!(
+            out,
+            "    ({id}, ({s0}, {}), ({e0}, {})),",
+            all_s.len(),
+            all_e.len()
+        );
     }
     out.push_str("];\n");
+    let _ = writeln!(
+        out,
+        "pub(crate) static ITEM_DIG_SPEEDS: [(u16, f32); {}] = [{}];",
+        all_s.len(),
+        all_s.join(", ")
+    );
+    let _ = writeln!(
+        out,
+        "pub(crate) static ITEM_DIG_BLOCKS: [u16; {}] = [{}];",
+        all_e.len(),
+        all_e.join(", ")
+    );
     Ok(out)
 }
