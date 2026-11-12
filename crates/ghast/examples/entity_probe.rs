@@ -57,6 +57,8 @@ struct Probe {
     started: Instant,
     limit: Duration,
     reported: bool,
+    /// Walk direction (`GHAST_YAW`, default 0 = +z).
+    yaw: f32,
 }
 
 impl Probe {
@@ -121,7 +123,8 @@ impl Behavior for Probe {
 
     fn interests(&self) -> Interests {
         if self.entities || self.mode != Mode::Walk {
-            Interests::ENTITIES | Interests::CHAT
+            // The tab list gives other players' scoreboard names (their teams).
+            Interests::ENTITIES | Interests::PLAYER_LIST | Interests::CHAT
         } else {
             Interests::CHAT
         }
@@ -165,7 +168,7 @@ impl Behavior for Probe {
                 self.wait += 1;
                 return;
             }
-            ctx.set_aim(0.0, 0.0);
+            ctx.set_aim(self.yaw, 0.0);
             ctx.set_controls(Controls {
                 forward: true,
                 ..Controls::NONE
@@ -367,6 +370,10 @@ fn main() {
             started: Instant::now(),
             limit,
             reported: false,
+            yaw: std::env::var("GHAST_YAW")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0),
         };
         let end = client.run(&mut probe).await;
         log::info!("session ended: {end:?}");

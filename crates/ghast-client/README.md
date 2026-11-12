@@ -184,8 +184,10 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   collides with boats, rafts and shulkers and is pushed by the mobs and boats around it, as the
   real client does. **Without `Interests::ENTITIES` neither happens**: a bot that walks into a
   boat or through a crowd then moves differently from a vanilla client (an anticheat can flag
-  it); turn the interest on where that can happen. Not modelled: team collision rules, the
-  exact tick order of several pushers (entity id order is used), open or scaled shulkers.
+  it); turn the interest on where that can happen. Team collision rules (`never`,
+  `pushOtherTeams`, `pushOwnTeam`) are followed; other players' teams need
+  `Interests::PLAYER_LIST`. Not modelled: the exact tick order of several pushers (entity id
+  order is used), open or scaled shulkers.
 - **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
   pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
 - **Proven against the real 26.1 client** (oracle vectors, `cargo test`):
@@ -440,6 +442,7 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `lab/use-items.sh 26.1`: golden apple, shield, bow while walking | 0 flags |
 | `lab/entities.sh` crowd: walk through 6 NoAI cows into an oak boat, entity tracking on, then off | on: pushed aside and over the boat, 0 flags; off: walks straight through, also 0 flags (Grim 2.3.74 does not check entity collision or pushes) |
 | `lab/entities.sh` horse / villager: sneak-click a tamed horse (saddle out and back), trade with a villager (select trade, take the result) | horse screen 2 clicks, merchant screen 1 click, all confirmed as predicted, 0 flags |
+| `lab/entities.sh` teams: two bots walk through each other, without a team, then in a `collisionRule never` team | without: pushed apart; with: pass straight through (x unchanged); 0 flags both ways |
 | `lab/entities.sh` border: walk into a 24-wide border, keep walking while it shrinks to 10 | stops at the edge (rounded out to whole blocks, as vanilla), the shrinking border passes, border damage kills, respawn, stops at the new edge, 0 flags |
 | `creative_probe` (creative screen: clone, place, Q, drop outside, ctrl+Q) | 6 clicks accepted, 0 corrections, 0 flags |
 

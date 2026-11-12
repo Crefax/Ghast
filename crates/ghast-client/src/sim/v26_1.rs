@@ -49,6 +49,10 @@ pub(crate) struct Sim26 {
     /// With entity tracking: the boxes the player collides with this tick and the entities
     /// that push it after its tick (buffers kept between ticks).
     around: Around,
+    /// With entity tracking: the scoreboard teams' collision rules (`set_player_team`).
+    teams: Option<Box<super::teams::Teams>>,
+    /// The player's scoreboard name (its team membership).
+    profile_name: Box<str>,
 }
 
 /// Entity collision and pushing around the player (only with entity tracking).
@@ -512,6 +516,17 @@ impl Sim26 {
             if !t.is_ticking(e) {
                 continue;
             }
+            // EntitySelector.pushableBy: the pusher's and the player's team collision rules.
+            if let Some(teams) = self.teams.as_deref().filter(|t| t.any_rule()) {
+                let mut buf = [0u8; 36];
+                let name = match t.player_name(e.id()) {
+                    Some(n) if e.is_player() => n,
+                    _ => e.uuid().hyphenated().encode_lower(&mut buf),
+                };
+                if !teams.may_push(name, &self.profile_name) {
+                    continue;
+                }
+            }
             let kind = if bits & PUSH_BOAT != 0 {
                 modern::PushKind::Boat
             } else {
@@ -553,6 +568,8 @@ impl Sim26 {
             ext_active: false,
             riptide: [0.0; 2],
             around: Around::default(),
+            teams: None,
+            profile_name: "".into(),
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -572,6 +589,10 @@ impl Sim26 {
             );
         }
         s.entities = opts.entities.map(ghast_entity::v26_1::Tracker::new);
+        s.teams = s.entities.is_some().then(Box::default);
+        if let Some(n) = &opts.profile_name {
+            s.profile_name = n.as_str().into();
+        }
         if opts.force_step_position != ForceStepPosition::Off {
             log::warn!("force_step_position has no effect on 26.1");
         }
@@ -745,10 +766,22 @@ impl Sim for Sim26 {
             }
             cb::id::LOGIN => {
                 self.own.id = raw.decode_as::<cb::Login>()?.entity_id;
+                // A new play phase: a new client scoreboard.
+                if let Some(t) = &mut self.teams {
+                    t.clear();
+                }
                 self.own.rockets.clear();
                 self.own.mounts.clear();
             }
             _ => {}
+        }
+        if raw.id == cb::id::TEAMS {
+            if let Some(t) = &mut self.teams
+                && !t.apply(&raw.body)
+            {
+                log::debug!("bad set_player_team packet ({} B)", raw.body.len());
+            }
+            return Ok(());
         }
         // The tracker also reads map_chunk / unload_chunk (which columns tick): the world gets
         // the same packets below.
@@ -1174,12 +1207,18 @@ impl Sim for Sim26 {
             }
             t
         });
+        // Teams sent before tracking started are not known (all pushes then allowed).
+        self.teams = self.entities.is_some().then(Box::default);
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
         self.entities
             .as_ref()
-            .map(|t| t.packet_ids().collect())
+            .map(|t| {
+                t.packet_ids()
+                    .chain([ghast_protocol::v26_1::play::clientbound::id::TEAMS])
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

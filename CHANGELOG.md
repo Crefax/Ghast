@@ -191,8 +191,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   hand-written and 9 fuzz cases of `tests/golden/26.1/entities.jsonl.gz` replay through the
   engine packet for packet. Without entity tracking the bot neither collides with nor is pushed
   by entities (no cost; a server-side anticheat may then flag walking into a boat or a crowd).
-  Not modelled yet: the pushers' exact tick order (by entity id for now: equal for entities
-  spawned in id order), team collision rules, an open or scaled shulker's box, the happy ghast.
+  Team collision rules (`set_player_team` `collisionRule`, decoded only with entity tracking:
+  the team name, rule and members) decide each push like `EntitySelector.pushableBy`; other
+  players' teams need `Interests::PLAYER_LIST` (their scoreboard names). Not modelled yet: the
+  pushers' exact tick order (by entity id for now: equal for entities spawned in id order), an
+  open or scaled shulker's box, the happy ghast.
 
 ### Fixed
 

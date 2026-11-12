@@ -8,7 +8,9 @@
 #           take the result (clicks confirmed)
 #   border  walk into the world border's edge and keep walking while it shrinks past the bot
 #           (0 flags), border reset
-#   ./entities.sh [phase ...]   (default: all four)
+#   teams   two bots walk through each other, without a team and in a collisionRule-never team
+#           (0 flags both ways; with the team they pass straight)
+#   ./entities.sh [phase ...]   (default: crowd horse villager border)
 # Starts the 26.1 lab if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example entity_probe
 set -euo pipefail
@@ -87,6 +89,31 @@ for phase in "${phases[@]}"; do
       f=$(flags_since "$since")
       echo "border: ${f:-0 Grim flags}"
       [ -z "$f" ] || { echo "FAIL: flags at the border"; fail=1; } ;;
+    teams)
+      # Two bots walk through each other along z (entity tracking on): first without a team
+      # (they push each other aside), then both in a team with collisionRule never (no push).
+      BOT2=${BOT2:-GhastBot13}
+      for rule in none never; do
+        clean
+        con "team remove ghastlab" || true
+        if [ "$rule" = never ]; then
+          con "team add ghastlab" "team modify ghastlab collisionRule never"
+        fi
+        since=$(date +%H:%M:%S)
+        # Members join once online (the bots then get the team update packet).
+        ( sleep 4; con "tp $BOT -7.5 4 -14 0 0" "tp $BOT2 -7.4 4 2 180 0"
+          [ "$rule" = never ] && con "team join ghastlab @a" ) &
+        GHAST_YAW=180 probe walk 10 --entities --username "$BOT2" > "$DIR/logs/entities-teams-$rule-2.txt" &
+        p2=$!
+        probe walk 10 --entities || fail=1
+        wait $p2 || fail=1
+        wait
+        echo "teams $rule: $BOT $(grep 'end position' "$DIR/logs/entities-walk--entities.log.out" | tail -1), $BOT2 $(grep 'end position' "$DIR/logs/entities-teams-$rule-2.txt" | tail -1)"
+        f=$(flags_since "$since")
+        echo "teams $rule: ${f:-0 Grim flags}"
+        [ -z "$f" ] || { echo "FAIL: flags with teams $rule"; fail=1; }
+      done
+      con "team remove ghastlab" || true ;;
     *) echo "unknown phase $phase" >&2; exit 2 ;;
   esac
 done

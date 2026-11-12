@@ -513,6 +513,7 @@ where
                 force_step_position: client.force_step_position,
                 entities: entity_config(behavior.interests()),
                 world: client.world_config,
+                profile_name: Some(client.account.name().to_string()),
             }),
         ),
         read_timeout: client.read_timeout,

@@ -13,6 +13,8 @@ use crate::common::{
 use crate::hands::{BlockQuery, HeldItem};
 use crate::version::DataSet;
 
+#[cfg(feature = "v26_1")]
+mod teams;
 #[cfg(feature = "v1_12_2")]
 mod v1_12;
 #[cfg(feature = "v1_16_5")]
@@ -455,6 +457,8 @@ pub(crate) struct SimOptions {
     pub entities: Option<ghast_entity::Config>,
     /// What the world keeps besides block states (default: nothing, see [`config`]).
     pub world: Option<WorldConfig>,
+    /// The player's scoreboard name (team membership for entity pushes, 26.1).
+    pub profile_name: Option<String>,
 }
 
 /// Grim compatibility (**not vanilla**): when to send the position on a tick whose move stayed
