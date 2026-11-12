@@ -88,6 +88,10 @@ name = "creative_probe"
 required-features = ["v26_1"]
 
 [[example]]
+name = "entity_probe"
+required-features = ["v26_1"]
+
+[[example]]
 name = "online_chat"
 required-features = ["microsoft"]
 

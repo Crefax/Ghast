@@ -152,7 +152,7 @@ fn java_array_hash(b: &[u8]) -> i32 {
 
 impl Wire26_1 {
     /// Test hook: the look of the last movement packet.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) fn set_last_look(&mut self, yaw: f32, pitch: f32) {
         self.last_look = (yaw, pitch);
     }
