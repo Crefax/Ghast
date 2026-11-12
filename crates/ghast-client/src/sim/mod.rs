@@ -225,9 +225,32 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// The held stack's use facts from the stack itself (26.1: its components decide whether
     /// it has a use state and whether it is food); other versions keep the table facts.
     #[inline(always)]
-    fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
-        let _ = stack;
+    fn item_use_facts(
+        &self,
+        stack: &ghast_inventory::Stack,
+        off_hand: bool,
+        held: HeldItem,
+    ) -> HeldItem {
+        let _ = (stack, off_hand);
         held
+    }
+    /// The sim reads per-tick inputs from the inventory and keys (26.1); `false` lets the
+    /// engine skip [`Sim::held_use_inputs`] and [`Sim::pre_tick`] without evaluating anything.
+    #[inline(always)]
+    fn modern_inputs(&self) -> bool {
+        false
+    }
+    /// Before the key handling, while the use key is down or a use runs: what the held stacks'
+    /// use depends on (26.1: the tridents' riptide strength, from the synced enchantments).
+    #[inline(always)]
+    fn held_use_inputs(&mut self, inv: &mut ghast_inventory::Inventory) {
+        let _ = inv;
+    }
+    /// [`Sim::pre_tick`] has something to do even without a use, a release or a jump press
+    /// (26.1: attached rockets).
+    #[inline(always)]
+    fn pre_tick_wanted(&self) -> bool {
+        false
     }
     /// Once per tick before the movement: the inputs of the modern movement that come from the
     /// inventory and the keys (26.1: the used stack's `use_effects`, the equipped glider when
@@ -1155,8 +1178,22 @@ impl Sim for Box<dyn Sim> {
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         (**self).held_item(id, count, efficiency)
     }
-    fn item_use_facts(&self, stack: &ghast_inventory::Stack, held: HeldItem) -> HeldItem {
-        (**self).item_use_facts(stack, held)
+    fn item_use_facts(
+        &self,
+        stack: &ghast_inventory::Stack,
+        off_hand: bool,
+        held: HeldItem,
+    ) -> HeldItem {
+        (**self).item_use_facts(stack, off_hand, held)
+    }
+    fn modern_inputs(&self) -> bool {
+        (**self).modern_inputs()
+    }
+    fn held_use_inputs(&mut self, inv: &mut ghast_inventory::Inventory) {
+        (**self).held_use_inputs(inv);
+    }
+    fn pre_tick_wanted(&self) -> bool {
+        (**self).pre_tick_wanted()
     }
     fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &PreTick) -> bool {
         (**self).pre_tick(inv, t)

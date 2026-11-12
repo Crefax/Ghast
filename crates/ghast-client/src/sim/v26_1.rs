@@ -44,8 +44,8 @@ pub(crate) struct Sim26 {
     /// riptide spin or counter, a launch made before the tick): set wherever `ext` gains such a
     /// state, recomputed after each extended tick. One flag keeps the plain tick's path lean.
     ext_active: bool,
-    /// `minecraft:enchantment` registry names in order (stack enchantments are indices).
-    enchantments: Vec<String>,
+    /// Riptide strength of the trident in the main / off hand (`held_use_inputs`).
+    riptide: [f32; 2],
 }
 
 /// The entity packets the modern movement reads without entity tracking: the player's own
@@ -137,33 +137,6 @@ impl std::fmt::Debug for Sim26 {
             .field("world", &self.world)
             .field("pos", &self.player.pos)
             .finish_non_exhaustive()
-    }
-}
-
-/// `EnchantmentHelper.getTridentSpinAttackStrength` of a trident. PLACEHOLDER until
-/// ghast-inventory reads the enchantment's `trident_spin_attack_strength` effect from the synced
-/// registry: the vanilla value 1.5 + 0.75 per riptide level above I.
-fn trident_strength(enchantments: &[String], s: &ghast_inventory::Stack) -> f32 {
-    use ghast_inventory::{EnchantmentId, Version};
-    if s.item_name(Version::V26_1) != Some("trident") {
-        return 0.0;
-    }
-    let level = s
-        .enchantments(Version::V26_1)
-        .iter()
-        .find(|e| match &e.id {
-            EnchantmentId::Registry(i) => usize::try_from(*i)
-                .ok()
-                .and_then(|i| enchantments.get(i))
-                .is_some_and(|n| n == "minecraft:riptide"),
-            EnchantmentId::Name(n) => n == "minecraft:riptide",
-            _ => false,
-        })
-        .map_or(0, |e| e.level);
-    if level <= 0 {
-        0.0
-    } else {
-        1.5 + 0.75 * (level - 1) as f32
     }
 }
 
@@ -343,7 +316,7 @@ impl Sim26 {
         let Some(s) = stack.filter(|s| i64::from(s.id()) == i64::from(id)) else {
             return;
         };
-        let strength = trident_strength(&self.enchantments, s);
+        let strength = self.riptide[usize::from(off)];
         if ticks < 10 || strength <= 0.0 || ghast_inventory::v26_1::next_damage_will_break(s) {
             return;
         }
@@ -379,7 +352,7 @@ impl Sim26 {
             own: OwnEntity::default(),
             rain_level: 0.0,
             ext_active: false,
-            enchantments: Vec::new(),
+            riptide: [0.0; 2],
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -634,16 +607,43 @@ impl Sim for Sim26 {
     fn registry_data(&mut self, raw: &RawPacket) {
         match raw.decode_as::<ghast_protocol::v26_1::configuration::clientbound::RegistryData>() {
             Ok(p) => {
-                if &*p.id == "minecraft:enchantment" {
-                    self.enchantments = p.entries.iter().map(|e| e.key.to_string()).collect();
-                }
                 self.world.apply_registry_data(&p);
             }
             Err(e) => log::warn!("bad registry_data packet: {e}"),
         }
     }
 
-    fn item_use_facts(&self, stack: &ghast_inventory::Stack, mut held: HeldItem) -> HeldItem {
+    fn modern_inputs(&self) -> bool {
+        true
+    }
+
+    fn held_use_inputs(&mut self, inv: &mut ghast_inventory::Inventory) {
+        // EnchantmentHelper.getTridentSpinAttackStrength through the synced registry (None:
+        // not computable -> no riptide). Only tridents are looked at.
+        let trident = |s: Option<&ghast_inventory::Stack>| {
+            s.filter(|s| {
+                ghast_inventory::v26_1::defaults(s.id()).is_some_and(|d| d.name == "trident")
+            })
+            .cloned()
+        };
+        let hands = [trident(inv.held()), trident(inv.offhand())];
+        for (k, s) in hands.into_iter().enumerate() {
+            self.riptide[k] = s
+                .and_then(|s| inv.trident_spin_attack_strength_26_1(&s))
+                .unwrap_or(0.0);
+        }
+    }
+
+    fn pre_tick_wanted(&self) -> bool {
+        self.ext.rocket_count() > 0
+    }
+
+    fn item_use_facts(
+        &self,
+        stack: &ghast_inventory::Stack,
+        off_hand: bool,
+        mut held: HeldItem,
+    ) -> HeldItem {
         // getUseDuration > 0; food only below a full bar unless can_always_eat.
         if let Some(u) = ghast_inventory::v26_1::item_use(stack) {
             held.usable = u.duration.is_none_or(|d| d > 0);
@@ -653,7 +653,9 @@ impl Sim for Sim26 {
         // FireworkRocketItem.use: SUCCESS (the server spawns the boosting rocket) only while
         // gliding; otherwise PASS.
         // TridentItem.use: with riptide only in water or rain (else FAIL: no use state).
-        if trident_strength(&self.enchantments, stack) > 0.0 {
+        if self.riptide[usize::from(off_hand)] > 0.0
+            && ghast_inventory::v26_1::defaults(stack.id()).is_some_and(|d| d.name == "trident")
+        {
             held.usable = held.usable && self.wet();
         }
         held.swing_on_use = self.ext.fall_flying

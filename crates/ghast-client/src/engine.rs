@@ -507,7 +507,7 @@ fn held_item<W: Sim + ?Sized>(
     let s = inv.held()?;
     let id = u16::try_from(s.id()).ok()?;
     let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
-    Some(sim.item_use_facts(s, sim.held_item(id, count, efficiency(s))))
+    Some(sim.item_use_facts(s, false, sim.held_item(id, count, efficiency(s))))
 }
 
 /// Whether rays hit the entity (`Entity.collides`): living entities, players,
@@ -673,7 +673,7 @@ fn off_held_item<W: Sim + ?Sized>(
     let s = inv.offhand()?;
     let id = u16::try_from(s.id()).ok()?;
     let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
-    Some(sim.item_use_facts(s, sim.held_item(id, count, 0)))
+    Some(sim.item_use_facts(s, true, sim.held_item(id, count, 0)))
 }
 
 /// Efficiency level of a stack (see [`enchant_level`]).
@@ -1261,6 +1261,10 @@ impl<S: Sim> Engine<S> {
             // The screen as the inventory models it (vanilla: a window the client has no
             // screen for opens none; a window the client closed is gone at once).
             let gui = c.inv.gui_open();
+            // 26.1: the riptide strength of the held tridents, while it can matter.
+            if self.sim.modern_inputs() && ((c.buttons.right && !gui) || c.hands.using_item()) {
+                self.sim.held_use_inputs(&mut c.inv);
+            }
             let eye = if c.pose.sneaking {
                 c.opts.caps.sneak_eye_height
             } else {
@@ -1376,14 +1380,23 @@ impl<S: Sim> Engine<S> {
         let first = c.out.len();
         // 26.1 per-tick inputs: updatingUsingItem, the glider (the other versions' sims do
         // nothing here).
-        let pre = crate::sim::PreTick {
-            using: c.hands.use_item(),
-            released: c.hands.released_use(),
-            controls: c.controls,
-            look: (c.pose.yaw, c.pose.pitch),
-        };
-        if !self.sim.pre_tick(&c.inv, &pre) {
-            c.hands.stop_using();
+        // 26.1 per-tick inputs, only when something can need them: a use, a release, a jump
+        // press, attached rockets.
+        if self.sim.modern_inputs()
+            && (c.hands.using_item()
+                || c.hands.released_use().is_some()
+                || c.controls.jump
+                || self.sim.pre_tick_wanted())
+        {
+            let pre = crate::sim::PreTick {
+                using: c.hands.use_item(),
+                released: c.hands.released_use(),
+                controls: c.controls,
+                look: (c.pose.yaw, c.pose.pitch),
+            };
+            if !self.sim.pre_tick(&c.inv, &pre) {
+                c.hands.stop_using();
+            }
         }
         let using = c.hands.using_item();
         self.sim
@@ -3426,6 +3439,11 @@ mod tests {
                     body: body(&reg),
                 };
                 e.sim.registry_data(&raw);
+                // ... and as the inventory gets it (the riptide strength reads it).
+                let mut names = ghast_inventory::v26_1::HashRegistries::default();
+                names.add("minecraft:enchantment", ["minecraft:riptide"]);
+                e.inventory_mut().set_registries_26_1(names);
+                e.inventory_mut().on_registry_data_26_1(raw.body.clone());
             }
             if ext.and_then(|x| x.get("raining")).and_then(Value::as_bool) == Some(true) {
                 e.handle(Inbound::GameState {
