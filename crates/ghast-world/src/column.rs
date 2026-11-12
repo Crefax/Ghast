@@ -432,6 +432,11 @@ impl<C> ColumnMap<C> {
         self.map.values().map(|(p, c)| (*p, c))
     }
 
+    /// Iterates the loaded columns mutably (arbitrary order).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (ChunkPos, &mut C)> {
+        self.map.values_mut().map(|(p, c)| (*p, c))
+    }
+
     /// Heap bytes of the hash table itself (entries included, column contents excluded).
     #[must_use]
     pub fn table_bytes(&self) -> usize {

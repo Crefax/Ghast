@@ -68,6 +68,7 @@ public final class Main {
             case "hashed-stacks" -> Io.write(a.path("--out", golden.resolve("hashed_stacks.jsonl.gz")), HashDump::lines);
             case "net-crypto" -> Io.write(a.path("--out", golden.resolve("net_crypto.jsonl.gz")), NetCryptoDump::lines);
             case "chat-signing" -> Io.write(a.path("--out", golden.resolve("chat_signing.jsonl.gz")), ChatSigningDump::lines);
+            case "biome-climate" -> Io.write(a.path("--out", golden.resolve("biome_climate.jsonl.gz")), BiomeClimateDump::lines);
             case "creative-clicks" -> {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", ClickDump.CREATIVE_CASES);
@@ -134,6 +135,7 @@ public final class Main {
                   hashed-stacks [--out FILE]           item stack wire bytes + the client's HashedStack
                   net-crypto [--out FILE]              login encryption: session hash, AES/CFB8, hello / key packets
                   chat-signing [--out FILE]            signed chat: session update, chat / command signatures, acks
+                  biome-climate [--out FILE]           biome climate settings, precipitation and temperature at positions
                   clicks [--seed N] [--count N] [--out FILE]  window clicks through the real client (every menu type)
                   creative-clicks [--seed N] [--count N] [--out FILE]  the creative inventory screen (set_creative_mode_slot)
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
@@ -180,6 +182,7 @@ public final class Main {
         Io.write(dir.resolve("hashed_stacks.jsonl.gz"), HashDump::lines);
         Io.write(dir.resolve("net_crypto.jsonl.gz"), NetCryptoDump::lines);
         Io.write(dir.resolve("chat_signing.jsonl.gz"), ChatSigningDump::lines);
+        Io.write(dir.resolve("biome_climate.jsonl.gz"), BiomeClimateDump::lines);
         Io.write(dir.resolve("clicks_seed1.jsonl.gz"), sink -> ClickDump.lines(1, ClickDump.CASES, sink));
         Io.write(dir.resolve("clicks_creative_seed1.jsonl.gz"), sink -> ClickDump.creativeLines(1, ClickDump.CREATIVE_CASES, sink));
         Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));

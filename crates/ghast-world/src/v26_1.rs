@@ -178,6 +178,32 @@ impl DimensionType {
     }
 }
 
+/// A biome registry entry's climate (`has_precipitation`, `temperature`,
+/// `temperature_modifier`); `None` when the data is malformed.
+fn climate_from_nbt(nbt: &AnonNbt) -> Option<crate::climate::Climate> {
+    let tag = nbt.parse().ok()??;
+    let c = tag.as_compound()?;
+    let has_precipitation = match c.get("has_precipitation")? {
+        Tag::Byte(v) => *v != 0,
+        _ => return None,
+    };
+    let temperature = match c.get("temperature")? {
+        Tag::Float(v) => *v,
+        Tag::Double(v) => *v as f32,
+        _ => return None,
+    };
+    let frozen = match c.get("temperature_modifier") {
+        None => false,
+        Some(Tag::String(s)) => match &**s {
+            "none" | "minecraft:none" => false,
+            "frozen" | "minecraft:frozen" => true,
+            _ => return None,
+        },
+        Some(_) => return None,
+    };
+    Some(crate::climate::Climate::new(has_precipitation, temperature, frozen))
+}
+
 /// What the world keeps from the configuration-phase registries.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
@@ -187,6 +213,9 @@ pub struct Registries {
     pub dimension_types: Vec<Option<DimensionType>>,
     /// Number of `minecraft:worldgen/biome` entries (0 until received).
     pub biome_count: usize,
+    /// The climate of each `minecraft:worldgen/biome` entry in registry order (from its data,
+    /// or vanilla's for an entry sent without data; `None` when neither is known).
+    pub biome_climates: Vec<Option<crate::climate::Climate>>,
 }
 
 /// The dimension the player is in.
@@ -390,6 +419,10 @@ pub struct World {
     builder: Builder,
     border: Border,
     batch: ChunkBatchSize,
+    /// `BiomeManager.biomeZoomSeed` (the login / respawn hashed seed).
+    biome_zoom_seed: i64,
+    /// `Level.getSeaLevel()` (login / respawn).
+    sea_level: i32,
 }
 
 impl std::fmt::Debug for World {
@@ -453,6 +486,8 @@ impl World {
             builder: Builder::new(STATE_COUNT),
             border: Border::new(LerpMath::Double),
             batch: ChunkBatchSize::default(),
+            biome_zoom_seed: 0,
+            sea_level: 63,
         }
     }
 
@@ -563,6 +598,62 @@ impl World {
         self.columns.clear();
     }
 
+    /// Turns [`WorldConfig::biomes`] on or off at run time. On: columns that arrive (and
+    /// `chunks_biomes` updates) from now on keep their biomes; columns already loaded have none
+    /// until the server resends them. Off: every stored biome is dropped.
+    pub fn set_biomes(&mut self, on: bool) {
+        self.config.biomes = on;
+        if !on {
+            for (_, col) in self.columns.iter_mut() {
+                col.biomes = None;
+            }
+        }
+    }
+
+    /// `BiomeManager.biomeZoomSeed`: the hashed seed of the last login / dimension change.
+    #[must_use]
+    pub fn biome_zoom_seed(&self) -> i64 {
+        self.biome_zoom_seed
+    }
+
+    /// `Level.getSeaLevel()`: the sea level of the last login / dimension change.
+    #[must_use]
+    pub fn sea_level(&self) -> i32 {
+        self.sea_level
+    }
+
+    /// `Level.getBiome(pos)`: the `minecraft:worldgen/biome` registry id of the block at `x`,
+    /// `y`, `z` (the zoomed noise cell, `BiomeManager`), or `None` when the cell's column is not
+    /// loaded or was loaded without biomes ([`WorldConfig::biomes`], [`World::set_biomes`]).
+    /// Vanilla reads plains in a column it does not have.
+    #[must_use]
+    pub fn biome_at(&self, x: i32, y: i32, z: i32) -> Option<u16> {
+        let d = self.dim.as_ref()?;
+        let [qx, qy, qz] = crate::climate::zoom_cell(self.biome_zoom_seed, x, y, z);
+        let biomes = self.columns.get(qx >> 2, qz >> 2)?.biomes.as_deref()?;
+        let lo = d.kind.min_y >> 2;
+        let hi = lo + (d.kind.height >> 2) - 1;
+        let qy = qy.clamp(lo, hi);
+        let section = biomes.get((((qy << 2) - d.kind.min_y) >> 4) as usize)?;
+        Some(section.get((((qy & 3) << 4) | ((qz & 3) << 2) | (qx & 3)) as usize))
+    }
+
+    /// The climate of biome registry id `id` (from the synced registry; vanilla's for entries
+    /// sent without data).
+    #[must_use]
+    pub fn biome_climate(&self, id: u16) -> Option<crate::climate::Climate> {
+        self.registries.biome_climates.get(usize::from(id)).copied().flatten()
+    }
+
+    /// `Biome.getPrecipitationAt(pos, seaLevel)` of the biome at a block position, `None` when
+    /// the biome or its climate is unknown ([`World::biome_at`]). `Level.isRainingAt` also needs
+    /// rain, sky access and the motion-blocking height map, which this does not check.
+    #[must_use]
+    pub fn precipitation_at(&self, x: i32, y: i32, z: i32) -> Option<crate::climate::Precipitation> {
+        let c = self.biome_climate(self.biome_at(x, y, z)?)?;
+        Some(c.precipitation_at(x, y, z, self.sea_level))
+    }
+
     /// The packet ids this world consumes with its configuration (for a `PacketFilter`).
     pub fn packet_ids(&self) -> impl Iterator<Item = i32> + use<> {
         let extra: &'static [i32] = if self.config.block_entities {
@@ -620,6 +711,12 @@ impl World {
             }
             "minecraft:worldgen/biome" => {
                 self.registries.biome_count = entries.len();
+                self.registries.biome_climates = entries
+                    .map(|(k, v)| match v {
+                        Some(nbt) => climate_from_nbt(nbt),
+                        None => crate::climate::Climate::vanilla(k),
+                    })
+                    .collect();
                 Applied::Changed
             }
             _ => Applied::NotWorldPacket,
@@ -809,8 +906,16 @@ impl World {
         self.batch.on_batch_finished(batch_size, now_nanos)
     }
 
-    fn enter(&mut self, name: &str, type_index: i32, view_distance: Option<i32>) -> Applied {
+    fn enter(
+        &mut self,
+        name: &str,
+        type_index: i32,
+        view_distance: Option<i32>,
+        (seed, sea_level): (i64, i32),
+    ) -> Applied {
         self.columns.clear();
+        self.biome_zoom_seed = seed;
+        self.sea_level = sea_level;
         self.border = Border::new(LerpMath::Double);
         let radius_distance = view_distance.unwrap_or(self.view.radius - 3);
         self.view = ViewWindow::new(radius_distance);
@@ -830,7 +935,20 @@ impl World {
     /// Enters a dimension without a `login` packet (tests, offline planning): a new client
     /// level like [`World::apply_login`]; `type_index` names a `dimension_type` registry entry.
     pub fn enter_dimension(&mut self, name: &str, type_index: i32, view_distance: i32) -> Applied {
-        self.enter(name, type_index, Some(view_distance))
+        self.enter(name, type_index, Some(view_distance), (0, 63))
+    }
+
+    /// [`World::enter_dimension`] with the spawn info's hashed seed (the biome zoom seed) and
+    /// sea level.
+    pub fn enter_dimension_with(
+        &mut self,
+        name: &str,
+        type_index: i32,
+        view_distance: i32,
+        hashed_seed: i64,
+        sea_level: i32,
+    ) -> Applied {
+        self.enter(name, type_index, Some(view_distance), (hashed_seed, sea_level))
     }
 
     /// Join game: a new client level (everything unloaded, window centred on 0, 0).
@@ -839,6 +957,7 @@ impl World {
             &p.world_state.name,
             p.world_state.dimension,
             Some(p.view_distance),
+            (p.world_state.hashed_seed, p.world_state.sea_level),
         )
     }
 
@@ -851,7 +970,12 @@ impl World {
         {
             return Applied::Ignored;
         }
-        self.enter(&p.world_state.name, p.world_state.dimension, None)
+        self.enter(
+            &p.world_state.name,
+            p.world_state.dimension,
+            None,
+            (p.world_state.hashed_seed, p.world_state.sea_level),
+        )
     }
 
     /// `set_chunk_cache_center`: moves the window; columns outside it are dropped.

@@ -33,6 +33,8 @@
 #![warn(missing_docs, unnameable_types)]
 
 mod border;
+#[cfg(feature = "v26_1")]
+pub mod climate;
 mod column;
 mod error;
 pub mod packed;

@@ -296,12 +296,33 @@ impl Sim26 {
 
     /// `isInWaterOrRain` with the level's rain (biome precipitation is not known: every biome
     /// counts as rainy).
+    /// `Entity.isInWaterOrRain`. `Level.isRainingAt` per position (feet and head): rain level
+    /// above 0.2, the biome rains there (`Biome.getPrecipitationAt`; an unknown biome counts as
+    /// raining: biomes are kept only once a riptide trident was held, or with
+    /// `WorldConfig::biomes`), and nothing above blocks motion or holds fluid (the sky check
+    /// of the physics; sky light itself is not modelled).
     fn wet(&self) -> bool {
         let p = &self.player;
-        let view = self
-            .world
-            .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
-        modern::in_water_or_rain::<V26_1, _>(p, &view, self.rain_level > 0.2)
+        let (bx, bz) = (p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        let view = self.world.view(bx, bz);
+        let raining = self.rain_level > 0.2;
+        if p.touching_water || !raining {
+            return modern::in_water_or_rain::<V26_1, _>(p, &view, raining);
+        }
+        let rains = |y: f64| {
+            self.world
+                .precipitation_at(bx, y.floor() as i32, bz)
+                .is_none_or(|r| r == ghast_world::climate::Precipitation::Rain)
+        };
+        // in_water_or_rain looks at the feet and the head block: keep only the raining ones.
+        let mut q = *p;
+        match (rains(p.pos[1]), rains(p.bb.max_y)) {
+            (false, false) => return false,
+            (true, true) => {}
+            (true, false) => q.bb.max_y = q.pos[1],
+            (false, true) => q.pos[1] = q.bb.max_y,
+        }
+        modern::in_water_or_rain::<V26_1, _>(&q, &view, true)
     }
 
     /// `releaseUsingItem` → `TridentItem.releaseUsing` with riptide: the launch, before the tick,
@@ -631,6 +652,10 @@ impl Sim for Sim26 {
             self.riptide[k] = s
                 .and_then(|s| inv.trident_spin_attack_strength_26_1(&s))
                 .unwrap_or(0.0);
+        }
+        // Riptide works in rain only where the biome rains: keep biomes from now on.
+        if self.riptide.iter().any(|&r| r > 0.0) && !self.world.config().biomes {
+            self.world.set_biomes(true);
         }
     }
 

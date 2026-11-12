@@ -415,3 +415,76 @@ fn state_ids_match_the_mojang_report() {
     // start at 1 from 0; found by this test, 2026-11-11).
     assert!(mislabelled.is_empty(), "{mislabelled:?}");
 }
+
+#[test]
+fn biomes_and_their_climate_come_from_the_registry() {
+    use ghast_protocol::nbt::{AnonNbt, Compound, Tag};
+    use ghast_world::climate::{Climate, Precipitation};
+    let rp = replay(FIXTURE, &HashMap::new());
+    let w = &rp.raw;
+    // Known-pack entries (sent without data) get vanilla's climate.
+    let climates = &w.registries().biome_climates;
+    assert_eq!(climates.len(), w.registries().biome_count);
+    assert!(climates.iter().all(Option::is_some));
+    let mut checked = 0;
+    for (p, _) in w.columns().iter() {
+        for i in 0..64 {
+            let (x, z) = (p.x * 16 + (i * 5) % 16, p.z * 16 + (i * 3) % 16);
+            let y = -64 + (i * 41) % 384;
+            let id = w.biome_at(x, y, z);
+            let [qx, _, qz] = ghast_world::climate::zoom_cell(w.biome_zoom_seed(), x, y, z);
+            assert_eq!(id.is_some(), w.column(qx >> 2, qz >> 2).is_some());
+            if let Some(id) = id {
+                assert!(usize::from(id) < climates.len());
+                let c = w.biome_climate(id).unwrap();
+                assert_eq!(
+                    w.precipitation_at(x, y, z),
+                    Some(c.precipitation_at(x, y, z, w.sea_level()))
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 500, "{checked}");
+    // Without biomes kept nothing is known; switching on keeps only what arrives later.
+    let mut off = World::new(WorldConfig::default().with_biomes(false));
+    let mut on = World::new(WorldConfig::default());
+    for w in [&mut off, &mut on] {
+        let data = |prec: i8, t: f32, m: Option<&str>| {
+            let mut c = vec![
+                ("has_precipitation".to_string(), Tag::Byte(prec)),
+                ("temperature".to_string(), Tag::Float(t)),
+            ];
+            if let Some(m) = m {
+                c.push(("temperature_modifier".to_string(), Tag::String(m.into())));
+            }
+            AnonNbt::from_tag(&Tag::Compound(Compound(c))).unwrap()
+        };
+        let (a, b) = (data(1, -0.5, None), data(0, 2.0, Some("frozen")));
+        w.apply_registry(
+            "minecraft:worldgen/biome",
+            [
+                ("pack:a", Some(&a)),
+                ("minecraft:plains", None),
+                ("pack:b", Some(&b)),
+                ("pack:unknown", None),
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            w.registries().biome_climates,
+            [
+                Some(Climate::new(true, -0.5, false)),
+                Climate::vanilla("plains"),
+                Some(Climate::new(false, 2.0, true)),
+                None
+            ]
+        );
+        assert_eq!(w.biome_climate(1).unwrap().precipitation_at(0, 64, 0, 63), Precipitation::Rain);
+    }
+    let mut w = World::new(WorldConfig::default().with_biomes(false));
+    w.set_biomes(true);
+    assert!(w.config().biomes);
+    w.set_biomes(false);
+    assert!(!w.config().biomes);
+}

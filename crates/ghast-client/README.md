@@ -166,7 +166,11 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   and living entity flags, firework rockets attached to the player and riptide launches are applied
   as the real client does; the own-entity packets are decoded only for the player's id, attached
   rockets and mounts (no entity tracking needed). `use_item` carries the rotation of the tick's
-  movement packet.
+  movement packet. Riptide in rain needs the biome to rain at the feet or head block
+  (`Level.isRainingAt`): biomes are kept from the first time a riptide trident is held (columns
+  that arrived before count as raining until the server resends them); turn on
+  `WorldConfig::biomes` with `Client::world_config` to have them from the start. Sky light is not
+  modelled (the column above must be free of motion-blocking blocks and fluids).
 - **Physics** is `ghast_physics::modern` (`V26_1`), fed every movement attribute in packet order,
   effects (weaving too), abilities, teleports with all nine relative bits and their delta,
   `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
