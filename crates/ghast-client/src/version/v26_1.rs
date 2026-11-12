@@ -54,8 +54,9 @@ pub struct Wire26_1 {
     hash_registries: ghast_inventory::v26_1::HashRegistries,
     /// This configuration's registry and tag bodies for the inventory (handed over at its end).
     inv_config: Vec<(bool, Bytes)>,
-    /// The last `declare_commands` packet (parsed only when a command is sent).
-    commands_raw: Option<RawPacket>,
+    /// The last `declare_commands` packet as one compressed frame (a vanilla tree is ~35 KB
+    /// raw, a few KB compressed); inflated and parsed only when a command is sent.
+    commands_raw: Option<Box<[u8]>>,
     /// The tree parsed from `commands_raw`.
     commands: Option<super::commands::CommandTree>,
     /// The chat session (online mode with profile keys): signs chat and command arguments.
@@ -244,7 +245,7 @@ impl Wire26_1 {
         salt: i64,
     ) -> Result<(), EncodeError> {
         if self.commands.is_none()
-            && let Some(raw) = &self.commands_raw
+            && let Some(raw) = self.commands_raw.as_deref().and_then(inflate)
         {
             match raw.decode_as::<cb::DeclareCommands>() {
                 Ok(p) => self.commands = super::commands::CommandTree::from_packet(&p),
@@ -677,12 +678,15 @@ impl ClientVersion for V26_1 {
     }
 
     fn note_registry(raw: &RawPacket, wire: &mut Wire26_1) {
-        // A copy: the frame buffer the body points into is not kept alive.
-        wire.inv_config
-            .push((false, Bytes::copy_from_slice(&raw.body)));
         let Ok(p) = raw.decode_as::<configuration::clientbound::RegistryData>() else {
             return;
         };
+        // The inventory keeps only the enchantment registry (the anvil's rules). A copy: the
+        // frame buffer the body points into is not kept alive.
+        if &*p.id == "minecraft:enchantment" {
+            wire.inv_config
+                .push((false, Bytes::copy_from_slice(&raw.body)));
+        }
         if &*p.id == "minecraft:chat_type" {
             wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
         }
@@ -1038,7 +1042,7 @@ impl ClientVersion for V26_1 {
             }
             cb::id::DECLARE_COMMANDS => {
                 // Kept raw: parsed only when a command is sent.
-                wire.commands_raw = Some(raw.clone());
+                wire.commands_raw = Some(deflate(raw));
                 wire.commands = None;
                 return Ok(None);
             }
@@ -1385,6 +1389,24 @@ impl super::HasSim for V26_1 {
 #[cfg(test)]
 #[path = "v26_1_chat_golden.rs"]
 mod chat_golden;
+
+/// A packet kept for later as one compressed frame (the protocol's own deflate).
+fn deflate(raw: &RawPacket) -> Box<[u8]> {
+    let mut enc = FrameEncoder::new();
+    enc.set_compression(0);
+    match enc.write_raw(raw) {
+        Ok(()) => enc.pending().into(),
+        Err(_) => Box::default(),
+    }
+}
+
+/// The packet [`deflate`] kept (`None` when corrupt: the tree then stays unknown).
+fn inflate(z: &[u8]) -> Option<RawPacket> {
+    let mut dec = ghast_protocol::FrameDecoder::new();
+    dec.set_compression(0);
+    dec.push(z);
+    dec.next_packet().ok().flatten()
+}
 
 #[cfg(test)]
 mod tests {

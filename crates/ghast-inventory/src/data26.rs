@@ -154,7 +154,8 @@ fn spin_spec(effects: Option<&Tag>) -> String {
 impl Data26 {
     /// `update_tags` (configuration or play): replaces the tags.
     pub(crate) fn set_tags_raw(&mut self, body: Bytes) {
-        self.tags_raw = Some(body);
+        // Only the registries `parse_tags` reads are kept (a vanilla body is ~32 KB, these ~4).
+        self.tags_raw = Some(kept_tags(&body).unwrap_or(body));
         self.tags = None;
     }
 
@@ -255,6 +256,45 @@ impl Data26 {
     }
 }
 
+/// The registries of an `update_tags` body that [`parse_tags`] keeps, re-framed as one
+/// exact-size body (`None` when the body does not parse).
+fn kept_tags(body: &Bytes) -> Option<Bytes> {
+    let mut r = Reader::new(body);
+    let n = r.read_varint().ok()?;
+    let mut kept: Vec<&[u8]> = Vec::new();
+    for _ in 0..n.max(0) {
+        let start = r.position();
+        let keep = reg_of(&r.read_string().ok()?).is_some();
+        let k = r.read_varint().ok()?;
+        for _ in 0..k.max(0) {
+            r.read_string().ok()?;
+            let c = r.read_varint().ok()?;
+            for _ in 0..c.max(0) {
+                r.read_varint().ok()?;
+            }
+        }
+        if keep {
+            kept.push(&body[start..r.position()]);
+        }
+    }
+    let count = i32::try_from(kept.len()).ok()?;
+    let len: usize = kept.iter().map(|k| k.len()).sum();
+    let mut out = Vec::with_capacity(len + 5);
+    let mut v = count as u32;
+    loop {
+        if v < 0x80 {
+            out.push(v as u8);
+            break;
+        }
+        out.push((v as u8 & 0x7f) | 0x80);
+        v >>= 7;
+    }
+    for k in kept {
+        out.extend_from_slice(k);
+    }
+    Some(Bytes::from(out))
+}
+
 fn parse_tags(raw: &Bytes) -> Option<HashMap<(Reg, String), Vec<i32>>> {
     let mut r = Reader::new(raw);
     let mut out = HashMap::new();
@@ -293,4 +333,85 @@ fn builtin(name: &str) -> Option<(i32, i32, &'static str, &'static str, &'static
         .iter()
         .find(|e| e.0 == name)
         .map(|e| (e.1, e.2, e.3, e.4, e.5))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `update_tags` body: registries of (tag name, ids).
+    /// (registry, [(tag, ids)]).
+    type Reg<'a> = (&'a str, &'a [(&'a str, &'a [i32])]);
+
+    fn body(regs: &[Reg<'_>]) -> Vec<u8> {
+        fn varint(o: &mut Vec<u8>, v: i32) {
+            let mut v = v as u32;
+            loop {
+                if v < 0x80 {
+                    o.push(v as u8);
+                    return;
+                }
+                o.push((v as u8 & 0x7f) | 0x80);
+                v >>= 7;
+            }
+        }
+        fn string(o: &mut Vec<u8>, s: &str) {
+            varint(o, s.len() as i32);
+            o.extend_from_slice(s.as_bytes());
+        }
+        let mut o = Vec::new();
+        varint(&mut o, regs.len() as i32);
+        for (reg, tags) in regs {
+            string(&mut o, reg);
+            varint(&mut o, tags.len() as i32);
+            for (name, ids) in *tags {
+                string(&mut o, name);
+                varint(&mut o, ids.len() as i32);
+                for &i in *ids {
+                    varint(&mut o, i);
+                }
+            }
+        }
+        o
+    }
+
+    #[test]
+    fn kept_tags_keep_what_parse_tags_reads() {
+        let many: Vec<i32> = (0..300).collect();
+        let full = body(&[
+            (
+                "minecraft:block",
+                &[("minecraft:logs", &many[..]), ("minecraft:dirt", &[1, 2])],
+            ),
+            (
+                "minecraft:item",
+                &[
+                    ("minecraft:swords", &[800, 801, 1000]),
+                    ("minecraft:empty", &[]),
+                ],
+            ),
+            ("minecraft:fluid", &[("minecraft:water", &[1, 2])]),
+            (
+                "minecraft:enchantment",
+                &[("minecraft:exclusive_set/armor", &[3, 4])],
+            ),
+            (
+                "minecraft:banner_pattern",
+                &[("minecraft:no_item_required", &[0, 1, 2])],
+            ),
+            ("minecraft:entity_type", &[("minecraft:skeletons", &[5])]),
+        ]);
+        let full = Bytes::from(full);
+        let kept = kept_tags(&full).unwrap();
+        assert!(
+            kept.len() < full.len() / 3,
+            "{} of {}",
+            kept.len(),
+            full.len()
+        );
+        assert_eq!(parse_tags(&kept), parse_tags(&full));
+        assert_eq!(parse_tags(&kept).unwrap().len(), 5);
+        // Truncated: not parsed, the caller keeps the body as it is.
+        assert!(kept_tags(&full.slice(..full.len() - 1)).is_none());
+    }
 }

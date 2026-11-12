@@ -124,7 +124,7 @@ fn signed_chat_matches_the_real_client() {
         });
         wire.op_level = chain["op_level"].as_u64().unwrap() as u8;
         wire.commands = None;
-        wire.commands_raw = Some(tree.clone());
+        wire.commands_raw = Some(deflate(&tree));
         for (n, e) in chain["events"].as_array().unwrap().iter().enumerate() {
             let at = format!("chain {index} event {n}: {e}");
             if let Some(sig) = e.get("recv") {
