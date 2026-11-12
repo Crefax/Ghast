@@ -68,6 +68,9 @@ pub(crate) struct ModernSim {
     parked: Option<Parked>,
     /// The answer to a server packet that goes out at once (`move_vehicle`).
     reply: Option<Outbound>,
+    /// 26.2+: a movement attribute of `ext` (friction / air drag modifier, bounciness) is not
+    /// at its default, so the extended tick runs (the plain tick reads the defaults).
+    movement_attributes: bool,
     /// The packets the sim reads changed (boats appeared / are gone): rebuild the filter.
     filter_dirty: bool,
 }
@@ -443,6 +446,18 @@ fn glider_equipped(inv: &ghast_inventory::Inventory) -> bool {
 }
 
 impl ModernSim {
+    /// Something in `ext` acts next tick (see [`ModernSim::ext_active`]).
+    #[inline]
+    fn ext_wanted(&self) -> bool {
+        let x = &self.ext;
+        x.fall_flying
+            || x.glider
+            || x.rocket_count() > 0
+            || x.spin_attack
+            || x.auto_spin_ticks > 0
+            || self.movement_attributes
+    }
+
     /// `set_entity_data`, `add_entity`, `remove_entities` for our own entity and attached
     /// rockets (everything else is read only up to the entity id, or the entity type).
     fn own_entity_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
@@ -939,6 +954,7 @@ impl ModernSim {
             vehicles: None,
             parked: None,
             reply: None,
+            movement_attributes: false,
             filter_dirty: false,
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
@@ -1406,9 +1422,10 @@ impl Sim for ModernSim {
         let food = self.player.food_level;
         let level = self.player.level;
         self.player = modern::PlayerState::new([0.0; 3], 0.0, 0.0);
-        // A new LocalPlayer: not gliding, no rockets attached.
+        // A new LocalPlayer: not gliding, no rockets attached, default attributes.
         self.ext = modern::PlayerExt::default();
         self.ext_active = false;
+        self.movement_attributes = false;
         self.player.abilities = abilities;
         self.player.food_level = food;
         self.player.level = level;
@@ -1426,9 +1443,12 @@ impl Sim for ModernSim {
         let old = self.player;
         let old_mining = self.mining;
         let old_ranges = self.ranges;
+        let old_moves = (self.ext.attributes, self.movement_attributes);
         self.reset_player();
         if keep & 1 != 0 {
             self.player.attributes = old.attributes;
+            (self.ext.attributes, self.movement_attributes) = old_moves;
+            self.ext_active |= self.movement_attributes;
             self.mining = old_mining;
             self.ranges = old_ranges;
         }
@@ -1503,7 +1523,16 @@ impl Sim for ModernSim {
                 "entity_interaction_range" => Some(1),
                 _ => None,
             };
-            if let Some(i) = mining {
+            if let Some(m) = self.ext.attributes.get_mut(a.name) {
+                m.apply_packet(a.base, &mods);
+                let d = modern::MovementAttributes::default();
+                let x = &self.ext.attributes;
+                self.movement_attributes = x.friction_modifier.value()
+                    != d.friction_modifier.value()
+                    || x.air_drag_modifier.value() != d.air_drag_modifier.value()
+                    || x.bounciness.value() != d.bounciness.value();
+                self.ext_active |= self.movement_attributes;
+            } else if let Some(i) = mining {
                 self.mining[i].apply_packet(a.base, &mods);
             } else if let Some(i) = range {
                 self.ranges[i].apply_packet(a.base, &mods);
@@ -1917,20 +1946,10 @@ impl Sim for ModernSim {
                 &view,
                 &mut self.packets,
             );
-            let x = &self.ext;
-            self.ext_active = x.fall_flying
-                || x.glider
-                || x.rocket_count() > 0
-                || x.spin_attack
-                || x.auto_spin_ticks > 0;
+            self.ext_active = self.ext_wanted();
         } else if self.ext_active {
             modern::tick_ext::<Rules, _>(p, &mut self.ext, &input, &view, &mut self.packets);
-            let x = &self.ext;
-            self.ext_active = x.fall_flying
-                || x.glider
-                || x.rocket_count() > 0
-                || x.spin_attack
-                || x.auto_spin_ticks > 0;
+            self.ext_active = self.ext_wanted();
         } else {
             // Nothing of the extension state can act (no glide, no glider to start one, no
             // rocket): the plain tick, which is tick_ext with a default state, folded.
