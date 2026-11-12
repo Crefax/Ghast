@@ -43,7 +43,9 @@ pub use attr::{
 };
 pub use boat::{Boat, BoatKind, BoatStatus, Seat, tick_boat, tick_passenger};
 pub use border::BorderState;
-pub use entity::{PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1};
+pub use entity::{
+    PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1, section_query_reaches,
+};
 pub use ext::{MAX_ROCKETS, MovementAttributes, PlayerExt};
 pub use load::LoadGate;
 pub use player::{

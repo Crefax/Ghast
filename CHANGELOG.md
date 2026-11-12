@@ -57,6 +57,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Fixed
 
+- `ghast-physics` modern core (26.1 and 26.2): a boat pushes the player only when its push query
+  reaches the player's entity section (`Level.getEntities` visits the sections of the query box
+  grown by 2 blocks horizontally and 4 downwards); a scaled-up player overlapping a boat far from
+  its own section is not pushed. Mob pushes are unaffected (the client tests the local player's
+  box directly). New `modern::section_query_reaches` for callers filtering entity collision boxes.
 - `ghast-physics` modern core: a zero movement input still adds `Vec3.ZERO` to the velocity
   (`moveRelative`), which turns `-0.0` into `+0.0` as vanilla does. No 26.1 vector could show it:
   26.1 never leaves a signed zero in a horizontal velocity before an input-less tick (its
@@ -70,9 +75,8 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Known gaps
 
-- 26.2 cached fuzz: 4 of 152,000 cases differ — one entity-push case at scale 16 among boats
-  (26.1 vanilla does the same, so a latent core bug of both rows) and three teleport cases in
-  which 26.2 vanilla resets the fall distance and 26.1 vanilla does not (cause not found yet).
+- 26.2 cached fuzz: 3 of 152,000 cases differ — three teleport cases in which 26.2 vanilla
+  resets the fall distance and 26.1 vanilla does not (cause not found yet).
 
 ## 0.4.1 — 2026-11-12
 

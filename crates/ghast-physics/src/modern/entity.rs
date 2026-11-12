@@ -138,6 +138,13 @@ pub fn push_by<R: Rules, W: BlockView<State = R::State>>(
     ) {
         return false;
     }
+    // A boat finds what it pushes with `Level.getEntities`, which visits only the entity sections
+    // around the queried box: the player is found only when the section of its position is among
+    // them, however far its box reaches (a scaled-up player). Mobs ask
+    // `ClientLevel.getPushableEntities`, which tests the local player's box directly.
+    if other.kind == PushKind::Boat && !section_query_reaches(&area, p.pos) {
+        return false;
+    }
     // EntitySelector.pushableBy: no spectators, isPushable (alive, not a spectator, not on a
     // climbable).
     if p.spectator || on_climbable_ext::<R, W>(p, x, world) {
@@ -169,4 +176,27 @@ pub fn push_by<R: Rules, W: BlockView<State = R::State>>(
         p.vel = v.arr();
     }
     true
+}
+
+/// `true` when an entity query over `area` (`Level.getEntities` through
+/// `EntitySectionStorage.forEachAccessibleNonEmptySection`) visits the entity section holding an
+/// entity at `pos`. The query looks at the sections of `area` grown by 2 blocks horizontally and
+/// 4 blocks downwards (not upwards); an entity is stored in the section of its block position,
+/// so an entity whose box reaches farther from its position than that (a large `scale`, a large
+/// mob) is not found by queries that only touch the far part of its box. Boat pushes go this way
+/// (applied by [`push_by`]), and so do the player's entity collisions (`Level.getEntityCollisions`
+/// over the player's box): pass only the [`Surroundings::entities`] boxes whose entity
+/// position this accepts for the player's movement box. Mob pushes do not
+/// (`ClientLevel.getPushableEntities` tests the local player's box directly).
+#[must_use]
+pub fn section_query_reaches(area: &Aabb, pos: [f64; 3]) -> bool {
+    use crate::math::floor;
+    let sec = |v: f64| floor(v) >> 4;
+    let (sx, sy, sz) = (sec(pos[0]), sec(pos[1]), sec(pos[2]));
+    sec(area.min_x - 2.0) <= sx
+        && sx <= sec(area.max_x + 2.0)
+        && sec(area.min_y - 4.0) <= sy
+        && sy <= sec(area.max_y + 0.0)
+        && sec(area.min_z - 2.0) <= sz
+        && sz <= sec(area.max_z + 2.0)
 }
