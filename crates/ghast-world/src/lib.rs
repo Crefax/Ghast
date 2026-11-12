@@ -48,8 +48,19 @@ pub mod v1_12;
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
+/// The modern world source (`src/v26_1.rs`) compiled for one protocol: its `data` and `proto`
+/// name that protocol's `ghast-data` and `ghast-protocol` modules.
 #[cfg(feature = "v26_1")]
-pub mod v26_1;
+#[path = "."]
+mod modern_775 {
+    pub(crate) use ghast_data::v26_1 as data;
+    pub(crate) use ghast_protocol::v26_1 as proto;
+    #[path = "v26_1.rs"]
+    pub mod world;
+}
+#[cfg(feature = "v26_1")]
+#[doc(inline)]
+pub use modern_775::world as v26_1;
 
 pub use border::Border;
 pub use column::{

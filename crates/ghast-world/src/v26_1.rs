@@ -34,17 +34,17 @@
 //! [`View`] around the player once per tick: a 3×3 column snapshot with O(1) reads and no
 //! hashing inside it.
 
-use bytes::Bytes;
-use ghast_data::v26_1::{Block, BlockState, STATE_COUNT};
-use ghast_protocol::RawPacket;
-use ghast_protocol::codec::Reader;
-use ghast_protocol::nbt::{AnonNbt, Tag};
-use ghast_protocol::v26_1::configuration::clientbound::RegistryData;
-use ghast_protocol::v26_1::play::clientbound::{
+use super::data::{Block, BlockState, STATE_COUNT};
+use super::proto::configuration::clientbound::RegistryData;
+use super::proto::play::clientbound::{
     self as cb, BlockChange, ChunkBiomes, ClientboundPlayPacket, InitializeWorldBorder, Login,
     MapChunk, MultiBlockChange, Respawn, TileEntityData, UnloadChunk, UpdateViewDistance,
     UpdateViewPosition,
 };
+use bytes::Bytes;
+use ghast_protocol::RawPacket;
+use ghast_protocol::codec::Reader;
+use ghast_protocol::nbt::{AnonNbt, Tag};
 
 use crate::border::{Border, BorderPacket, LerpMath};
 use crate::column::{BlockEntity, ColumnMap};
