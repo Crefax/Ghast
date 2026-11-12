@@ -45,7 +45,7 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether", "border", "boats"};
+    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether", "border", "boats", "minecarts"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
@@ -55,6 +55,7 @@ final class ExtCases {
             case "nether" -> nether();
             case "border" -> border();
             case "boats" -> boats();
+            case "minecarts" -> minecarts();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -67,6 +68,7 @@ final class ExtCases {
             case "nether" -> netherFuzz(seed, index, ticks);
             case "border" -> borderFuzz(seed, index, ticks);
             case "boats" -> boatsFuzz(seed, index, ticks);
+            case "minecarts" -> minecartsFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -819,6 +821,122 @@ final class ExtCases {
             addEvent(sc, x.range(ticks / 2, ticks - 1), new Ext.Ride(BOAT, new int[0]));
         }
         sc.description = "randomized boat case: pools, land, ice, walls; paddling keys, looks, corrections";
+        return sc;
+    }
+
+    // ---- minecarts: the player rides a vehicle the server moves --------------------------------------
+
+    private static final String[] CART_TYPES = {"minecart", "chest_minecart", "furnace_minecart", "hopper_minecart", "tnt_minecart"};
+
+    /** A rail line along +z at y 64 on stone, with a minecart of {@code type} on it. */
+    private static Scenario cart(Scenario sc, String type, double z, float yaw) {
+        sc.fill(-24, 63, -24, 24, 63, 24, s("stone"), 0).fill(0, 64, -20, 0, 64, 20, s("rail"), 0);
+        with(sc, new Ext.Spawn(BOAT, type, 0.5, 64.0, z, yaw));
+        return sc;
+    }
+
+    /** The player boards entity {@link #BOAT} in the first tick (set-passengers packet). */
+    private static Scenario board(Scenario sc) {
+        addEvent(sc, 0, new Ext.Ride(BOAT, new int[] {Harness.PLAYER_ENTITY_ID}));
+        return sc;
+    }
+
+    static List<Scenario> minecarts() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(cart(new Scenario("cart_idle_keys").desc("sit in a minecart: walk keys, jump, sneak, sprint, looking around")
+                .spawn(0.5, 64, 0.5, 0, 0).run(5, 0).run(10, FORWARD).run(10, FORWARD | SPRINT, 90, 20).run(5, JUMP).run(5, LEFT | BACK, -120, -40)
+                .run(5, SNEAK).run(10, 0), "minecart", 0.5, 0.0F));
+        board(l.get(l.size() - 1));
+        Scenario ride = cart(new Scenario("cart_moved_by_server").desc("the server moves the minecart along the rails (teleport packets)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(60, FORWARD, 30, 10), "minecart", 0.5, 0.0F);
+        board(ride);
+        for (int i = 0; i < 40; i++) {
+            addEvent(ride, 3 + i, new Ext.Move(BOAT, 0.5, 64.0, 0.5 + i * 0.35, 0.0F, true));
+        }
+        l.add(ride);
+        Scenario wall = cart(new Scenario("cart_into_wall").fill(-2, 64, 6, 2, 67, 6, s("stone"), 0)
+                .desc("a minecart moved against a wall: the passenger's own move collides"), "chest_minecart", 0.5, 90.0F)
+                .spawn(0.5, 64, 0.5, 0, 0).run(40, FORWARD);
+        board(wall);
+        for (int i = 0; i < 20; i++) {
+            addEvent(wall, 2 + i, new Ext.Move(BOAT, 0.5, 64.0, 0.5 + i * 0.25, 90.0F, true));
+        }
+        l.add(wall);
+        Scenario wet = cart(new Scenario("cart_through_water").desc("a minecart moved through water: the passenger is not shielded")
+                .fill(-3, 64, 4, 3, 66, 8, s("water"), 0), "furnace_minecart", 0.5, 0.0F).spawn(0.5, 64, 0.5, 0, 0).run(50, 0);
+        board(wet);
+        for (int i = 0; i < 30; i++) {
+            addEvent(wet, 2 + i, new Ext.Move(BOAT, 0.5, 64.0, 0.5 + i * 0.3, 0.0F, true));
+        }
+        l.add(wet);
+        Scenario off = cart(new Scenario("cart_dismount").desc("sneak, then the server takes the player off"), "minecart", 0.5, 0.0F)
+                .spawn(0.5, 64, 0.5, 0, 0).run(10, 0).run(5, SNEAK).run(20, 0);
+        board(off);
+        addEvent(off, 13, new Ext.Ride(BOAT, new int[0]));
+        l.add(off);
+        return l;
+    }
+
+    /**
+     * Randomized minecart cases: a rail line with obstacles (walls, water, ceilings) next to it; the
+     * server moves the minecart along and off it; random keys and looks; dismounts. Cases get a
+     * {@code _mc} suffix.
+     */
+    static Scenario minecartsFuzz(long seed, int index, int ticks) {
+        Harness.init();
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x63617274L);
+        Scenario sc = new Scenario("fuzz_s" + seed + "_" + index + "_mc");
+        String type = x.pick(CART_TYPES);
+        float yaw = (float) (x.nextDouble() * 360 - 180);
+        cart(sc, type, 0.5, yaw);
+        int obstacles = x.range(0, 6);
+        for (int i = 0; i < obstacles; i++) {
+            int cz = x.range(-15, 15), side = x.chance(0.5) ? 1 : -1, h = x.range(0, 3);
+            String b = x.pick(new String[] {"stone", "water", "oak_planks", "glass", "cobweb", "oak_slab", "soul_sand", "ladder[facing=north]"});
+            if (x.chance(0.3)) {
+                sc.fill(-1, 66 + h, cz, 1, 66 + h, cz + x.range(0, 3), s(b), 0);
+            } else {
+                sc.fill(side, 64, cz, side * x.range(1, 3), 64 + h, cz + x.range(0, 3), s(b), 0);
+            }
+        }
+        sc.spawn(0.5, 64.5, 0.5, yaw, 0);
+        float look = yaw, pitch = 0;
+        int[] keySets = {0, FORWARD, BACK, LEFT, RIGHT, JUMP, SNEAK, FORWARD | SPRINT, FORWARD | JUMP, LEFT | BACK};
+        int keys = 0;
+        for (int t = 0; t < ticks; t++) {
+            if (x.chance(0.12)) {
+                keys = keySets[x.nextInt(keySets.length)];
+            }
+            if (x.chance(0.2)) {
+                look += (float) ((x.nextDouble() - 0.5) * 120);
+                pitch = (float) Math.max(-90, Math.min(90, pitch + (x.nextDouble() - 0.5) * 50));
+            }
+            sc.run(1, keys, look, pitch);
+        }
+        board(sc);
+        double cx = 0.5, cy = 64.0, cz = 0.5, v = (x.nextDouble() - 0.5) * 0.8;
+        float cyaw = yaw;
+        for (int t = 1; t < ticks; t++) {
+            if (x.chance(0.1)) {
+                v = (x.nextDouble() - 0.5) * 0.8;
+            }
+            if (x.chance(0.7)) {
+                cz += v;
+                if (x.chance(0.05)) {
+                    cx += (x.nextDouble() - 0.5) * 2;
+                    cy += (x.nextDouble() - 0.5) * 1.5;
+                }
+                if (x.chance(0.1)) {
+                    cyaw = (float) (x.nextDouble() * 360 - 180);
+                }
+                addEvent(sc, t, new Ext.Move(BOAT, cx, cy, cz, cyaw, x.chance(0.8)));
+            }
+        }
+        if (x.chance(0.2)) {
+            addEvent(sc, x.range(ticks / 2, ticks - 1), new Ext.Ride(BOAT, new int[0]));
+        }
+        sc.description = "randomized minecart case: rails, obstacles; the server moves the cart; random keys and looks";
         return sc;
     }
 

@@ -170,7 +170,10 @@ feeds and sends: `set_passengers` -> `Boat::board`, `move_vehicle` -> `Boat::ser
 entity colliders). Not modelled there: bubble columns under a boat (server-driven), boats the player
 does not control, two passengers.
 
-Not modelled: other vehicles and mounts, pistons, block entities. The nether's `fast_lava` (`LevelInfo`) and build height are oracle-proven
+Minecarts (vehicles the server moves): `Seat` + `tick_passenger` (the vehicle's position after its
+own client tick comes from the entity tracker).
+
+Not modelled: living mounts, pistons, block entities. The nether's `fast_lava` (`LevelInfo`) and build height are oracle-proven
 (`nether.jsonl.gz`).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every

@@ -705,6 +705,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         }
     }
     let mut riding: Option<(i64, String, modern::Boat)> = None;
+    // A vehicle the server moves (a minecart): its id; its position comes from the record.
+    let mut seat: Option<i64> = None;
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
         let input = &rec["input"];
@@ -814,7 +816,17 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .unwrap()
                             .iter()
                             .any(|v| v.as_i64() == Some(1));
-                        if on {
+                        let is_boat = spawned
+                            .get(&vehicle)
+                            .is_some_and(|s| modern::BoatKind::from_entity_name(&s.0).is_some());
+                        if !is_boat {
+                            if on && seat != Some(vehicle) {
+                                modern::Seat::board(&mut p);
+                                seat = Some(vehicle);
+                            } else if !on && seat == Some(vehicle) {
+                                seat = None;
+                            }
+                        } else if on {
                             if riding.as_ref().is_none_or(|r| r.0 != vehicle) {
                                 let (ty, pos, yaw) = spawned[&vehicle].clone();
                                 let kind = modern::BoatKind::from_entity_name(&ty).unwrap();
@@ -883,7 +895,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let ents = rec.get("entities").and_then(Value::as_array);
         let mut colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
         let mut after: Vec<modern::Pusher> = Vec::new();
-        let vehicle_id = riding.as_ref().map(|r| r.0);
+        let vehicle_id = riding.as_ref().map(|r| r.0).or(seat);
         let mut boat_colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
         if let Some(ents) = ents {
             let mut before_player = true;
@@ -939,7 +951,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let colliders: Vec<ghast_physics::math::Aabb> =
             colliders.into_iter().map(|c| c.1).collect();
         let around = modern::Surroundings::new().with_entities(&colliders);
-        if let Some((_, _, bt)) = riding.as_mut() {
+        if seat.is_some() {
+            let s = modern::Seat::new(f3(&rec["vehicle"]["pos"]), modern::Seat::MINECART);
+            modern::tick_passenger::<V26_1, _>(&mut p, &mut x, &around, &s, &ti, &world, &mut out);
+        } else if let Some((_, _, bt)) = riding.as_mut() {
             boat_colliders.sort_by_key(|c| c.0);
             let bc: Vec<ghast_physics::math::Aabb> = boat_colliders.iter().map(|c| c.1).collect();
             modern::tick_boat::<V26_1, _>(bt, &mut p, &mut x, &around, &bc, &ti, &world, &mut out);
@@ -980,6 +995,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 }
             }
             (None, None) => {}
+            (Some(_), None) if seat.is_some() => {}
             (v, r) => {
                 return Err(mm(
                     t,

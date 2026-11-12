@@ -260,6 +260,15 @@ final class Ext {
         }
         if (run.player.getVehicle() instanceof net.minecraft.world.entity.vehicle.boat.AbstractBoat boat) {
             boat(j.key("vehicle"), boat);
+        } else if (run.player.getVehicle() != null) {
+            // A vehicle the client does not move (a minecart): where it is after its tick.
+            Entity v = run.player.getVehicle();
+            j.key("vehicle").beginObject().field("id", v.getId()).field("type", BuiltInRegistries.ENTITY_TYPE.getKey(v.getType()).getPath());
+            j.key("pos").beginArray().f64(v.getX()).f64(v.getY()).f64(v.getZ()).endArray();
+            j.fieldF32("yaw", v.getYRot()).fieldF32("pitch", v.getXRot());
+            box(j.key("bb"), v.getBoundingBox());
+            j.field("authoritative", v.isLocalInstanceAuthoritative());
+            j.endObject();
         }
         j.key("entities").beginArray();
         for (Entity e : ORDER) {

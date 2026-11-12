@@ -101,6 +101,12 @@ fn boats_26_1() {
     check("boats.jsonl.gz");
 }
 
+/// Riding a minecart the server moves: the passenger's tick and seat.
+#[test]
+fn minecarts_26_1() {
+    check("minecarts.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

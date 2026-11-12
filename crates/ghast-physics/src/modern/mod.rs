@@ -40,7 +40,7 @@ pub use attr::{
     Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash,
     java_string_hash, sprinting_id,
 };
-pub use boat::{Boat, BoatKind, BoatStatus, tick_boat};
+pub use boat::{Boat, BoatKind, BoatStatus, Seat, tick_boat, tick_passenger};
 pub use border::BorderState;
 pub use entity::{PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1};
 pub use ext::{MAX_ROCKETS, PlayerExt};

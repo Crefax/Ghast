@@ -346,6 +346,8 @@ pub fn tick_boat<R: Rules, W: BlockView<State = R::State>>(
         spin_attack: x.spin_attack,
         auto_spin_ticks: x.auto_spin_ticks,
         riding: Some(Ride {
+            boat: true,
+            controlled: true,
             top: boat.e.bb.max_y,
             under_water: boat.is_under_water(),
             pos: boat.e.pos,
@@ -370,6 +372,93 @@ pub fn tick_boat<R: Rules, W: BlockView<State = R::State>>(
     // LocalPlayer.rideTick: the boat paddles with these keys in its next tick.
     let k = p.input.keys;
     boat.s.input = [k.left, k.right, k.forward, k.back];
+}
+
+/// A vehicle the player rides but the server moves (a minecart): where it is after its own client
+/// tick (the entity tracker's interpolated position) and the height of its seat.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Seat {
+    /// The vehicle's position after its tick.
+    pub pos: [f64; 3],
+    /// The passenger attachment height above the vehicle's position (`EntityType` passenger
+    /// attachment: [`Seat::MINECART`] for every minecart).
+    pub height: f64,
+}
+
+impl Seat {
+    /// The passenger attachment height of minecarts (`passengerAttachments(0.1875F)`).
+    pub const MINECART: f64 = 0.1875;
+
+    /// The server's `set_passengers` put the player on such a vehicle (`startRiding`): the
+    /// standing pose (the rotation is kept).
+    pub fn board(p: &mut PlayerState) {
+        if p.pose != Pose::Standing {
+            p.pose = Pose::Standing;
+            p.dims = Pose::Standing.scaled(p.scale());
+            let [x, y, z] = p.pos;
+            p.set_pos(x, y, z);
+        }
+    }
+
+    /// A seat at `height` above a vehicle at `pos`.
+    #[must_use]
+    pub fn new(pos: [f64; 3], height: f64) -> Seat {
+        Seat { pos, height }
+    }
+}
+
+/// One client tick of a player riding a vehicle the server moves (a minecart): mouse turning (no
+/// clamp), the passenger's tick (motion zeroed first; packets: `player_input` when the keys changed
+/// and a rotation-only movement packet, no `vehicle_move`), then the seat (`positionRider`: the
+/// vehicle's position plus the seat height minus the player's 0.6 vehicle attachment) and the
+/// fall distance reset. The vehicle ticks before its passenger: pass its position after that tick.
+pub fn tick_passenger<R: Rules, W: BlockView<State = R::State>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    around: &super::Surroundings<'_>,
+    seat: &Seat,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    if input.yaw.is_finite() {
+        p.yaw = input.yaw;
+    }
+    if input.pitch.is_finite() {
+        p.pitch = (input.pitch % 360.0).clamp(-90.0, 90.0);
+    }
+    p.vel = [0.0; 3];
+    let mut g = Glide {
+        fall_flying: x.fall_flying,
+        glider: x.glider,
+        spin_attack: x.spin_attack,
+        auto_spin_ticks: x.auto_spin_ticks,
+        riding: Some(Ride {
+            boat: false,
+            controlled: false,
+            top: 0.0,
+            under_water: false,
+            pos: seat.pos,
+            yaw: 0.0,
+            pitch: 0.0,
+            on_ground: false,
+        }),
+        last_yd: 0.0,
+    };
+    let pending = x.pending_move.take();
+    let keep = TickInput {
+        yaw: f32::NAN,
+        pitch: f32::NAN,
+        ..*input
+    };
+    tick_core::<R, W, Ents<'_>>(p, &mut g, pending, Ents(around.entities), &keep, world, out);
+    x.fall_flying = g.fall_flying;
+    x.auto_spin_ticks = g.auto_spin_ticks;
+    let attach = 0.6 * f64::from(p.scale());
+    let y = seat.pos[1] + seat.height;
+    p.set_pos(seat.pos[0], y - attach, seat.pos[2]);
+    p.fall_distance = 0.0;
 }
 
 /// `Mth.wrapDegrees(float)`.

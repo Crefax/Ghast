@@ -1080,6 +1080,16 @@ corrections, other boats and dismounts. Quirks:
 - Fixed with this mechanic: the first record of a case with entities listed the previous case's
   last entity tick (static lists); `entities.jsonl.gz` changed in its `t = 0` records only.
 
+**`minecarts`** (5 cases + 100 fuzz): a minecart (all five kinds) on a rail line, boarded through
+`set_passengers`, moved by real `teleport_entity` packets (the client interpolates it; it is not
+the client's to move). Tick records add `vehicle` with the cart's position, rotation and box after
+its tick and `authoritative: false`. Cases: keys and looks while sitting, a cart moved along the
+rails, against a wall and through water, a dismount. Fuzz (`ExtCases.minecartsFuzz`, cases `…_mc`):
+obstacles next to and above the rails (walls, water, cobwebs, slabs, soul sand, ladders), the cart
+moved along and off the rails with random speeds and rotations, random keys and looks, dismounts.
+The passenger's own move and collisions still run every tick (its flags go out in the rotation
+packet); the seat is 0.1875 above the cart.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

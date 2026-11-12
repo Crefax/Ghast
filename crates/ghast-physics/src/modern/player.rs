@@ -808,6 +808,10 @@ pub(super) struct Ride {
     pub(super) top: f64,
     /// The boat is under water (the passenger's fluid box is then not cut).
     pub(super) under_water: bool,
+    /// The vehicle is a boat (the passenger's fluid box is cut at its top).
+    pub(super) boat: bool,
+    /// The client moves the vehicle (it sends `vehicle_move` and the sprint state).
+    pub(super) controlled: bool,
     /// The boat's position, rotation and ground flag for the move-vehicle packet.
     pub(super) pos: [f64; 3],
     pub(super) yaw: f32,
@@ -1120,7 +1124,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     ) -> super::fluid::Interaction {
         let p = &*self.p;
         let mut b = super::math::deflate(&p.bb, 0.001);
-        if !r.under_water {
+        if r.boat && !r.under_water {
             if r.top >= b.max_y {
                 return super::fluid::Interaction::default();
             }
@@ -2631,6 +2635,9 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             on_ground: p.on_ground,
             horizontal_collision: p.horizontal_collision,
         });
+        if !r.controlled {
+            return;
+        }
         out.push(Packet::MoveVehicle {
             pos: r.pos,
             yaw: r.yaw,
