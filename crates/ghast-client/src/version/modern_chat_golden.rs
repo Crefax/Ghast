@@ -1,4 +1,4 @@
-//! Signed chat against the real 26.1 client: `tests/golden/26.1/chat_signing.jsonl.gz` (oracle
+//! Signed chat against the real client: `tests/golden/<version>/chat_signing.jsonl.gz` (oracle
 //! `chat-signing`, made with `LocalChatSession`, `SignedMessageChain`, `LastSeenMessagesTracker`,
 //! `SignableCommand` over the client's command dispatcher and the serverbound packet codecs).
 //! Every packet body this wire layer writes — `chat_session_update`, `chat_message`,
@@ -19,12 +19,13 @@ use serde_json::Value;
 use super::*;
 
 fn vectors() -> Vec<Value> {
-    let path = concat!(
+    let path = format!(
+        "{}/../../tests/golden/{}/chat_signing.jsonl.gz",
         env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/golden/26.1/chat_signing.jsonl.gz"
+        super::super::GOLDEN_DIR
     );
     let mut text = String::new();
-    flate2::read::GzDecoder::new(std::fs::File::open(path).expect("golden file"))
+    flate2::read::GzDecoder::new(std::fs::File::open(&path).expect("golden file"))
         .read_to_string(&mut text)
         .expect("gzip");
     text.lines()
@@ -97,13 +98,13 @@ fn signed_chat_matches_the_real_client() {
     );
 
     let mut enc = FrameEncoder::new();
-    let mut wire = Wire26_1::default();
+    let mut wire = Wire::default();
     // chat_session_update.
     wire.chat = Some(ChatSession {
         keys: keys.clone(),
         chain: SignedMessageChain::new(profile, session_id),
     });
-    V26_1::write_play(&mut enc, &Outbound::ChatSessionUpdate, &mut wire).unwrap();
+    Marker::write_play(&mut enc, &Outbound::ChatSessionUpdate, &mut wire).unwrap();
     let f = frames(&mut enc);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].0, sb::id::CHAT_SESSION_UPDATE);
@@ -131,7 +132,7 @@ fn signed_chat_matches_the_real_client() {
                 recv += 1;
                 wire.seen
                     .add(Bytes::from(b64(sig)), e["shown"].as_bool().unwrap());
-                V26_1::write_wire_replies(&mut enc, &mut wire).unwrap();
+                Marker::write_wire_replies(&mut enc, &mut wire).unwrap();
                 let f = frames(&mut enc);
                 match e.get("ack_body") {
                     Some(b) => {
@@ -189,7 +190,7 @@ fn signed_chat_matches_the_real_client() {
     assert!(chats > 50 && signed_cmds > 30 && cmds > 30 && acks >= 2);
 }
 
-/// Login encryption against the real 26.1 classes: `tests/golden/26.1/net_crypto.jsonl.gz`
+/// Login encryption against the real classes: `tests/golden/<version>/net_crypto.jsonl.gz`
 /// (oracle `net-crypto`): the session hash, the `hello` packet (with `shouldAuthenticate`),
 /// the key packet layout (both ways: the real client's packet decrypts to its secret and
 /// challenge, ours to ours) and the AES/CFB8 streams of both directions.
@@ -199,12 +200,13 @@ fn login_encryption_matches_the_real_client() {
     use rsa::pkcs8::DecodePrivateKey;
     use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 
-    let path = concat!(
+    let path = format!(
+        "{}/../../tests/golden/{}/net_crypto.jsonl.gz",
         env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/golden/26.1/net_crypto.jsonl.gz"
+        super::super::GOLDEN_DIR
     );
     let mut text = String::new();
-    flate2::read::GzDecoder::new(std::fs::File::open(path).expect("golden file"))
+    flate2::read::GzDecoder::new(std::fs::File::open(&path).expect("golden file"))
         .read_to_string(&mut text)
         .expect("gzip");
     let mut n = 0;
@@ -228,7 +230,7 @@ fn login_encryption_matches_the_real_client() {
             login::clientbound::id::ENCRYPTION_BEGIN,
             Bytes::from(hex(c["hello_body"].as_str().unwrap())),
         );
-        let (id, key, token) = match V26_1::decode_login(&raw).unwrap().unwrap() {
+        let (id, key, token) = match Marker::decode_login(&raw).unwrap().unwrap() {
             LoginInbound::EncryptionRequest {
                 server_id,
                 public_key,
@@ -271,7 +273,7 @@ fn login_encryption_matches_the_real_client() {
         )
         .unwrap();
         let mut enc = FrameEncoder::new();
-        V26_1::write_encryption_response(
+        Marker::write_encryption_response(
             &mut enc,
             &ours.encrypted_shared_secret,
             &ours.encrypted_verify_token,

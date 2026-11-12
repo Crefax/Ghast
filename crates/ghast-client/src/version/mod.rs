@@ -16,7 +16,7 @@ use crate::common::{
 use crate::interest::Interests;
 
 mod caps;
-#[cfg(feature = "v26_1")]
+#[cfg(ghast_modern)]
 mod commands;
 #[cfg(feature = "v1_12_2")]
 mod v1_12_2;
@@ -37,7 +37,7 @@ pub use ghast_protocol::v1_16_5::V1_16_5;
 #[cfg(feature = "v26_1")]
 pub use ghast_protocol::v26_1::V26_1;
 #[cfg(feature = "v26_1")]
-pub use v26_1::Wire26_1;
+pub use v26_1::Wire as Wire26_1;
 
 /// A protocol version the client supports, chosen at run time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

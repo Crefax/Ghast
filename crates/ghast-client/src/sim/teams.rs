@@ -1,4 +1,4 @@
-//! 26.1 team collision rules for entity pushes: the part of the client scoreboard that
+//! Modern team collision rules for entity pushes: the part of the client scoreboard that
 //! `EntitySelector.pushableBy` reads (each team's `collisionRule` and who is on which team),
 //! kept from `set_player_team` packets only while entities are tracked.
 
@@ -13,6 +13,18 @@ pub(crate) const ALWAYS: u8 = 0;
 pub(crate) const NEVER: u8 = 1;
 pub(crate) const PUSH_OTHER_TEAMS: u8 = 2;
 pub(crate) const PUSH_OWN_TEAM: u8 = 3;
+
+/// The order of a team's parameters in `set_player_team` (`Parameters.STREAM_CODEC`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // `AffixesFirst` is read by the 26.2 row
+pub(crate) enum TeamLayout {
+    /// 26.1: display name, options byte, name tag visibility, collision rule, colour
+    /// (`ChatFormatting`), prefix, suffix.
+    RuleBeforeAffixes,
+    /// 26.2: display name, prefix, suffix, name tag visibility, collision rule, optional
+    /// colour (`TeamColor`), options byte.
+    AffixesFirst,
+}
 
 /// The client scoreboard's teams as far as collision rules go.
 #[derive(Debug, Default)]
@@ -61,11 +73,11 @@ impl Teams {
     /// `ClientPacketListener.handleSetPlayerTeamPacket` for a `set_player_team` body. Only the
     /// name, the action, the collision rule and the member list are read (the components are
     /// skipped). Returns `false` for a body that does not parse (nothing more is applied).
-    pub(crate) fn apply(&mut self, body: &Bytes) -> bool {
-        self.apply_inner(body).is_some()
+    pub(crate) fn apply(&mut self, body: &Bytes, layout: TeamLayout) -> bool {
+        self.apply_inner(body, layout).is_some()
     }
 
-    fn apply_inner(&mut self, body: &Bytes) -> Option<()> {
+    fn apply_inner(&mut self, body: &Bytes, layout: TeamLayout) -> Option<()> {
         let mut r = Reader::new(body);
         let name = r.read_string().ok()?;
         let mode = r.read_i8().ok()?;
@@ -92,18 +104,34 @@ impl Teams {
         };
         if mode == 0 || mode == 2 {
             AnonNbt::read(&mut r).ok()?; // display name
-            r.read_u8().ok()?; // options
-            r.read_varint().ok()?; // name tag visibility
-            let rule = r.read_varint().ok()?;
+            let rule = match layout {
+                TeamLayout::RuleBeforeAffixes => {
+                    r.read_u8().ok()?; // options
+                    r.read_varint().ok()?; // name tag visibility
+                    let rule = r.read_varint().ok()?;
+                    r.read_varint().ok()?; // color
+                    AnonNbt::read(&mut r).ok()?; // prefix
+                    AnonNbt::read(&mut r).ok()?; // suffix
+                    rule
+                }
+                TeamLayout::AffixesFirst => {
+                    AnonNbt::read(&mut r).ok()?; // prefix
+                    AnonNbt::read(&mut r).ok()?; // suffix
+                    r.read_varint().ok()?; // name tag visibility
+                    let rule = r.read_varint().ok()?;
+                    if r.read_bool().ok()? {
+                        r.read_varint().ok()?; // color
+                    }
+                    r.read_u8().ok()?; // options
+                    rule
+                }
+            };
             // ByIdMap.continuous with OutOfBoundsStrategy.ZERO: unknown ids are `always`.
             let rule = u8::try_from(rule)
                 .ok()
                 .filter(|&x| x <= PUSH_OWN_TEAM)
                 .unwrap_or(ALWAYS);
             self.set_rule(slot, rule);
-            r.read_varint().ok()?; // color
-            AnonNbt::read(&mut r).ok()?; // prefix
-            AnonNbt::read(&mut r).ok()?; // suffix
         }
         if mode == 0 || mode == 3 || mode == 4 {
             let n = r.read_varint().ok()?;
@@ -150,6 +178,13 @@ impl Teams {
             return false;
         }
         (own_rule != PUSH_OTHER_TEAMS && their_rule != PUSH_OTHER_TEAMS) || same
+    }
+}
+
+#[cfg(test)]
+impl Teams {
+    fn apply26(&mut self, body: &Bytes) -> bool {
+        self.apply(body, TeamLayout::RuleBeforeAffixes)
     }
 }
 
@@ -209,8 +244,8 @@ mod tests {
         for ra in 0..4u8 {
             for rb in 0..4u8 {
                 let mut t = Teams::default();
-                assert!(t.apply(&packet("a", 0, Some(i32::from(ra)), &["me", "zombie-uuid"])));
-                assert!(t.apply(&packet("b", 0, Some(i32::from(rb)), &["cow-uuid"])));
+                assert!(t.apply26(&packet("a", 0, Some(i32::from(ra)), &["me", "zombie-uuid"])));
+                assert!(t.apply26(&packet("b", 0, Some(i32::from(rb)), &["cow-uuid"])));
                 assert_eq!(t.any_rule(), ra != 0 || rb != 0);
                 let a = Some((0, ra));
                 let b = Some((1, rb));
@@ -218,7 +253,7 @@ mod tests {
                 assert_eq!(t.may_push("cow-uuid", "me"), vanilla(b, a), "{ra} {rb}");
                 assert_eq!(t.may_push("pig-uuid", "me"), vanilla(None, a), "{ra} {rb}");
                 // The player leaves its team.
-                assert!(t.apply(&packet("a", 4, None, &["me"])));
+                assert!(t.apply26(&packet("a", 4, None, &["me"])));
                 assert_eq!(t.may_push("zombie-uuid", "me"), vanilla(a, None));
                 assert_eq!(t.may_push("cow-uuid", "me"), vanilla(b, None));
             }
@@ -228,33 +263,33 @@ mod tests {
     #[test]
     fn scoreboard_semantics() {
         let mut t = Teams::default();
-        t.apply(&packet("a", 0, Some(i32::from(NEVER)), &["x"]));
+        t.apply26(&packet("a", 0, Some(i32::from(NEVER)), &["x"]));
         assert!(!t.may_push("x", "me"));
         // Moving to another team leaves the first one.
-        t.apply(&packet("b", 0, Some(0), &[]));
-        t.apply(&packet("b", 3, None, &["x"]));
+        t.apply26(&packet("b", 0, Some(0), &[]));
+        t.apply26(&packet("b", 3, None, &["x"]));
         assert!(t.may_push("x", "me"));
         // A remove for a team the member is not on keeps the membership.
-        t.apply(&packet("a", 4, None, &["x"]));
+        t.apply26(&packet("a", 4, None, &["x"]));
         assert_eq!(t.of("x"), (Some(1), ALWAYS));
         // Update info changes the rule; ADD on an existing team keeps it (and its members).
-        t.apply(&packet("b", 2, Some(i32::from(NEVER)), &[]));
+        t.apply26(&packet("b", 2, Some(i32::from(NEVER)), &[]));
         assert!(!t.may_push("x", "me"));
-        t.apply(&packet("b", 0, Some(i32::from(NEVER)), &["y"]));
+        t.apply26(&packet("b", 0, Some(i32::from(NEVER)), &["y"]));
         assert_eq!(t.of("x"), (Some(1), NEVER));
         // Removing a team frees its members and its slot.
-        t.apply(&packet("b", 1, None, &[]));
+        t.apply26(&packet("b", 1, None, &[]));
         assert_eq!(t.of("x"), (None, ALWAYS));
         assert!(t.may_push("y", "me"));
         assert_eq!(t.strict, 1);
-        t.apply(&packet("a", 1, None, &[]));
+        t.apply26(&packet("a", 1, None, &[]));
         assert!(!t.any_rule());
         // Unknown team, unknown rule id, a truncated body.
-        assert!(!t.apply(&packet("zzz", 3, None, &["x"])));
-        t.apply(&packet("c", 0, Some(9), &["x"]));
+        assert!(!t.apply26(&packet("zzz", 3, None, &["x"])));
+        t.apply26(&packet("c", 0, Some(9), &["x"]));
         assert_eq!(t.of("x"), (Some(0), ALWAYS));
         let p = packet("c", 3, None, &["y"]);
-        assert!(!t.apply(&p.slice(..p.len() - 1)));
+        assert!(!t.apply26(&p.slice(..p.len() - 1)));
     }
 }
 
@@ -284,7 +319,7 @@ fn teams_cost() {
     let mut t = Teams::default();
     let mut ok = 0;
     for i in 0..n {
-        ok += usize::from(t.apply(&packets[i % packets.len()]));
+        ok += usize::from(t.apply(&packets[i % packets.len()], TeamLayout::RuleBeforeAffixes));
     }
     println!("{ok}");
 }

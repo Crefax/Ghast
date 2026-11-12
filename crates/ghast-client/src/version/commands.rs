@@ -13,14 +13,12 @@
 //! exact value parsers (is it a valid block id …) are not modelled — the reader only needs where
 //! each argument ends.
 
-use ghast_protocol::v26_1::play::clientbound as cb;
-use ghast_protocol::v26_1::types::{
-    CommandNodeExtraNodeData, CommandNodeExtraNodeDataCase2Parser as P,
-};
+//! The tree is version-free; each modern protocol's wire layer builds it from its own
+//! `declare_commands` types (`command_tree` in `version/modern.rs`).
 
 /// How an argument's text is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reader {
+pub(crate) enum Reader {
     /// `readBoolean` / `readString`.
     StringToken,
     /// `readUnquotedString` (`brigadier:string` single word).
@@ -46,14 +44,15 @@ enum Reader {
     Balanced,
 }
 
+/// A node of the tree (indices into the node list).
 #[derive(Debug, Clone)]
-struct Node {
+pub(crate) struct Node {
     /// 0 root, 1 literal, 2 argument.
-    kind: u8,
-    name: Box<str>,
-    reader: Reader,
-    children: Box<[u32]>,
-    redirect: Option<u32>,
+    pub(crate) kind: u8,
+    pub(crate) name: Box<str>,
+    pub(crate) reader: Reader,
+    pub(crate) children: Box<[u32]>,
+    pub(crate) redirect: Option<u32>,
 }
 
 /// A parsed command tree (only what the signing decision needs).
@@ -64,29 +63,9 @@ pub(crate) struct CommandTree {
 }
 
 impl CommandTree {
-    /// Builds the tree from a `declare_commands` packet.
-    pub(crate) fn from_packet(p: &cb::DeclareCommands) -> Option<Self> {
-        let n = p.nodes.len();
-        let index = |i: i32| u32::try_from(i).ok().filter(|&i| (i as usize) < n);
-        let mut nodes = Vec::with_capacity(n);
-        for node in &p.nodes {
-            let (name, reader): (Box<str>, Reader) = match &node.extra_node_data {
-                CommandNodeExtraNodeData::Case1(l) => ((&*l.name).into(), Reader::Balanced),
-                CommandNodeExtraNodeData::Case2(a) => ((&*a.name).into(), reader_for(a)),
-                _ => ("".into(), Reader::Balanced),
-            };
-            nodes.push(Node {
-                kind: node.flags.command_node_type,
-                name,
-                reader,
-                children: node.children.iter().filter_map(|&c| index(c)).collect(),
-                redirect: node.redirect_node.and_then(index),
-            });
-        }
-        Some(Self {
-            nodes,
-            root: index(p.root_index)?,
-        })
+    /// A tree of `nodes` (children and redirects already checked to be in range).
+    pub(crate) fn new(nodes: Vec<Node>, root: u32) -> Self {
+        Self { nodes, root }
     }
 
     /// The signable arguments (`minecraft:message`) a parse of `command` (without the `/`)
@@ -214,39 +193,6 @@ struct Parse {
     args: Vec<Arg>,
     consumed: usize,
     errors: u32,
-}
-
-fn reader_for(a: &ghast_protocol::v26_1::types::CommandNodeExtraNodeDataCase2) -> Reader {
-    use ghast_protocol::v26_1::types::CommandNodeExtraNodeDataCase2Properties as Props;
-    match a.parser {
-        P::BRIGADIER_BOOL => Reader::StringToken,
-        P::BRIGADIER_FLOAT | P::BRIGADIER_DOUBLE | P::BRIGADIER_INTEGER | P::BRIGADIER_LONG => {
-            Reader::Number
-        }
-        P::BRIGADIER_STRING => match &a.properties {
-            Props::BrigadierString(s) if s.0 == 0 => Reader::Word,
-            Props::BrigadierString(s) if s.0 == 2 => Reader::Greedy,
-            _ => Reader::StringToken,
-        },
-        P::MINECRAFT_ENTITY => match &a.properties {
-            Props::Entity(f) => Reader::Entity {
-                single: f.only_allow_entities == 1,
-                players: f.only_allow_players == 1,
-            },
-            _ => Reader::Entity {
-                single: false,
-                players: false,
-            },
-        },
-        P::MINECRAFT_GAME_PROFILE => Reader::GameProfile,
-        P::MINECRAFT_SCORE_HOLDER => Reader::ScoreHolder,
-        P::MINECRAFT_MESSAGE => Reader::Message,
-        P::MINECRAFT_VEC3 | P::MINECRAFT_BLOCK_POS => Reader::Coords(3),
-        P::MINECRAFT_VEC2 | P::MINECRAFT_COLUMN_POS | P::MINECRAFT_ROTATION => Reader::Coords(2),
-        P::MINECRAFT_ANGLE => Reader::Coords(1),
-        P::MINECRAFT_TIME => Reader::Time,
-        _ => Reader::Balanced,
-    }
 }
 
 /// Brigadier's `isAllowedInUnquotedString`.

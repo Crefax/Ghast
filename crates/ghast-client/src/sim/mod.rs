@@ -13,7 +13,7 @@ use crate::common::{
 use crate::hands::{BlockQuery, HeldItem};
 use crate::version::DataSet;
 
-#[cfg(feature = "v26_1")]
+#[cfg(ghast_modern)]
 mod teams;
 #[cfg(feature = "v1_12_2")]
 mod v1_12;
