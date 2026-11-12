@@ -52,6 +52,11 @@ final class Ext {
         int riptide;
         /** It rains (the server's start-raining and rain-level game events at setup). */
         boolean raining;
+        /**
+         * Other entities spawned at setup (after the player, so they tick after it); non-null also when
+         * empty: tick records then list every other entity ({@code entities}).
+         */
+        List<Spawn> entities;
     }
 
     static Setup setup(Scenario sc) {
@@ -88,6 +93,12 @@ final class Ext {
 
     /** Remove entities packet. */
     record Remove(int id) implements Scenario.VersionEvent {}
+
+    /** An add-entity packet: {@code type} (registry name without namespace) at a position, no motion. */
+    record Spawn(int id, String type, double x, double y, double z, float yaw) implements Scenario.VersionEvent {}
+
+    /** A teleport-entity packet (absolute position, yaw, on ground): the client interpolates there. */
+    record Move(int id, double x, double y, double z, float yaw, boolean onGround) implements Scenario.VersionEvent {}
 
     // ---- harness hooks -----------------------------------------------------------------------------
 
@@ -138,6 +149,97 @@ final class Ext {
         if (s != null && s.fallFlying) {
             sharedFlags(run, 0x80, 0);
         }
+        if (s != null && s.entities != null) {
+            for (Spawn sp : s.entities) {
+                spawn(sp);
+            }
+        }
+    }
+
+    private static void spawn(Spawn s) {
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getOptional(Identifier.withDefaultNamespace(s.type()))
+                .orElseThrow(() -> new IllegalArgumentException("entity " + s.type()));
+        byte yRot = (byte) Math.floor(s.yaw() * 256.0F / 360.0F);
+        ClientboundAddEntityPacket add = new ClientboundAddEntityPacket(s.id(), new UUID(0x656e74L, s.id()), s.x(), s.y(), s.z(),
+                0.0F, s.yaw(), type, 0, Vec3.ZERO, s.yaw());
+        Harness.listener.handleAddEntity(Harness.roundTrip(ClientboundAddEntityPacket.STREAM_CODEC, add));
+    }
+
+    private static void move(Move m) {
+        Harness.listener.handleTeleportEntity(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket.STREAM_CODEC,
+                new net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket(m.id(),
+                        new net.minecraft.world.entity.PositionMoveRotation(new Vec3(m.x(), m.y(), m.z()), Vec3.ZERO, m.yaw(), 0.0F),
+                        java.util.Set.of(), m.onGround())));
+    }
+
+    // ---- other entities around the player: boxes before the player's tick and after each tick ----
+
+    private static final java.util.Map<Integer, net.minecraft.world.phys.AABB> PRE = new java.util.HashMap<>();
+    private static final List<Entity> ORDER = new ArrayList<>();
+    /** Position of each entity in the level's own {@code getEntities} order (sections, then insertion). */
+    private static final java.util.Map<Integer, Integer> QUERY_ORDER = new java.util.HashMap<>();
+
+    static void beforeEntities(Harness.Run run) {
+        PRE.clear();
+        ORDER.clear();
+        QUERY_ORDER.clear();
+        Setup s = of(run.sc);
+        if (s == null || s.entities == null) {
+            return;
+        }
+        for (Entity e : run.level.entitiesForRendering()) {
+            if (e.getId() != Harness.PLAYER_ENTITY_ID) {
+                PRE.put(e.getId(), e.getBoundingBox());
+            }
+        }
+        // Tick order: the level's ticking list (insertion order).
+        Object list = Reflect.get(net.minecraft.client.multiplayer.ClientLevel.class, run.level, "tickingEntities");
+        @SuppressWarnings("unchecked")
+        it.unimi.dsi.fastutil.ints.Int2ObjectMap<Entity> active = (it.unimi.dsi.fastutil.ints.Int2ObjectMap<Entity>)
+                Reflect.get(net.minecraft.world.level.entity.EntityTickList.class, list, "active");
+        ORDER.addAll(active.values());
+        int k = 0;
+        for (Entity e : run.level.getEntities((Entity) run.player, run.player.getBoundingBox().inflate(64.0))) {
+            QUERY_ORDER.put(e.getId(), k++);
+        }
+    }
+
+    static void afterEntities(Harness.Run run) {
+    }
+
+    /** The {@code entities} of a tick record: every other ticking entity in tick order (cases with entities). */
+    static void tickRecord(Json j, Harness.Run run) {
+        Setup s = of(run.sc);
+        if (s == null || s.entities == null) {
+            return;
+        }
+        j.key("entities").beginArray();
+        for (Entity e : ORDER) {
+            if (e.getId() == Harness.PLAYER_ENTITY_ID) {
+                j.beginObject().field("id", e.getId()).field("player", true).endObject();
+                continue;
+            }
+            j.beginObject().field("id", e.getId()).field("type", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath());
+            net.minecraft.world.phys.AABB pre = PRE.get(e.getId());
+            if (pre != null) {
+                box(j.key("pre"), pre);
+            }
+            if (!e.isRemoved()) {
+                box(j.key("post"), e.getBoundingBox());
+                j.key("pos").beginArray().f64(e.getX()).f64(e.getY()).f64(e.getZ()).endArray();
+            }
+            j.field("alive", e.isAlive());
+            Integer q = QUERY_ORDER.get(e.getId());
+            if (q != null) {
+                j.field("query_order", q);
+            }
+            j.endObject();
+        }
+        j.endArray();
+    }
+
+    private static void box(Json j, net.minecraft.world.phys.AABB b) {
+        j.beginArray().f64(b.minX).f64(b.minY).f64(b.minZ).f64(b.maxX).f64(b.maxY).f64(b.maxZ).endArray();
     }
 
     static void apply(Harness.Run run, Scenario.VersionEvent e) {
@@ -149,6 +251,10 @@ final class Ext {
             equip(run, q.slot(), q.item(), q.damage());
         } else if (e instanceof Firework f) {
             firework(run, f.id());
+        } else if (e instanceof Spawn sp) {
+            spawn(sp);
+        } else if (e instanceof Move m) {
+            move(m);
         } else if (e instanceof Remove r) {
             Harness.listener.handleRemoveEntities(Harness.roundTrip(ClientboundRemoveEntitiesPacket.STREAM_CODEC,
                     new ClientboundRemoveEntitiesPacket(r.id())));
@@ -244,6 +350,13 @@ final class Ext {
         if (s.raining) {
             j.field("raining", true);
         }
+        if (s.entities != null) {
+            j.key("entities").beginArray();
+            for (Spawn sp : s.entities) {
+                spawnJson(j.beginObject(), sp).endObject();
+            }
+            j.endArray();
+        }
         j.endObject();
     }
 
@@ -259,11 +372,29 @@ final class Ext {
             }
         } else if (e instanceof Firework f) {
             j.field("type", "firework").field("id", f.id());
+        } else if (e instanceof Spawn sp) {
+            spawnJson(j.field("type", "spawn"), sp);
+        } else if (e instanceof Move m) {
+            j.field("type", "entity_move").field("id", m.id());
+            j.key("pos").beginArray().f64(m.x()).f64(m.y()).f64(m.z()).endArray();
+            j.fieldF32("yaw", m.yaw()).field("on_ground", m.onGround());
         } else if (e instanceof Remove r) {
             j.field("type", "remove_entity").field("id", r.id());
         } else {
             throw new IllegalArgumentException("event " + e);
         }
+    }
+
+    private static Json spawnJson(Json j, Spawn sp) {
+        j.field("id", sp.id()).field("entity", sp.type());
+        j.key("pos").beginArray().f64(sp.x()).f64(sp.y()).f64(sp.z()).endArray();
+        return j.fieldF32("yaw", sp.yaw());
+    }
+
+    private static Spawn readSpawn(JsonObject o) {
+        com.google.gson.JsonArray p = o.getAsJsonArray("pos");
+        return new Spawn(o.get("id").getAsInt(), o.get("entity").getAsString(), ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)),
+                ScenarioReader.f64(p.get(2)), ScenarioReader.f32(o.get("yaw")));
     }
 
     static void readSetup(JsonObject s, Scenario sc) {
@@ -283,6 +414,12 @@ final class Ext {
         st.leftHanded = x.has("left_handed") && x.get("left_handed").getAsBoolean();
         st.riptide = x.has("riptide") ? x.get("riptide").getAsInt() : 0;
         st.raining = x.has("raining") && x.get("raining").getAsBoolean();
+        if (x.has("entities")) {
+            st.entities = new ArrayList<>();
+            for (com.google.gson.JsonElement e : x.getAsJsonArray("entities")) {
+                st.entities.add(readSpawn(e.getAsJsonObject()));
+            }
+        }
     }
 
     /** An event this class knows, or null. */
@@ -294,6 +431,12 @@ final class Ext {
                     ev.has("damage") ? ev.get("damage").getAsInt() : 0);
             case "firework" -> new Firework(ev.get("id").getAsInt());
             case "remove_entity" -> new Remove(ev.get("id").getAsInt());
+            case "spawn" -> readSpawn(ev);
+            case "entity_move" -> {
+                com.google.gson.JsonArray p = ev.getAsJsonArray("pos");
+                yield new Move(ev.get("id").getAsInt(), ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)), ScenarioReader.f64(p.get(2)),
+                        ScenarioReader.f32(ev.get("yaw")), ev.get("on_ground").getAsBoolean());
+            }
             default -> null;
         };
     }

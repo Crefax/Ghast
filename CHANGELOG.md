@@ -129,6 +129,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `tests/golden/26.1/riptide.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): `modern::riptide` (the
   launch on releasing the trident), `modern::in_water_or_rain`, `PlayerExt::{spin_attack,
   auto_spin_ticks, apply_living_flags, living_flags}` (spin counter and pose).
+- **26.1 entity collision and pushing**, proven against the real client (oracle `entities`,
+  `tests/golden/26.1/entities.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): `modern::Surroundings`
+  with `tick_in` / `LoadGate::step_in` (boxes of collidable entities: in collisions, step-up,
+  pose and edge tests, auto-jump), `modern::push_by` (`Pusher`, `PushKind`), `push_kind_26_1`,
+  `collides_26_1`, `MAX_ROCKETS`.
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 

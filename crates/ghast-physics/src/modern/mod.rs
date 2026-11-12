@@ -24,6 +24,7 @@
 
 mod attr;
 pub(crate) mod collide;
+mod entity;
 mod ext;
 mod fluid;
 mod inside;
@@ -37,12 +38,13 @@ pub use attr::{
     Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash,
     java_string_hash, sprinting_id,
 };
-pub use ext::PlayerExt;
+pub use entity::{PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1};
+pub use ext::{MAX_ROCKETS, PlayerExt};
 pub use load::LoadGate;
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
     LevelInfo, PlayerState, Pose, SentState, UseEffects, in_water_or_rain, no_block_collision,
-    on_climbable, on_climbable_ext, riptide, tick, tick_ext,
+    on_climbable, on_climbable_ext, riptide, tick, tick_ext, tick_in,
 };
 pub use rules::{Rules, V26_1};
 

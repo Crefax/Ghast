@@ -167,6 +167,7 @@ final class Recorder {
         }
         j.key("state");
         state(j, run.player);
+        Ext.tickRecord(j, run);
         j.key("packets").beginArray();
         for (Packet<?> p : Harness.connection.sent) {
             packet(j, p);

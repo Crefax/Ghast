@@ -19,8 +19,9 @@
 //! player's chunk column and its neighbours received). The gate order on the wire is
 //! `player_loaded`, then the first movement packet of that tick, then `client_tick_end`.
 
+use super::entity::Surroundings;
 use super::ext::PlayerExt;
-use super::player::{PlayerState, tick_ext};
+use super::player::{PlayerState, tick_in};
 use super::rules::Rules;
 use crate::input::{Packet, Packets, TickInput};
 use crate::world::BlockView;
@@ -111,7 +112,7 @@ impl LoadGate {
     }
 
     /// One whole client tick of the player behind the gate: the gate tick (pushes
-    /// [`Packet::PlayerLoaded`] on the gate tick), then [`tick`] if loaded (without the mouse turn
+    /// [`Packet::PlayerLoaded`] on the gate tick), then [`tick`](super::tick) if loaded (without the mouse turn
     /// on the gate tick itself), else only the entity tick counter. `client_tick_end` is the
     /// caller's, after this.
     pub fn step<R: Rules, W: BlockView<State = R::State>>(
@@ -137,6 +138,29 @@ impl LoadGate {
         section_compiled: bool,
         out: &mut Packets,
     ) {
+        self.step_in::<R, W>(
+            p,
+            x,
+            &Surroundings::default(),
+            input,
+            world,
+            section_compiled,
+            out,
+        );
+    }
+
+    /// [`LoadGate::step_ext`] with the player's surroundings ([`super::tick_in`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_in<R: Rules, W: BlockView<State = R::State>>(
+        &mut self,
+        p: &mut PlayerState,
+        x: &mut PlayerExt,
+        around: &Surroundings<'_>,
+        input: &TickInput,
+        world: &W,
+        section_compiled: bool,
+        out: &mut Packets,
+    ) {
         let was_loaded = self.is_loaded();
         if self.tick(p, section_compiled) {
             out.push(Packet::PlayerLoaded);
@@ -146,14 +170,14 @@ impl LoadGate {
             return;
         }
         if was_loaded {
-            tick_ext::<R, W>(p, x, input, world, out);
+            tick_in::<R, W>(p, x, around, input, world, out);
         } else {
             let still = TickInput {
                 yaw: p.yaw,
                 pitch: p.pitch,
                 ..*input
             };
-            tick_ext::<R, W>(p, x, &still, world, out);
+            tick_in::<R, W>(p, x, around, &still, world, out);
         }
     }
 }

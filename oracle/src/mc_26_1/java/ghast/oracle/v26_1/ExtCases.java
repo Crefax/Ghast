@@ -44,12 +44,13 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra", "riptide"};
+    static final String[] MECHANICS = {"elytra", "riptide", "entities"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
             case "elytra" -> elytra();
             case "riptide" -> riptide();
+            case "entities" -> entities();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -58,6 +59,7 @@ final class ExtCases {
         return switch (mechanic) {
             case "elytra" -> elytraFuzz(seed, index, ticks);
             case "riptide" -> riptideFuzz(seed, index, ticks);
+            case "entities" -> entitiesFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -442,6 +444,122 @@ final class ExtCases {
             }
         }
         sc.description += ", riptide";
+        return sc;
+    }
+
+    // ---- other entities: collision and pushing ------------------------------------------------------
+
+    private static Scenario with(Scenario sc, Ext.Spawn... spawns) {
+        Ext.Setup st = Ext.setup(sc);
+        if (st.entities == null) {
+            st.entities = new ArrayList<>();
+        }
+        st.entities.addAll(List.of(spawns));
+        return sc;
+    }
+
+    private static Ext.Spawn sp(int id, String type, double x, double y, double z) {
+        return new Ext.Spawn(id, type, x, y, z, 0.0F);
+    }
+
+    static List<Scenario> entities() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(with(flat("push_zombie"), sp(100, "zombie", 0.8, 64, 0.7)).desc("a zombie overlapping the player pushes it away each tick")
+                .spawn(0.5, 64, 0.5, 0, 0).run(30, 0).run(20, FORWARD));
+        l.add(with(flat("push_crowd"), sp(100, "villager", 0.2, 64, 0.5), sp(101, "cow", 0.9, 64, 0.2), sp(102, "pig", 0.5, 64, 1.0),
+                sp(103, "sheep", 0.45, 64, 0.55)).desc("four mobs around the player: pushes add up in tick order")
+                .spawn(0.5, 64, 0.5, 0, 0).run(40, 0));
+        l.add(with(flat("push_walk_into_mobs"), sp(100, "cow", 0.5, 64, 3.0), sp(101, "cow", 0.9, 64, 4.2), sp(102, "iron_golem", 0.4, 64, 6))
+                .desc("walk and sprint into cows and an iron golem").spawn(0.5, 64, 0.5, 0, 0).run(5, 0).run(40, FORWARD | SPRINT));
+        l.add(with(flat("no_push_armor_stand_bat_parrot"), sp(100, "armor_stand", 0.6, 64, 0.6), sp(101, "bat", 0.4, 64.5, 0.4),
+                sp(102, "parrot", 0.5, 64.2, 0.7)).desc("armor stands, bats and parrots do not push players").spawn(0.5, 64, 0.5, 0, 0).run(30, 0));
+        l.add(with(flat("boat_collide"), sp(100, "oak_boat", 0.5, 64, 3.0)).desc("walk into a boat, jump on it, stand, walk off; sneak at its edge")
+                .spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(12, FORWARD).run(1, FORWARD | JUMP).run(10, FORWARD).run(10, 0)
+                .run(20, FORWARD | SNEAK).run(10, FORWARD));
+        l.add(with(flat("boat_push"), sp(100, "oak_boat", 0.5, 64, 1.55), sp(101, "bamboo_raft", 1.8, 64, 0.5), sp(102, "birch_chest_boat", -0.9, 63.8, 0.5))
+                .desc("boats next to the player push it (their box grown by 0.2)").spawn(0.5, 64, 0.5, 0, 0).run(40, 0));
+        l.add(with(flat("shulker_block").fill(-3, 63, 2, 3, 63, 6, s("stone"), 0), sp(100, "shulker", 0.5, 64, 3.5), sp(101, "shulker", 0.5, 65, 4.5))
+                .desc("shulkers collide like blocks: walk into one, jump up two").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(10, FORWARD)
+                .run(1, FORWARD | JUMP).run(12, FORWARD).run(1, FORWARD | JUMP).run(15, FORWARD));
+        l.add(with(flat("minecart_near"), sp(100, "minecart", 0.7, 64, 0.6), sp(101, "furnace_minecart", 0.5, 64, 1.3))
+                .desc("minecarts overlapping the player").spawn(0.5, 64, 0.5, 0, 0).run(30, 0));
+        Scenario moving = with(flat("push_moving_zombie"), sp(100, "zombie", 3.0, 64, 0.5)).desc("a zombie walks through the standing player (teleport packets, interpolated)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(40, 0);
+        for (int i = 0; i < 20; i++) {
+            addEvent(moving, 2 + i, new Ext.Move(100, 3.0 - i * 0.25, 64, 0.5 + (i % 3) * 0.05, 90.0F, true));
+        }
+        l.add(moving);
+        l.add(with(flat("push_ladder").fill(0, 64, 1, 0, 70, 1, s("stone"), 0).fill(0, 64, 0, 0, 70, 0, s("ladder[facing=north]"), 0),
+                sp(100, "zombie", 0.8, 64.5, 0.5)).desc("on a ladder the player is not pushable").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(20, FORWARD | JUMP).run(10, 0));
+        Scenario spec = with(flat("push_spectator"), sp(100, "zombie", 0.8, 64, 0.7)).desc("spectators are not pushed").spawn(0.5, 64, 0.5, 0, 0);
+        l.add(spec.mode(Scenario.GameMode.SPECTATOR).run(20, 0));
+        Scenario boatStack = with(flat("boat_stand_on"), sp(100, "oak_boat", 0.5, 64, 0.5)).desc("stand on a boat (spawned in it, pushed up by the step), the boat moves away")
+                .spawn(0.5, 64.5625, 0.5, 0, 0).run(15, 0);
+        for (int i = 0; i < 10; i++) {
+            addEvent(boatStack, 15 - 10 + i, new Ext.Move(100, 0.5 + i * 0.12, 64, 0.5, 0.0F, true));
+        }
+        l.add(boatStack.run(15, 0));
+        Scenario spawnLate = flat("push_spawned_in").desc("mobs spawned and removed mid-case").spawn(0.5, 64, 0.5, 0, 0).run(40, 0);
+        with(spawnLate);
+        addEvent(spawnLate, 5, new Ext.Spawn(200, "zombie", 0.6, 64, 0.6, 45.0F));
+        addEvent(spawnLate, 12, new Ext.Spawn(201, "slime", 0.3, 64, 0.3, 0.0F));
+        addEvent(spawnLate, 20, new Ext.Remove(200));
+        addEvent(spawnLate, 30, new Ext.Remove(201));
+        l.add(spawnLate);
+        return l;
+    }
+
+    private static final String[] ENTITY_POOL = {"zombie", "villager", "cow", "pig", "sheep", "chicken", "armor_stand", "bat", "parrot",
+            "oak_boat", "spruce_boat", "birch_chest_boat", "bamboo_raft", "shulker", "iron_golem", "horse", "slime", "spider", "wolf",
+            "minecart", "item_frame", "skeleton", "creeper", "llama", "camel"};
+
+    /**
+     * Randomized entity cases: the {@code withExtras} case with 1-6 entities of a mixed pool (mobs, armor
+     * stands, bats, parrots, boats, rafts, shulkers, minecarts, ...) within two blocks of the spawn, moved
+     * by teleport packets, spawned and removed during the case. Cases get an {@code _en} suffix.
+     */
+    static Scenario entitiesFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_en");
+        copy(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x656e74697479L);
+        with(sc);
+        int n = x.range(1, 6);
+        int nextId = 300;
+        List<double[]> live = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            double ex = sc.x + (x.nextDouble() - 0.5) * 4, ey = sc.y + (x.chance(0.6) ? 0 : (x.nextDouble() - 0.5) * 2), ez = sc.z + (x.nextDouble() - 0.5) * 4;
+            Ext.Setup st = Ext.setup(sc);
+            st.entities.add(new Ext.Spawn(nextId, x.pick(ENTITY_POOL), ex, ey, ez, (float) (x.nextDouble() * 360)));
+            live.add(new double[] {nextId++, ex, ey, ez});
+        }
+        for (int t = 0; t < sc.ticks.size(); t++) {
+            for (double[] e : live) {
+                if (x.chance(0.15)) {
+                    double step = x.chance(0.2) ? 1.0 : 0.25;
+                    e[1] += (x.nextDouble() - 0.5) * step;
+                    e[2] += x.chance(0.8) ? 0 : (x.nextDouble() - 0.5) * step;
+                    e[3] += (x.nextDouble() - 0.5) * step;
+                    if (x.chance(0.3)) {
+                        // towards the player's spawn column
+                        e[1] += (sc.x - e[1]) * 0.3;
+                        e[3] += (sc.z - e[3]) * 0.3;
+                    }
+                    addEvent(sc, t, new Ext.Move((int) e[0], e[1], e[2], e[3], (float) (x.nextDouble() * 360), x.chance(0.7)));
+                }
+            }
+            if (x.chance(0.02) && !live.isEmpty()) {
+                double[] e = live.remove(x.nextInt(live.size()));
+                addEvent(sc, t, new Ext.Remove((int) e[0]));
+            }
+            if (x.chance(0.03) && live.size() < 8) {
+                double ex = sc.x + (x.nextDouble() - 0.5) * 3, ez = sc.z + (x.nextDouble() - 0.5) * 3;
+                addEvent(sc, t, new Ext.Spawn(nextId, x.pick(ENTITY_POOL), ex, sc.y, ez, (float) (x.nextDouble() * 360)));
+                live.add(new double[] {nextId++, ex, sc.y, ez});
+            }
+        }
+        sc.description += ", entities";
         return sc;
     }
 

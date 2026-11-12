@@ -104,6 +104,29 @@ pub(crate) enum Placed {
     Shape(&'static VoxelShapeRef, Option<[f64; 3]>, [f64; 3]),
     /// The world-border shape.
     Border,
+    /// A collidable entity's box (`Shapes.create(entity.getBoundingBox())`).
+    Entity(Aabb),
+}
+
+/// `Shapes.create(box)` of an entity box as a one-cell shape with explicit points.
+fn entity_shape_collide(e: &Aabb, axis: usize, b: &Aabb, d: f64) -> f64 {
+    let xs = [e.min_x, e.max_x];
+    let ys = [e.min_y, e.max_y];
+    let zs = [e.min_z, e.max_z];
+    VoxelShape {
+        axes: [
+            Points::Explicit(&xs),
+            Points::Explicit(&ys),
+            Points::Explicit(&zs),
+        ],
+        cells: &[1],
+    }
+    .max_distance(axis, b, d, None)
+}
+
+/// `true` when the entity box is too thin in some axis (`Shapes.create` gives the empty shape).
+fn entity_shape_empty(e: &Aabb) -> bool {
+    e.max_x - e.min_x < EPSILON || e.max_y - e.min_y < EPSILON || e.max_z - e.min_z < EPSILON
 }
 
 /// A voxel table entry as a [`VoxelShape`] (moved shapes always binary-search their points).
@@ -379,6 +402,9 @@ impl Placed {
                 }
             }
             Placed::Border => {}
+            Placed::Entity(e) => {
+                let _ = f(*e);
+            }
         }
     }
 
@@ -398,6 +424,7 @@ impl Placed {
                 Some(s.axes[1].get(top + 1))
             }
             Placed::Border => None,
+            Placed::Entity(e) => Some(e.max_y),
         }
     }
 
@@ -405,6 +432,7 @@ impl Placed {
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             Placed::Shape(r, _, _) => r.empty,
+            Placed::Entity(e) => entity_shape_empty(e),
             _ => false,
         }
     }
@@ -415,6 +443,13 @@ impl Placed {
             Placed::Cube(o) => cube_collide(axis, b, d, *o),
             Placed::Shape(r, sh, o) => shape_collide(r, *sh, *o, axis, b, d),
             Placed::Border => border.shape().max_distance(axis, b, d, None),
+            Placed::Entity(e) => {
+                if entity_shape_empty(e) {
+                    d
+                } else {
+                    entity_shape_collide(e, axis, b, d)
+                }
+            }
         }
     }
 
@@ -438,6 +473,11 @@ impl Placed {
                     if !f(y) {
                         return;
                     }
+                }
+            }
+            Placed::Entity(e) => {
+                if !entity_shape_empty(e) {
+                    let _ = f(e.min_y) && f(e.max_y);
                 }
             }
         }
@@ -536,6 +576,8 @@ pub(crate) struct World<'a, R: Rules, W> {
     /// Build height `[min_y, max_y]`.
     pub min_y: i32,
     pub max_y: i32,
+    /// Boxes of the entities the player collides with (`canBeCollidedWith`).
+    pub entities: &'a [Aabb],
     pub _r: core::marker::PhantomData<R>,
 }
 
@@ -649,7 +691,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
                         Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
-                        Placed::Border => false,
+                        Placed::Border | Placed::Entity(_) => false,
                     };
                     if hit && !f(x, y, z, shape) {
                         return;
@@ -691,7 +733,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
                         Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
-                        Placed::Border => false,
+                        Placed::Border | Placed::Entity(_) => false,
                     };
                     if hit {
                         return true;
@@ -712,16 +754,60 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
         if !empty {
             return false;
         }
+        if !self.entities.is_empty() && self.any_entity_collider(query) {
+            return false;
+        }
         if self.border.inside_close(src[0], src[2], query) {
             return !self.border.shape().intersects(query, None);
         }
         true
     }
 
-    /// `collectColliders(entity, [], box)`: the border shape when the entity is inside and close
-    /// to it, then every block shape.
-    pub(crate) fn colliders(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx, c: &mut Colliders) {
+    #[cold]
+    #[inline(never)]
+    fn any_entity_collider(&self, area: &Aabb) -> bool {
+        self.entity_colliders(area).next().is_some()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn push_entity_colliders(&self, area: &Aabb, c: &mut Colliders) {
+        for e in self.entity_colliders(area) {
+            c.push(Placed::Entity(e));
+        }
+    }
+
+    /// `getEntityCollisions(entity, area)`: the collidable entity boxes intersecting the area grown
+    /// by `1e-7` (none for an area smaller than `1e-7` on average).
+    pub(crate) fn entity_colliders<'q>(&'q self, area: &Aabb) -> impl Iterator<Item = Aabb> + 'q {
+        let size =
+            ((area.max_x - area.min_x) + (area.max_y - area.min_y) + (area.max_z - area.min_z))
+                / 3.0;
+        let q = super::math::inflate(area, 1.0e-7, 1.0e-7, 1.0e-7);
+        let list = if size < 1.0e-7 {
+            &[][..]
+        } else {
+            self.entities
+        };
+        list.iter()
+            .copied()
+            .filter(move |e| intersects(e, q.min_x, q.min_y, q.min_z, q.max_x, q.max_y, q.max_z))
+    }
+
+    /// `collectColliders(entity, entityShapes, box)`: the entity shapes found for `entity_area`,
+    /// the border shape when the entity is inside and close to it, then every block shape.
+    pub(crate) fn colliders(
+        &self,
+        src: [f64; 3],
+        entity_area: &Aabb,
+        query: &Aabb,
+        ctx: &ShapeCtx,
+        c: &mut Colliders,
+    ) {
         c.clear();
+        if !self.entities.is_empty() {
+            self.push_entity_colliders(entity_area, c);
+        }
         if self.border.inside_close(src[0], src[2], query) {
             c.push(Placed::Border);
         }
@@ -841,7 +927,8 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
     let step_v = if movement.length_sqr() == 0.0 {
         movement
     } else {
-        world.colliders(src, &expand_towards(bb, movement), ctx, &mut colliders);
+        let area = expand_towards(bb, movement);
+        world.colliders(src, &area, &area, ctx, &mut colliders);
         collide_with_shapes(movement, bb, &colliders, world.border)
     };
     let cx = movement.x != step_v.x;
@@ -858,7 +945,8 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
         if !landing {
             up = expand_towards(&up, V3::new(0.0, f64::from(-1.0e-5f32), 0.0));
         }
-        world.colliders(src, &up, ctx, &mut colliders);
+        // The entity shapes are the ones found for the movement (vanilla reuses that list).
+        world.colliders(src, &expand_towards(bb, movement), &up, ctx, &mut colliders);
         let skip = step_v.y as f32;
         // FloatArraySet: bitwise-distinct values; inline for the usual few, spilling when a tall
         // step height meets finely divided shapes (e.g. stacked daylight detectors: one value per

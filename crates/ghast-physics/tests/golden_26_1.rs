@@ -76,6 +76,12 @@ fn riptide_26_1() {
     check("riptide.jsonl.gz");
 }
 
+/// Other entities: collision with boats and shulkers, pushes by mobs and boats.
+#[test]
+fn entities_26_1() {
+    check("entities.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

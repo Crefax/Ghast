@@ -494,7 +494,9 @@ final class Harness {
             // part of the listener tick.
             tickLevelLoad();
             useKey();
+            Ext.beforeEntities(this);
             level.tickEntities();
+            Ext.afterEntities(this);
             listener.send(ServerboundClientTickEndPacket.INSTANCE);
             tick++;
         }

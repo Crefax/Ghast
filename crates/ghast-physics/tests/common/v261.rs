@@ -545,6 +545,17 @@ impl UseKey {
     }
 }
 
+fn aabb_of(v: &Value) -> ghast_physics::math::Aabb {
+    ghast_physics::math::Aabb::new(
+        f64_of(&v[0]),
+        f64_of(&v[1]),
+        f64_of(&v[2]),
+        f64_of(&v[3]),
+        f64_of(&v[4]),
+        f64_of(&v[5]),
+    )
+}
+
 /// Replays one 26.1 case.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
@@ -690,6 +701,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         assert!(x.attach_rocket(i(&e["id"]), p.pos));
                     }
                     "remove_entity" => x.remove_rocket(i(&e["id"])),
+                    // Other entities: their boxes come with the tick record.
+                    "spawn" | "entity_move" => {}
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -721,7 +734,57 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item: use_key.using,
         };
-        gate.step_ext::<V26_1, _>(&mut p, &mut x, &ti, &world, compiled, &mut out);
+        // Other entities in the client's tick order: those before the player push it first (with
+        // their box after their tick); the player collides with the collidable ones as they are
+        // when it ticks; those after it push it after its tick.
+        let ents = rec.get("entities").and_then(Value::as_array);
+        let mut colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
+        let mut after: Vec<modern::Pusher> = Vec::new();
+        if let Some(ents) = ents {
+            let mut before_player = true;
+            for e in ents {
+                if e.get("player").is_some() {
+                    before_player = false;
+                    continue;
+                }
+                let name = e["type"].as_str().unwrap();
+                let living = ghast_data::v26_1::entity_by_name(name)
+                    .and_then(|i| ghast_data::v26_1::entity_type(i.id))
+                    .is_some_and(|t| t.is_living());
+                let post = e.get("post").map(aabb_of);
+                let pre = e.get("pre").map(aabb_of);
+                let at_tick = if before_player { post } else { pre };
+                if modern::collides_26_1(name)
+                    && b(&e["alive"])
+                    && let Some(bb) = at_tick
+                {
+                    let order = e
+                        .get("query_order")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(i64::MAX);
+                    colliders.push((order, bb));
+                }
+                if let (Some(kind), Some(bb)) = (modern::push_kind_26_1(name, living), post) {
+                    let pusher = modern::Pusher::new(f3(&e["pos"]), bb, kind);
+                    if before_player {
+                        modern::push_by::<V26_1, _>(&mut p, &x, &world, &pusher);
+                    } else {
+                        after.push(pusher);
+                    }
+                }
+            }
+        }
+        // In the level's getEntities order (sections, then the order entities entered them).
+        colliders.sort_by_key(|c| c.0);
+        let colliders: Vec<ghast_physics::math::Aabb> =
+            colliders.into_iter().map(|c| c.1).collect();
+        let around = modern::Surroundings::new().with_entities(&colliders);
+        gate.step_in::<V26_1, _>(&mut p, &mut x, &around, &ti, &world, compiled, &mut out);
+        if gate.is_loaded() {
+            for pusher in &after {
+                modern::push_by::<V26_1, _>(&mut p, &x, &world, pusher);
+            }
+        }
         if use_key.using {
             use_key.held += 1;
         }

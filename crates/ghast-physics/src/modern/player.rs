@@ -631,6 +631,7 @@ pub fn on_climbable<R: Rules, W: BlockView<State = R::State>>(p: &PlayerState, w
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
+        entities: &[],
         _r: core::marker::PhantomData,
     };
     climbable::<R, W>(&world, p, false)
@@ -650,6 +651,7 @@ pub fn on_climbable_ext<R: Rules, W: BlockView<State = R::State>>(
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
+        entities: &[],
         _r: core::marker::PhantomData,
     };
     climbable::<R, W>(&world, p, x.fall_flying)
@@ -688,6 +690,7 @@ pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
         border: &border,
         min_y: level.min_y,
         max_y: level.min_y + level.height - 1,
+        entities: &[],
         _r: core::marker::PhantomData,
     };
     let c = ShapeCtx {
@@ -742,7 +745,7 @@ pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     world: &W,
     out: &mut Packets,
 ) {
-    tick_core::<R, W>(p, &mut Glide::default(), None, input, world, out);
+    tick_core::<R, W>(p, &mut Glide::default(), None, &[], input, world, out);
 }
 
 /// [`tick`] with the extension state of the mechanics added after 0.4.0 (gliding and rockets, see
@@ -755,6 +758,19 @@ pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
     world: &W,
     out: &mut Packets,
 ) {
+    tick_in::<R, W>(p, x, &super::Surroundings::default(), input, world, out);
+}
+
+/// [`tick_ext`] with the player's surroundings that are not blocks: the boxes of the entities it
+/// collides with ([`Surroundings::entities`](super::Surroundings)).
+pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    around: &super::Surroundings<'_>,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
     let mut g = Glide {
         fall_flying: x.fall_flying,
         glider: x.glider,
@@ -762,7 +778,7 @@ pub fn tick_ext<R: Rules, W: BlockView<State = R::State>>(
         auto_spin_ticks: x.auto_spin_ticks,
     };
     let pending = x.pending_move.take();
-    tick_core::<R, W>(p, &mut g, pending, input, world, out);
+    tick_core::<R, W>(p, &mut g, pending, around.entities, input, world, out);
     x.fall_flying = g.fall_flying;
     x.auto_spin_ticks = g.auto_spin_ticks;
     x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
@@ -782,6 +798,7 @@ fn tick_core<R: Rules, W: BlockView<State = R::State>>(
     p: &mut PlayerState,
     x: &mut Glide,
     pending: Option<Movement>,
+    entities: &[Aabb],
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -799,6 +816,7 @@ fn tick_core<R: Rules, W: BlockView<State = R::State>>(
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
+        entities,
         _r: core::marker::PhantomData,
     };
     let mut t = Ctx {
@@ -855,6 +873,7 @@ pub fn riptide<R: Rules, W: BlockView<State = R::State>>(
             border: &border,
             min_y: p.level.min_y,
             max_y: p.level.min_y + p.level.height - 1,
+            entities: &[],
             _r: core::marker::PhantomData,
         };
         let mut t = Ctx {
@@ -2183,7 +2202,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
                 });
                 m::collided_along(&at_from, to.sub(from), boxes[..n].iter().copied())
             }
-            Some(Placed::Border) => false,
+            Some(Placed::Border | Placed::Entity(_)) => false,
         }
     }
 
@@ -2382,19 +2401,28 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         // Float.MIN_VALUE marks "nothing hit".
         let mut obstacle = f32::from_bits(1);
         let mut hit: Option<Aabb> = None;
-        self.w
-            .each_collision(&test, Some(&ctx), false, |_, _, _, s| {
-                let mut go = true;
-                s.for_boxes(|b| {
-                    if seg(&b, l0, l1) || seg(&b, r0, r1) {
-                        hit = Some(b);
-                        go = false;
-                        return false;
-                    }
-                    true
+        // getCollisions: the entity shapes first, then the blocks.
+        if !self.w.entities.is_empty() {
+            hit = self
+                .w
+                .entity_colliders(&test)
+                .find(|b| seg(b, l0, l1) || seg(b, r0, r1));
+        }
+        if hit.is_none() {
+            self.w
+                .each_collision(&test, Some(&ctx), false, |_, _, _, s| {
+                    let mut go = true;
+                    s.for_boxes(|b| {
+                        if seg(&b, l0, l1) || seg(&b, r0, r1) {
+                            hit = Some(b);
+                            go = false;
+                            return false;
+                        }
+                        true
+                    });
+                    go
                 });
-                go
-            });
+        }
         if let Some(b) = hit {
             obstacle = b.max_y as f32;
             let c = super::math::center(&b);

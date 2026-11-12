@@ -1010,6 +1010,30 @@ attack). Fuzz (`ExtCases.riptideFuzz`, cases `…_x_rt`): the `withExtras` case,
 the spawn and rain, use spans of 3-25 ticks, pitch changes, spin flag events, sometimes an elytra.
 Quirk: the launch reads the rotation the tick's mouse turning set (key handling runs after it).
 
+**`entities`** (13 cases + 100 fuzz): other entities through real `add_entity` (event / setup
+`{"type":"spawn","id","entity","pos","yaw"}`, spawned after the player so they tick after it),
+`teleport_entity` (`{"type":"entity_move","id","pos","yaw","on_ground"}`; the client interpolates)
+and `remove_entities`. Cases: a zombie overlapping the player, a crowd of four mobs, walking into
+cows and an iron golem, armor stands / bats / parrots (they do not push players), boats and rafts
+(collide like blocks, push from their own tick), shulkers to stand and jump on, minecarts, a
+zombie walking through the player, a ladder (not pushable), a spectator, a boat moving away under
+the player, mobs spawned and removed mid-case. Fuzz (`ExtCases.entitiesFuzz`, cases `…_x_en`):
+the `withExtras` case with 1-6 entities of a mixed pool within two blocks, moved, spawned and
+removed during the case. Tick records of these cases add `entities`: every ticking entity in the
+client's tick order (the player as `{"id":1,"player":true}`), each with `type`, `pre` (box before
+the player's tick), `post` (box after the entity tick), `pos`, `alive` and `query_order` (its
+place in the level's own `getEntities` order around the player). Quirks:
+
+- On the client only the local player is pushable; the other entities' ticks push it (mobs from
+  `pushEntities` over their box, boats over their box grown by 0.2 / shrunk by 0.01 when the
+  player's feet are not above the boat's bottom).
+- Entity collision shapes come in the level's `getEntities` order (by section, then the order
+  entities entered it), and that order is observable: `Shapes.collide` returns 0 once the
+  remaining distance is below `1e-7`, so a shape that leaves a sub-`1e-7` gap decides only when it
+  is the last one.
+- The collision list found for the movement is reused for the step-up query, and auto-jump's
+  obstacle search sees entity boxes before blocks.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

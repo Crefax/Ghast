@@ -158,7 +158,11 @@ modelled there: a rocket that hits a big dripleaf tilts it on the client before 
 Riptide: `modern::riptide` (the client's launch on releasing the trident), `in_water_or_rain`,
 the spin counter and pose in `PlayerExt`; touching other entities while spinning is not modelled.
 
-Not modelled: vehicles, entity collision and push, pistons, block entities, a
+Other entities: `Surroundings` + `tick_in` (boxes of boats, rafts, shulkers the player collides
+with, in the level's `getEntities` order), `push_by` after each entity's client tick
+(`push_kind_26_1`, `collides_26_1`).
+
+Not modelled: vehicles, pistons, block entities, a
 moving world border; the nether's `fast_lava` is supported only as a flag (no oracle vector yet).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every
