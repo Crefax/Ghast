@@ -356,6 +356,7 @@ pub fn tick_boat<R: Rules, W: BlockView<State = R::State>>(
             on_ground: boat.e.on_ground,
         }),
         last_yd: 0.0,
+        ..Glide::with_attributes(x)
     };
     let pending = x.pending_move.take();
     let keep = TickInput {
@@ -445,6 +446,7 @@ pub fn tick_passenger<R: Rules, W: BlockView<State = R::State>>(
             on_ground: false,
         }),
         last_yd: 0.0,
+        ..Glide::with_attributes(x)
     };
     let pending = x.pending_move.take();
     let keep = TickInput {
@@ -694,8 +696,8 @@ fn ground_friction<R: Rules, W: BlockView<State = R::State>>(
             for y in y0..y1 {
                 if edges <= 0 || y != y0 && y != y1 - 1 {
                     let s = w.state(x, y, z);
-                    if R::block(s).name != "lily_pad" && w.shape_overlaps(s, x, y, z, &q) {
-                        friction += R::block(s).friction;
+                    if R::block_name(s) != "lily_pad" && w.shape_overlaps(s, x, y, z, &q) {
+                        friction += R::friction(s);
                         count += 1;
                     }
                 }

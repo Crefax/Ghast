@@ -1,7 +1,7 @@
 //! Fluids of the modern client: `EntityFluidInteraction` (one sweep for height, eyes and current),
 //! fluid heights and `FlowingFluid.getFlow`.
 
-use ghast_data::v26_1::{StatePhys, block_flags as bf, state_flags as sf};
+use super::rules::shared::{StatePhys, block_flags as bf, state_flags as sf};
 
 use super::collide::{Extra, World};
 use super::math::{V3, ceil, floor};
@@ -231,7 +231,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
         if kind(p.fluid()) == k {
             return false;
         }
-        if R::block(s).flags & bf::ICE != 0 {
+        if R::block_flags(s) & bf::ICE != 0 {
             return false;
         }
         p.flags() & (sf::STURDY_NORTH << side) != 0

@@ -5,7 +5,7 @@
 // Vanilla's negated float comparisons are kept as written: they decide the NaN cases.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
-use ghast_data::v26_1::{BlockKind, StatePhys, VoxelClass, VoxelShapeRef, state_flags as sf};
+use super::rules::shared::{BlockKind, StatePhys, VoxelClass, VoxelShapeRef, state_flags as sf};
 
 use super::math::{V3, bx, expand_towards, floor, hi, intersects, java_max, java_min, lo, mv};
 use super::rules::Rules;
@@ -691,7 +691,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
         }
         let r = R::voxel(p.shape());
         if f & sf::OFFSET != 0 {
-            let shift = model_offset(R::block(s).offset, x, z);
+            let shift = model_offset(R::offset(s), x, z);
             return Some(Placed::Shape(r, Some(shift), o));
         }
         Some(Placed::Shape(r, None, o))

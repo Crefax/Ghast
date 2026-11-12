@@ -8,6 +8,7 @@
 //! | rule set | version | status |
 //! |---|---|---|
 //! | [`V26_1`] | 26.1 (protocol 775) | bit-exact against the vanilla oracle |
+//! | [`V26_2`] | 26.2 (protocol 776) | bit-exact against the vanilla oracle (26.1 + collision restitution) |
 //!
 //! Unloaded chunks are handled exactly as the 26.1 client does: gravity stays normal (the client
 //! reports every chunk as present), collision skips unloaded chunks, and the fluid sweep sees no
@@ -43,14 +44,18 @@ pub use attr::{
 pub use boat::{Boat, BoatKind, BoatStatus, Seat, tick_boat, tick_passenger};
 pub use border::BorderState;
 pub use entity::{PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1};
-pub use ext::{MAX_ROCKETS, PlayerExt};
+pub use ext::{MAX_ROCKETS, MovementAttributes, PlayerExt};
 pub use load::LoadGate;
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
     LevelInfo, PlayerState, Pose, SentState, UseEffects, in_water_or_rain, no_block_collision,
     on_climbable, on_climbable_ext, riptide, tick, tick_ext, tick_in,
 };
-pub use rules::{Rules, V26_1};
+pub use rules::Rules;
+#[cfg(feature = "v26_1")]
+pub use rules::V26_1;
+#[cfg(feature = "v26_2")]
+pub use rules::V26_2;
 
 use crate::input::{Packets, TickInput};
 use crate::world::BlockView;
@@ -59,6 +64,7 @@ use crate::world::BlockView;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Options {}
 
+#[cfg(feature = "v26_1")]
 impl crate::Ruleset for V26_1 {
     type BlockState = ghast_data::v26_1::BlockState;
     type Player = PlayerState;
@@ -76,16 +82,41 @@ impl crate::Ruleset for V26_1 {
     }
 }
 
+#[cfg(feature = "v26_2")]
+impl crate::Ruleset for V26_2 {
+    type BlockState = ghast_data::v26_2::BlockState;
+    type Player = PlayerState;
+    type Options = Options;
+
+    #[inline]
+    fn tick_with<W: BlockView<State = Self::BlockState>>(
+        player: &mut PlayerState,
+        input: &TickInput,
+        world: &W,
+        _options: &Options,
+        out: &mut Packets,
+    ) {
+        tick::<V26_2, W>(player, input, world, out);
+    }
+}
+
 /// A [`crate::MemoryWorld`]-like in-memory world for modern versions (build height `-64..320`).
+#[cfg(feature = "v26_1")]
 pub type MemoryWorld26 = ModernMemoryWorld<ghast_data::v26_1::BlockState>;
+
+/// [`MemoryWorld26`] over 26.2 block states.
+#[cfg(feature = "v26_2")]
+pub type MemoryWorld262 = ModernMemoryWorld<ghast_data::v26_2::BlockState>;
 
 /// An in-memory world with a configurable build height: explicitly loaded chunk columns,
 /// everything else unloaded. For tests, benches and offline planning.
 #[derive(Clone, Debug)]
 pub struct ModernMemoryWorld<S> {
-    columns: std::collections::HashMap<(i32, i32), Box<[u16]>>,
+    /// Decoded states (decoding happens when a block is stored, not when it is read).
+    columns: std::collections::HashMap<(i32, i32), Box<[S]>>,
     loaded_rects: Vec<[i32; 4]>,
     decode: fn(u16) -> S,
+    air: S,
     min_y: i32,
     height: i32,
     border: crate::WorldBorder,
@@ -99,6 +130,7 @@ impl<S: Copy> ModernMemoryWorld<S> {
             columns: std::collections::HashMap::new(),
             loaded_rects: Vec::new(),
             decode,
+            air: decode(0),
             min_y,
             height,
             border: crate::WorldBorder::default(),
@@ -133,11 +165,13 @@ impl<S: Copy> ModernMemoryWorld<S> {
             return;
         }
         let len = (16 * 16 * self.height) as usize;
+        let air = self.air;
+        let state = (self.decode)(raw);
         let col = self
             .columns
             .entry((x >> 4, z >> 4))
-            .or_insert_with(|| vec![0u16; len].into_boxed_slice());
-        col[Self::index(x, y - self.min_y, z)] = raw;
+            .or_insert_with(|| vec![air; len].into_boxed_slice());
+        col[Self::index(x, y - self.min_y, z)] = state;
     }
 
     /// Fills the inclusive box with a raw value.
@@ -169,15 +203,14 @@ impl<S: Copy> BlockView for ModernMemoryWorld<S> {
 
     #[inline]
     fn block(&self, x: i32, y: i32, z: i32) -> S {
-        let decode = self.decode;
         let (cx, cz) = (x >> 4, z >> 4);
         let ry = y - self.min_y;
         if ry < 0 || ry >= self.height || !self.loaded(cx, cz) {
-            return decode(0);
+            return self.air;
         }
         match self.columns.get(&(cx, cz)) {
-            Some(col) => decode(col[Self::index(x, ry, z)]),
-            None => decode(0),
+            Some(col) => col[Self::index(x, ry, z)],
+            None => self.air,
         }
     }
 
@@ -191,7 +224,22 @@ impl<S: Copy> BlockView for ModernMemoryWorld<S> {
     }
 }
 
+/// An empty 26.2 world (overworld build height); unknown ids decode to air.
+#[cfg(feature = "v26_2")]
+#[must_use]
+pub fn memory_world_26_2() -> MemoryWorld262 {
+    ModernMemoryWorld::new(
+        |raw| {
+            ghast_data::v26_2::BlockState::from_id(raw)
+                .unwrap_or(ghast_data::v26_2::BlockState::AIR)
+        },
+        -64,
+        384,
+    )
+}
+
 /// An empty 26.1 world (overworld build height); unknown ids decode to air.
+#[cfg(feature = "v26_1")]
 #[must_use]
 pub fn memory_world_26_1() -> MemoryWorld26 {
     ModernMemoryWorld::new(

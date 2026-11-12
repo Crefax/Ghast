@@ -419,6 +419,7 @@ fn clip_direction(b: &Aabb, from: V3, scale: &mut f64, dx: f64, dy: f64, dz: f64
 }
 
 /// `AABB.collidedAlongVector(vector, boxes)` for this box.
+#[inline]
 pub fn collided_along(b: &Aabb, vector: V3, boxes: impl Iterator<Item = Aabb>) -> bool {
     let from = center(b);
     let to = from.add(vector);

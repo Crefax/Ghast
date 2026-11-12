@@ -1,17 +1,36 @@
 //! 26.1 golden replay (format: `oracle/README.md`, section "26.1").
 
 use ghast_physics::modern::{
-    self, AttributeKind, ClientInput, Dimensions, Effects, MemoryWorld26, ModifierId, PlayerExt,
-    PlayerState, Pose, SentState, V26_1,
+    self, AttributeKind, ClientInput, Dimensions, Effects, ModernMemoryWorld, ModifierId,
+    PlayerExt, PlayerState, Pose, Rules, SentState, V26_1,
 };
 use ghast_physics::{Abilities, Keys, Packet, Packets, TickInput};
 use serde_json::{Value, json};
 
 use super::{Case, Mismatch, b, diff, f3, f32_of, f64_of, i, jf32, jf64, keys_of};
 
-/// The case's world: fills of 26.1 global state ids inside the loaded chunk rectangles.
-pub fn world_of(header: &Value) -> MemoryWorld26 {
-    let mut w = modern::memory_world_26_1();
+/// A modern row the replay runs: its rules and its empty world (the fill ids are its own).
+pub trait Row: Rules {
+    /// An empty world of this row's block states.
+    fn empty_world() -> ModernMemoryWorld<Self::State>;
+}
+
+impl Row for V26_1 {
+    fn empty_world() -> ModernMemoryWorld<Self::State> {
+        modern::memory_world_26_1()
+    }
+}
+
+#[cfg(feature = "v26_2")]
+impl Row for modern::V26_2 {
+    fn empty_world() -> ModernMemoryWorld<Self::State> {
+        modern::memory_world_26_2()
+    }
+}
+
+/// The case's world: fills of the row's global state ids inside the loaded chunk rectangles.
+pub fn world_of<R: Row>(header: &Value) -> ModernMemoryWorld<R::State> {
+    let mut w = R::empty_world();
     for r in header["loaded_chunks"].as_array().unwrap() {
         let r: Vec<i32> = r.as_array().unwrap().iter().map(i).collect();
         w.load_chunks(r[0], r[1], r[2], r[3]);
@@ -281,6 +300,15 @@ pub fn ext_of(header: &Value, t0: &Value) -> PlayerExt {
         x.rocket_arm_left = e.get("left_handed").is_some_and(b);
     }
     x.fall_flying = b(&t0["state"]["fall_flying"]);
+    // 26.2 movement attributes (recorded where the version has them; setup-only, like the others).
+    for name in ["friction_modifier", "air_drag_modifier", "bounciness"] {
+        if let Some(v) = t0["state"]["attributes"].get(name) {
+            x.attributes
+                .get_mut(name)
+                .unwrap()
+                .apply_packet(f64_of(v), &[]);
+        }
+    }
     x
 }
 
@@ -290,15 +318,19 @@ fn glider(item: Option<&Value>, damage: Option<&Value>) -> bool {
 }
 
 /// The state in the oracle's 26.1 record layout.
-pub fn state_json(p: &PlayerState, w: &MemoryWorld26, using_item: bool) -> Value {
-    state_json_ext(p, &PlayerExt::default(), w, using_item)
+pub fn state_json<R: Row>(
+    p: &PlayerState,
+    w: &ModernMemoryWorld<R::State>,
+    using_item: bool,
+) -> Value {
+    state_json_ext::<R>(p, &PlayerExt::default(), w, using_item)
 }
 
 /// [`state_json`] with the extension state.
-pub fn state_json_ext(
+pub fn state_json_ext<R: Row>(
     p: &PlayerState,
     x: &PlayerExt,
-    w: &MemoryWorld26,
+    w: &ModernMemoryWorld<R::State>,
     using_item: bool,
 ) -> Value {
     let bb = p.bb;
@@ -343,7 +375,7 @@ pub fn state_json_ext(
         "in_powder_snow": p.in_powder_snow,
         "was_in_powder_snow": p.was_in_powder_snow,
         "first_update": p.first_tick,
-        "climbing": modern::on_climbable_ext::<V26_1, _>(p, x, w),
+        "climbing": modern::on_climbable_ext::<R, _>(p, x, w),
         "swimming": p.is_swimming(),
         "sprinting": p.sprinting,
         "sneaking": p.shift(),
@@ -376,6 +408,10 @@ pub fn state_json_ext(
             "water_movement_efficiency": jf64(a.water_movement_efficiency.value()),
             "scale": jf64(a.scale.value()),
             "safe_fall_distance": jf64(a.safe_fall_distance.value()),
+            // 26.2 (compared only where the oracle records them).
+            "friction_modifier": jf64(x.attributes.friction_modifier.value()),
+            "air_drag_modifier": jf64(x.attributes.air_drag_modifier.value()),
+            "bounciness": jf64(x.attributes.bounciness.value()),
         },
         "movement_speed_attr": jf64(p.movement_speed()),
         "last_block_pos": null,
@@ -616,8 +652,13 @@ fn aabb_of(v: &Value) -> ghast_physics::math::Aabb {
 
 /// Replays one 26.1 case.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
+    replay_with::<V26_1>(case)
+}
+
+/// [`replay`] with another rule set over the 26.1 block data (family checks).
+pub fn replay_with<R: Row>(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
-    let mut world = world_of(&case.header);
+    let mut world = world_of::<R>(&case.header);
     let moving_border = case.header["setup"]
         .get("ext")
         .and_then(|e| e.get("border"))
@@ -649,7 +690,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     if let Some(d) = diff(
         "state",
         &t0["state"],
-        &state_json_ext(&p, &x, &world, false),
+        &state_json_ext::<R>(&p, &x, &world, false),
     ) {
         return Err(mm(0, d));
     }
@@ -760,8 +801,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         p.apply_attribute(AttributeKind::MovementSpeed, f64_of(&e["base"]), &mods);
                     }
                     "attribute" => {
-                        let kind = AttributeKind::from_name(e["attribute"].as_str().unwrap())
-                            .expect("movement attribute");
+                        let name = e["attribute"].as_str().unwrap();
                         let mods: Vec<(ModifierId, f64, u8)> = e["modifiers"]
                             .as_array()
                             .unwrap()
@@ -774,7 +814,14 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                                 )
                             })
                             .collect();
-                        p.apply_attribute(kind, f64_of(&e["base"]), &mods);
+                        if let Some(kind) = AttributeKind::from_name(name) {
+                            p.apply_attribute(kind, f64_of(&e["base"]), &mods);
+                        } else {
+                            x.attributes
+                                .get_mut(name)
+                                .expect("movement attribute")
+                                .apply_packet(f64_of(&e["base"]), &mods);
+                        }
                     }
                     "level_chunks_load_start" => gate.level_chunks_load_start(),
                     "section_compiled" => compiled = b(&e["compiled"]),
@@ -870,14 +917,14 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             p.yaw = yaw;
             p.pitch = pitch;
         }
-        let wet = modern::in_water_or_rain::<V26_1, _>(&p, &world, raining);
+        let wet = modern::in_water_or_rain::<R, _>(&p, &world, raining);
         let can_use = has_item && !p.spectator && (riptide == 0 || wet);
         if let Some(held) = use_key.tick(use_down, can_use)
             && riptide > 0
             && held >= 10
             && wet
         {
-            modern::riptide::<V26_1, _>(&mut p, &mut x, &world, strength);
+            modern::riptide::<R, _>(&mut p, &mut x, &world, strength);
         }
         if riptide > 0 && !gate.is_loaded() {
             p.yaw = old_yaw;
@@ -939,7 +986,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 if let (Some(kind), Some(bb)) = (modern::push_kind_26_1(name, living), post) {
                     let pusher = modern::Pusher::new(f3(&e["pos"]), bb, kind);
                     if before_player {
-                        modern::push_by::<V26_1, _>(&mut p, &x, &world, &pusher);
+                        modern::push_by::<R, _>(&mut p, &x, &world, &pusher);
                     } else {
                         after.push(pusher);
                     }
@@ -953,17 +1000,17 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let around = modern::Surroundings::new().with_entities(&colliders);
         if seat.is_some() {
             let s = modern::Seat::new(f3(&rec["vehicle"]["pos"]), modern::Seat::MINECART);
-            modern::tick_passenger::<V26_1, _>(&mut p, &mut x, &around, &s, &ti, &world, &mut out);
+            modern::tick_passenger::<R, _>(&mut p, &mut x, &around, &s, &ti, &world, &mut out);
         } else if let Some((_, _, bt)) = riding.as_mut() {
             boat_colliders.sort_by_key(|c| c.0);
             let bc: Vec<ghast_physics::math::Aabb> = boat_colliders.iter().map(|c| c.1).collect();
-            modern::tick_boat::<V26_1, _>(bt, &mut p, &mut x, &around, &bc, &ti, &world, &mut out);
+            modern::tick_boat::<R, _>(bt, &mut p, &mut x, &around, &bc, &ti, &world, &mut out);
         } else {
-            gate.step_in::<V26_1, _>(&mut p, &mut x, &around, &ti, &world, compiled, &mut out);
+            gate.step_in::<R, _>(&mut p, &mut x, &around, &ti, &world, compiled, &mut out);
         }
         if gate.is_loaded() {
             for pusher in &after {
-                modern::push_by::<V26_1, _>(&mut p, &x, &world, pusher);
+                modern::push_by::<R, _>(&mut p, &x, &world, pusher);
             }
         }
         if use_key.using {
@@ -1010,7 +1057,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         if let Some(d) = diff(
             "state",
             &rec["state"],
-            &state_json_ext(&p, &x, &world, use_key.using),
+            &state_json_ext::<R>(&p, &x, &world, use_key.using),
         ) {
             return Err(mm(t, d));
         }
@@ -1030,10 +1077,15 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
 
 /// Replays every case of a 26.1 file.
 pub fn replay_file(path: &std::path::Path) -> super::Summary {
+    replay_file_with::<V26_1>(path)
+}
+
+/// [`replay_file`] with another row.
+pub fn replay_file_with<R: Row>(path: &std::path::Path) -> super::Summary {
     let mut s = super::Summary::default();
     for case in super::cases(path) {
         s.cases += 1;
-        match replay(&case) {
+        match replay_with::<R>(&case) {
             Ok(n) => s.ticks += n,
             Err(m) => s.failures.push(m),
         }

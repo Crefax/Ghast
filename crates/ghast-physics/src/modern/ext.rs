@@ -67,6 +67,44 @@ pub struct PlayerExt {
     rockets: [Rocket; MAX_ROCKETS],
     /// A movement made before the tick (the riptide lift), swept by the tick's inside-block effects.
     pub(super) pending_move: Option<super::inside::Movement>,
+    /// The movement attributes added in 26.2 (`friction_modifier`, `air_drag_modifier`,
+    /// `bounciness`); read only by rule sets that have them ([`Rules::RESTITUTION`](super::Rules::RESTITUTION)).
+    pub attributes: MovementAttributes,
+}
+
+/// The movement attributes 26.2 added to every living entity. The server sends them like the
+/// others (update attributes packet); their defaults leave movement as 26.1 computes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct MovementAttributes {
+    /// `minecraft:friction_modifier` (1, 0..2048): scales `1 - friction` of the block stood on.
+    pub friction_modifier: super::attr::Attribute,
+    /// `minecraft:air_drag_modifier` (1, 0..2048): scales `1 - drag` of the air drags.
+    pub air_drag_modifier: super::attr::Attribute,
+    /// `minecraft:bounciness` (0, 0..1): the restitution of every collision.
+    pub bounciness: super::attr::Attribute,
+}
+
+impl Default for MovementAttributes {
+    fn default() -> Self {
+        MovementAttributes {
+            friction_modifier: super::attr::Attribute::new(1.0, 0.0, 2048.0),
+            air_drag_modifier: super::attr::Attribute::new(1.0, 0.0, 2048.0),
+            bounciness: super::attr::Attribute::new(0.0, 0.0, 1.0),
+        }
+    }
+}
+
+impl MovementAttributes {
+    /// The instance for a registry name (`minecraft:` optional); `None` for other attributes.
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut super::attr::Attribute> {
+        Some(match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "friction_modifier" => &mut self.friction_modifier,
+            "air_drag_modifier" => &mut self.air_drag_modifier,
+            "bounciness" => &mut self.bounciness,
+            _ => return None,
+        })
+    }
 }
 
 /// Attached rockets [`PlayerExt`] keeps track of.

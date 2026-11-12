@@ -1,5 +1,5 @@
 //! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/`,
-//! `oracle/cache/1.16.5/fuzz{,-edges,-extras}/` and `oracle/cache/1.12.2/fuzz{,-edges,-extras}/` (or the file / directory in `GHAST_FUZZ`) produced by
+//! `oracle/cache/1.16.5/fuzz{,-edges,-extras}/`, `oracle/cache/1.12.2/fuzz{,-edges,-extras}/`, the 26.1 and 26.2 directories (or the file / directory in `GHAST_FUZZ`) produced by
 //! `oracle/run.sh fuzz`, compared bit for bit. The version is taken from the path.
 //!
 //! Needs the git-ignored oracle cache, so it is behind the `oracle-cache` feature:
@@ -44,6 +44,18 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/26.1/fuzz-border"),
             repo_root().join("oracle/cache/26.1/fuzz-boats"),
             repo_root().join("oracle/cache/26.1/fuzz-minecarts"),
+            repo_root().join("oracle/cache/26.2/fuzz"),
+            repo_root().join("oracle/cache/26.2/fuzz-edges"),
+            repo_root().join("oracle/cache/26.2/fuzz-extras"),
+            repo_root().join("oracle/cache/26.2/fuzz-restitution"),
+            repo_root().join("oracle/cache/26.2/fuzz-teleports"),
+            repo_root().join("oracle/cache/26.2/fuzz-elytra"),
+            repo_root().join("oracle/cache/26.2/fuzz-riptide"),
+            repo_root().join("oracle/cache/26.2/fuzz-entities"),
+            repo_root().join("oracle/cache/26.2/fuzz-nether"),
+            repo_root().join("oracle/cache/26.2/fuzz-border"),
+            repo_root().join("oracle/cache/26.2/fuzz-boats"),
+            repo_root().join("oracle/cache/26.2/fuzz-minecarts"),
         ],
     };
     let mut files = Vec::new();
@@ -66,6 +78,10 @@ fn inputs() -> Vec<PathBuf> {
 
 fn replay_any(path: &std::path::Path) -> Summary {
     let name = path.to_string_lossy();
+    #[cfg(all(feature = "v26_1", feature = "v26_2"))]
+    if name.contains("26.2") {
+        return common::v261::replay_file_with::<ghast_physics::modern::V26_2>(path);
+    }
     #[cfg(feature = "v26_1")]
     if name.contains("26.1") {
         return common::v261::replay_file(path);
@@ -79,7 +95,7 @@ fn replay_any(path: &std::path::Path) -> Summary {
         return common::v112::replay_file(path);
     }
     #[cfg(feature = "v1_8")]
-    if !["26.1", "1.16.5", "1.12.2"]
+    if !["26.1", "26.2", "1.16.5", "1.12.2"]
         .iter()
         .any(|v| name.contains(v))
     {

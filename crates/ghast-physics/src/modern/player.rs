@@ -6,7 +6,7 @@
 // Vanilla's negated float comparisons are kept as written: they decide the NaN cases.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::nonminimal_bool)]
 
-use ghast_data::v26_1::{BlockKind, block_flags as bf, state_flags as sf};
+use super::rules::shared::{BlockKind, block_flags as bf, state_flags as sf};
 
 use super::attr::{Attribute, ModifierId, SPRINT_AMOUNT, sprinting_id};
 use super::collide::{Border, Ents, Extra, Placed, Plain, ShapeCtx, World, collide, make_box};
@@ -714,14 +714,14 @@ fn climbable<R: Rules, W: BlockView<State = R::State>, E: Extra>(
     }
     let (x, y, z) = (floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
     let s = w.state(x, y, z);
-    let d = R::block(s);
-    if gliding && d.flags & bf::CAN_GLIDE_THROUGH != 0 {
+    let flags = R::block_flags(s);
+    if gliding && flags & bf::CAN_GLIDE_THROUGH != 0 {
         return false;
     }
-    if d.flags & bf::CLIMBABLE != 0 {
+    if flags & bf::CLIMBABLE != 0 {
         return true;
     }
-    if d.flags & bf::TRAPDOOR != 0 {
+    if flags & bf::TRAPDOOR != 0 {
         let aux = R::phys(s).aux();
         if aux & 1 == 0 {
             return false;
@@ -779,6 +779,7 @@ pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
         auto_spin_ticks: x.auto_spin_ticks,
         riding: None,
         last_yd: 0.0,
+        ..Glide::with_attributes(x)
     };
     let pending = x.pending_move.take();
     tick_core::<R, W, Ents<'_>>(p, &mut g, pending, Ents(around.entities), input, world, out);
@@ -789,7 +790,7 @@ pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
 
 /// The part of [`PlayerExt`] the player's own tick reads and writes (kept small so a plain
 /// [`tick`] does not build the rocket list).
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub(super) struct Glide {
     pub(super) fall_flying: bool,
     pub(super) glider: bool,
@@ -799,6 +800,49 @@ pub(super) struct Glide {
     pub(super) riding: Option<Ride>,
     /// A boat's `lastYd` (its fall check), boat ticks only.
     pub(super) last_yd: f64,
+    /// 26.2 `bounciness` attribute value (see [`Rules::RESTITUTION`]).
+    pub(super) bounciness: f64,
+    /// 26.2 `air_drag_modifier` attribute value, as the float `LivingEntity` reads.
+    pub(super) air_drag_modifier: f32,
+    /// 26.2 `friction_modifier` attribute value, as the float `LivingEntity` reads.
+    pub(super) friction_modifier: f32,
+}
+
+impl Default for Glide {
+    fn default() -> Self {
+        Glide {
+            fall_flying: false,
+            glider: false,
+            spin_attack: false,
+            auto_spin_ticks: 0,
+            riding: None,
+            last_yd: 0.0,
+            bounciness: 0.0,
+            air_drag_modifier: 1.0,
+            friction_modifier: 1.0,
+        }
+    }
+}
+
+impl Glide {
+    /// The movement attribute values of the extension state (the rest default).
+    pub(super) fn with_attributes(x: &PlayerExt) -> Glide {
+        let a = &x.attributes;
+        Glide {
+            bounciness: a.bounciness.value(),
+            air_drag_modifier: a.air_drag_modifier.value() as f32,
+            friction_modifier: a.friction_modifier.value() as f32,
+            ..Glide::default()
+        }
+    }
+}
+
+/// 26.2 `LivingEntity.computeModifiedFriction`: `clamp(1 - (1 - friction) * modifier, 0, 1)`
+/// in float (the identity for a modifier of 1 and frictions in `[0.5, 1]`).
+#[inline]
+fn modified_friction(friction: f32, modifier: f32) -> f32 {
+    let v = 1.0f32 - (1.0f32 - friction) * modifier;
+    if v < 0.0 { 0.0 } else { v.min(1.0) }
 }
 
 /// What a passenger's tick reads from its boat (after the boat's tick).
@@ -911,6 +955,7 @@ pub fn riptide<R: Rules, W: BlockView<State = R::State>>(
                 auto_spin_ticks: x.auto_spin_ticks,
                 riding: None,
                 last_yd: 0.0,
+                ..Glide::with_attributes(x)
             },
             w: &w,
             old_pos: V3::ZERO,
@@ -1508,13 +1553,12 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     /// `getBlockJumpFactor`.
     fn block_jump_factor(&self) -> f32 {
         let p = &self.p;
-        let here = R::block(
+        let here = R::jump_factor(
             self.w
                 .state(floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2])),
-        )
-        .jump_factor;
+        );
         let [x, y, z] = self.on_pos(0.500_001);
-        let below = R::block(self.w.state(x, y, z)).jump_factor;
+        let below = R::jump_factor(self.w.state(x, y, z));
         if here == 1.0 { below } else { here }
     }
 
@@ -1527,13 +1571,13 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         let s = self
             .w
             .state(floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
-        let here = R::block(s).speed_factor;
+        let here = R::speed_factor(s);
         let k = R::phys(s).kind();
         let base = if k == BlockKind::Water as u8 || k == BlockKind::BubbleColumn as u8 {
             here
         } else if here == 1.0 {
             let [x, y, z] = self.on_pos(0.500_001);
-            R::block(self.w.state(x, y, z)).speed_factor
+            R::speed_factor(self.w.state(x, y, z))
         } else {
             here
         };
@@ -1548,10 +1592,10 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             if !(offset > 1.0e-5) {
                 return s;
             }
-            let d = R::block(self.w.state(s[0], s[1], s[2]));
-            let keep = (f64::from(offset) <= 0.5 && d.flags & bf::FENCES != 0)
-                || d.flags & bf::WALLS != 0
-                || d.flags & bf::FENCE_GATE != 0;
+            let flags = R::block_flags(self.w.state(s[0], s[1], s[2]));
+            let keep = (f64::from(offset) <= 0.5 && flags & bf::FENCES != 0)
+                || flags & bf::WALLS != 0
+                || flags & bf::FENCE_GATE != 0;
             if keep {
                 return s;
             }
@@ -1736,14 +1780,30 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     fn travel_in_air(&mut self, input: V3) {
         let below = self.on_pos(0.500_001);
         let bf_ = if self.p.on_ground {
-            R::block(self.w.state(below[0], below[1], below[2])).friction
+            let f = R::friction(self.w.state(below[0], below[1], below[2]));
+            if R::RESTITUTION {
+                modified_friction(f, self.x.friction_modifier)
+            } else {
+                f
+            }
         } else {
             1.0
         };
-        let friction = bf_ * 0.91;
-        // handleRelativeFrictionAndCalculateMovement
+        // 26.2: both drags under the air drag modifier (the identity at its default 1).
+        let (air_drag, vertical_drag) = if R::RESTITUTION {
+            let m = self.x.air_drag_modifier;
+            (modified_friction(0.91, m), modified_friction(0.98, m))
+        } else {
+            (0.91, 0.98)
+        };
+        let friction = bf_ * air_drag;
+        // handleRelativeFrictionAndCalculateMovement (26.2: no friction scaling at or below 0.6)
         let speed = if self.p.on_ground {
-            self.p.speed() * (0.216_000_02 / (bf_ * bf_ * bf_))
+            if R::RESTITUTION && f64::from(bf_) <= 0.6 {
+                self.p.speed()
+            } else {
+                self.p.speed() * (0.216_000_02 / (bf_ * bf_ * bf_))
+            }
         } else {
             self.flying_speed()
         };
@@ -1766,7 +1826,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             y -= self.gravity();
         }
         let f = f64::from(friction);
-        self.set_vel(V3::new(mvm.x * f, y * f64::from(0.98f32), mvm.z * f));
+        self.set_vel(V3::new(mvm.x * f, y * f64::from(vertical_drag), mvm.z * f));
     }
 
     fn on_climbable(&self) -> bool {
@@ -1801,6 +1861,10 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     fn move_relative(&mut self, speed: f32, input: V3) {
         let len = input.length_sqr();
         if len < 1.0e-7 {
+            // getInputVector is Vec3.ZERO: adding it turns a signed zero (26.2 restitution)
+            // into +0.0.
+            let v = self.vel();
+            self.set_vel(V3::new(v.x + 0.0, v.y + 0.0, v.z + 0.0));
             return;
         }
         let v = if len > 1.0 { input.normalize() } else { input }.scale(f64::from(speed));
@@ -1924,25 +1988,99 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         } else {
             self.check_fall_damage(movement.y);
         }
-        if self.p.horizontal_collision {
-            let v = self.vel();
-            self.set_vel(V3::new(
-                if xc { 0.0 } else { v.x },
-                v.y,
-                if zc { 0.0 } else { v.z },
-            ));
-        }
-        if delta.y != movement.y {
-            self.after_fall_on(effect);
+        if R::RESTITUTION {
+            // canSimulateMovement: the client player and the boat it controls.
+            if delta.y.abs() > 0.0 && self.p.vertical_collision || self.p.horizontal_collision {
+                self.restitute(effect, xc, zc, movement);
+            }
+        } else {
+            if self.p.horizontal_collision {
+                let v = self.vel();
+                self.set_vel(V3::new(
+                    if xc { 0.0 } else { v.x },
+                    v.y,
+                    if zc { 0.0 } else { v.z },
+                ));
+            }
+            if delta.y != movement.y {
+                self.after_fall_on(effect);
+            }
         }
         let k = f64::from(self.block_speed_factor());
         let v = self.vel();
         self.set_vel(V3::new(v.x * k, v.y, v.z * k));
     }
 
+    /// 26.2 `Entity.restituteMovementAfterCollisions` (see [`Rules::RESTITUTION`]).
+    fn restitute(&mut self, effect: R::State, xc: bool, zc: bool, movement: V3) {
+        // isSuppressingBounce: the player's shift key; a boat never.
+        let suppress = !E::VEHICLE && self.p.shift();
+        // getEntityBounciness: the bounciness attribute of a living entity, 0 for a boat.
+        let mut r = if suppress || E::VEHICLE {
+            0.0
+        } else {
+            self.x.bounciness
+        };
+        let c = self.vel();
+        let mut o = c;
+        if xc {
+            o.x = -c.x * r;
+        }
+        if zc {
+            o.z = -c.z * r;
+        }
+        if self.p.vertical_collision {
+            // getEffectiveGravity: a boat's default gravity, the player's with slow falling.
+            let g = if E::VEHICLE { 0.04 } else { self.gravity() };
+            if self.p.vertical_collision_below {
+                r = if -c.y >= g
+                    && !suppress
+                    && R::phys(effect).kind() != BlockKind::HoneyBlock as u8
+                {
+                    java_max(r, f64::from(self.block_bounciness(effect)))
+                } else {
+                    0.0
+                };
+            }
+            let (gc, drag) = if r > 0.0 {
+                let portion = movement.y / c.y;
+                (
+                    portion * g,
+                    m::lerp(portion, 1.0, f64::from(self.air_drag())),
+                )
+            } else {
+                (0.0, 1.0)
+            };
+            o.y = (gc - c.y) * drag * r;
+        }
+        self.set_vel(o);
+    }
+
+    /// 26.2 `Entity.getBlockBounciness`: the block's bounce restitution (slime blocks 1, beds
+    /// 0.75), times 0.8 for an entity that is not living (a boat).
+    fn block_bounciness(&self, s: R::State) -> f32 {
+        let b = if R::phys(s).kind() == BlockKind::SlimeBlock as u8 {
+            1.0f32
+        } else if R::block_flags(s) & bf::BED != 0 {
+            0.75f32
+        } else {
+            0.0
+        };
+        if E::VEHICLE { b * 0.8f32 } else { b }
+    }
+
+    /// `getAirDrag`: a boat's 1; a living entity's 0.98 under its `air_drag_modifier`.
+    fn air_drag(&self) -> f32 {
+        if E::VEHICLE {
+            1.0
+        } else {
+            modified_friction(0.98, self.x.air_drag_modifier)
+        }
+    }
+
     /// `updateEntityMovementAfterFallOn` of the block landed on.
     fn after_fall_on(&mut self, s: R::State) {
-        let d = R::block(s);
+        let flags = R::block_flags(s);
         let kind_ = R::phys(s).kind();
         let v = self.vel();
         // bounceUp: a factor of 1 for living entities, 0.8 for others (a boat).
@@ -1951,7 +2089,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             if v.y < 0.0 {
                 self.set_vel(V3::new(v.x, -v.y * factor, v.z));
             }
-        } else if !self.p.shift() && d.flags & bf::BED != 0 {
+        } else if !self.p.shift() && flags & bf::BED != 0 {
             if v.y < 0.0 {
                 self.set_vel(V3::new(v.x, -v.y * f64::from(0.66f32) * factor, v.z));
             }
@@ -2098,7 +2236,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             let tp = from.add(diff.scale(0.001));
             super::math::contains(b, tp) || m::clip_box(b, from, to).is_some()
         };
-        if R::block(s).flags & bf::FALL_DAMAGE_RESETTING != 0 && shape_clip(&cell(1.0)) {
+        if R::block_flags(s) & bf::FALL_DAMAGE_RESETTING != 0 && shape_clip(&cell(1.0)) {
             return true;
         }
         let f = p.fluid();

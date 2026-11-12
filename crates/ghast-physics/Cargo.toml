@@ -14,13 +14,15 @@ documentation = "https://docs.rs/ghast-physics"
 readme = "README.md"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2"]
 # One feature per version module (with its ghast-data tables); any subset builds.
 v1_8 = ["ghast-data/v1_8"]
 v1_12 = ["ghast-data/v1_12"]
 v1_16_5 = ["ghast-data/v1_16_5"]
 # The modern core with the 26.1 rule set (ghast-data's 26.1 tables).
 v26_1 = ["ghast-data/v26_1"]
+# The modern core with the 26.2 rule set (ghast-data's 26.2 tables).
+v26_2 = ["ghast-data/v26_2"]
 # Large-fuzz replay test (`tests/fuzz_cache.rs`): replays oracle output from `oracle/cache/` that
 # `oracle/run.sh fuzz` generated. Off by default so `cargo test` needs no Java and no cache.
 oracle-cache = []
