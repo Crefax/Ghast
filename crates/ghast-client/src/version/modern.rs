@@ -789,7 +789,7 @@ impl ClientVersion for Marker {
         }
         // Everything the inventory reads (recipes for the furnace / smithing / stonecutter
         // slots, abilities for creative clicks, experience for the anvil and enchanting).
-        for &id in super::INVENTORY_PACKET_IDS {
+        for &id in super::inventory_packet_ids() {
             f.insert(id);
         }
         if interests.contains(Interests::CHAT) {
@@ -1109,7 +1109,7 @@ impl ClientVersion for Marker {
         // Slots keep their components as bytes (structural skip); no confirms since 1.17.
         if (raw.id == cb::id::LOGIN
             || raw.id == cb::id::RESPAWN
-            || super::INVENTORY_PACKET_IDS.contains(&raw.id))
+            || super::inventory_packet_ids().contains(&raw.id))
             // The mount screen needs the entity (ClientVersion::open_mount_screen).
             && raw.id != cb::id::OPEN_HORSE_WINDOW
         {
@@ -1770,7 +1770,7 @@ mod tests {
     #[test]
     fn filter_passes_the_inventory_packets() {
         let f = Marker::play_filter(Interests::NONE);
-        for &id in super::super::INVENTORY_PACKET_IDS {
+        for &id in super::super::inventory_packet_ids() {
             assert!(f.contains(id), "0x{id:02x}");
         }
     }

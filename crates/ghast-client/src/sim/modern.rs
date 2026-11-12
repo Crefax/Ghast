@@ -1089,7 +1089,7 @@ impl WorldView for ModernSim {
                 conduit_power: self.conduit_power,
             })),
             air: s.is_air(),
-            water: d.name == "water",
+            water: s.block().name() == "water",
             block: s.block().default_state().id(),
             hardness,
             // The modern destroy progress replaces tool groups and harvest lists.
@@ -1097,7 +1097,7 @@ impl WorldView for ModernSim {
             harvest_tools: &[],
             selection: outline_box(s),
             stairs: None,
-            activates: activates_1_16(d.name),
+            activates: activates_1_16(s.block().name()),
         })
     }
 

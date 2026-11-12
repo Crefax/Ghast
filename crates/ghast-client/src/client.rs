@@ -26,6 +26,8 @@ use crate::version::V1_12_2;
 use crate::version::V1_16_5;
 #[cfg(feature = "v26_1")]
 use crate::version::V26_1;
+#[cfg(feature = "v26_2")]
+use crate::version::V26_2;
 use crate::version::{ClientVersion, GameVersion, HasSim};
 
 /// Length of one client tick.
@@ -339,6 +341,8 @@ impl Client {
             GameVersion::V1_16_5 => sessions::<V1_16_5, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v26_1")]
             GameVersion::V26_1 => sessions::<V26_1, B, S>(self, behavior, shutdown).await,
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => sessions::<V26_2, B, S>(self, behavior, shutdown).await,
             #[allow(unreachable_patterns)]
             v => {
                 let _ = (behavior, shutdown);

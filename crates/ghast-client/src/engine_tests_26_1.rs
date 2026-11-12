@@ -17,5 +17,14 @@ pub(super) const GAME: GameVersion = GameVersion::V26_1;
 pub(super) const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V26_1;
 pub(super) const GOLDEN: &str = "26.1";
 
+/// A component patch with one `enchantments` component (its body).
+pub(super) fn enchantments_patch(body: &[u8]) -> ghast_protocol::types::slot::v775::ComponentPatch {
+    ghast_protocol::types::slot::v775::ComponentPatch::from_parts(
+        &[(inv::component::ENCHANTMENTS, body)],
+        &[],
+    )
+}
+
+#[allow(clippy::duplicate_mod)]
 #[path = "engine_modern_tests.rs"]
 mod replays;

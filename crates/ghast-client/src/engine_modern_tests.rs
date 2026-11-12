@@ -803,10 +803,7 @@ fn riptide_matches_the_oracle() {
             let mut stack = ghast_inventory::Stack::new(id, 1, 0);
             if let Some(level) = ext.and_then(|x| x.get("riptide")).and_then(Value::as_u64) {
                 // enchantments: one entry, registry index 0 (riptide), the level.
-                let patch = ghast_protocol::types::slot::v775::ComponentPatch::from_parts(
-                    &[(inv::component::ENCHANTMENTS, &[1, 0, level as u8])],
-                    &[],
-                );
+                let patch = enchantments_patch(&[1, 0, level as u8]);
                 stack = stack.with_data(ghast_inventory::ItemData::Components(Box::new(patch)));
             }
             e.inventory_mut().on_set_slot(0, 36, Some(stack));
@@ -1653,7 +1650,7 @@ fn item_use_facts() {
     assert!(!sim.pre_tick(&inv, &pre_tick(Some((true, shield)))));
 }
 
-/// 26.1: the same through the 26.1 tracker and `pick::v26_1::pick_target` (entity range 3,
+/// The same through the version's tracker and `pick_target` (entity range 3,
 /// block range 4.5, no pick margin).
 #[test]
 fn entity_pick() {
@@ -1664,10 +1661,11 @@ fn entity_pick() {
         body: bytes::Bytes::from(b),
     };
     let zombie = |eid: u8, x: f64| {
-        // entity id, uuid, type 150 (zombie), x y z, zero velocity, pitch yaw head, data.
+        // entity id, uuid, type (zombie, var-int), x y z, zero velocity, pitch yaw head, data.
         let mut b = vec![eid];
         b.extend((0x1000u128 + u128::from(eid)).to_be_bytes());
-        b.extend([150, 1]);
+        let ty = data::entity_by_name("zombie").unwrap().id;
+        b.extend([(ty & 0x7f) as u8 | 0x80, (ty >> 7) as u8]);
         for v in [x, 64.0, 8.5] {
             b.extend(v.to_be_bytes());
         }

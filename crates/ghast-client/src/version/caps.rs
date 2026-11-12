@@ -19,6 +19,8 @@ pub enum PhysicsRules {
     V1_16_5,
     /// `ghast_physics::modern` with the `V26_1` rules (26.1 – 26.1.2).
     Modern26_1,
+    /// `ghast_physics::modern` with the `V26_2` rules (26.2: collision restitution).
+    Modern26_2,
 }
 
 /// The data tables of a version (`ghast-data` module).
@@ -33,6 +35,8 @@ pub enum DataSet {
     V1_16_5,
     /// `ghast_data::v26_1`: flattened block states and item ids.
     V26_1,
+    /// `ghast_data::v26_2`: flattened block states and item ids.
+    V26_2,
 }
 
 /// How item stacks carry their extra data on the wire.
@@ -171,4 +175,13 @@ pub(crate) const V26_1: Capabilities = Capabilities {
     block_sequence: true,
     chat_acknowledgements: true,
     ..V1_16_5
+};
+
+/// 26.2 (protocol 776): the 26.1 row with its own physics rules and data.
+pub(crate) const V26_2: Capabilities = Capabilities {
+    version: GameVersion::V26_2,
+    protocol: 776,
+    physics: PhysicsRules::Modern26_2,
+    data: DataSet::V26_2,
+    ..V26_1
 };

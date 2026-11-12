@@ -23,6 +23,8 @@ mod v1_16_5;
 mod v1_8;
 #[cfg(feature = "v26_1")]
 pub(crate) mod v26_1;
+#[cfg(feature = "v26_2")]
+pub(crate) mod v26_2;
 
 #[cfg(feature = "v1_8")]
 pub(crate) use v1_8::Sim18;
@@ -32,6 +34,8 @@ pub(crate) use v1_12::Sim12;
 pub(crate) use v1_16_5::Sim16;
 #[cfg(feature = "v26_1")]
 pub(crate) use v26_1::Sim26;
+#[cfg(feature = "v26_2")]
+pub(crate) use v26_2::Sim262;
 
 /// The crosshair pick's inputs besides the world (vanilla `GameRenderer.updateTargetedEntity`).
 #[cfg_attr(
@@ -149,7 +153,7 @@ pub trait WorldView {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    ghast_modern
 ))]
 #[derive(Debug, Default)]
 pub(super) struct SessionPackets {
@@ -161,7 +165,7 @@ pub(super) struct SessionPackets {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    ghast_modern
 ))]
 impl SessionPackets {
     fn note(&mut self, raw: &RawPacket, login: i32, respawn: i32) {
@@ -207,7 +211,7 @@ impl BlockUpdates {
 /// What [`Sim::pre_tick`] gets each tick.
 #[derive(Debug, Clone, Copy)]
 // Read by the 26.1 sim only.
-#[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+#[cfg_attr(not(ghast_modern), allow(dead_code))]
 pub(crate) struct PreTick {
     /// The use in progress: (off hand, item id).
     pub(crate) using: Option<(bool, u16)>,
@@ -267,7 +271,7 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         true
     }
     /// Test hook: puts the 26.1 player (and its extension state) in place, level loaded.
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_modern(
         &mut self,
         p: ghast_physics::modern::PlayerState,
@@ -276,12 +280,12 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = (p, x);
     }
     /// Test hook: the 26.1 player's shared flags byte.
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_shared_flags(&self) -> u8 {
         0
     }
     /// Test hook: our entity id for the own-entity packets.
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_own_id(&mut self, id: i32) {
         let _ = id;
     }
@@ -354,7 +358,7 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// Spectator game mode (no collision).
     fn spectator(&mut self, on: bool);
     /// 26.1: the client player's movement state (see [`crate::TickContext::modern_player`]).
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
         None
     }
@@ -475,7 +479,7 @@ pub(crate) struct SimOptions {
     /// What the world keeps besides block states (default: nothing, see [`config`]).
     pub world: Option<WorldConfig>,
     /// The player's scoreboard name (team membership for entity pushes, 26.1).
-    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
     pub profile_name: Option<String>,
 }
 
@@ -559,7 +563,7 @@ pub(super) fn force_position(
 
 /// 1.16 blocks whose `onUse` succeeds for a plain right click (GUIs, doors,
 /// switches, …). Name-based approximation of vanilla's per-block `use` overrides.
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", ghast_modern))]
 pub(super) fn activates_1_16(name: &str) -> bool {
     const EXACT: &[&str] = &[
         "chest",
@@ -630,7 +634,7 @@ pub(super) fn legacy_crosshair(t: ghast_physics::pick::legacy::Target, eye: [f64
 }
 
 /// A modern (1.16.5+) crosshair target as the engine takes it.
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", ghast_modern))]
 pub(super) fn modern_crosshair(t: ghast_physics::pick::Target, eye: [f64; 3]) -> Crosshair {
     use ghast_physics::pick::Target;
     match t {
@@ -670,7 +674,7 @@ pub(super) fn block_hit(
 }
 
 /// Union of the collision boxes as a ray box (`None` when there is none).
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", ghast_modern))]
 pub(super) fn union(boxes: &[ghast_data::Aabb]) -> Option<[f64; 6]> {
     let mut u = [1.0_f64, 1.0, 1.0, 0.0, 0.0, 0.0];
     for b in boxes {
@@ -767,6 +771,8 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         },
         #[cfg(feature = "v26_1")]
         DataSet::V26_1 => v26_1::held_item_facts(id, count, efficiency),
+        #[cfg(feature = "v26_2")]
+        DataSet::V26_2 => v26_2::held_item_facts(id, count, efficiency),
         // A data set this build does not include: an item without known facts.
         #[allow(unreachable_patterns)]
         _ => HeldItem {
@@ -923,7 +929,7 @@ pub(super) fn push_packets(
     }
 }
 
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", ghast_modern))]
 pub(super) fn physics_abilities(a: Abilities) -> ghast_physics::Abilities {
     ghast_physics::Abilities {
         invulnerable: a.flags & 1 != 0,
@@ -1021,6 +1027,7 @@ pub(crate) mod test_chunks {
         v26_1_sections(x, z, 24, 7)
     }
 
+    #[cfg(feature = "v26_1")]
     /// A 26.1 column of `sections` sections with the stone layer at the top of section
     /// `stone` (the nether: 16 sections, stone layer section 3).
     pub(crate) fn v26_1_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
@@ -1050,6 +1057,57 @@ pub(crate) mod test_chunks {
             d.put_varint(0);
         }
         RawPacket::from_packet(&ghast_protocol::v26_1::play::clientbound::MapChunk {
+            x,
+            z,
+            heightmaps: Vec::new(),
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+            sky_light_mask: Vec::new(),
+            block_light_mask: Vec::new(),
+            empty_sky_light_mask: Vec::new(),
+            empty_block_light_mask: Vec::new(),
+            sky_light: Vec::new(),
+            block_light: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    #[cfg(feature = "v26_2")]
+    /// A 26.2 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
+    pub(crate) fn v26_2(x: i32, z: i32) -> RawPacket {
+        v26_2_sections(x, z, 24, 7)
+    }
+
+    #[cfg(feature = "v26_2")]
+    /// A 26.2 column of `sections` sections with the stone layer at the top of section
+    /// `stone` (the nether: 16 sections, stone layer section 3).
+    pub(crate) fn v26_2_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
+        use ghast_protocol::McWrite;
+        let stone = ghast_data::v26_2::BlockState::parse("stone").unwrap().id();
+        let mut d = BytesMut::new();
+        for section in 0..sections {
+            if section == stone_at {
+                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
+                d.put_i16(256);
+                d.put_i16(0);
+                d.put_u8(4);
+                d.put_varint(2);
+                d.put_varint(0);
+                d.put_varint(i32::from(stone));
+                for w in 0..256 {
+                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+                }
+            } else {
+                d.put_i16(0);
+                d.put_i16(0);
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            // Biomes: one value (registry id 0).
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        RawPacket::from_packet(&ghast_protocol::v26_2::play::clientbound::MapChunk {
             x,
             z,
             heightmaps: Vec::new(),
@@ -1220,7 +1278,7 @@ impl Sim for Box<dyn Sim> {
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
         (**self).mount_info(entity_id)
     }
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
         (**self).modern_player()
     }
@@ -1233,7 +1291,7 @@ impl Sim for Box<dyn Sim> {
     fn vehicle(&self) -> Option<crate::common::Vehicle> {
         (**self).vehicle()
     }
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_modern(
         &mut self,
         p: ghast_physics::modern::PlayerState,
@@ -1241,11 +1299,11 @@ impl Sim for Box<dyn Sim> {
     ) {
         (**self).test_set_modern(p, x);
     }
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_shared_flags(&self) -> u8 {
         (**self).test_shared_flags()
     }
-    #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_own_id(&mut self, id: i32) {
         (**self).test_set_own_id(id);
     }

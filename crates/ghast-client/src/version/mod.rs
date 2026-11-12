@@ -26,6 +26,8 @@ mod v1_16_5;
 mod v1_8;
 #[cfg(feature = "v26_1")]
 pub(crate) mod v26_1;
+#[cfg(feature = "v26_2")]
+pub(crate) mod v26_2;
 
 pub use caps::{Capabilities, DataSet, ItemModel, PhysicsRules};
 #[cfg(feature = "v1_8")]
@@ -36,8 +38,12 @@ pub use ghast_protocol::v1_12_2::V1_12_2;
 pub use ghast_protocol::v1_16_5::V1_16_5;
 #[cfg(feature = "v26_1")]
 pub use ghast_protocol::v26_1::V26_1;
+#[cfg(feature = "v26_2")]
+pub use ghast_protocol::v26_2::V26_2;
 #[cfg(feature = "v26_1")]
 pub use v26_1::Wire as Wire26_1;
+#[cfg(feature = "v26_2")]
+pub use v26_2::Wire as Wire26_2;
 
 /// A protocol version the client supports, chosen at run time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,6 +57,8 @@ pub enum GameVersion {
     V1_16_5,
     /// 26.1 – 26.1.2 (protocol 775).
     V26_1,
+    /// 26.2 (protocol 776).
+    V26_2,
 }
 
 impl GameVersion {
@@ -61,6 +69,7 @@ impl GameVersion {
         GameVersion::V1_12_2,
         GameVersion::V1_16_5,
         GameVersion::V26_1,
+        GameVersion::V26_2,
     ];
 
     /// What this version can do (the row the client core reads instead of comparing
@@ -72,6 +81,7 @@ impl GameVersion {
             Self::V1_12_2 => &caps::V1_12_2,
             Self::V1_16_5 => &caps::V1_16_5,
             Self::V26_1 => &caps::V26_1,
+            Self::V26_2 => &caps::V26_2,
         }
     }
 
@@ -83,6 +93,7 @@ impl GameVersion {
             Self::V1_12_2 => cfg!(feature = "v1_12_2"),
             Self::V1_16_5 => cfg!(feature = "v1_16_5"),
             Self::V26_1 => cfg!(feature = "v26_1"),
+            Self::V26_2 => cfg!(feature = "v26_2"),
         }
     }
 
@@ -109,6 +120,7 @@ impl GameVersion {
             Self::V1_12_2 => "1.12.2",
             Self::V1_16_5 => "1.16.5",
             Self::V26_1 => "26.1",
+            Self::V26_2 => "26.2",
         }
     }
 
@@ -141,14 +153,14 @@ impl fmt::Display for GameVersion {
 
 /// Error parsing a [`GameVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5, 26.1)")]
+#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5, 26.1, 26.2)")]
 pub struct UnknownVersion(pub String);
 
 impl FromStr for GameVersion {
     type Err = UnknownVersion;
 
     /// Accepts `1.8`, `1.8.x`, `47`, `1.12.2`, `340`, `1.16.4`, `1.16.5`, `754`, `26.1`,
-    /// `26.1.1`, `26.1.2` and `775`.
+    /// `26.1.1`, `26.1.2`, `775`, `26.2` and `776`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "1.8" | "1.8.0" | "1.8.1" | "1.8.2" | "1.8.3" | "1.8.4" | "1.8.5" | "1.8.6"
@@ -156,6 +168,7 @@ impl FromStr for GameVersion {
             "1.12.2" | "340" => Ok(Self::V1_12_2),
             "1.16.4" | "1.16.5" | "754" => Ok(Self::V1_16_5),
             "26.1" | "26.1.0" | "26.1.1" | "26.1.2" | "775" => Ok(Self::V26_1),
+            "26.2" | "26.2.0" | "776" => Ok(Self::V26_2),
             other => Err(UnknownVersion(other.to_owned())),
         }
     }
@@ -377,6 +390,8 @@ mod sealed {
     impl Sealed for super::V1_16_5 {}
     #[cfg(feature = "v26_1")]
     impl Sealed for super::V26_1 {}
+    #[cfg(feature = "v26_2")]
+    impl Sealed for super::V26_2 {}
 }
 
 /// Truncates `s` to at most `max` UTF-16 units (Java's `String.length()`), at a character

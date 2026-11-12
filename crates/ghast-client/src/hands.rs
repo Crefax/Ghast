@@ -64,6 +64,9 @@ pub(crate) enum ExactDig {
     /// `ghast_data::v26_1::dig` with the player's mining attributes.
     #[cfg(feature = "v26_1")]
     V26_1(ModernDig),
+    /// `ghast_data::v26_2::dig` with the player's mining attributes.
+    #[cfg(feature = "v26_2")]
+    V26_2(ModernDig),
 }
 
 /// The facts of the modern destroy-progress formula (attributes replace enchantment levels).
@@ -103,7 +106,7 @@ pub struct HeldItem {
     /// Tool speed multiplier per dig group, filled by the version (`tool_multiplier`).
     pub tool_speed: Option<fn(DigMaterial, u16) -> f32>,
     /// 1.20.5+: the item id for the exact destroy progress (`ghast_data::v26_1`).
-    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
     pub(crate) modern_item: Option<u16>,
     /// Using the item succeeds on the client and swings the arm (26.1: a firework rocket while
     /// gliding, `FireworkRocketItem.use`).
@@ -353,6 +356,8 @@ fn exact_progress(b: &BlockQuery, e: ExactDig, held: Option<&HeldItem>, f: DigFa
         ),
         #[cfg(feature = "v26_1")]
         ExactDig::V26_1(m) => crate::sim::v26_1::dig_progress(&m, held, f),
+        #[cfg(feature = "v26_2")]
+        ExactDig::V26_2(m) => crate::sim::v26_2::dig_progress(&m, held, f),
     }
 }
 

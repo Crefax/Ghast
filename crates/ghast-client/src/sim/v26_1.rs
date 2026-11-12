@@ -47,6 +47,8 @@ pub(crate) mod effects {
     pub(crate) const WEAVING: i8 = 37;
 }
 
+// One body, mounted once per modern version (see CONTRIBUTING.md).
+#[allow(clippy::duplicate_mod)]
 #[path = "modern.rs"]
 mod imp;
 

@@ -1760,7 +1760,7 @@ impl TickContext<'_> {
     /// the tick): the attributes the server sent (movement speed, step height, jump strength,
     /// scale, ...), effects, abilities and the level's build height. Clone it to simulate
     /// ahead with `ghast_physics::modern::tick`. `None` on the other versions.
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     #[must_use]
     pub fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
         self.world.modern_player()
@@ -1944,16 +1944,16 @@ impl TickContext<'_> {
     /// when the name did not change or the input slot is empty). An empty name removes a
     /// custom name.
     pub fn anvil_rename(&mut self, name: &str) -> Result<(), ClickRefused> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(ghast_modern)]
         if let Some(o) = self
             .core
             .inv
-            .anvil_rename_26_1(name)
+            .anvil_rename_modern(name)
             .map_err(ClickRefused::Inventory)?
         {
             self.core.out.push(Outbound::Inventory(o));
         }
-        #[cfg(not(feature = "v26_1"))]
+        #[cfg(not(ghast_modern))]
         let _ = name;
         Ok(())
     }
@@ -1961,16 +1961,16 @@ impl TickContext<'_> {
     /// Selects a banner pattern in the open loom (26.1 `container_button_click`, written now;
     /// nothing is sent for a pattern the loom does not offer).
     pub fn select_loom_pattern(&mut self, index: i32) -> Result<(), ClickRefused> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(ghast_modern)]
         if let Some(o) = self
             .core
             .inv
-            .select_loom_pattern_26_1(index)
+            .select_loom_pattern_modern(index)
             .map_err(ClickRefused::Inventory)?
         {
             self.core.out.push(Outbound::Inventory(o));
         }
-        #[cfg(not(feature = "v26_1"))]
+        #[cfg(not(ghast_modern))]
         let _ = index;
         Ok(())
     }
@@ -1978,16 +1978,16 @@ impl TickContext<'_> {
     /// Selects a trade in the open villager screen (26.1 `select_trade`, written now; the
     /// payment slots are refilled like the real screen).
     pub fn select_trade(&mut self, index: i32) -> Result<(), ClickRefused> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(ghast_modern)]
         {
             let o = self
                 .core
                 .inv
-                .select_trade_26_1(index)
+                .select_trade_modern(index)
                 .map_err(ClickRefused::Inventory)?;
             self.core.out.push(Outbound::Inventory(o));
         }
-        #[cfg(not(feature = "v26_1"))]
+        #[cfg(not(ghast_modern))]
         let _ = index;
         Ok(())
     }
@@ -2410,6 +2410,17 @@ mod tests_26_1;
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
+#[path = "engine_tests_26_2.rs"]
+mod tests_26_2;
+
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
     feature = "v26_1"
 ))]
 mod tests {
@@ -2442,6 +2453,8 @@ mod tests {
             GameVersion::V1_8_9 => Box::new(crate::sim::Sim18::new()),
             GameVersion::V1_12_2 => Box::new(crate::sim::Sim12::new()),
             GameVersion::V26_1 => Box::new(crate::sim::Sim26::test_overworld()),
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => Box::new(crate::sim::Sim262::test_overworld()),
             _ => Box::new(crate::sim::Sim16::new()),
         };
         Engine::new(opts(version), sim)
@@ -2453,6 +2466,8 @@ mod tests {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
             GameVersion::V26_1 => crate::sim::test_chunks::v26_1(x, z),
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => crate::sim::test_chunks::v26_2(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),
         };
         e.sim.world_packet(&raw).unwrap();
@@ -3044,6 +3059,28 @@ mod tests {
                 }
                 GameVersion::V26_1 => {
                     use ghast_protocol::v26_1::play::clientbound as cb;
+                    // Section y = -1 (20-bit two's complement), local x 5 z 6 y 14.
+                    let local = (5 << 8 | 6 << 4 | 14) as i64;
+                    vec![
+                        RawPacket::from_packet(&cb::BlockChange {
+                            location: BlockPos::new(3, 63, 4),
+                            r#type: 1,
+                        })
+                        .unwrap(),
+                        RawPacket::from_packet(&cb::MultiBlockChange {
+                            chunk_coordinates: cb::MultiBlockChangeChunkCoordinates {
+                                x: 0,
+                                z: 0,
+                                y: -1,
+                            },
+                            records: vec![9 << 12 | local],
+                        })
+                        .unwrap(),
+                    ]
+                }
+                #[cfg(feature = "v26_2")]
+                GameVersion::V26_2 => {
+                    use ghast_protocol::v26_2::play::clientbound as cb;
                     // Section y = -1 (20-bit two's complement), local x 5 z 6 y 14.
                     let local = (5 << 8 | 6 << 4 | 14) as i64;
                     vec![

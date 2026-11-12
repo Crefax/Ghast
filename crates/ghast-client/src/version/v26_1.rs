@@ -20,13 +20,18 @@ pub(crate) const GAME: GameVersion = GameVersion::V26_1;
 /// The inventory version.
 pub(crate) const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V26_1;
 /// Every play packet the inventory reads.
-pub(crate) const INVENTORY_PACKET_IDS: &[i32] = ghast_inventory::PACKET_IDS_26_1;
+#[inline(always)]
+pub(crate) fn inventory_packet_ids() -> &'static [i32] {
+    ghast_inventory::PACKET_IDS_26_1
+}
 /// The oracle goldens of this version's wire (`tests/golden/<dir>/`).
 #[cfg(test)]
 pub(crate) const GOLDEN_DIR: &str = "26.1";
 /// The world and movement of this version.
 pub(crate) type Sim = crate::sim::Sim26;
 
+// One body, mounted once per modern version (see CONTRIBUTING.md).
+#[allow(clippy::duplicate_mod)]
 #[path = "modern.rs"]
 mod imp;
 

@@ -16,7 +16,7 @@ pub(crate) const PUSH_OWN_TEAM: u8 = 3;
 
 /// The order of a team's parameters in `set_player_team` (`Parameters.STREAM_CODEC`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // `AffixesFirst` is read by the 26.2 row
+#[allow(dead_code)] // one variant per modern row; single-version builds use one
 pub(crate) enum TeamLayout {
     /// 26.1: display name, options byte, name tag visibility, collision rule, colour
     /// (`ChatFormatting`), prefix, suffix.
@@ -257,6 +257,36 @@ mod tests {
                 assert_eq!(t.may_push("zombie-uuid", "me"), vanilla(a, None));
                 assert_eq!(t.may_push("cow-uuid", "me"), vanilla(b, None));
             }
+        }
+    }
+
+    /// The 26.2 parameter order: display name, prefix, suffix, visibility, collision rule,
+    /// optional colour, options (with and without a colour).
+    #[test]
+    fn layout_26_2() {
+        for color in [None, Some(12)] {
+            let mut b = bytes::BytesMut::new();
+            b.put_string("a").unwrap();
+            b.put_i8(0);
+            for _ in 0..3 {
+                b.put_u8(8);
+                b.put_u16(0);
+            }
+            b.put_varint(1); // name tag visibility
+            b.put_varint(i32::from(NEVER));
+            match color {
+                Some(c) => {
+                    b.put_u8(1);
+                    b.put_varint(c);
+                }
+                None => b.put_u8(0),
+            }
+            b.put_u8(3); // options
+            b.put_varint(1);
+            b.put_string("x").unwrap();
+            let mut t = Teams::default();
+            assert!(t.apply(&b.freeze(), TeamLayout::AffixesFirst), "{color:?}");
+            assert_eq!(t.of("x"), (Some(0), NEVER));
         }
     }
 

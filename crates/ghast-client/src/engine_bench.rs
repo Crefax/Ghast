@@ -70,6 +70,7 @@ fn opts(caps_version: GameVersion) -> CoreOptions {
             GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
             GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
             GameVersion::V26_1 => ghast_inventory::Version::V26_1,
+            GameVersion::V26_2 => ghast_inventory::Version::V26_2,
             _ => ghast_inventory::Version::V1_16_5,
         },
     }
@@ -82,6 +83,8 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
             GameVersion::V26_1 => crate::sim::test_chunks::v26_1(x, z),
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => crate::sim::test_chunks::v26_2(x, z),
             _ => crate::sim::test_chunks::v1_16_5(x, z),
         };
         e.sim.world_packet(&raw).unwrap();
@@ -115,60 +118,74 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         reason: 13,
         value: 0.0,
     });
-    // GHAST_BENCH_ENTITIES=N (26.1): entity tracking on and N mobs standing around the
+    // GHAST_BENCH_ENTITIES=N (modern): entity tracking on and N mobs standing around the
     // player (every fifth a boat), as a server sends them; they never move.
-    #[cfg(feature = "v26_1")]
-    if version == GameVersion::V26_1
-        && let Some(n) = std::env::var("GHAST_BENCH_ENTITIES")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-    {
-        use ghast_protocol::v26_1::play::clientbound as cb;
-        e.sim.set_entities(Some(
-            ghast_entity::Config::default()
-                .with_metadata(true)
-                .with_equipment(false)
-                .with_effects(false)
-                .with_events(false),
-        ));
-        let ty = |name| i32::from(ghast_data::v26_1::entity_by_name(name).unwrap().id);
-        for k in 0..n {
-            let a = f64::from(k) * 2.399;
-            let r = 1.0 + f64::from(k % 7);
-            let p = cb::SpawnEntity {
-                entity_id: 1000 + k,
-                object_uuid: uuid::Uuid::from_u64_pair(0x6265_6e63, k as u64),
-                r#type: if k % 5 == 4 {
-                    ty("oak_boat")
-                } else {
-                    ty("cow")
-                },
-                x: 8.5 + r * a.cos(),
-                y: 64.0,
-                z: 8.5 + r * a.sin(),
-                velocity: ghast_protocol::types::LpVec3::ZERO,
-                pitch: 0,
-                yaw: 0,
-                head_pitch: 0,
-                object_data: 0,
-            };
-            let mut enc = ghast_protocol::FrameEncoder::new();
-            enc.write_packet(&p).unwrap();
-            let out = enc.out_mut().split().freeze();
-            let mut r = &out[..];
-            for _ in 0..2 {
-                while r[0] & 0x80 != 0 {
+    macro_rules! mobs {
+        ($n:expr, $($proto:ident)::+, $($data:ident)::+) => {{
+            use $($proto)::+::play::clientbound as cb;
+            let n = $n;
+            e.sim.set_entities(Some(
+                ghast_entity::Config::default()
+                    .with_metadata(true)
+                    .with_equipment(false)
+                    .with_effects(false)
+                    .with_events(false),
+            ));
+            let ty = |name| i32::from($($data)::+::entity_by_name(name).unwrap().id);
+            for k in 0..n {
+                let a = f64::from(k) * 2.399;
+                let r = 1.0 + f64::from(k % 7);
+                let p = cb::SpawnEntity {
+                    entity_id: 1000 + k,
+                    object_uuid: uuid::Uuid::from_u64_pair(0x6265_6e63, k as u64),
+                    r#type: if k % 5 == 4 {
+                        ty("oak_boat")
+                    } else {
+                        ty("cow")
+                    },
+                    x: 8.5 + r * a.cos(),
+                    y: 64.0,
+                    z: 8.5 + r * a.sin(),
+                    velocity: ghast_protocol::types::LpVec3::ZERO,
+                    pitch: 0,
+                    yaw: 0,
+                    head_pitch: 0,
+                    object_data: 0,
+                };
+                let mut enc = ghast_protocol::FrameEncoder::new();
+                enc.write_packet(&p).unwrap();
+                let out = enc.out_mut().split().freeze();
+                let mut r = &out[..];
+                for _ in 0..2 {
+                    while r[0] & 0x80 != 0 {
+                        r = &r[1..];
+                    }
                     r = &r[1..];
                 }
-                r = &r[1..];
+                let raw = ghast_protocol::RawPacket {
+                    id: cb::id::SPAWN_ENTITY,
+                    body: bytes::Bytes::copy_from_slice(r),
+                };
+                e.sim.world_packet(&raw).unwrap();
             }
-            let raw = ghast_protocol::RawPacket {
-                id: cb::id::SPAWN_ENTITY,
-                body: bytes::Bytes::copy_from_slice(r),
-            };
-            e.sim.world_packet(&raw).unwrap();
-        }
+        }};
     }
+    let bench_entities = std::env::var("GHAST_BENCH_ENTITIES")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok());
+    #[cfg(feature = "v26_1")]
+    if version == GameVersion::V26_1
+        && let Some(n) = bench_entities
+    {
+        mobs!(n, ghast_protocol::v26_1, ghast_data::v26_1);
+    }
+    #[cfg(feature = "v26_2")]
+    if version == GameVersion::V26_2
+        && let Some(n) = bench_entities
+    {
+        mobs!(n, ghast_protocol::v26_2, ghast_data::v26_2);
+    }
+    let _ = bench_entities;
     let chat = ChatMessage {
         rendered: None,
         json: ghast_protocol::types::ByteString::from_static(r#"{"text":"hello"}"#),
@@ -245,6 +262,14 @@ fn engine_bench() {
         total += run(
             GameVersion::V26_1,
             crate::sim::Sim26::test_overworld(),
+            ticks,
+        );
+    }
+    #[cfg(feature = "v26_2")]
+    if want(GameVersion::V26_2) {
+        total += run(
+            GameVersion::V26_2,
+            crate::sim::Sim262::test_overworld(),
             ticks,
         );
     }
