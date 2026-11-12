@@ -77,6 +77,11 @@ impl Block {
                 .ok()
                 .and_then(ghast_data::v26_1::BlockState::from_id)
                 .map_or("", |s| s.block().name()),
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => u16::try_from(self.raw)
+                .ok()
+                .and_then(ghast_data::v26_2::BlockState::from_id)
+                .map_or("", |s| s.block().name()),
             _ => "",
         }
     }
@@ -315,6 +320,8 @@ fn entity_name(version: GameVersion, ty: EntityType) -> &'static str {
         (EntityType::Player, _) => return "player",
         #[cfg(feature = "v26_1")]
         (EntityType::Registry(_), GameVersion::V26_1) => ghast_client::entity::v26_1::info(ty),
+        #[cfg(feature = "v26_2")]
+        (EntityType::Registry(_), GameVersion::V26_2) => ghast_client::entity::v26_2::info(ty),
         #[cfg(feature = "v1_16_5")]
         (EntityType::Registry(_), _) => ghast_client::entity::v1_16_5::info(ty),
         #[cfg(feature = "v1_12_2")]

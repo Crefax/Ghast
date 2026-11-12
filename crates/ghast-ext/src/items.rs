@@ -87,6 +87,8 @@ pub fn item_id(version: GameVersion, name: &str) -> Option<i32> {
         GameVersion::V1_16_5 => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
         #[cfg(feature = "v26_1")]
         GameVersion::V26_1 => ghast_data::v26_1::Item::from_name(n).map(|i| i32::from(i.id())),
+        #[cfg(feature = "v26_2")]
+        GameVersion::V26_2 => ghast_data::v26_2::Item::from_name(n).map(|i| i32::from(i.id())),
         _ => None,
     }
 }
@@ -113,6 +115,8 @@ pub fn item_name(version: GameVersion, id: i32) -> &'static str {
         }
         #[cfg(feature = "v26_1")]
         GameVersion::V26_1 => ghast_data::v26_1::Item::from_id(id).map_or("", |i| i.name()),
+        #[cfg(feature = "v26_2")]
+        GameVersion::V26_2 => ghast_data::v26_2::Item::from_id(id).map_or("", |i| i.name()),
         _ => "",
     }
 }

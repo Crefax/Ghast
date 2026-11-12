@@ -62,7 +62,8 @@
         feature = "v1_8",
         feature = "v1_12_2",
         feature = "v1_16_5",
-        feature = "v26_1"
+        feature = "v26_1",
+        feature = "v26_2"
     )),
     allow(unused_variables, dead_code, unreachable_code)
 )]
