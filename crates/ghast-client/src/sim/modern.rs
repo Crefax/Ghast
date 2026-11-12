@@ -1774,7 +1774,7 @@ impl Sim for ModernSim {
     }
 
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
-        held_item_facts(super::DATA_SET, id, count, efficiency)
+        held_item_facts(id, count, efficiency)
     }
 
     fn chunk_batch_start(&mut self, now_nanos: i64) {
@@ -1950,6 +1950,62 @@ fn sync_pose_26(pose: &mut Pose, p: &modern::PlayerState) {
     pose.flying = p.abilities.flying;
     pose.sneaking = p.shift();
     pose.sprinting = p.sprinting;
+}
+
+/// [`held_item_facts`] of this version's data set.
+pub(crate) fn held_item_facts(id: u16, count: u8, efficiency: u8) -> HeldItem {
+    let item = super::data::Item::from_id(id);
+    let name = item.map_or("", super::data::Item::name);
+    let food = item.and_then(super::data::Item::food);
+    HeldItem {
+        id,
+        count,
+        efficiency,
+        places_block: item.is_some_and(|i| i.block().is_some()),
+        usable: food.is_some()
+            || matches!(
+                name,
+                "potion"
+                    | "milk_bucket"
+                    | "honey_bottle"
+                    | "bow"
+                    | "crossbow"
+                    | "shield"
+                    | "trident"
+                    | "spyglass"
+                    | "goat_horn"
+            ),
+        food: food.is_some(),
+        always_edible: food.is_some_and(|f| f.can_always_eat),
+        // The modern destroy progress reads the item itself.
+        tool_speed: None,
+        modern_item: item.map(|_| id),
+        swing_on_use: false,
+    }
+}
+
+/// `BlockBehaviour.getDestroyProgress` of this version (oracle-verified in its `data::dig`).
+pub(crate) fn dig_progress(
+    m: &crate::hands::ModernDig,
+    held: Option<&HeldItem>,
+    f: crate::hands::DigFactors,
+) -> f32 {
+    use super::data::{BlockState, Item, dig};
+    let Some(state) = BlockState::from_id(m.state) else {
+        return 0.0;
+    };
+    let item = held.and_then(|h| h.modern_item).and_then(Item::from_id);
+    let c = dig::DigConditions {
+        mining_efficiency: m.mining_efficiency,
+        block_break_speed: m.block_break_speed,
+        submerged_mining_speed: m.submerged_mining_speed,
+        haste: (f.haste > 0).then(|| i32::from(f.haste) - 1),
+        conduit_power: m.conduit_power,
+        mining_fatigue: (f.fatigue > 0).then(|| i32::from(f.fatigue) - 1),
+        eye_in_water: f.in_water,
+        on_ground: f.on_ground,
+    };
+    dig::destroy_progress_with(state, item, &c)
 }
 
 /// The resolved entity ids (the per-version table tests).

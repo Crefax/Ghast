@@ -66,8 +66,8 @@ pub(crate) enum ExactDig {
     V26_1(ModernDig),
 }
 
-/// The facts of the 26.1 destroy-progress formula (attributes replace enchantment levels).
-#[cfg(feature = "v26_1")]
+/// The facts of the modern destroy-progress formula (attributes replace enchantment levels).
+#[cfg(ghast_modern)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ModernDig {
     /// Block state id.
@@ -352,29 +352,8 @@ fn exact_progress(b: &BlockQuery, e: ExactDig, held: Option<&HeldItem>, f: DigFa
             },
         ),
         #[cfg(feature = "v26_1")]
-        ExactDig::V26_1(m) => modern_progress(&m, held, f),
+        ExactDig::V26_1(m) => crate::sim::v26_1::dig_progress(&m, held, f),
     }
-}
-
-/// 26.1 `BlockBehaviour.getDestroyProgress` (oracle-verified in `ghast_data::v26_1::dig`).
-#[cfg(feature = "v26_1")]
-fn modern_progress(m: &ModernDig, held: Option<&HeldItem>, f: DigFactors) -> f32 {
-    use ghast_data::v26_1::{BlockState, Item, dig};
-    let Some(state) = BlockState::from_id(m.state) else {
-        return 0.0;
-    };
-    let item = held.and_then(|h| h.modern_item).and_then(Item::from_id);
-    let c = dig::DigConditions {
-        mining_efficiency: m.mining_efficiency,
-        block_break_speed: m.block_break_speed,
-        submerged_mining_speed: m.submerged_mining_speed,
-        haste: (f.haste > 0).then(|| i32::from(f.haste) - 1),
-        conduit_power: m.conduit_power,
-        mining_fatigue: (f.fatigue > 0).then(|| i32::from(f.fatigue) - 1),
-        eye_in_water: f.in_water,
-        on_ground: f.on_ground,
-    };
-    dig::destroy_progress_with(state, item, &c)
 }
 
 /// `Block.calcBlockBreakingData` (float maths): break progress per tick.

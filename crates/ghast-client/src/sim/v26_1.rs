@@ -11,12 +11,10 @@ pub(crate) use ghast_physics::pick::v26_1 as pick;
 pub(crate) use ghast_protocol::v26_1 as proto;
 pub(crate) use ghast_world::v26_1 as world;
 
-use crate::version::{DataSet, GameVersion};
+use crate::version::GameVersion;
 
 /// The run-time tag of this version.
 pub(crate) const GAME: GameVersion = GameVersion::V26_1;
-/// The data tables (held item facts).
-pub(crate) const DATA_SET: DataSet = DataSet::V26_1;
 /// The order of the team parameters in `set_player_team`.
 pub(crate) const TEAM_LAYOUT: super::teams::TeamLayout =
     super::teams::TeamLayout::RuleBeforeAffixes;
@@ -52,7 +50,7 @@ pub(crate) mod effects {
 #[path = "modern.rs"]
 mod imp;
 
-pub(crate) use imp::ModernSim as Sim26;
+pub(crate) use imp::{ModernSim as Sim26, dig_progress, held_item_facts};
 
 /// The exact destroy progress of this version.
 pub(crate) fn exact_dig(m: crate::hands::ModernDig) -> crate::hands::ExactDig {

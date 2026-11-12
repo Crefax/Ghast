@@ -22,7 +22,7 @@ mod v1_16_5;
 #[cfg(feature = "v1_8")]
 mod v1_8;
 #[cfg(feature = "v26_1")]
-mod v26_1;
+pub(crate) mod v26_1;
 
 #[cfg(feature = "v1_8")]
 pub(crate) use v1_8::Sim18;
@@ -766,36 +766,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
             tool_speed: Some(ghast_data::v1_16_5::tool_multiplier),
         },
         #[cfg(feature = "v26_1")]
-        DataSet::V26_1 => {
-            let item = ghast_data::v26_1::Item::from_id(id);
-            let name = item.map_or("", ghast_data::v26_1::Item::name);
-            let food = item.and_then(ghast_data::v26_1::Item::food);
-            HeldItem {
-                id,
-                count,
-                efficiency,
-                places_block: item.is_some_and(|i| i.block().is_some()),
-                usable: food.is_some()
-                    || matches!(
-                        name,
-                        "potion"
-                            | "milk_bucket"
-                            | "honey_bottle"
-                            | "bow"
-                            | "crossbow"
-                            | "shield"
-                            | "trident"
-                            | "spyglass"
-                            | "goat_horn"
-                    ),
-                food: food.is_some(),
-                always_edible: food.is_some_and(|f| f.can_always_eat),
-                // The modern destroy progress reads the item itself.
-                tool_speed: None,
-                modern_item: item.map(|_| id),
-                swing_on_use: false,
-            }
-        }
+        DataSet::V26_1 => v26_1::held_item_facts(id, count, efficiency),
         // A data set this build does not include: an item without known facts.
         #[allow(unreachable_patterns)]
         _ => HeldItem {
