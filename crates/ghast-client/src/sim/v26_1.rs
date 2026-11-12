@@ -372,8 +372,7 @@ impl Sim26 {
         if self.ext.rocket_count() > 0 {
             let rocket = |s: Option<&ghast_inventory::Stack>| {
                 s.is_some_and(|s| {
-                    ghast_inventory::v26_1::defaults(s.id())
-                        .is_some_and(|d| d.name == "firework_rocket")
+                    ghast_inventory::v26_1::item_name(s.id()) == Some("firework_rocket")
                 })
             };
             let off_only = rocket(inv.offhand()) && !rocket(inv.held());
@@ -876,7 +875,7 @@ impl Sim for Sim26 {
         // not computable -> no riptide). Only tridents are looked at.
         let trident = |s: Option<&ghast_inventory::Stack>| {
             s.filter(|s| {
-                ghast_inventory::v26_1::defaults(s.id()).is_some_and(|d| d.name == "trident")
+                ghast_inventory::v26_1::item_name(s.id()) == Some("trident")
             })
             .cloned()
         };
@@ -912,13 +911,12 @@ impl Sim for Sim26 {
         // gliding; otherwise PASS.
         // TridentItem.use: with riptide only in water or rain (else FAIL: no use state).
         if self.riptide[usize::from(off_hand)] > 0.0
-            && ghast_inventory::v26_1::defaults(stack.id()).is_some_and(|d| d.name == "trident")
+            && ghast_inventory::v26_1::item_name(stack.id()) == Some("trident")
         {
             held.usable = held.usable && self.wet();
         }
         held.swing_on_use = self.ext.fall_flying
-            && ghast_inventory::v26_1::defaults(stack.id())
-                .is_some_and(|d| d.name == "firework_rocket");
+            && ghast_inventory::v26_1::item_name(stack.id()) == Some("firework_rocket");
         held
     }
 

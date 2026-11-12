@@ -151,6 +151,23 @@ codegen-units = 1
 strip = true
 ```
 
+**Many bots, one process each: build without PIE.** The generated data tables (block, item and
+shape tables of every version) hold pointers; in a position-independent executable the dynamic
+loader patches them at start-up, so every process gets a private copy (~0.9 MB). A non-PIE
+build has nothing to patch: the tables stay clean, file-backed and shared between all processes
+running the binary. It costs address-space randomisation of the main binary (ASLR of the
+libraries and the stack stays).
+
+```sh
+RUSTFLAGS="-C relocation-model=static" cargo build --release --target x86_64-unknown-linux-gnu
+```
+
+Pass `--target` explicitly so the flag does not reach build scripts and proc macros; it works
+the same for `aarch64-unknown-linux-gnu` (also through `lab/build-pi.sh` with
+`PI_RUSTFLAGS="-C target-cpu=cortex-a76 -C relocation-model=static"`). Idle AFK bot, x86-64,
+2026-11-12: private dirty memory 2.3 → 1.4 MB (26.1 and 1.8.9), RSS 7.3 → 6.1 MB (26.1) and
+7.2 → 5.6 MB (1.8.9).
+
 ## Migrating from 0.3
 
 0.4 breaks the API once, for 26.1 and the shared infrastructure (details in
