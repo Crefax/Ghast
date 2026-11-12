@@ -11,11 +11,12 @@ vanilla's constant 65536-entry sine table, built once).
 | `v1_12` | 1.12.2 (protocol 340; the rules hold for every 1.12 release) | bit-exact against the vanilla oracle (see below) |
 | `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
 | `modern` with `V26_1` (feature `v26_1`, default) | 26.1 (protocol 775) | bit-exact against the vanilla oracle (see "Modern core") |
+| `modern` with `V26_2` (feature `v26_2`, default) | 26.2 (protocol 776) | bit-exact against the vanilla oracle (see "26.2") |
 
-Each version module has a cargo feature of the same name (`v1_8`, `v1_12`, `v1_16_5`, `v26_1`;
+Each version module has a cargo feature of the same name (`v1_8`, `v1_12`, `v1_16_5`, `v26_1`, `v26_2`;
 all on by default) that also selects its `ghast-data` tables; any subset builds, so a client for
 one version can turn the others off (`default-features = false, features = ["v26_1"]`). `pick`
-needs `v1_16_5` or `v26_1`.
+needs `v1_16_5`, `v26_1` or `v26_2`.
 
 ## Use
 
@@ -179,6 +180,28 @@ Not modelled: living mounts, pistons, block entities. The nether's `fast_lava` (
 block entity); the tables hold the closed box. The client push-out probe also relies on every
 suffocating large shape staying inside its cube — pinned by the `ghast-data` test
 `suffocating_large_shapes_stay_in_their_cube`, which fails if the data ever changes that.
+
+## 26.2 (`V26_2`)
+
+`V26_2` is the 26.1 row over the 26.2 tables with one structural change, `Rules::RESTITUTION`
+(26.2 `Entity.restituteMovementAfterCollisions`): each colliding axis becomes `-v * restitution`
+(the `bounciness` attribute, default 0, so a plain collision leaves a signed zero); on landing
+the larger of that and the block's bounce restitution (slime block 1, beds 0.75, ×0.8 for a
+boat), none when falling slower than the effective gravity, while sneaking or on honey
+(`suppresses_bounce`); the vertical rebound compensates gravity and air drag for the part of the
+tick after the impact. `friction_modifier` and `air_drag_modifier` scale the block friction and
+the air drags (`computeModifiedFriction`). The three attributes live in
+`PlayerExt::attributes` (`MovementAttributes::get_mut(name)` + `Attribute::apply_packet`); the
+plain `tick` uses their defaults, which give the 26.1 arithmetic bit for bit.
+
+Verification: `tests/golden_26_2.rs` (all 26.2 movement goldens, incl. `fuzz_restitution_seed1`
+and 20 restitution scenarios) and the large-fuzz test over `oracle/cache/26.2/` (15.2 M ticks:
+plain 4.2 M, edges, extras, restitution and each extension mechanic 1 M). 4 cached cases differ
+(see CHANGELOG "Known gaps"). `tests/family_26_2_on_26_1.rs` (ignored) replays 26.2 vectors on
+the 26.1 tables by state name, the measurement that put 26.2 into the 26.1 family.
+
+Instructions per plain tick (hardware counter, 40,000 ticks, memory world; walk / busy / swim):
+26.1 41,751 / 45,590 / 30,287; 26.2 41,824 / 45,639 / 30,289.
 
 ## Crosshair pick (`pick`: 1.8.9, 1.12.2, 1.16.5, 26.1)
 

@@ -35,6 +35,39 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - **26.2 world** in `ghast-world` (`v26_2`, feature `v26_2`): the 26.1 world over the 26.2 block
   states and packets; checked against a vanilla 26.2 server (every chunk of a capture, 1576
   block probes confirmed by the server).
+- **26.2 movement** in `ghast-physics`: rule set `modern::V26_2` (feature `v26_2`, on by
+  default) over `ghast_data::v26_2`, bit-exact against the vanilla 26.2 oracle (all 26.2 movement
+  goldens; 15.2 M cached fuzz ticks, see "Known gaps"). 26.2 is the 26.1 row plus one structural
+  change behind the new defaulted `Rules::RESTITUTION`: `Entity.restituteMovementAfterCollisions`
+  (colliding axes reflected by the `bounciness` attribute, landing on slime (1) / beds (0.75,
+  ×0.8 for a boat), gravity and drag compensation, no bounce when sneaking or on honey) and the
+  `friction_modifier` / `air_drag_modifier` attributes. New: `modern::MovementAttributes`
+  (`PlayerExt::attributes`, `get_mut(name)`; read by the extended ticks), `MemoryWorld262`,
+  `memory_world_26_2`, per-field `Rules` methods (`friction`, `speed_factor`, `jump_factor`,
+  `block_flags`, `offset`, `block_name`; defaulted from `Rules::block`), `pick::v26_2`.
+- **Oracle**: one shared modern harness (`oracle/src/modern`) compiled per version with a small
+  per-version shim (`Compat`); `tests/golden/26.2/` (29 files, incl. `fuzz_restitution_seed1` and
+  20 restitution scenarios).
+
+### Fixed
+
+- `ghast-physics` modern core: a zero movement input still adds `Vec3.ZERO` to the velocity
+  (`moveRelative`), which turns `-0.0` into `+0.0` as vanilla does. No 26.1 vector could show it:
+  26.1 never leaves a signed zero in a horizontal velocity before an input-less tick (its
+  collisions zero the axis with `0.0`); 26.2's restitution does.
+
+### Changed
+
+- `ghast-physics`: `ModernMemoryWorld` decodes block states when they are stored, not on every
+  read (a second modern row stopped the decode function pointer from being folded; the plain
+  26.1 tick on the memory world is now about 1 % cheaper than in 0.4.1).
+
+### Known gaps
+
+- 26.2 cached fuzz: 4 of 152,000 cases differ — one entity-push case at scale 16 among boats
+  (26.1 vanilla does the same, so a latent core bug of both rows) and three teleport cases in
+  which 26.2 vanilla resets the fall distance and 26.1 vanilla does not (cause not found yet).
+  `ghast-entity` has no 26.2 tracker yet.
 
 ## 0.4.1 — 2026-11-12
 
