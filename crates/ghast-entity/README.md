@@ -1,7 +1,7 @@
 # ghast-entity
 
 Entity tracking for the ghast Minecraft Java Edition client library, 1.8.9 (protocol 47),
-1.12.2 (protocol 340), 1.16.5 (protocol 754) and 26.1 – 26.1.2 (protocol 775). It keeps what the vanilla client knows about every entity the server
+1.12.2 (protocol 340), 1.16.5 (protocol 754), 26.1 – 26.1.2 (protocol 775) and 26.2 (protocol 776). It keeps what the vanilla client knows about every entity the server
 announced, parsed by hand straight from the packet bodies.
 
 ```rust
@@ -18,7 +18,8 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
 
 ## API
 
-- `v1_8::Tracker`, `v1_12::Tracker`, `v1_16_5::Tracker`, `v26_1::Tracker`:
+- `v1_8::Tracker`, `v1_12::Tracker`, `v1_16_5::Tracker`, `v26_1::Tracker`, `v26_2::Tracker`
+  (`v26_2` is the `v26_1` source compiled over the 26.2 protocol and data modules: same API):
   - setup and packets: `new(Config)`, `apply(&RawPacket)` / `apply_body(id, &Bytes)` returning
     `Result<Applied, DecodeError>`;
   - packet filter: `wants(id)`, `packet_ids()`;

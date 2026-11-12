@@ -1,5 +1,5 @@
 //! Entity tracking for the ghast Minecraft Java Edition client library (1.8.9, 1.12.2, 1.16.5
-//! and 26.1).
+//! 26.1 and 26.2).
 //!
 //! [`v1_8::Tracker`] / [`v1_12::Tracker`] / [`v1_16_5::Tracker`] / `v26_1::Tracker` take raw
 //! clientbound play packets
@@ -31,7 +31,8 @@
         feature = "v1_8",
         feature = "v1_12",
         feature = "v1_16_5",
-        feature = "v26_1"
+        feature = "v26_1",
+        feature = "v26_2"
     )),
     allow(dead_code)
 )]
@@ -41,13 +42,16 @@
         feature = "v1_8",
         feature = "v1_12",
         feature = "v1_16_5",
-        feature = "v26_1"
+        feature = "v26_1",
+        feature = "v26_2"
     )),
     allow(unused_imports, unused_variables)
 )]
 
 mod common;
 mod entity;
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
+mod modern_state;
 mod store;
 #[cfg(feature = "v1_12")]
 pub mod v1_12;
@@ -55,8 +59,65 @@ pub mod v1_12;
 pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
+
+/// The modern tracker source (`src/v26_1.rs`) compiled for protocol 775: `data` and `proto`
+/// name that protocol's `ghast-data` and `ghast-protocol` modules.
 #[cfg(feature = "v26_1")]
-pub mod v26_1;
+#[path = "."]
+mod modern_775 {
+    pub(crate) use ghast_data::v26_1 as data;
+    use ghast_protocol::types::slot::v775::ItemStack;
+    pub(crate) use ghast_protocol::v26_1 as proto;
+
+    /// The entity era this instance stamps.
+    pub(crate) const ERA: crate::entity::Era = crate::entity::Era::V26;
+    /// Registry id of `minecraft:scale` in 26.1.
+    pub(crate) const SCALE_ATTRIBUTE_ID: i32 = 25;
+
+    /// A slot with 26.1's component codec.
+    #[inline]
+    pub(crate) fn read_stack(
+        r: &mut ghast_protocol::Reader<'_>,
+    ) -> crate::common::R<Option<ItemStack>> {
+        ItemStack::read(r)
+    }
+
+    #[path = "v26_1.rs"]
+    pub mod tracker;
+}
+#[cfg(feature = "v26_1")]
+#[doc(inline)]
+pub use modern_775::tracker as v26_1;
+
+/// The same tracker source for protocol 776 (26.2): ids, sizes and the slot codec come from
+/// `ghast_data::v26_2` / `ghast_protocol::v26_2`; the entity data serializers are unchanged.
+#[cfg(feature = "v26_2")]
+#[path = "."]
+mod modern_776 {
+    pub(crate) use ghast_data::v26_2 as data;
+    use ghast_protocol::types::slot::v775::ItemStack;
+    pub(crate) use ghast_protocol::v26_2 as proto;
+
+    /// The entity era this instance stamps.
+    pub(crate) const ERA: crate::entity::Era = crate::entity::Era::V26_2;
+    /// Registry id of `minecraft:scale` in 26.2 (`minecraft:attribute` gained entries before it).
+    pub(crate) const SCALE_ATTRIBUTE_ID: i32 = 30;
+
+    /// A slot with 26.2's component codec.
+    #[inline]
+    pub(crate) fn read_stack(
+        r: &mut ghast_protocol::Reader<'_>,
+    ) -> crate::common::R<Option<ItemStack>> {
+        ItemStack::read_776(r)
+    }
+
+    #[allow(clippy::duplicate_mod)]
+    #[path = "v26_1.rs"]
+    pub mod tracker;
+}
+#[cfg(feature = "v26_2")]
+#[doc(inline)]
+pub use modern_776::tracker as v26_2;
 
 pub use entity::{
     EQUIPMENT_SLOTS, Effect, Entity, EntityClass, EntityType, Item, MetaValue, Metadata,

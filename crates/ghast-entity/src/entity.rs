@@ -126,7 +126,7 @@ pub enum MetaValue {
     /// 26.1 optional text component (raw network NBT).
     OptComponent(Option<Bytes>),
     /// 26.1 item stack (`None` = empty; component patch copied out of the packet).
-    #[cfg(feature = "v26_1")]
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
     Stack(Option<ghast_protocol::types::slot::v775::ItemStack>),
     /// 26.1 registry or enum value: `(serializer id, value)` (cat / cow / wolf / frog / pig /
     /// chicken / zombie nautilus variants and sound variants, sniffer / armadillo / copper golem
@@ -233,6 +233,8 @@ pub(crate) enum Era {
     V1_16,
     /// 26.1.
     V26,
+    /// 26.2 (the same modern state as 26.1, with 26.2's ids and sizes).
+    V26_2,
 }
 
 /// 1.16 registry ids used by [`Entity::class`].
@@ -274,8 +276,8 @@ pub struct Entity {
     pub(crate) effects: Vec<Effect>,
     /// 26.1 client state (codec base, interpolation, size keys), boxed: one pointer for the
     /// other versions.
-    #[cfg(feature = "v26_1")]
-    pub(crate) m: crate::v26_1::Ext,
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) m: crate::modern_state::Ext,
 }
 
 impl Entity {
@@ -301,8 +303,8 @@ impl Entity {
             meta: Metadata::default(),
             equipment: None,
             effects: Vec::new(),
-            #[cfg(feature = "v26_1")]
-            m: crate::v26_1::Ext::default(),
+            #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+            m: crate::modern_state::Ext::default(),
         }
     }
 
@@ -331,6 +333,10 @@ impl Entity {
         if self.era == Era::V26 {
             return crate::v26_1::class(self);
         }
+        #[cfg(feature = "v26_2")]
+        if self.era == Era::V26_2 {
+            return crate::v26_2::class(self);
+        }
         match self.ty {
             EntityType::Player => EntityClass::Player,
             EntityType::LegacyObject(2) | EntityType::Registry(ITEM_1_16) => EntityClass::Item,
@@ -348,7 +354,7 @@ impl Entity {
     /// whose stacks carry data components: see `v26_1::item_stack` / `v26_1::item_count`.
     #[must_use]
     pub fn item(&self) -> Option<&Item> {
-        if self.era == Era::V26 {
+        if matches!(self.era, Era::V26 | Era::V26_2) {
             return None;
         }
         let index = match self.ty {
@@ -381,6 +387,11 @@ impl Entity {
             Era::V26 => {
                 let _ = vs;
                 crate::v26_1::dimensions(self)
+            }
+            #[cfg(feature = "v26_2")]
+            Era::V26_2 => {
+                let _ = vs;
+                crate::v26_2::dimensions(self)
             }
             // A tracker only stamps eras of versions compiled in.
             #[allow(unreachable_patterns)]

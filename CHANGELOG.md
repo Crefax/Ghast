@@ -48,6 +48,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - **Oracle**: one shared modern harness (`oracle/src/modern`) compiled per version with a small
   per-version shim (`Compat`); `tests/golden/26.2/` (29 files, incl. `fuzz_restitution_seed1` and
   20 restitution scenarios).
+- **26.2 entity tracking** in `ghast-entity`: `v26_2::Tracker` (feature `v26_2`, on by default),
+  the 26.1 tracker source compiled a second time over `ghast_protocol::v26_2` /
+  `ghast_data::v26_2` (26.2 entity ids, the sulfur cube, sizes, `SCALE_ATTRIBUTE` = 30, the 776
+  slot codec); same API as `v26_1`. Replays `tests/golden/26.2/entity_tracking.jsonl.gz` with
+  every field equal (like 26.1, the tick order differs only around riding entities) and the
+  vanilla 26.2 capture.
 
 ### Fixed
 
@@ -67,7 +73,6 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - 26.2 cached fuzz: 4 of 152,000 cases differ — one entity-push case at scale 16 among boats
   (26.1 vanilla does the same, so a latent core bug of both rows) and three teleport cases in
   which 26.2 vanilla resets the fall distance and 26.1 vanilla does not (cause not found yet).
-  `ghast-entity` has no 26.2 tracker yet.
 
 ## 0.4.1 — 2026-11-12
 

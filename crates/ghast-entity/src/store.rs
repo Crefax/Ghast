@@ -360,6 +360,8 @@ impl Entities {
             Era::V1_16 => crate::v1_16_5::vanilla_size(e),
             #[cfg(feature = "v26_1")]
             Era::V26 => crate::v26_1::vanilla_size(e),
+            #[cfg(feature = "v26_2")]
+            Era::V26_2 => crate::v26_2::vanilla_size(e),
             #[allow(unreachable_patterns)]
             _ => None,
         };
@@ -536,11 +538,12 @@ mod tests {
         let n = std::mem::size_of::<Entity>();
         eprintln!("size_of::<Entity>() = {n}");
         // 0.3.0: 232 bytes. The 26.1 state is boxed: one pointer in the entity.
-        assert!(n <= if cfg!(feature = "v26_1") { 232 } else { 224 }, "{n}");
-        #[cfg(feature = "v26_1")]
+        let modern = cfg!(any(feature = "v26_1", feature = "v26_2"));
+        assert!(n <= if modern { 232 } else { 224 }, "{n}");
+        #[cfg(any(feature = "v26_1", feature = "v26_2"))]
         {
-            let b = std::mem::size_of::<crate::v26_1::State>();
-            eprintln!("size_of::<v26_1::State>() = {b} (heap, 26.1 entities only)");
+            let b = std::mem::size_of::<crate::modern_state::State>();
+            eprintln!("size_of::<modern_state::State>() = {b} (heap, 26.x entities only)");
             assert!(b <= 120, "{b}");
         }
     }

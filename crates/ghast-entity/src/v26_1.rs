@@ -1,8 +1,12 @@
-//! 26.1 (protocol 775) entity tracking.
+//! Modern entity tracking: 26.1 (protocol 775) as `v26_1`, 26.2 (protocol 776) as `v26_2`.
 //!
-//! The 26.1 client no longer keeps a separate "server position": an entity *is* at
+//! Both modules are the same source compiled over their version's protocol and data modules:
+//! entity type ids, sizes and the slot codec are that version's; the behaviour below is the
+//! same in both clients (26.2 replays its own golden dump, `tests/golden/26.2/`).
+//!
+//! The modern client no longer keeps a separate "server position": an entity *is* at
 //! `Entity.position()`, and what a position packet does depends on the type
-//! (`ghast_data::v26_1::EntityTypeData::interpolation`, from the jar):
+//! (`ghast_data::modern::EntityTypeData::interpolation`, from the jar):
 //!
 //! - **Interpolated** types (living entities, boats, minecarts, experience orbs, fishing bobbers)
 //!   get a target; [`Tracker::tick`] moves them a third of the remaining way per tick
@@ -35,12 +39,14 @@
 
 use std::ops::Deref;
 
+use super::data::entities::{self as data, EntityTypeData, type_flags};
+use super::proto::play::clientbound::{Login, Respawn, id};
+use super::read_stack;
+use crate::modern_state::st;
 use bytes::Bytes;
-use ghast_data::v26_1::entities::{self as data, EntityTypeData, type_flags};
 use ghast_protocol::nbt::AnonNbt;
 use ghast_protocol::types::LpVec3;
 use ghast_protocol::types::slot::v775::ItemStack;
-use ghast_protocol::v26_1::play::clientbound::{Login, Respawn, id};
 use ghast_protocol::{Decode, DecodeError, RawPacket, Reader};
 
 use crate::Applied;
@@ -87,10 +93,10 @@ pub const PLAYER_LIST_IDS: &[i32] = &[id::PLAYER_INFO, id::PLAYER_REMOVE];
 /// Index of the fox flags byte (`Fox.DATA_FLAGS_ID`; 0x20 = sleeping).
 const FOX_FLAGS: u8 = 19;
 
-/// Registry id of `minecraft:scale` (checked against the jar by the oracle test).
-pub const SCALE_ATTRIBUTE: i32 = 25;
+/// Registry id of `minecraft:scale` in this version (checked against the jar by the oracle test).
+pub const SCALE_ATTRIBUTE: i32 = super::SCALE_ATTRIBUTE_ID;
 
-/// 26.1 metadata indices shared by every entity / living entity.
+/// Metadata indices shared by every entity / living entity (the same in 26.1 and 26.2).
 pub mod meta {
     /// Entity flags byte (0x01 on fire, 0x02 crouching, 0x08 sprinting, 0x10 swimming,
     /// 0x20 invisible, 0x40 glowing, 0x80 fall flying).
@@ -114,144 +120,7 @@ pub mod meta {
     pub const ITEM: u8 = 8;
 }
 
-/// Bits of `State::flags`.
-mod st {
-    /// `previousTickPosition` / `previousTickRot` are set.
-    pub const HAS_PREV: u8 = 1;
-    /// The scale changed: vanilla refreshes the dimensions at the end of the entity's next tick
-    /// (`refreshDirtyAttributes`).
-    pub const SCALE_DIRTY: u8 = 2;
-    /// Nothing changes in a tick until a packet or a movement disturbs the entity.
-    pub const SETTLED: u8 = 4;
-    /// Living: a sleeping position is set (`isSleeping`: the tick zeroes xRot).
-    pub const SLEEPING: u8 = 8;
-    /// The baby flag.
-    pub const BABY: u8 = 16;
-    /// `dims` holds the cached dimensions.
-    pub const HAS_DIMS: u8 = 32;
-}
-
-/// The 26.1 client state of an entity (`InterpolationHandler`, `VecDeltaCodec`, size keys),
-/// boxed so entities of the other versions do not carry it.
-#[derive(Clone, Debug)]
-pub(crate) struct State {
-    pub(crate) td: Option<&'static EntityTypeData>,
-    /// Interpolation target and its rotation `(yRot, xRot)`.
-    target: [f64; 3],
-    /// `previousTickPosition` (valid with [`st::HAS_PREV`]).
-    prev: [f64; 3],
-    target_rot: [f32; 2],
-    /// `previousTickRot` (`(xRot, yRot)`, vanilla's `Vec2` order).
-    prev_rot: [f32; 2],
-    /// Vanilla's cached `dimensions` (valid with [`st::HAS_DIMS`]; refreshed on size metadata, at
-    /// spawn, and after a scale change at the end of the next tick).
-    dims: ghast_data::EntityDimensions,
-    head_target: f32,
-    /// `yBodyRot`, and the mob `BodyRotationControl` state.
-    body_yaw: f32,
-    last_stable_head: f32,
-    /// `getScale()` (sanitized `minecraft:scale` attribute).
-    scale: f32,
-    slime_size: i32,
-    /// Item entities: the stack size (0 = empty / unknown).
-    item_count: i32,
-    /// Players: the tab list object the entity cached (`AbstractClientPlayer.getPlayerInfo`,
-    /// 0 = none yet) and its game mode once it left the tab list.
-    info_gen: u32,
-    frozen_game_mode: i8,
-    /// Remaining interpolation steps (0 = none active).
-    steps: u8,
-    head_steps: u8,
-    /// `headStableTime`, saturated at 30 (vanilla only compares it with 10 and 20).
-    head_stable_time: u8,
-    pose: u8,
-    stand_flags: u8,
-    /// Foxes: their own flags byte (`Fox.isSleeping` = bit 0x20 instead of the bed position).
-    fox_flags: u8,
-    /// [`st`] bits.
-    flags: u8,
-}
-
-impl State {
-    const EMPTY: State = State {
-        td: None,
-        target: [0.0; 3],
-        prev: [0.0; 3],
-        target_rot: [0.0; 2],
-        prev_rot: [0.0; 2],
-        dims: ghast_data::EntityDimensions {
-            width: 0.0,
-            height: 0.0,
-            eye_height: 0.0,
-        },
-        head_target: 0.0,
-        body_yaw: 0.0,
-        last_stable_head: 0.0,
-        scale: 1.0,
-        slime_size: 1,
-        item_count: 0,
-        info_gen: 0,
-        frozen_game_mode: 0,
-        steps: 0,
-        head_steps: 0,
-        head_stable_time: 0,
-        pose: 0,
-        stand_flags: 0,
-        fox_flags: 0,
-        flags: 0,
-    };
-
-    #[inline]
-    fn flag(&self, f: u8) -> bool {
-        self.flags & f != 0
-    }
-
-    #[inline]
-    fn set_flag(&mut self, f: u8, on: bool) {
-        if on {
-            self.flags |= f;
-        } else {
-            self.flags &= !f;
-        }
-    }
-
-    #[inline]
-    fn dims(&self) -> Option<ghast_data::EntityDimensions> {
-        self.flag(st::HAS_DIMS).then_some(self.dims)
-    }
-
-    #[inline]
-    fn set_dims(&mut self, d: Option<ghast_data::EntityDimensions>) {
-        self.set_flag(st::HAS_DIMS, d.is_some());
-        if let Some(d) = d {
-            self.dims = d;
-        }
-    }
-}
-
-/// The boxed 26.1 state of an entity: empty (one pointer) for the other versions; reads of an
-/// empty one see the defaults, the first write allocates.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Ext(Option<Box<State>>);
-
-static EMPTY_STATE: State = State::EMPTY;
-
-impl Deref for Ext {
-    type Target = State;
-    #[inline]
-    fn deref(&self) -> &State {
-        self.0.as_deref().unwrap_or(&EMPTY_STATE)
-    }
-}
-
-impl std::ops::DerefMut for Ext {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut State {
-        self.0.get_or_insert_with(|| Box::new(State::EMPTY))
-    }
-}
-
-/// The bot's entity view on a 26.1 connection. Dereferences to the shared [`Entities`].
+/// The bot's entity view on a modern (26.1 / 26.2) connection. Dereferences to the shared [`Entities`].
 #[derive(Clone, Debug)]
 pub struct Tracker {
     store: Entities,
@@ -461,7 +330,7 @@ impl Tracker {
         }
         Tracker {
             store: Entities {
-                era: crate::entity::Era::V26,
+                era: super::ERA,
                 ..Entities::new(config)
             },
             dimension: String::new(),
@@ -961,7 +830,7 @@ impl Tracker {
                 let mut n = 0;
                 loop {
                     let b = r.read_u8()?;
-                    let item = ItemStack::read(r)?.map(|i| Item {
+                    let item = read_stack(r)?.map(|i| Item {
                         id: i.id,
                         count: i.count.clamp(0, 127) as i8,
                         damage: 0,
@@ -1579,7 +1448,7 @@ fn read_value(
         }
         7 => {
             let start = r.position();
-            let s = ItemStack::read(r)?;
+            let s = read_stack(r)?;
             let is_item = td.id == data::ITEM && index == meta::ITEM;
             if is_item {
                 keys.count = Some(s.as_ref().map_or(0, |s| s.count));
@@ -1589,7 +1458,7 @@ fn read_value(
             }
             // Re-read from an owned copy: the stored stack must not pin the packet buffer.
             let copy = owned(r, start);
-            let s = ItemStack::read(&mut Reader::new(&copy))?;
+            let s = read_stack(&mut Reader::new(&copy))?;
             if is_item {
                 keys.stack = Some(s.clone());
             }
@@ -1653,7 +1522,7 @@ fn read_value(
 
 /// Skips the values with a complex layout using the generated decoders.
 fn skip_complex(r: &mut Reader<'_>, ty: u32) -> R<()> {
-    use ghast_protocol::v26_1::types::{
+    use super::proto::types::{
         EntityMetadataPaintingVariant, GlobalPos, Particle, ResolvableProfile,
     };
     match ty {
@@ -2047,8 +1916,8 @@ pub fn custom_name(e: &Entity) -> Option<&Bytes> {
 #[must_use]
 pub fn info(t: EntityType) -> Option<&'static ghast_data::EntityInfo> {
     match t {
-        EntityType::Registry(id) => ghast_data::v26_1::entity(id),
-        EntityType::Player => ghast_data::v26_1::entity(data::PLAYER),
+        EntityType::Registry(id) => super::data::entity(id),
+        EntityType::Player => super::data::entity(data::PLAYER),
         _ => None,
     }
 }

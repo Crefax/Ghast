@@ -1,6 +1,6 @@
 [package]
 name = "ghast-entity"
-description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9, 1.12.2, 1.16.5 and 26.1 entity packets, vanilla-exact positions, O(1) lookup"
+description = "Entity tracking for the ghast Minecraft Java Edition client library: zero-allocation parsing of 1.8.9, 1.12.2, 1.16.5, 26.1 and 26.2 entity packets, vanilla-exact positions, O(1) lookup"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,12 +14,13 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-entity"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2"]
 # One tracker per version (with its protocol and data tables); any subset builds.
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
+v26_2 = ["ghast-protocol/v26_2", "ghast-data/v26_2"]
 
 [dependencies]
 ghast-protocol = { path = "../ghast-protocol", version = "0.4.1", default-features = false }
@@ -28,11 +29,11 @@ bytes = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "testgen"] }
-ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "v26_1"] }
+ghast-protocol = { path = "../ghast-protocol", default-features = false, features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "v26_2", "testgen"] }
+ghast-data = { path = "../ghast-data", default-features = false, features = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2"] }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
-ghast-physics = { path = "../ghast-physics", default-features = false, features = ["v26_1"] }
+ghast-physics = { path = "../ghast-physics", default-features = false, features = ["v26_1", "v26_2"] }
 proptest = { workspace = true }
 criterion = { workspace = true }
 
@@ -61,8 +62,16 @@ name = "v26_1"
 required-features = ["v26_1"]
 
 [[test]]
+name = "v26_2"
+required-features = ["v26_2"]
+
+[[test]]
 name = "oracle_26_1"
 required-features = ["v26_1"]
+
+[[test]]
+name = "oracle_26_2"
+required-features = ["v26_2"]
 
 [[test]]
 name = "robustness"
