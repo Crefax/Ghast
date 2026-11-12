@@ -3,7 +3,8 @@
 Inventory and container windows for the ghast client library: the player inventory, cursor and
 open window as the vanilla client holds them, **vanilla's client-side click prediction** and the
 window confirm protocol, for **1.8.9** (protocol 47), **1.12.2** (protocol 340; the click rules
-hold for 1.12 – 1.12.2), **1.16.5** (protocol 754) and **26.1** (protocol 775). Pure and
+hold for 1.12 – 1.12.2), **1.16.5** (protocol 754), **26.1** (protocol 775) and **26.2**
+(protocol 776). Pure and
 sync: packets in, packets out; no I/O, no clock.
 
 ```rust
@@ -130,6 +131,36 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 - **Only click while still**: the server and anticheats judge clicks against the last sent pose;
   the client (TickContext) must not click while turning.
 
+## Modern versions (26.1, 26.2)
+
+One implementation serves every modern version: the item readers, hash schemas, click
+simulation and menu logic exist once and read the version's tables (`src/tables.rs`: item rows,
+registry name tables, menu facts, slot reader). Data components are handled as canonical kinds
+(the 26.1 type ids, then later additions such as 26.2's `sulfur_cube_content`), mapped to each
+version's wire ids at compile time by name. The `window_items` loops stay one instance per
+version with the tables as constants; the raw packet apply / encode is one macro instance per
+protocol (the generated packet types differ).
+
+The version-neutral API dispatches on the inventory's version: `Inventory::apply_raw_modern`,
+`encode_modern` / `encode_creative_modern` (raw id + body), `on_open_screen_modern`,
+`on_registry_data_modern`, … and the free functions of `ghast_inventory::modern`, which take a
+`Version`. The 0.4.1 names (`apply_raw_v26_1`, `on_open_screen_26_1`, `v26_1::item_name`, …) are
+kept: the methods are aliases of the `_modern` ones, the `v26_1` functions fix the version to 26.1.
+
+**Adding a modern version** (e.g. 26.3) is a table row, plus whatever the game changed:
+1. `src/generated/items_<v>.rs`: `cargo run -p ghast-inventory --example gen_items_26_1 --
+   <reports dir> <v>` over the server's `--reports` output (item registry and default
+   components, component / potion / attribute / sound / villager type / mob effect / entity type
+   / block entity type / menu names).
+2. `src/generated/menus_<v>.rs`: `examples/gen_menus_26_1.rs` over the oracle's
+   `tests/golden/<v>/clicks_seed1.jsonl.gz` (item menu facts, crafting remainders).
+3. Enchantment definitions: compare with `examples/gen_enchantments_26_1.rs`; shared while equal.
+4. A new component name fails the build: append it to `src/generated/component_kinds.rs` and
+   give it a hash schema in `src/item26_hash.rs` (read its codecs in the version's client).
+5. One `Mv` variant and one arm per accessor in `src/tables.rs`, a `modern_packets!` line in
+   `src/packets.rs`, the `Version` row, the feature, the `window_items` arm in `inventory.rs`
+   and a mount of `tests/common/modern_clicks.rs` (plus the hashed-stack test) for its goldens.
+
 ## 26.1
 
 - Stacks keep their data component patch raw (`ItemData::Components`); `apply_raw_v26_1`
@@ -141,7 +172,7 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
   cursor as hashed stacks (vanilla `HashedStack`: crc32c `HashOps` over each component's
   codec); the server applies the click and resends only slots whose hash differs. ghast hashes
   every component kind a client can receive (107 of 110; the other three never reach a
-  client), from a data-driven schema table (`src/v26_1_hash.rs`). Proven against the real
+  client), from a data-driven schema table (`src/item26_hash.rs`). Proven against the real
   client's hashes of 4000 stacks (`tests/golden/26.1/hashed_stacks.jsonl.gz`, all
   byte-identical) and live: 129 stacks, one kind each, drew no correction on a vanilla 26.1.2
   server. Data-driven registry names come from the configuration phase
@@ -257,11 +288,17 @@ cargo test -p ghast-inventory
   byte-identical, 0 differences.** The vectors carry the server's tags, enchantment registry and
   item facts, the villager offers, the anvil names sent and the data slots after each click. Big runs: `MC=26.1 oracle/run.sh clicks --seed 2 --count 30000` then
   `GHAST_CLICK_VECTORS_26_1=$PWD/oracle/cache/26.1/clicks/clicks-seed2-n30000.jsonl.gz cargo test --release -p ghast-inventory --test oracle_clicks_26_1 -- --nocapture`.
-- `tests/oracle_clicks_26_1.rs` `golden_26_1_creative_screen_matches_the_real_client`
+- `tests/oracle_clicks_26_1.rs` `golden_creative_screen_matches_the_real_client`
   (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, oracle `creative-clicks`: the real
   `CreativeModeInventoryScreen.slotClicked` with its listener, random earlier broadcasts,
   server slots in between): 1000 cases, 7544 events, 19 259 packets, all byte-identical, 0
   differences.
+- `tests/oracle_clicks_26_2.rs` (the same shared replay, `tests/golden/26.2/`): 3000 cases,
+  23 963 clicks, all predicted and byte-identical; creative screen 1000 cases, 19 259 packets;
+  0 differences. `tests/v26_2.rs`: the real 26.2 client's hashes of 4000 stacks, every whole
+  `HashedStack` exact; 108 of the 111 component kinds proven by the vectors (`sulfur_cube_content`
+  included), the other three (`creative_slot_lock`, `additional_trade_cost`,
+  `map_post_processing`) are never sent to clients and not hashed.
 - `tests/v26_1.rs` `menus_session_replays` (`fixtures/menus_26_1_2.bin.zz`): `examples/live_clicks_26_1.rs`
   with `MENUS=1` on a vanilla 26.1.2 server (2026-11-12): drags, bundles, a crafting table
   (remainders), a furnace, an anvil (sword + enchanted book combined, renamed, taken), a

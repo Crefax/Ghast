@@ -54,6 +54,22 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   slot codec); same API as `v26_1`. Replays `tests/golden/26.2/entity_tracking.jsonl.gz` with
   every field equal (like 26.1, the tick order differs only around riding entities) and the
   vanilla 26.2 capture.
+- **26.2 inventory** in `ghast-inventory` (`Version::V26_2`, feature `v26_2`, on by default):
+  click prediction for every menu, creative screen, hashed click stacks (incl. the new
+  `sulfur_cube_content`), item facts from the 26.2 reports. Proven like 26.1: the 26.2 click
+  vectors (23,963 clicks) and creative vectors (19,259 packets) byte-identical, 0 differences;
+  the real client's hashes of 4,000 stacks (108 of 111 component kinds) exact. One modern
+  implementation over per-version tables: components are handled as canonical kinds mapped to
+  each version's wire ids at compile time.
+- `ghast-inventory` version-neutral modern API (dispatches on the inventory's version):
+  `Inventory::{apply_raw_modern, encode_modern, encode_creative_modern, on_open_screen_modern,
+  on_registry_data_modern, on_update_tags_modern, on_merchant_offers_modern,
+  on_mount_screen_modern, set_registries_modern, registries_modern, set_creative_modern,
+  anvil_rename_modern, select_loom_pattern_modern, select_trade_modern, …}`,
+  `Window::menu_modern`, `Version::is_modern`, and module `modern` (functions taking a
+  `Version`: `item_name`, `item_id`, `defaults`, `component_id`, `component_name`, `menu_name`,
+  `window_kind`, `item_use`, `component_hash`, `hash_covers`, `packet_ids`, …). The 0.4.1
+  `_26_1` methods and `v26_1` functions stay and are aliases.
 
 ### Fixed
 
