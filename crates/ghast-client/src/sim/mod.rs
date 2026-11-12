@@ -206,6 +206,8 @@ impl BlockUpdates {
 
 /// What [`Sim::pre_tick`] gets each tick.
 #[derive(Debug, Clone, Copy)]
+// Read by the 26.1 sim only.
+#[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
 pub(crate) struct PreTick {
     /// The use in progress: (off hand, item id).
     pub(crate) using: Option<(bool, u16)>,
@@ -473,6 +475,7 @@ pub(crate) struct SimOptions {
     /// What the world keeps besides block states (default: nothing, see [`config`]).
     pub world: Option<WorldConfig>,
     /// The player's scoreboard name (team membership for entity pushes, 26.1).
+    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
     pub profile_name: Option<String>,
 }
 
