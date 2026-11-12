@@ -36,6 +36,7 @@ read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to
 ./airborne-join.sh 26.1 [5]  # regression: log in 1 block above the ground N times, PASS = 0 Grim flags (any lab)
 LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build instead of the pinned one (cross-checks)
 ./transfer.sh                # 26.1: /transfer the bot back to the lab twice (--follow-transfers), PASS = both followed, 0 flags
+./entities.sh [crowd|horse|villager|border]  # 26.1 with summoned NoAI mobs (the lab spawns none): crowd + boat with entity tracking on/off, horse inventory, villager trade, shrinking world border; PASS = screens confirmed, 0 flags
 ./proxy-switch.sh [10]       # 26.1 reconfiguration: Velocity + two backends, N /server switches (own server set, see below)
 ./online-26.1.sh             # 26.1 online mode + signed chat against a local account stand-in (own server, see below)
 ```
