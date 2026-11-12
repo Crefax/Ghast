@@ -570,6 +570,7 @@ pub mod v775 {
     impl Iterator for Components<'_> {
         type Item = (i32, Bytes);
 
+        #[inline]
         fn next(&mut self) -> Option<(i32, Bytes)> {
             if self.left == 0 {
                 return None;
