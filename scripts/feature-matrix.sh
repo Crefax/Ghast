@@ -25,7 +25,7 @@ crates=(
   "ghast-protocol:v1_8 v1_12_2 v1_16_5 v26_1 v26_2::"
   "ghast-data:v1_8 v1_12 v1_16_5 v26_1 v26_2::"
   "ghast-physics:v1_8 v1_12 v1_16_5 v26_1::"
-  "ghast-world:v1_8 v1_12 v1_16_5 v26_1::"
+  "ghast-world:v1_8 v1_12 v1_16_5 v26_1 v26_2::"
   "ghast-entity:v1_8 v1_12 v1_16_5 v26_1::all"
   "ghast-inventory:v1_8 v1_12 v1_16_5 v26_1::all"
   "ghast-auth:::"

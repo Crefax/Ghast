@@ -60,7 +60,7 @@ pub(crate) struct BorderPacket {
 
 impl BorderPacket {
     /// A packet with every optional field absent.
-    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "v26_1", feature = "v26_2")), allow(dead_code))]
     pub(crate) const EMPTY: BorderPacket = BorderPacket {
         action: 0,
         diameter: None,

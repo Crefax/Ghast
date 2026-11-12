@@ -14,12 +14,15 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-world"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "physics"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2", "physics"]
 # Per-version worlds (chunk formats and packet handling).
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1", "ghast-physics?/v26_1"]
+# 26.2: the 26.1 world source over the 26.2 data and packets (the physics view uses the modern
+# core's border, which ghast-physics builds with its `v26_1` feature).
+v26_2 = ["ghast-protocol/v26_2", "ghast-data/v26_2", "ghast-physics?/v26_1"]
 # Implements `ghast_physics::BlockView` for the worlds.
 physics = ["dep:ghast-physics"]
 

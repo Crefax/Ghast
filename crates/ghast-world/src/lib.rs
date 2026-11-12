@@ -33,12 +33,12 @@
 #![warn(missing_docs, unnameable_types)]
 
 mod border;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod climate;
 mod column;
 mod error;
 pub mod packed;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod paletted;
 mod section;
 
@@ -61,6 +61,21 @@ mod modern_775 {
 #[cfg(feature = "v26_1")]
 #[doc(inline)]
 pub use modern_775::world as v26_1;
+
+/// The same world source for protocol 776 (26.2): nothing in the world changed between 26.1
+/// and 26.2 except the block-state ids, which come from `ghast_data::v26_2`.
+#[cfg(feature = "v26_2")]
+#[path = "."]
+mod modern_776 {
+    pub(crate) use ghast_data::v26_2 as data;
+    pub(crate) use ghast_protocol::v26_2 as proto;
+    #[allow(clippy::duplicate_mod)]
+    #[path = "v26_1.rs"]
+    pub mod world;
+}
+#[cfg(feature = "v26_2")]
+#[doc(inline)]
+pub use modern_776::world as v26_2;
 
 pub use border::Border;
 pub use column::{
