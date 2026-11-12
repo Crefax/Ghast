@@ -578,6 +578,27 @@ impl Sim26 {
         s
     }
 
+    /// Test hook: a world in the vanilla nether (registries as with known packs).
+    #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+    pub(crate) fn test_nether() -> Self {
+        let mut s = Self::new();
+        s.world.apply_registry(
+            "minecraft:dimension_type",
+            [
+                ("minecraft:overworld", None),
+                ("minecraft:the_nether", None),
+            ]
+            .into_iter(),
+        );
+        s.world.apply_registry(
+            "minecraft:worldgen/biome",
+            [("minecraft:plains", None)].into_iter(),
+        );
+        s.world.enter_dimension("minecraft:the_nether", 1, 8);
+        s.sync_level();
+        s
+    }
+
     /// Test hook: a world in the vanilla overworld (registries as with known packs).
     #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
     pub(crate) fn test_overworld() -> Self {
@@ -1209,6 +1230,8 @@ impl Sim for Sim26 {
                 self.push_player(pose);
             }
         }
+        // ClientLevel.tick: the world border steps after the entities (the player included).
+        self.world.tick();
     }
 
     fn crosshair_target(&self, q: &PickQuery<'_>) -> Crosshair {
@@ -1330,7 +1353,6 @@ impl Sim for Sim26 {
         }
         push_packets(&self.packets, entity_id, out);
         sync_pose_26(pose, &self.player);
-        self.world.tick();
     }
 }
 

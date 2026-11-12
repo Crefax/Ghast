@@ -138,7 +138,11 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
             let p = cb::SpawnEntity {
                 entity_id: 1000 + k,
                 object_uuid: uuid::Uuid::from_u64_pair(0x6265_6e63, k as u64),
-                r#type: if k % 5 == 4 { ty("oak_boat") } else { ty("cow") },
+                r#type: if k % 5 == 4 {
+                    ty("oak_boat")
+                } else {
+                    ty("cow")
+                },
                 x: 8.5 + r * a.cos(),
                 y: 64.0,
                 z: 8.5 + r * a.sin(),

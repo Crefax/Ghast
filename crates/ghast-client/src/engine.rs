@@ -3640,18 +3640,79 @@ mod tests {
 
     /// 26.1 entity collision and pushing through the engine (entity tracking on): the
     /// hand-written cases of `tests/golden/26.1/entities.jsonl.gz` with their entities as real
-    /// `add_entity` / `teleport_entity` / `remove_entities` packets into the tracker; every
-    /// movement, `entity_action` and `player_input` packet must equal the real client's.
+    /// `add_entity` / `teleport_entity` / `remove_entities` packets into the tracker, and every
+    /// fuzz case whose events this replay drives; every movement, `entity_action` and
+    /// `player_input` packet must equal the real client's.
     #[test]
     #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
     fn entities_match_the_oracle_26_1() {
+        let (cases, fuzz) = ext_replay_26_1(
+            "entities.jsonl.gz",
+            &[
+                "push_zombie",
+                "push_crowd",
+                "push_walk_into_mobs",
+                "no_push_armor_stand_bat_parrot",
+                "boat_collide",
+                "boat_push",
+                "shulker_block",
+                "minecart_near",
+                "push_moving_zombie",
+                "push_ladder",
+                "push_spectator",
+                "boat_stand_on",
+                "push_spawned_in",
+            ],
+        );
+        assert!(cases >= 13 && fuzz >= 5, "{cases} {fuzz}");
+    }
+
+    /// 26.1 world border through the engine: `initialize` / `set_border_center` /
+    /// `set_border_size` / `set_border_lerp_size` packets into the world, the border stepping
+    /// after the entities (`tests/golden/26.1/border.jsonl.gz`).
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn border_matches_the_oracle_26_1() {
+        let (cases, fuzz) = ext_replay_26_1(
+            "border.jsonl.gz",
+            &[
+                "border_shrinking",
+                "border_growing",
+                "border_static_changes",
+                "border_outside",
+            ],
+        );
+        assert!(cases >= 4 && fuzz >= 5, "{cases} {fuzz}");
+    }
+
+    /// 26.1 nether through the engine: the level facts (build height 0-255, fast lava) from the
+    /// synced `the_nether` dimension type (`tests/golden/26.1/nether.jsonl.gz`).
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn nether_matches_the_oracle_26_1() {
+        let (cases, fuzz) = ext_replay_26_1(
+            "nether.jsonl.gz",
+            &[
+                "nether_lava_flow",
+                "nether_lava_fall",
+                "nether_low_world",
+                "nether_top",
+            ],
+        );
+        assert!(cases >= 4 && fuzz >= 5, "{cases} {fuzz}");
+    }
+
+    /// Replays the hand-written cases `hand` and the fuzz cases whose events it drives (entities,
+    /// border, own velocity) of a 26.1 oracle file through the engine; returns (cases, fuzz).
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn ext_replay_26_1(file: &str, hand: &[&str]) -> (usize, usize) {
         use crate::phys_golden::v261::{ext_of, player_of};
         use ghast_protocol::v26_1::play::clientbound as cb;
         use serde_json::Value;
         use std::io::BufRead;
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/golden/26.1/entities.jsonl.gz"
+        let path = format!(
+            "{}/../../tests/golden/26.1/{file}",
+            env!("CARGO_MANIFEST_DIR")
         );
         let f = std::fs::File::open(path).unwrap();
         let lines: Vec<Value> = std::io::BufReader::new(flate2::read::GzDecoder::new(f))
@@ -3815,21 +3876,7 @@ mod tests {
             };
             e.sim.world_packet(&raw).unwrap();
         };
-        let wanted = [
-            "push_zombie",
-            "push_crowd",
-            "push_walk_into_mobs",
-            "no_push_armor_stand_bat_parrot",
-            "boat_collide",
-            "boat_push",
-            "shulker_block",
-            "minecart_near",
-            "push_moving_zombie",
-            "push_ladder",
-            "push_spectator",
-            "boat_stand_on",
-            "push_spawned_in",
-        ];
+        let wanted = hand;
         let (mut cases, mut fuzz_cases, mut ticks_done, mut packets) = (0, 0, 0, 0);
         let mut failed = Vec::new();
         let mut i = 0;
@@ -3851,13 +3898,22 @@ mod tests {
                     .all(|ev| {
                         matches!(
                             ev["type"].as_str(),
-                            Some("spawn" | "entity_move" | "remove_entity")
+                            Some(
+                                "spawn"
+                                    | "entity_move"
+                                    | "remove_entity"
+                                    | "border_center"
+                                    | "border_size"
+                                    | "border_lerp"
+                                    | "velocity"
+                            )
                         )
                     })
-            }) && sc["setup"]["ext"]
-                .as_object()
-                .is_some_and(|x| x.keys().all(|k| k == "entities"));
-            let fuzz = name.ends_with("_x_en") && plain;
+            }) && sc["setup"]["ext"].as_object().is_none_or(|x| {
+                x.keys()
+                    .all(|k| matches!(k.as_str(), "entities" | "border" | "dimension"))
+            });
+            let fuzz = name.starts_with("fuzz") && plain;
             if !wanted.contains(&name.as_str()) && !fuzz {
                 continue;
             }
@@ -3866,8 +3922,13 @@ mod tests {
             let setup = &sc["setup"];
             let mut o = opts(GameVersion::V26_1);
             o.inventory = ghast_inventory::Version::V26_1;
-            let mut e: Engine<Box<dyn Sim>> =
-                Engine::new(o, Box::new(crate::sim::Sim26::test_overworld()));
+            let nether = setup["ext"]["dimension"] == "the_nether";
+            let sim = if nether {
+                crate::sim::Sim26::test_nether()
+            } else {
+                crate::sim::Sim26::test_overworld()
+            };
+            let mut e: Engine<Box<dyn Sim>> = Engine::new(o, Box::new(sim));
             e.handle(Inbound::JoinGame(JoinGame {
                 entity_id: 7,
                 game_mode: match setup["game_mode"].as_str().unwrap() {
@@ -3907,7 +3968,12 @@ mod tests {
                 let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
                 for x in r[0]..=r[2] {
                     for z in r[1]..=r[3] {
-                        load(&mut e, x, z);
+                        let raw = if nether {
+                            crate::sim::test_chunks::v26_1_sections(x, z, 16, 3)
+                        } else {
+                            crate::sim::test_chunks::v26_1(x, z)
+                        };
+                        e.sim.world_packet(&raw).unwrap();
                     }
                 }
             }
@@ -4001,6 +4067,46 @@ mod tests {
                             };
                             e.sim.world_packet(&raw).unwrap();
                         }
+                        "border_center" => {
+                            let raw = RawPacket {
+                                id: cb::id::WORLD_BORDER_CENTER,
+                                body: body(&cb::WorldBorderCenter {
+                                    x: f64v(&ev["x"]),
+                                    z: f64v(&ev["z"]),
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "border_size" => {
+                            let raw = RawPacket {
+                                id: cb::id::WORLD_BORDER_SIZE,
+                                body: body(&cb::WorldBorderSize {
+                                    diameter: f64v(&ev["size"]),
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "border_lerp" => {
+                            let raw = RawPacket {
+                                id: cb::id::WORLD_BORDER_LERP_SIZE,
+                                body: body(&cb::WorldBorderLerpSize {
+                                    old_diameter: f64v(&ev["from"]),
+                                    new_diameter: f64v(&ev["to"]),
+                                    speed: ev["ticks"].as_i64().unwrap(),
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "velocity" => {
+                            // set_entity_motion: 1/8000 units through the LpVec3 codec.
+                            let c = |k: &str| ev[k].as_f64().unwrap() / 8000.0;
+                            let [x, y, z] =
+                                crate::phys_golden::v261::lpvec3([c("x"), c("y"), c("z")]);
+                            e.handle(Inbound::Velocity {
+                                entity_id: 7,
+                                motion: Vec3::new(x, y, z),
+                            });
+                        }
                         "remove_entity" => {
                             let raw = RawPacket {
                                 id: cb::id::ENTITY_DESTROY,
@@ -4044,15 +4150,16 @@ mod tests {
             }
         }
         eprintln!(
-            "entities through the engine: {cases} cases ({fuzz_cases} fuzz), {ticks_done} ticks, {packets} packets identical"
+            "{file} through the engine: {cases} cases ({fuzz_cases} fuzz), {ticks_done} ticks, {packets} packets identical"
         );
         assert!(
             failed.is_empty(),
-            "{} failed:\n{}",
+            "{file}: {} failed:\n{}",
             failed.len(),
             failed.join("\n")
         );
         assert_eq!(cases - fuzz_cases, wanted.len());
+        (cases, fuzz_cases)
     }
 
     /// 26.1 item use from the stack's components (`item_use`): which items have a use state,

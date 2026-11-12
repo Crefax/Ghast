@@ -381,7 +381,10 @@ impl PerlinSimplex {
         let mut r = Legacy::new(seed);
         let low = -octaves[0];
         let high = *octaves.last().unwrap_or(&0);
-        assert!(high <= 0, "positive octaves are not used by the biome noises");
+        assert!(
+            high <= 0,
+            "positive octaves are not used by the biome noises"
+        );
         let n = (low + high + 1) as usize;
         let zero = Simplex::new(&mut r);
         let mut levels: Vec<Option<Simplex>> = (0..n).map(|_| None).collect();

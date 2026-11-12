@@ -201,7 +201,11 @@ fn climate_from_nbt(nbt: &AnonNbt) -> Option<crate::climate::Climate> {
         },
         Some(_) => return None,
     };
-    Some(crate::climate::Climate::new(has_precipitation, temperature, frozen))
+    Some(crate::climate::Climate::new(
+        has_precipitation,
+        temperature,
+        frozen,
+    ))
 }
 
 /// What the world keeps from the configuration-phase registries.
@@ -418,6 +422,9 @@ pub struct World {
     view: ViewWindow,
     builder: Builder,
     border: Border,
+    /// The border as the 26.1 client's collision reads it (tick-based lerp, one tick behind).
+    #[cfg(feature = "physics")]
+    collision_border: ghast_physics::modern::BorderState,
     batch: ChunkBatchSize,
     /// `BiomeManager.biomeZoomSeed` (the login / respawn hashed seed).
     biome_zoom_seed: i64,
@@ -485,6 +492,8 @@ impl World {
             view: ViewWindow::new(2),
             builder: Builder::new(STATE_COUNT),
             border: Border::new(LerpMath::Double),
+            #[cfg(feature = "physics")]
+            collision_border: ghast_physics::modern::BorderState::new(),
             batch: ChunkBatchSize::default(),
             biome_zoom_seed: 0,
             sea_level: 63,
@@ -591,6 +600,8 @@ impl World {
     /// this once per tick.
     pub fn tick(&mut self) {
         self.border.advance(50);
+        #[cfg(feature = "physics")]
+        self.collision_border.tick();
     }
 
     /// Unloads everything (keeps the registries and the dimension).
@@ -642,14 +653,23 @@ impl World {
     /// sent without data).
     #[must_use]
     pub fn biome_climate(&self, id: u16) -> Option<crate::climate::Climate> {
-        self.registries.biome_climates.get(usize::from(id)).copied().flatten()
+        self.registries
+            .biome_climates
+            .get(usize::from(id))
+            .copied()
+            .flatten()
     }
 
     /// `Biome.getPrecipitationAt(pos, seaLevel)` of the biome at a block position, `None` when
     /// the biome or its climate is unknown ([`World::biome_at`]). `Level.isRainingAt` also needs
     /// rain, sky access and the motion-blocking height map, which this does not check.
     #[must_use]
-    pub fn precipitation_at(&self, x: i32, y: i32, z: i32) -> Option<crate::climate::Precipitation> {
+    pub fn precipitation_at(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> Option<crate::climate::Precipitation> {
         let c = self.biome_climate(self.biome_at(x, y, z)?)?;
         Some(c.precipitation_at(x, y, z, self.sea_level))
     }
@@ -829,6 +849,8 @@ impl World {
 
     /// `set_border_center`.
     pub fn apply_border_center(&mut self, p: &cb::WorldBorderCenter) -> Applied {
+        #[cfg(feature = "physics")]
+        self.collision_border.set_center(p.x, p.z);
         self.apply_border(&BorderPacket {
             action: 2,
             x: Some(p.x),
@@ -839,6 +861,9 @@ impl World {
 
     /// `set_border_lerp_size` (lerp time in ticks).
     pub fn apply_border_lerp_size(&mut self, p: &cb::WorldBorderLerpSize) -> Applied {
+        #[cfg(feature = "physics")]
+        self.collision_border
+            .lerp_size(p.old_diameter, p.new_diameter, p.speed);
         self.apply_border(&BorderPacket {
             action: 1,
             old_diameter: Some(p.old_diameter),
@@ -850,6 +875,8 @@ impl World {
 
     /// `set_border_size`.
     pub fn apply_border_size(&mut self, p: &cb::WorldBorderSize) -> Applied {
+        #[cfg(feature = "physics")]
+        self.collision_border.set_size(p.diameter);
         self.apply_border(&BorderPacket {
             action: 0,
             diameter: Some(p.diameter),
@@ -881,6 +908,17 @@ impl World {
 
     /// `initialize_border` (lerp time in ticks).
     pub fn apply_initialize_border(&mut self, p: &InitializeWorldBorder) -> Applied {
+        // ClientPacketListener.handleInitializeBorder.
+        #[cfg(feature = "physics")]
+        {
+            let b = &mut self.collision_border;
+            b.set_center(p.x, p.z);
+            if p.speed > 0 {
+                b.lerp_size(p.old_diameter, p.new_diameter, p.speed);
+            } else {
+                b.set_size(p.new_diameter);
+            }
+        }
         self.apply_border(&BorderPacket {
             action: 3,
             x: Some(p.x),
@@ -914,6 +952,10 @@ impl World {
         (seed, sea_level): (i64, i32),
     ) -> Applied {
         self.columns.clear();
+        #[cfg(feature = "physics")]
+        {
+            self.collision_border = ghast_physics::modern::BorderState::new();
+        }
         self.biome_zoom_seed = seed;
         self.sea_level = sea_level;
         self.border = Border::new(LerpMath::Double);
@@ -948,7 +990,12 @@ impl World {
         hashed_seed: i64,
         sea_level: i32,
     ) -> Applied {
-        self.enter(name, type_index, Some(view_distance), (hashed_seed, sea_level))
+        self.enter(
+            name,
+            type_index,
+            Some(view_distance),
+            (hashed_seed, sea_level),
+        )
     }
 
     /// Join game: a new client level (everything unloaded, window centred on 0, 0).
@@ -1467,13 +1514,10 @@ impl<'w> View<'w> {
 mod physics {
     use super::{BlockState, View, World, void_air};
 
+    /// The border collision reads (`WorldBorder.getMinX()` etc.: a moving border at its size
+    /// before the last tick).
     fn border(w: &World) -> ghast_physics::WorldBorder {
-        let (center_x, center_z) = w.border.center();
-        ghast_physics::WorldBorder {
-            center_x,
-            center_z,
-            size: w.border.size(),
-        }
+        w.collision_border.collision_border()
     }
 
     impl ghast_physics::BlockView for World {

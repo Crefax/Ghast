@@ -480,7 +480,10 @@ fn biomes_and_their_climate_come_from_the_registry() {
                 None
             ]
         );
-        assert_eq!(w.biome_climate(1).unwrap().precipitation_at(0, 64, 0, 63), Precipitation::Rain);
+        assert_eq!(
+            w.biome_climate(1).unwrap().precipitation_at(0, 64, 0, 63),
+            Precipitation::Rain
+        );
     }
     let mut w = World::new(WorldConfig::default().with_biomes(false));
     w.set_biomes(true);

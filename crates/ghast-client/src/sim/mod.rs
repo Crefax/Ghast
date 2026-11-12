@@ -1013,11 +1013,17 @@ pub(crate) mod test_chunks {
     #[cfg(feature = "v26_1")]
     /// A 26.1 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
     pub(crate) fn v26_1(x: i32, z: i32) -> RawPacket {
+        v26_1_sections(x, z, 24, 7)
+    }
+
+    /// A 26.1 column of `sections` sections with the stone layer at the top of section
+    /// `stone` (the nether: 16 sections, stone layer section 3).
+    pub(crate) fn v26_1_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
         use ghast_protocol::McWrite;
         let stone = ghast_data::v26_1::BlockState::parse("stone").unwrap().id();
         let mut d = BytesMut::new();
-        for section in 0..24 {
-            if section == 7 {
+        for section in 0..sections {
+            if section == stone_at {
                 // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
                 d.put_i16(256);
                 d.put_i16(0);

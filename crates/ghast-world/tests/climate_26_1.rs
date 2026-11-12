@@ -8,7 +8,10 @@ use ghast_world::climate::{Climate, Precipitation, zoom_cell};
 
 #[test]
 fn climate_matches_the_real_biomes() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden/26.1/biome_climate.jsonl.gz");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/golden/26.1/biome_climate.jsonl.gz"
+    );
     let mut text = String::new();
     flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap())
         .read_to_string(&mut text)
@@ -36,7 +39,11 @@ fn climate_matches_the_real_biomes() {
         let c = Climate::vanilla(name).unwrap_or_else(|| panic!("{name}"));
         let bits = u32::from_str_radix(v["temperature"].as_str().unwrap(), 16).unwrap();
         assert_eq!(c.temperature.to_bits(), bits, "{name}");
-        assert_eq!(c.has_precipitation, v["has_precipitation"].as_bool().unwrap(), "{name}");
+        assert_eq!(
+            c.has_precipitation,
+            v["has_precipitation"].as_bool().unwrap(),
+            "{name}"
+        );
         assert_eq!(c.frozen, v["modifier"] == "frozen", "{name}");
         for s in v["samples"].as_array().unwrap() {
             let i = |k: usize| s[k].as_i64().unwrap() as i32;

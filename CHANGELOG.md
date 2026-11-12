@@ -190,6 +190,10 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Changed (behaviour)
 
+- 26.1 world border collision follows the real client: the border's lerp advances once per
+  client tick after the entities (`modern::BorderState` in the 26.1 `World`), and collision reads
+  the size from before the last step; it used to move with wall-clock time. Oracle `border` and
+  `nether` cases (4 + 43 fuzz each) replay through the engine.
 - 26.1 world border collision: each bound is clamped to ±29,999,984 on both sides, and a border
   clamped to a sliver collides as `Shapes.INFINITY` (it blocked movement before).
 - 26.1 `start_configuration` now follows `handleConfigurationStart`: a pending chat
