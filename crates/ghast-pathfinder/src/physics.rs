@@ -332,135 +332,149 @@ impl Physics for P16 {
     }
 }
 
+/// The movement rules of a modern version: the shared modern core with the version's rule set
+/// and block states (one row per version).
 #[cfg(feature = "v26_1")]
-impl Physics for P26 {
-    type State = ghast_physics::modern::PlayerState;
-    type Block = ghast_data::v26_1::BlockState;
-    const VERSION: Version = Version::V26_1;
+macro_rules! modern_physics {
+    ($p:ident, $version:expr, $block:ty, $rules:ty) => {
+        impl Physics for $p {
+            type State = ghast_physics::modern::PlayerState;
+            type Block = $block;
+            const VERSION: Version = $version;
 
-    fn new_state(pos: [f64; 3], yaw: f32, pitch: f32) -> Self::State {
-        let mut s = ghast_physics::modern::PlayerState::new(pos, yaw, pitch);
-        s.sent.pos = pos;
-        s.sent.yaw = yaw;
-        s.sent.pitch = pitch;
-        s.first_tick = false;
-        s.auto_jump_enabled = false;
-        s
-    }
+            fn new_state(pos: [f64; 3], yaw: f32, pitch: f32) -> Self::State {
+                let mut s = ghast_physics::modern::PlayerState::new(pos, yaw, pitch);
+                s.sent.pos = pos;
+                s.sent.yaw = yaw;
+                s.sent.pitch = pitch;
+                s.first_tick = false;
+                s.auto_jump_enabled = false;
+                s
+            }
 
-    fn new_state_live(pos: [f64; 3], yaw: f32, pitch: f32, live: &Live) -> Self::State {
-        let mut s = Self::new_state(pos, yaw, pitch);
-        if let Some(t) = live.modern.as_deref() {
-            s.attributes = t.attributes;
-            s.effects = t.effects;
-            s.abilities = t.abilities;
-            s.spectator = t.spectator;
-            s.food_level = t.food_level;
-            s.leather_boots = t.leather_boots;
-            s.options = t.options;
-            s.level = t.level;
-            // The box follows the scale attribute.
-            s.dims = t.dims;
-            s.scale_dirty = t.scale_dirty;
-            s.set_pos(pos[0], pos[1], pos[2]);
-            // Sprinting is the controller's choice: the copied speed modifier goes.
-            s.set_sprinting(false);
+            fn new_state_live(pos: [f64; 3], yaw: f32, pitch: f32, live: &Live) -> Self::State {
+                let mut s = Self::new_state(pos, yaw, pitch);
+                if let Some(t) = live.modern.as_deref() {
+                    s.attributes = t.attributes;
+                    s.effects = t.effects;
+                    s.abilities = t.abilities;
+                    s.spectator = t.spectator;
+                    s.food_level = t.food_level;
+                    s.leather_boots = t.leather_boots;
+                    s.options = t.options;
+                    s.level = t.level;
+                    // The box follows the scale attribute.
+                    s.dims = t.dims;
+                    s.scale_dirty = t.scale_dirty;
+                    s.set_pos(pos[0], pos[1], pos[2]);
+                    // Sprinting is the controller's choice: the copied speed modifier goes.
+                    s.set_sprinting(false);
+                }
+                s
+            }
+
+            fn from_observation(o: &Observation, live: &Live) -> Self::State {
+                let Some(t) = live.modern.as_deref() else {
+                    let mut s = Self::new_state(o.pos, o.yaw, o.pitch);
+                    s.vel = o.vel;
+                    s.on_ground = o.on_ground;
+                    s.set_sprinting(o.sprinting);
+                    s.sent.sprinting = o.sprinting;
+                    s.food_level = o.food;
+                    return s;
+                };
+                // The live state is exact (timers, input, attributes); the observation only wins
+                // where they differ.
+                let mut s = *t;
+                if s.pos != o.pos {
+                    s.set_pos(o.pos[0], o.pos[1], o.pos[2]);
+                }
+                s.vel = o.vel;
+                s.on_ground = o.on_ground;
+                s.yaw = o.yaw;
+                s.pitch = o.pitch;
+                if s.sprinting != o.sprinting {
+                    s.set_sprinting(o.sprinting);
+                }
+                s.food_level = o.food;
+                s
+            }
+
+            fn feed(live: &mut Live, s: &Self::State) {
+                live.set_modern(s);
+            }
+
+            #[cfg(all(
+                test,
+                feature = "v1_8",
+                feature = "v1_12_2",
+                feature = "v1_16_5",
+                feature = "v26_1"
+            ))]
+            fn as_modern(s: &Self::State) -> Option<&ghast_physics::modern::PlayerState> {
+                Some(s)
+            }
+
+            fn observe(s: &Self::State) -> Observation {
+                Observation {
+                    pos: s.pos,
+                    vel: s.vel,
+                    on_ground: s.on_ground,
+                    yaw: s.yaw,
+                    pitch: s.pitch,
+                    sprinting: s.sprinting,
+                    food: s.food_level,
+                }
+            }
+
+            #[inline]
+            fn tick<W: BlockView<State = Self::Block>>(
+                s: &mut Self::State,
+                keys: Keys,
+                yaw: f32,
+                pitch: f32,
+                world: &W,
+            ) {
+                let mut out = Packets::new();
+                let input = TickInput {
+                    keys,
+                    yaw,
+                    pitch,
+                    using_item: false,
+                };
+                ghast_physics::modern::tick::<$rules, W>(s, &input, world, &mut out);
+            }
+
+            fn horizontal_collision(s: &Self::State) -> bool {
+                s.horizontal_collision
+            }
+
+            fn fall_distance(s: &Self::State) -> f32 {
+                s.fall_distance as f32
+            }
+
+            #[inline]
+            fn decode(raw: u32) -> Self::Block {
+                u16::try_from(raw)
+                    .ok()
+                    .and_then(<$block>::from_id)
+                    .unwrap_or(<$block>::AIR)
+            }
+
+            fn air() -> Self::Block {
+                <$block>::AIR
+            }
         }
-        s
-    }
-
-    fn from_observation(o: &Observation, live: &Live) -> Self::State {
-        let Some(t) = live.modern.as_deref() else {
-            let mut s = Self::new_state(o.pos, o.yaw, o.pitch);
-            s.vel = o.vel;
-            s.on_ground = o.on_ground;
-            s.set_sprinting(o.sprinting);
-            s.sent.sprinting = o.sprinting;
-            s.food_level = o.food;
-            return s;
-        };
-        // The live state is exact (timers, input, attributes); the observation only wins
-        // where they differ.
-        let mut s = *t;
-        if s.pos != o.pos {
-            s.set_pos(o.pos[0], o.pos[1], o.pos[2]);
-        }
-        s.vel = o.vel;
-        s.on_ground = o.on_ground;
-        s.yaw = o.yaw;
-        s.pitch = o.pitch;
-        if s.sprinting != o.sprinting {
-            s.set_sprinting(o.sprinting);
-        }
-        s.food_level = o.food;
-        s
-    }
-
-    fn feed(live: &mut Live, s: &Self::State) {
-        live.set_modern(s);
-    }
-
-    #[cfg(all(
-        test,
-        feature = "v1_8",
-        feature = "v1_12_2",
-        feature = "v1_16_5",
-        feature = "v26_1"
-    ))]
-    fn as_modern(s: &Self::State) -> Option<&ghast_physics::modern::PlayerState> {
-        Some(s)
-    }
-
-    fn observe(s: &Self::State) -> Observation {
-        Observation {
-            pos: s.pos,
-            vel: s.vel,
-            on_ground: s.on_ground,
-            yaw: s.yaw,
-            pitch: s.pitch,
-            sprinting: s.sprinting,
-            food: s.food_level,
-        }
-    }
-
-    #[inline]
-    fn tick<W: BlockView<State = Self::Block>>(
-        s: &mut Self::State,
-        keys: Keys,
-        yaw: f32,
-        pitch: f32,
-        world: &W,
-    ) {
-        let mut out = Packets::new();
-        let input = TickInput {
-            keys,
-            yaw,
-            pitch,
-            using_item: false,
-        };
-        ghast_physics::modern::tick::<ghast_physics::modern::V26_1, W>(s, &input, world, &mut out);
-    }
-
-    fn horizontal_collision(s: &Self::State) -> bool {
-        s.horizontal_collision
-    }
-
-    fn fall_distance(s: &Self::State) -> f32 {
-        s.fall_distance as f32
-    }
-
-    #[inline]
-    fn decode(raw: u32) -> Self::Block {
-        u16::try_from(raw)
-            .ok()
-            .and_then(ghast_data::v26_1::BlockState::from_id)
-            .unwrap_or(ghast_data::v26_1::BlockState::AIR)
-    }
-
-    fn air() -> Self::Block {
-        ghast_data::v26_1::BlockState::AIR
-    }
+    };
 }
+
+#[cfg(feature = "v26_1")]
+modern_physics!(
+    P26,
+    Version::V26_1,
+    ghast_data::v26_1::BlockState,
+    ghast_physics::modern::V26_1
+);
 
 /// A physics world view over a [`BlockSource`] (unknown reads as air, like the vanilla client),
 /// with optional block overrides (simulated digs and places).
