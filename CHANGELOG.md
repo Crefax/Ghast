@@ -164,7 +164,9 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   unloaded; the local player first at login / dimension change, last at a same-dimension respawn.
   Checked against the real client's tick list in `entity_tracking.jsonl.gz` (new `tick_order`
   field): 3,362 of 3,456 ticks equal; the rest differ because the tracker does not place passengers
-  on their vehicles.
+  on their vehicles. The full membership re-check runs only after packets were applied or when
+  an entity's interpolation moved it into another column; `Tracker::tick_early` ticks an entity
+  ahead of the rest (a vehicle before its passenger, entities that tick before the player).
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 
@@ -223,9 +225,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   by entities (no cost; a server-side anticheat may then flag walking into a boat or a crowd).
   Team collision rules (`set_player_team` `collisionRule`, decoded only with entity tracking:
   the team name, rule and members) decide each push like `EntitySelector.pushableBy`; other
-  players' teams need `Interests::PLAYER_LIST` (their scoreboard names). Not modelled yet: the
-  pushers' exact tick order (by entity id for now: equal for entities spawned in id order), an
-  open or scaled shulker's box, the happy ghast.
+  players' teams need `Interests::PLAYER_LIST` (their scoreboard names); the team rules are
+  unit-tested against the decompiled predicate and lab-tested, not oracle-proven. Pushes and
+  collision boxes follow the client's tick order (`Tracker::tick_seq`): entities that tick before
+  the player (or before the vehicle it rides) tick first and push before its tick. Not
+  modelled: an open or scaled shulker's box (the closed shell is used), the happy ghast; tick
+  order of passengers (the tracker does not place them on their vehicles).
 
 ### Fixed
 

@@ -195,8 +195,9 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   boat or through a crowd then moves differently from a vanilla client (an anticheat can flag
   it); turn the interest on where that can happen. Team collision rules (`never`,
   `pushOtherTeams`, `pushOwnTeam`) are followed; other players' teams need
-  `Interests::PLAYER_LIST`. Not modelled: the exact tick order of several pushers (entity id
-  order is used), open or scaled shulkers.
+  `Interests::PLAYER_LIST` (unit- and lab-tested, not oracle-proven). Pushes follow the
+  client's entity tick order. Not modelled: open or scaled shulkers (the closed shell is used),
+  the happy ghast.
 - **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
   pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
 - **Proven against the real 26.1 client** (oracle vectors, `cargo test`):

@@ -128,6 +128,9 @@ struct Around {
     pushers: Vec<(i64, modern::Pusher)>,
     /// The player ticked since the last entity tick (pushes come after its tick).
     player_ticked: bool,
+    /// The entities near the player that tick before it in the client's tick list (ticked
+    /// early: their boxes are post-tick, their pushes come before the player's tick).
+    pre: Vec<i32>,
 }
 
 /// Per 26.1 entity type: the player collides with it ([`modern::collides_26_1`]).
@@ -542,6 +545,49 @@ impl Sim26 {
         self.vehicles.as_mut().unwrap()
     }
 
+    /// `ClientLevel.tickEntities` up to the player: the entities near it that tick before it
+    /// (before its root vehicle when riding) tick now, and their pushes act before its tick.
+    #[inline(never)]
+    fn tick_before_player(&mut self, pose: &mut Pose) {
+        let Some(t) = &mut self.entities else { return };
+        let me = self.riding.as_ref().map_or(self.own.id, Riding::id);
+        let Some(me_seq) = t.tick_seq(me) else { return };
+        let p = &self.player;
+        let reach = |v: f64| v.abs() + 4.0;
+        let (rx, ry, rz) = (reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2]));
+        let pre = &mut self.around.pre;
+        pre.clear();
+        let mut found: Vec<(u64, i32)> = Vec::new();
+        for e in t.iter() {
+            let [x, y, z] = e.position();
+            if (x - p.pos[0]).abs() > rx + 2.0
+                || (y - p.pos[1]).abs() > ry + 2.0
+                || (z - p.pos[2]).abs() > rz + 2.0
+            {
+                continue;
+            }
+            if entity_bits(e) & (COLLIDES | PUSH_LIVING | PUSH_BOAT) == 0 && self.riding.is_none() {
+                continue;
+            }
+            let Some(seq) = t.tick_seq(e.id()).filter(|&q| q < me_seq) else {
+                continue;
+            };
+            found.push((seq, e.id()));
+        }
+        if found.is_empty() {
+            return;
+        }
+        found.sort_unstable();
+        let (world, level) = (&self.world, &self.player.level);
+        for &(_, id) in &found {
+            t.tick_early(id, |e, bb| block_free(world, level, e, bb));
+            pre.push(id);
+        }
+        if self.riding.is_none() {
+            self.push_player(pose, true);
+        }
+    }
+
     /// The parked boat ends when the server moved it (its tracked position changed) or it is
     /// gone.
     fn check_parked(&mut self) {
@@ -751,13 +797,14 @@ impl Sim26 {
     /// The pushes of the entities that ticked after the player (`LivingEntity.pushEntities`,
     /// `AbstractBoat.tick`), each with its box after its own tick.
     #[inline(never)]
-    fn push_player(&mut self, pose: &mut Pose) {
+    fn push_player(&mut self, pose: &mut Pose, before: bool) {
         let p = &self.player;
         let a = &mut self.around;
         a.pushers.clear();
         let parked = self.parked.as_ref();
         // The boat the player left pushes from where it is (without the tracker, only it).
         if let Some(k) = parked
+            && !before
             && self.entities.as_ref().is_none_or(|t| t.get(k.id).is_none())
         {
             a.pushers.push((
@@ -767,6 +814,10 @@ impl Sim26 {
         }
         for e in self.entities.iter().flat_map(|t| t.iter()) {
             let t = self.entities.as_ref().unwrap();
+            // Those that tick before the player pushed it before its tick.
+            if before != (!a.pre.is_empty() && a.pre.contains(&e.id())) {
+                continue;
+            }
             let bits = entity_bits(e);
             if bits & (PUSH_LIVING | PUSH_BOAT) == 0 {
                 continue;
@@ -805,9 +856,10 @@ impl Sim26 {
             } else {
                 modern::PushKind::Living
             };
-            // Placeholder tick order: by entity id (vanilla: the tick list's insertion order).
+            // In the client's tick order.
+            let seq = t.tick_seq(e.id()).map_or(i64::MAX, |q| q as i64);
             a.pushers
-                .push((i64::from(e.id()), modern::Pusher::new(pos, aabb(b), kind)));
+                .push((seq, modern::Pusher::new(pos, aabb(b), kind)));
         }
         if a.pushers.is_empty() {
             return;
@@ -1627,8 +1679,9 @@ impl Sim for Sim26 {
         if std::mem::take(&mut self.around.player_ticked)
             && (self.entities.is_some() || self.parked.is_some())
         {
-            self.push_player(pose);
+            self.push_player(pose, false);
         }
+        self.around.pre.clear();
         // ClientLevel.tick: the world border steps after the entities (the player included).
         self.world.tick();
     }
@@ -1712,6 +1765,9 @@ impl Sim for Sim26 {
         };
         // Entity.setOldPosAndRot at the start of the entity tick.
         self.old_pos = self.player.pos;
+        if self.entities.is_some() {
+            self.tick_before_player(pose);
+        }
         if let Some(Riding::Seat { id }) = self.riding {
             // The vehicle ticks before its passenger: its position after this tick.
             let (world, level) = (&self.world, &self.player.level);

@@ -267,9 +267,12 @@ pub struct Tracker {
     /// number. Re-adding an id that is still a member keeps its place.
     order: Fast<i32, u64>,
     next_seq: u64,
-    /// An entity [`Tracker::tick_early`] already ticked this client tick (the next
-    /// [`Tracker::tick_with`] skips it once).
-    early: Option<i32>,
+    /// Entities [`Tracker::tick_early`] already ticked this client tick (the next
+    /// [`Tracker::tick_with`] skips them once).
+    early: Vec<i32>,
+    /// Tick list membership may have changed in a way only a full re-check finds (passengers
+    /// changed vehicles): re-checked at the start of the next tick.
+    order_dirty: bool,
 }
 
 impl Deref for Tracker {
@@ -467,7 +470,8 @@ impl Tracker {
             ghosts: Fast::default(),
             order: Fast::default(),
             next_seq: 0,
-            early: None,
+            early: Vec::new(),
+            order_dirty: false,
         }
     }
 
@@ -583,6 +587,7 @@ impl Tracker {
     /// A chunk column became loaded (what a `map_chunk` packet does here; for a tracker started
     /// while chunks are already loaded): its entities tick again.
     pub fn mark_column_loaded(&mut self, x: i32, z: i32) {
+        self.order_dirty = true;
         let k = chunk_key(x, z);
         if self.chunks.insert(k, ()).is_none() {
             let mut ids: Vec<i32> = self
@@ -609,6 +614,7 @@ impl Tracker {
 
     /// A chunk column was unloaded (`unload_chunk`): its entities stop ticking.
     pub fn mark_column_unloaded(&mut self, x: i32, z: i32) {
+        self.order_dirty = true;
         let k = chunk_key(x, z);
         self.chunks.remove(&k);
         self.column_unloaded(k);
@@ -665,8 +671,14 @@ impl Tracker {
     /// (`[min_x, min_y, min_z, max_x, max_y, max_z]`) is free (`Level.noCollision`: blocks,
     /// collidable entities, world border).
     pub fn tick_with(&mut self, mut no_collision: impl FnMut(&Entity, [f64; 6]) -> bool) {
-        self.refresh_order();
-        let early = self.early.take();
+        // The full membership re-check, only when packets were applied since the last one.
+        if std::mem::take(&mut self.order_dirty) {
+            self.refresh_order();
+        }
+        let early = std::mem::take(&mut self.early);
+        // Entities whose column changed in this tick (interpolation steps).
+        let mut moved: Vec<i32> = Vec::new();
+        let mut moved_vehicle = false;
         let me = self.store.self_id;
         let chunks = &self.chunks;
         // Vehicles whose first passenger is a mob (their body control skips the idle turn).
@@ -686,7 +698,10 @@ impl Tracker {
         let mut discard: Vec<i32> = Vec::new();
         let players = &self.store.players;
         for e in self.store.map.values_mut() {
-            if e.m.flag(st::SETTLED) || Some(e.id) == me || Some(e.id) == early {
+            if e.m.flag(st::SETTLED)
+                || Some(e.id) == me
+                || (!early.is_empty() && early.contains(&e.id))
+            {
                 continue;
             }
             if !e.is_player() && !chunks.contains_key(&chunk_of(e.pos)) {
@@ -712,13 +727,20 @@ impl Tracker {
                 }
             }
             let c = !carrying.is_empty() && carrying.contains(&e.id);
+            let before = chunk_of(e.pos);
             tick_entity(e, c, &mut no_collision);
+            if chunk_of(e.pos) != before {
+                moved.push(e.id);
+                moved_vehicle |= !e.passengers.is_empty();
+            }
         }
         for id in discard {
             self.store.remove(id);
         }
-        // Moves made by the tick (interpolation, passengers placed on their vehicles).
-        self.refresh_order();
+        // Moves made by the tick (interpolation): only when some entity changed its column.
+        if !moved.is_empty() || moved_vehicle {
+            self.refresh_order();
+        }
     }
 
     /// Ticks entity `id` now, ahead of the rest of this client tick (a vehicle ticks before
@@ -730,11 +752,17 @@ impl Tracker {
         id: i32,
         mut no_collision: impl FnMut(&Entity, [f64; 6]) -> bool,
     ) -> Option<[f64; 3]> {
+        let again = self.early.contains(&id);
         let e = self.store.map.get_mut(&id)?;
-        if !e.m.flag(st::SETTLED) && (e.is_player() || self.chunks.contains_key(&chunk_of(e.pos))) {
+        if !again
+            && !e.m.flag(st::SETTLED)
+            && (e.is_player() || self.chunks.contains_key(&chunk_of(e.pos)))
+        {
             tick_entity(e, false, &mut no_collision);
         }
-        self.early = Some(id);
+        if !self.early.contains(&id) {
+            self.early.push(id);
+        }
         Some(e.pos)
     }
 
@@ -769,17 +797,19 @@ impl Tracker {
         .then(|| Reader::new(body).read_varint().ok())
         .flatten();
         let out = self.apply_inner(packet_id, body);
+        self.order_dirty = true;
         if let Some(eid) = mover {
             self.refresh_one(eid);
         }
         out
     }
 
-    /// Tick list membership of one entity after it moved.
+    /// Tick list membership of one entity after it moved (a vehicle carries its passengers).
     fn refresh_one(&mut self, id: i32) {
         let Some(e) = self.store.map.get(&id) else {
             return;
         };
+
         if Some(id) == self.store.self_id || e.is_player() || self.ghosts.contains_key(&id) {
             return;
         }
