@@ -4,6 +4,9 @@
 // in crates/ghast-protocol/src/generated/.
 
 //! Definitions first used by protocol 776 (Minecraft 26.2).
+//!
+//! Not a stability promise: these paths may change in a minor release; name the types through
+//! the version module (`crate::v26_2::…`) instead.
 
 #[cfg(feature = "v26_2")]
 pub mod login;

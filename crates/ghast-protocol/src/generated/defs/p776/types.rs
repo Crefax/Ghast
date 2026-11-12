@@ -28,9 +28,14 @@ use bytes::{BufMut, Bytes, BytesMut};
 #[cfg(feature = "v26_2")]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[non_exhaustive]
 pub struct SlotComponentType(pub i32);
 #[cfg(feature = "v26_2")]
 impl SlotComponentType {
+    /// The value with wire number `v`.
+    pub const fn new(v: i32) -> Self {
+        Self(v)
+    }
     /// `custom_data`
     pub const CUSTOM_DATA: Self = Self(0);
     /// `max_stack_size`
@@ -896,9 +901,14 @@ impl Generate for ItemStackTemplate {
 #[cfg(feature = "v26_2")]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[non_exhaustive]
 pub struct ParticleType(pub i32);
 #[cfg(feature = "v26_2")]
 impl ParticleType {
+    /// The value with wire number `v`.
+    pub const fn new(v: i32) -> Self {
+        Self(v)
+    }
     /// `angry_villager`
     pub const ANGRY_VILLAGER: Self = Self(0);
     /// `block`
@@ -1330,6 +1340,7 @@ pub struct ParticleDataGeyserPoof {
 #[cfg(feature = "v26_2")]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ParticleData {
     /// Case(s) `block`.
     Block(i32),
@@ -2206,6 +2217,7 @@ pub struct SlotComponentDataContainer {
 #[cfg(feature = "v26_2")]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SlotComponentData {
     /// Case(s) `custom_data`.
     CustomData(AnonNbt),
@@ -7750,9 +7762,14 @@ impl Generate for UntrustedSlotComponent {
 #[cfg(feature = "v26_2")]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[non_exhaustive]
 pub struct CommandNodeExtraNodeDataCase2Parser(pub i32);
 #[cfg(feature = "v26_2")]
 impl CommandNodeExtraNodeDataCase2Parser {
+    /// The value with wire number `v`.
+    pub const fn new(v: i32) -> Self {
+        Self(v)
+    }
     /// `brigadier:bool`
     pub const BRIGADIER_BOOL: Self = Self(0);
     /// `brigadier:float`
@@ -7958,6 +7975,7 @@ pub struct CommandNodeExtraNodeDataCase2 {
 #[cfg(feature = "v26_2")]
 /// Switch on `flags/command_node_type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CommandNodeExtraNodeData {
     /// Case(s) `0`.
     Case0,
@@ -8484,6 +8502,7 @@ impl Generate for CommandNode {
 #[cfg(feature = "v26_2")]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum EntityMetadataEntryValue {
     /// Case(s) `byte`.
     Byte(i8),

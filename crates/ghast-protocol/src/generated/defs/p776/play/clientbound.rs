@@ -203,6 +203,7 @@ pub struct RecipeDisplayDataSmithing {
 #[cfg(feature = "v26_2")]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum RecipeDisplayData {
     /// Case(s) `crafting_shapeless`.
     CraftingShapeless(crate::defs::p776::play::clientbound::RecipeDisplayDataCraftingShapeless),
@@ -636,6 +637,7 @@ pub struct SlotDisplayDataWithRemainder {
 #[cfg(feature = "v26_2")]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SlotDisplayData {
     /// Case(s) `empty`.
     Empty,
@@ -2716,9 +2718,14 @@ impl<const V: i32> Generate for Advancements<V> {
 #[cfg(feature = "v26_2")]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[non_exhaustive]
 pub struct EntityUpdateAttributesPropertiesKey(pub i32);
 #[cfg(feature = "v26_2")]
 impl EntityUpdateAttributesPropertiesKey {
+    /// The value with wire number `v`.
+    pub const fn new(v: i32) -> Self {
+        Self(v)
+    }
     /// `air_drag_modifier`
     pub const AIR_DRAG_MODIFIER: Self = Self(0);
     /// `generic.armor`

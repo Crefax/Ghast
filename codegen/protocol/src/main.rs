@@ -1033,10 +1033,13 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
     for (&vi, scopes) in &by_owner {
         let spec = VERSIONS[vi].protocol;
         let cfg = cfg_of(&owner_cfg[&vi]);
+        let unpublished = spec > LAST_PUBLISHED_PROTOCOL;
         let _ = writeln!(
             root,
-            "/// Definitions first used by protocol {spec} (Minecraft {}).\n#[cfg({cfg})]\npub mod p{spec};",
-            VERSIONS[vi].covers
+            "/// Definitions first used by protocol {spec} (Minecraft {}).{}\n#[cfg({cfg})]{}\npub mod p{spec};",
+            VERSIONS[vi].covers,
+            if unpublished { UNSTABLE_NOTE } else { "" },
+            if unpublished { "\n#[doc(hidden)]" } else { "" },
         );
         let dir = format!("defs/p{spec}");
         let hdr = header(&outs[vi].source);
@@ -1053,8 +1056,13 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
         let mut m = hdr.clone();
         let _ = writeln!(
             m,
-            "//! Definitions first used by protocol {spec} (Minecraft {}).\n",
-            VERSIONS[vi].covers
+            "//! Definitions first used by protocol {spec} (Minecraft {}).{}\n",
+            VERSIONS[vi].covers,
+            if unpublished {
+                UNSTABLE_NOTE.replace("\n///", "\n//!")
+            } else {
+                String::new()
+            }
         );
         for (scope, texts) in scopes {
             let (path, doc) = match scope.split_once('/') {
@@ -1073,7 +1081,11 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
             f.push_str(IMPORTS);
             f.push('\n');
             for t in texts {
-                f.push_str(t);
+                if unpublished {
+                    f.push_str(&non_exhaustive(t));
+                } else {
+                    f.push_str(t);
+                }
                 f.push('\n');
             }
             files.push((path, f));
@@ -1098,6 +1110,42 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
     }
     files.push(("defs/mod.rs".into(), root));
     files
+}
+
+/// The newest protocol whose `defs::p<N>` module was published (crates.io 0.4.1). Modules of
+/// newer protocols are `#[doc(hidden)]` and their switch enums and id newtypes
+/// `#[non_exhaustive]`: they are not a stability promise until the 0.5.0 share-rule redesign.
+const LAST_PUBLISHED_PROTOCOL: i32 = 775;
+
+const UNSTABLE_NOTE: &str = "\n///\n/// Not a stability promise: these paths may change in a minor release; name the types through\n/// the version module (`crate::v26_2::…`) instead.";
+
+/// `#[non_exhaustive]` on the switch enums and id newtypes of one emitted item; newtypes get a
+/// `new` constructor (their field stays public for reading).
+fn non_exhaustive(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 64);
+    let mut newtype: Option<(String, String)> = None;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with("pub enum ") {
+            out.push_str("#[non_exhaustive]\n");
+        } else if let Some(rest) = line.strip_prefix("pub struct ")
+            && let Some((name, inner)) = rest.split_once("(pub ")
+            && let Some(ty) = inner.strip_suffix(");\n")
+        {
+            out.push_str("#[non_exhaustive]\n");
+            newtype = Some((name.to_string(), ty.to_string()));
+        }
+        out.push_str(line);
+        if let Some((name, ty)) = &newtype
+            && line == format!("impl {name} {{\n")
+        {
+            let _ = writeln!(
+                out,
+                "    /// The value with wire number `v`.\n    pub const fn new(v: {ty}) -> Self {{\n        Self(v)\n    }}"
+            );
+            newtype = None;
+        }
+    }
+    out
 }
 
 /// Versions using any item owned by `owner` in a scope matching `pred`.

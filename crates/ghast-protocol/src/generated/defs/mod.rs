@@ -35,5 +35,9 @@ pub mod p754;
 #[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod p775;
 /// Definitions first used by protocol 776 (Minecraft 26.2).
+///
+/// Not a stability promise: these paths may change in a minor release; name the types through
+/// the version module (`crate::v26_2::…`) instead.
 #[cfg(feature = "v26_2")]
+#[doc(hidden)]
 pub mod p776;
