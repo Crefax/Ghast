@@ -23,6 +23,18 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   (`tests/capture_26_2.rs`); example `login_26_2`.
 - `slot::v775::ComponentPatch` / `ItemStack` also hold 26.2 stacks: `read_776`, `decode_776`,
   `decode_all_776`, `from_parts_776`, `ComponentPatch::protocol`.
+- **26.2 data** in `ghast-data` (`v26_2`, feature `v26_2`, on by default): blocks, states,
+  properties, collision and crosshair shapes, items, tools, dig facts and entities from the real
+  26.2 jar (oracle dumps in `tests/golden/26.2/`); display fields minecraft-data lacks for 26.2
+  are its 26.1 values by name plus a reviewed table for the new blocks, items and the sulfur
+  cube. Same API as `v26_1`; the movement types (`StatePhys`, `BlockKind`, `block_flags`,
+  `state_flags`, `VoxelShapeRef`, `VoxelClass`) are one type shared by both, and so are the shape
+  tables. 26.2 `BlockData` / `ItemData` rows hold no pointers (no `name` / `display_name`
+  fields); `Block::name` / `display_name` and `Item::name` / `display_name` read them, and are
+  new on `v26_1` too.
+- **26.2 world** in `ghast-world` (`v26_2`, feature `v26_2`): the 26.1 world over the 26.2 block
+  states and packets; checked against a vanilla 26.2 server (every chunk of a capture, 1576
+  block probes confirmed by the server).
 
 ## 0.4.1 — 2026-11-12
 
