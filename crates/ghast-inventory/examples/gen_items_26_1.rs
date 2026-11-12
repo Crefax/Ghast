@@ -26,6 +26,41 @@ fn registry(r: &Value, name: &str) -> Vec<String> {
     v.into_iter().map(|(_, k)| k).collect()
 }
 
+/// A name list as one text blob and end offsets: plain read-only data (no pointers, so no
+/// load-time relocations: untouched pages stay unresident and shared between processes).
+fn text_table(out: &mut String, konst: &str, doc: &str, names: &[&str]) {
+    let mut text = String::new();
+    let mut ends = Vec::new();
+    for n in names {
+        text.push_str(n);
+        ends.push(text.len());
+    }
+    let _ = writeln!(
+        out,
+        "/// {doc} (text of [`{konst}_ENDS`]).\npub(crate) const {konst}_TEXT: &str = {text:?};\n\
+         /// End offset of each name in [`{konst}_TEXT`].\npub(crate) static {konst}_ENDS: [u32; {}] = {ends:?};\n",
+        ends.len()
+    );
+}
+
+/// Interns strings into one blob: `(offset, len)` spans.
+#[derive(Default)]
+struct Blob {
+    text: String,
+    seen: std::collections::HashMap<String, (usize, usize)>,
+}
+
+impl Blob {
+    fn span(&mut self, s: &str) -> String {
+        let (o, l) = *self.seen.entry(s.to_string()).or_insert_with(|| {
+            let o = self.text.len();
+            self.text.push_str(s);
+            (o, s.len())
+        });
+        format!("({o}, {l})")
+    }
+}
+
 fn strip(s: &str) -> &str {
     s.strip_prefix("minecraft:").unwrap_or(s)
 }
@@ -40,13 +75,14 @@ fn main() {
     let comps = registry(&reg, "minecraft:data_component_type");
     let menus = registry(&reg, "minecraft:menu");
     let potions = registry(&reg, "minecraft:potion");
+    // (constant, registry, part of the public API)
     let statics = [
-        ("ATTRIBUTES", "minecraft:attribute"),
-        ("SOUND_EVENTS", "minecraft:sound_event"),
-        ("VILLAGER_TYPES", "minecraft:villager_type"),
-        ("MOB_EFFECTS", "minecraft:mob_effect"),
-        ("ENTITY_TYPES", "minecraft:entity_type"),
-        ("BLOCK_ENTITY_TYPES", "minecraft:block_entity_type"),
+        ("ATTRIBUTES", "minecraft:attribute", true),
+        ("SOUND_EVENTS", "minecraft:sound_event", true),
+        ("VILLAGER_TYPES", "minecraft:villager_type", true),
+        ("MOB_EFFECTS", "minecraft:mob_effect", false),
+        ("ENTITY_TYPES", "minecraft:entity_type", false),
+        ("BLOCK_ENTITY_TYPES", "minecraft:block_entity_type", false),
     ];
 
     let mut out = String::new();
@@ -77,6 +113,13 @@ fn main() {
         let _ = writeln!(out, "    {:?},", strip(c));
     }
     out.push_str("];\n\n");
+    let names: Vec<&str> = comps.iter().map(|c| strip(c)).collect();
+    text_table(
+        &mut out,
+        "COMPONENT_NAMES",
+        "Component type names by id",
+        &names,
+    );
 
     let _ = writeln!(
         out,
@@ -87,6 +130,8 @@ fn main() {
         let _ = writeln!(out, "    {:?},", strip(m));
     }
     out.push_str("];\n\n");
+    let names: Vec<&str> = menus.iter().map(|c| strip(c)).collect();
+    text_table(&mut out, "MENUS", "`minecraft:menu` registry names", &names);
     let _ = writeln!(
         out,
         "/// `minecraft:potion` registry names by id.\npub static POTIONS: [&str; {}] = [",
@@ -96,25 +141,39 @@ fn main() {
         let _ = writeln!(out, "    {:?},", strip(p));
     }
     out.push_str("];\n\n");
+    let names: Vec<&str> = potions.iter().map(|c| strip(c)).collect();
+    text_table(
+        &mut out,
+        "POTIONS",
+        "`minecraft:potion` registry names",
+        &names,
+    );
 
-    for (konst, name) in statics {
+    for (konst, name, public) in statics {
         let names = registry(&reg, name);
-        let _ = writeln!(
-            out,
-            "/// `{name}` registry names by id.\npub static {konst}: [&str; {}] = [",
-            names.len()
-        );
-        for n in &names {
-            let _ = writeln!(out, "    {:?},", strip(n));
+        if public {
+            // kept for the public API; ghast itself reads the text table below
+            let _ = writeln!(
+                out,
+                "/// `{name}` registry names by id.\npub static {konst}: [&str; {}] = [",
+                names.len()
+            );
+            for n in &names {
+                let _ = writeln!(out, "    {:?},", strip(n));
+            }
+            out.push_str("];\n\n");
         }
-        out.push_str("];\n\n");
+        let names: Vec<&str> = names.iter().map(|c| strip(c)).collect();
+        text_table(&mut out, konst, &format!("`{name}` registry names"), &names);
     }
 
     let _ = writeln!(
         out,
-        "/// Default components of every item, by registry id.\npub static ITEMS: [ItemDefaults; {}] = [",
+        "/// Default components of every item, by registry id (strings as spans of [`ITEM_TEXT`]).\n\
+         pub(crate) static ITEM_ROWS: [Row; {}] = [",
         items.len()
     );
+    let mut blob = Blob::default();
     for it in &items {
         let name = strip(it);
         let path = dir
@@ -229,11 +288,21 @@ fn main() {
         let kinetic = c.get("minecraft:kinetic_weapon").is_some();
         let _ = writeln!(
             out,
-            "    ItemDefaults {{ name: {name:?}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable: {repairable:?}, patterns: {patterns:?}, dye: {dye}, allowed: {allowed:?}, glider: {glider} }},",
-            use_speed.to_bits()
+            "    Row {{ name_s: {}, max_stack_size: {max_stack}, max_damage: {max_damage}, damage: {damage}, unbreakable: {unbreakable}, equip: Equip::{equip}, equip_restricted: {restricted}, bundle: {bundle}, rarity: {rarity}, use_effects: ({use_sprint}, {use_vibrations}, {:#x}), consumable: {consume}, food: {food}, blocks_attacks: {blocks}, kinetic_weapon: {kinetic}, repairable_s: {}, patterns_s: {}, dye: {dye}, allowed_s: {}, glider: {glider} }},",
+            blob.span(name),
+            use_speed.to_bits(),
+            blob.span(&repairable),
+            blob.span(&patterns),
+            blob.span(&allowed),
         );
     }
-    out.push_str("];\n");
+    out.push_str("];\n\n");
+    let _ = writeln!(
+        out,
+        "/// The strings of [`ITEM_ROWS`] (item names, repair items, banner patterns, allowed entities).\n\
+         pub(crate) const ITEM_TEXT: &str = {:?};",
+        blob.text
+    );
     let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/generated/items_26_1.rs");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, out).unwrap();

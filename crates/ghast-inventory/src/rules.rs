@@ -91,7 +91,7 @@ impl Version {
     pub(crate) fn name(self, id: i32) -> &'static str {
         #[cfg(feature = "v26_1")]
         if self == Version::V26_1 {
-            return crate::v26_1::defaults(id).map_or("", |d| d.name);
+            return crate::v26_1::item_name(id).unwrap_or("");
         }
         self.info(id).map_or("", |i| i.name)
     }
@@ -100,7 +100,7 @@ impl Version {
     pub(crate) fn known(self, id: i32) -> bool {
         #[cfg(feature = "v26_1")]
         if self == Version::V26_1 {
-            return crate::v26_1::defaults(id).is_some();
+            return crate::v26_1::row(id).is_some();
         }
         self.info(id).is_some()
     }

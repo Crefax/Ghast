@@ -17,7 +17,7 @@ use ghast_protocol::nbt::AnonNbt;
 
 use ghast_protocol::types::slot::v775::ComponentPatch;
 
-use super::{COMPONENT_NAMES, POTIONS, anon_hash, component as c, generated, ops, typed_nbt_hash};
+use super::{anon_hash, component as c, generated, nth, ops, typed_nbt_hash};
 
 /// Names of the registries a click hash needs: the configuration phase's `registry_data` keys
 /// in order (data-driven registries such as enchantments, damage types, entity variants).
@@ -862,18 +862,46 @@ fn schema(ty: i32) -> Option<S> {
     })
 }
 
+fn component_name(t: i32) -> Option<&'static str> {
+    nth(
+        generated::COMPONENT_NAMES_TEXT,
+        &generated::COMPONENT_NAMES_ENDS,
+        usize::try_from(t).ok()?,
+    )
+}
+
 fn name_of(reg: Reg, id: i32, regs: &HashRegistries) -> Option<&str> {
     let i = usize::try_from(id).ok()?;
     match reg {
-        Reg::Item => generated::ITEMS.get(i).map(|d| d.name),
-        Reg::ComponentType => COMPONENT_NAMES.get(i).copied(),
-        Reg::Potion => POTIONS.get(i).copied(),
-        Reg::Attribute => super::ATTRIBUTES.get(i).copied(),
-        Reg::SoundEvent => super::SOUND_EVENTS.get(i).copied(),
-        Reg::VillagerType => super::VILLAGER_TYPES.get(i).copied(),
-        Reg::MobEffect => generated::MOB_EFFECTS.get(i).copied(),
-        Reg::EntityType => generated::ENTITY_TYPES.get(i).copied(),
-        Reg::BlockEntityType => generated::BLOCK_ENTITY_TYPES.get(i).copied(),
+        Reg::Item => super::item_name(id),
+        Reg::ComponentType => nth(
+            generated::COMPONENT_NAMES_TEXT,
+            &generated::COMPONENT_NAMES_ENDS,
+            i,
+        ),
+        Reg::Potion => nth(generated::POTIONS_TEXT, &generated::POTIONS_ENDS, i),
+        Reg::Attribute => nth(generated::ATTRIBUTES_TEXT, &generated::ATTRIBUTES_ENDS, i),
+        Reg::SoundEvent => nth(
+            generated::SOUND_EVENTS_TEXT,
+            &generated::SOUND_EVENTS_ENDS,
+            i,
+        ),
+        Reg::VillagerType => nth(
+            generated::VILLAGER_TYPES_TEXT,
+            &generated::VILLAGER_TYPES_ENDS,
+            i,
+        ),
+        Reg::MobEffect => nth(generated::MOB_EFFECTS_TEXT, &generated::MOB_EFFECTS_ENDS, i),
+        Reg::EntityType => nth(
+            generated::ENTITY_TYPES_TEXT,
+            &generated::ENTITY_TYPES_ENDS,
+            i,
+        ),
+        Reg::BlockEntityType => nth(
+            generated::BLOCK_ENTITY_TYPES_TEXT,
+            &generated::BLOCK_ENTITY_TYPES_ENDS,
+            i,
+        ),
         Reg::Block => ghast_data::v26_1::Block::from_id(u16::try_from(i).ok()?).map(|b| b.name()),
         Reg::Data(r) => regs.names(r)?.get(i).map(String::as_str),
     }
@@ -981,7 +1009,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let patch = ComponentPatch::read(r, n, 0).ok()?;
             let mut m = Vec::new();
             for (t, value) in patch.iter() {
-                let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+                let name = component_name(t)?;
                 let h = component_hash(t, &value, regs)?;
                 m.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
             }
@@ -1144,12 +1172,12 @@ fn template(r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
     }
     let mut comps = Vec::new();
     for (t, value) in patch.iter() {
-        let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+        let name = component_name(t)?;
         let h = component_hash(t, &value, regs)?;
         comps.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
     }
     for t in patch.removed() {
-        let name = COMPONENT_NAMES.get(usize::try_from(t).ok()?)?;
+        let name = component_name(t)?;
         comps.push((V::Str(format!("!minecraft:{name}")), V::Map(Vec::new())));
     }
     if !comps.is_empty() {

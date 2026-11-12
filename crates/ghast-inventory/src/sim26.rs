@@ -582,9 +582,7 @@ fn equip(s: &Stack) -> R<(Equip, bool)> {
     match v::patched(s, c::EQUIPPABLE) {
         Some(Some(b)) => patched_equip(&b).ok_or(Unpredictable),
         Some(None) => Ok((Equip::None, true)),
-        None => {
-            Ok(v::defaults(s.id).map_or((Equip::None, true), |d| (d.equip, !d.equip_restricted)))
-        }
+        None => Ok(v::row(s.id).map_or((Equip::None, true), |d| (d.equip, !d.equip_restricted))),
     }
 }
 
@@ -608,7 +606,7 @@ fn patched_equip(b: &Bytes) -> Option<(Equip, bool)> {
         if n == 0 {
             return None;
         }
-        let me = v::ENTITY_TYPES.iter().position(|e| *e == "player")? as i32;
+        let me = v::entity_type_id("player")?;
         let mut found = false;
         for _ in 0..n - 1 {
             found |= r.read_varint().ok()? == me;
@@ -709,7 +707,7 @@ fn bundle_items(s: &Stack) -> R<Option<Vec<Stack>>> {
         Some(Some(b)) => b,
         Some(None) => return Ok(None),
         None => {
-            return Ok(v::defaults(s.id).is_some_and(|d| d.bundle).then(Vec::new));
+            return Ok(v::row(s.id).is_some_and(|d| d.bundle).then(Vec::new));
         }
     };
     let mut r = Reader::new(&bytes);
@@ -817,7 +815,7 @@ impl Bundle {
             write_template(t, &mut w);
         }
         let value = w.freeze();
-        let default_empty = v::defaults(s.id).is_some_and(|d| d.bundle);
+        let default_empty = v::row(s.id).is_some_and(|d| d.bundle);
         let keep_default = default_empty && self.items.is_empty();
         set_component(
             s,
@@ -939,19 +937,16 @@ impl Sim26<'_> {
             Some(Some(b)) => equip_allowed(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(false),
             None => {
-                let Some(d) = v::defaults(s.id) else {
+                let Some(d) = v::row(s.id) else {
                     return Ok(false);
                 };
-                let allowed = if d.allowed.is_empty() {
+                let allowed = if d.allowed().is_empty() {
                     None
                 } else {
                     Some(
-                        crate::data26::holders_from_names(d.allowed, |n| {
+                        crate::data26::holders_from_names(d.allowed(), |n| {
                             let n = n.strip_prefix("minecraft:").unwrap_or(n);
-                            v::ENTITY_TYPES
-                                .iter()
-                                .position(|x| *x == n)
-                                .map(|i| i as i32)
+                            v::entity_type_id(n)
                         })
                         .ok_or(Unpredictable)?,
                     )
@@ -1444,7 +1439,7 @@ impl Sim26<'_> {
             Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(false),
             None => {
-                let spec = v::defaults(input.id).map_or("", |d| d.repairable);
+                let spec = v::row(input.id).map_or("", |d| d.repairable());
                 if spec.is_empty() {
                     return Ok(false);
                 }
@@ -1624,7 +1619,7 @@ impl Sim26<'_> {
             Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(Vec::new()),
             None => {
-                let spec = v::defaults(p.id).map_or("", |d| d.patterns);
+                let spec = v::row(p.id).map_or("", |d| d.patterns());
                 if spec.is_empty() {
                     return Ok(Vec::new());
                 }
@@ -1650,7 +1645,7 @@ impl Sim26<'_> {
             let color = match v::patched(&dye, c::DYE) {
                 Some(Some(b)) => Reader::new(&b).read_varint().ok(),
                 Some(None) => None,
-                None => v::defaults(dye.id)
+                None => v::row(dye.id)
                     .map(|d| d.dye)
                     .filter(|&d| d != 255)
                     .map(i32::from),
@@ -2934,7 +2929,7 @@ fn value(s: &Stack, ty: i32) -> R<Option<Bytes>> {
 /// The item default of component `ty` as wire bytes (`Some(None)`: the item has none; `None`:
 /// not known here).
 fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
-    let d = v::defaults(id)?;
+    let d = v::row(id)?;
     let varint = |v: i32| {
         let mut w = BytesMut::new();
         w.put_varint(v);
@@ -2942,10 +2937,10 @@ fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
     };
     Some(match ty {
         c::ENCHANTMENTS | c::REPAIR_COST => Some(vec![0]),
-        c::STORED_ENCHANTMENTS => (d.name == "enchanted_book").then(|| vec![0]),
+        c::STORED_ENCHANTMENTS => (d.name() == "enchanted_book").then(|| vec![0]),
         c::DAMAGE => d.damage.then(|| vec![0]),
         c::MAX_DAMAGE => (d.max_damage > 0).then(|| varint(i32::from(d.max_damage))),
-        c::BANNER_PATTERNS => (fact(id, v::BANNER) || d.name == "shield").then(|| vec![0]),
+        c::BANNER_PATTERNS => (fact(id, v::BANNER) || d.name() == "shield").then(|| vec![0]),
         c::DYE => (d.dye != 255).then(|| varint(i32::from(d.dye))),
         c::CUSTOM_NAME => None,
         _ => return None,
@@ -3101,11 +3096,11 @@ fn banner_layers(s: &Stack) -> R<(i32, Bytes)> {
 
 /// A `BundleItem` (only those override clicks; any item's `bundle_contents` counts for weights).
 fn is_bundle(s: &Stack) -> bool {
-    v::defaults(s.id).is_some_and(|d| d.bundle)
+    v::row(s.id).is_some_and(|d| d.bundle)
 }
 
 fn is_item(s: &Stack, name: &str) -> bool {
-    v::defaults(s.id).is_some_and(|d| d.name == name)
+    v::row(s.id).is_some_and(|d| d.name() == name)
 }
 
 /// Brewing `PotionSlot.mayPlaceItem`.

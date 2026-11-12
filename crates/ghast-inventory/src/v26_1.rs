@@ -15,11 +15,31 @@ mod hash;
 pub use hash::{HashRegistries, component_hash, hash_covers};
 
 mod generated {
-    use super::{Equip, ItemDefaults};
+    use super::{Equip, Row};
     include!("generated/items_26_1.rs");
 }
 
-pub(crate) use generated::ENTITY_TYPES;
+/// Name `i` of a generated text table (`*_TEXT` + `*_ENDS`).
+pub(crate) fn nth(text: &'static str, ends: &[u32], i: usize) -> Option<&'static str> {
+    let end = *ends.get(i)? as usize;
+    let start = if i == 0 { 0 } else { ends[i - 1] as usize };
+    text.get(start..end)
+}
+
+/// The id of `name` in a generated text table.
+pub(crate) fn position(text: &'static str, ends: &[u32], name: &str) -> Option<usize> {
+    (0..ends.len()).find(|&i| nth(text, ends, i) == Some(name))
+}
+
+/// The registry id of an entity type name (without `minecraft:`).
+pub(crate) fn entity_type_id(name: &str) -> Option<i32> {
+    position(
+        generated::ENTITY_TYPES_TEXT,
+        &generated::ENTITY_TYPES_ENDS,
+        name,
+    )
+    .map(|i| i as i32)
+}
 pub use generated::{
     ATTRIBUTES, COMPONENT_NAMES, ITEM_COUNT, MENUS, POTIONS, SOUND_EVENTS, VILLAGER_TYPES,
     component,
@@ -120,6 +140,21 @@ pub struct ItemDefaults {
     pub bundle: bool,
     /// `rarity` (0 common, 1 uncommon, 2 rare, 3 epic).
     pub rarity: u8,
+}
+
+/// One item's default components as ghast stores them: plain data, strings as spans of the
+/// generated `ITEM_TEXT` (no pointers: the table needs no load-time relocation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Row {
+    name_s: (u32, u16),
+    pub(crate) max_stack_size: u8,
+    pub(crate) max_damage: u16,
+    pub(crate) damage: bool,
+    pub(crate) unbreakable: bool,
+    pub(crate) equip: Equip,
+    pub(crate) equip_restricted: bool,
+    pub(crate) bundle: bool,
+    pub(crate) rarity: u8,
     /// `use_effects`: can sprint, interact vibrations, speed multiplier (`f32` bits).
     pub(crate) use_effects: (bool, bool, u32),
     /// `consumable`: consume seconds (`f32` bits), animation id.
@@ -131,32 +166,90 @@ pub struct ItemDefaults {
     /// Has `kinetic_weapon` (a spear).
     pub(crate) kinetic_weapon: bool,
     /// `repairable.items` (`#tag` or an item name; empty when absent).
-    pub(crate) repairable: &'static str,
+    repairable_s: (u32, u16),
     /// `provides_banner_patterns` (`#tag` or a pattern name; empty when absent).
-    pub(crate) patterns: &'static str,
+    patterns_s: (u32, u16),
     /// `dye` color id (255 when absent).
     pub(crate) dye: u8,
     /// `equippable.allowed_entities` (`#tag` or entity type names; empty when absent).
-    pub(crate) allowed: &'static str,
+    allowed_s: (u32, u16),
     /// `glider` present (the elytra).
     pub(crate) glider: bool,
 }
 
+impl Row {
+    fn text((o, l): (u32, u16)) -> &'static str {
+        let o = o as usize;
+        generated::ITEM_TEXT
+            .get(o..o + usize::from(l))
+            .unwrap_or("")
+    }
+
+    /// Registry name without `minecraft:`.
+    pub(crate) fn name(&self) -> &'static str {
+        Self::text(self.name_s)
+    }
+
+    /// `repairable.items` (`#tag` or an item name; empty when absent).
+    pub(crate) fn repairable(&self) -> &'static str {
+        Self::text(self.repairable_s)
+    }
+
+    /// `provides_banner_patterns` (`#tag` or a pattern name; empty when absent).
+    pub(crate) fn patterns(&self) -> &'static str {
+        Self::text(self.patterns_s)
+    }
+
+    /// `equippable.allowed_entities` (`#tag` or entity type names; empty when absent).
+    pub(crate) fn allowed(&self) -> &'static str {
+        Self::text(self.allowed_s)
+    }
+}
+
+/// The stored defaults of item `id`.
+pub(crate) fn row(id: i32) -> Option<&'static Row> {
+    generated::ITEM_ROWS.get(usize::try_from(id).ok()?)
+}
+
+/// Registry name of item `id` without `minecraft:` (`"diamond_sword"`).
+#[must_use]
+pub fn item_name(id: i32) -> Option<&'static str> {
+    row(id).map(Row::name)
+}
+
 /// Default components of item `id`.
 #[must_use]
+///
+/// The table of these is built on the first call (ghast itself reads its compact,
+/// relocation-free table; see [`item_name`] for the name alone).
 pub fn defaults(id: i32) -> Option<&'static ItemDefaults> {
-    usize::try_from(id)
-        .ok()
-        .and_then(|i| generated::ITEMS.get(i))
+    static TABLE: std::sync::OnceLock<Box<[ItemDefaults]>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        generated::ITEM_ROWS
+            .iter()
+            .map(|r| ItemDefaults {
+                name: r.name(),
+                max_stack_size: r.max_stack_size,
+                max_damage: r.max_damage,
+                damage: r.damage,
+                unbreakable: r.unbreakable,
+                equip: r.equip,
+                equip_restricted: r.equip_restricted,
+                bundle: r.bundle,
+                rarity: r.rarity,
+            })
+            .collect()
+    });
+    table.get(usize::try_from(id).ok()?)
 }
 
 /// Item registry id of a name (`"diamond_sword"` or `"minecraft:diamond_sword"`).
 #[must_use]
 pub fn item_id(name: &str) -> Option<i32> {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    generated::ITEMS
+    generated::ITEM_ROWS
         .iter()
-        .position(|d| d.name == name)
+        .position(|d| d.name() == name)
         .map(|i| i as i32)
 }
 
@@ -164,17 +257,23 @@ pub fn item_id(name: &str) -> Option<i32> {
 #[must_use]
 pub fn component_id(name: &str) -> Option<i32> {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    COMPONENT_NAMES
-        .iter()
-        .position(|n| *n == name)
-        .map(|i| i as i32)
+    position(
+        generated::COMPONENT_NAMES_TEXT,
+        &generated::COMPONENT_NAMES_ENDS,
+        name,
+    )
+    .map(|i| i as i32)
 }
 
 /// The window type of a 26.1 `open_screen` (`minecraft:menu` registry id).
 #[must_use]
 pub fn window_kind(menu: i32) -> Option<WindowKind> {
-    let name = MENUS.get(usize::try_from(menu).ok()?)?;
-    Some(match *name {
+    let name = nth(
+        generated::MENUS_TEXT,
+        &generated::MENUS_ENDS,
+        usize::try_from(menu).ok()?,
+    )?;
+    Some(match name {
         "generic_9x1" => WindowKind::Chest { rows: 1 },
         "generic_9x2" => WindowKind::Chest { rows: 2 },
         "generic_9x3" => WindowKind::Chest { rows: 3 },
@@ -242,19 +341,19 @@ fn has_component(s: &Stack, ty: i32, default: bool) -> bool {
 
 /// `ItemStack.getMaxStackSize()`: the `max_stack_size` component (default 1 when absent).
 pub(crate) fn max_stack_size(s: &Stack) -> i32 {
-    let d = defaults(s.id).map(|d| i32::from(d.max_stack_size));
+    let d = row(s.id).map(|d| i32::from(d.max_stack_size));
     int_component(s, component::MAX_STACK_SIZE, d).unwrap_or(1)
 }
 
 /// `max_damage` (`None` when absent).
 pub(crate) fn max_damage(s: &Stack) -> Option<i32> {
-    let d = defaults(s.id).and_then(|d| (d.max_damage > 0).then_some(i32::from(d.max_damage)));
+    let d = row(s.id).and_then(|d| (d.max_damage > 0).then_some(i32::from(d.max_damage)));
     int_component(s, component::MAX_DAMAGE, d)
 }
 
 /// `ItemStack.isDamageableItem()`: `max_damage` and `damage` present, `unbreakable` absent.
 pub(crate) fn is_damageable(s: &Stack) -> bool {
-    let d = defaults(s.id);
+    let d = row(s.id);
     max_damage(s).is_some()
         && !unbreakable(s)
         && has_component(s, component::DAMAGE, d.is_some_and(|d| d.damage))
@@ -262,7 +361,7 @@ pub(crate) fn is_damageable(s: &Stack) -> bool {
 
 /// `ItemStack.getDamageValue()`: `damage` clamped to `0..=max_damage`.
 pub(crate) fn damage_value(s: &Stack) -> i32 {
-    let d = defaults(s.id).and_then(|d| d.damage.then_some(0));
+    let d = row(s.id).and_then(|d| d.damage.then_some(0));
     let v = int_component(s, component::DAMAGE, d).unwrap_or(0);
     v.clamp(0, max_damage(s).unwrap_or(0))
 }
@@ -272,7 +371,7 @@ pub(crate) fn unbreakable(s: &Stack) -> bool {
     has_component(
         s,
         component::UNBREAKABLE,
-        defaults(s.id).is_some_and(|d| d.unbreakable),
+        row(s.id).is_some_and(|d| d.unbreakable),
     )
 }
 
@@ -282,7 +381,7 @@ pub(crate) fn equip(s: &Stack) -> Result<Equip, ()> {
     match patched(s, component::EQUIPPABLE) {
         Some(Some(b)) => patched_equip(&b).ok_or(()),
         Some(None) => Ok(Equip::None),
-        None => Ok(defaults(s.id).map_or(Equip::None, |d| {
+        None => Ok(row(s.id).map_or(Equip::None, |d| {
             if d.equip_restricted {
                 Equip::None
             } else {
@@ -298,9 +397,7 @@ fn equippable_slot(s: &Stack) -> Option<Equip> {
     match patched(s, component::EQUIPPABLE) {
         Some(Some(b)) => equip_of_slot(Reader::new(&b).read_varint().ok()?),
         Some(None) => None,
-        None => defaults(s.id)
-            .map(|d| d.equip)
-            .filter(|e| *e != Equip::None),
+        None => row(s.id).map(|d| d.equip).filter(|e| *e != Equip::None),
     }
 }
 
@@ -323,7 +420,7 @@ fn equip_of_slot(slot: i32) -> Option<Equip> {
 /// `None` otherwise. Durability is not looked at: see [`can_glide_using`].
 #[must_use]
 pub fn glider(s: &Stack) -> Option<Equip> {
-    let d = defaults(s.id);
+    let d = row(s.id);
     if !has_component(s, component::GLIDER, d.is_some_and(|d| d.glider)) {
         return None;
     }
@@ -375,7 +472,7 @@ pub(crate) fn overrides_clicks(s: &Stack) -> bool {
     has_component(
         s,
         component::BUNDLE_CONTENTS,
-        defaults(s.id).is_some_and(|d| d.bundle),
+        row(s.id).is_some_and(|d| d.bundle),
     )
 }
 
@@ -426,7 +523,11 @@ pub(crate) fn potion(s: &Stack) -> Option<&'static str> {
         return None;
     }
     let id = r.read_varint().ok()?;
-    POTIONS.get(usize::try_from(id).ok()?).copied()
+    nth(
+        generated::POTIONS_TEXT,
+        &generated::POTIONS_ENDS,
+        usize::try_from(id).ok()?,
+    )
 }
 
 // ---------------------------------------------------------------------- item use
@@ -522,7 +623,7 @@ pub struct ItemUse {
 /// stack patches but that do not read give the item defaults' values.
 #[must_use]
 pub fn item_use(s: &Stack) -> Option<ItemUse> {
-    let d = defaults(s.id)?;
+    let d = row(s.id)?;
     let (mut can_sprint, mut vibrations, mut speed) = (
         d.use_effects.0,
         d.use_effects.1,
@@ -585,7 +686,7 @@ pub fn item_use(s: &Stack) -> Option<ItemUse> {
         None if kinetic => (UseAnimation::Spear, Some(72000)),
         None => (UseAnimation::None, Some(0)),
     };
-    match d.name {
+    match d.name() {
         "bow" => (animation, duration) = (UseAnimation::Bow, Some(72000)),
         "crossbow" => (animation, duration) = (UseAnimation::Crossbow, Some(72000)),
         "trident" => (animation, duration) = (UseAnimation::Trident, Some(72000)),

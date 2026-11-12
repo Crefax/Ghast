@@ -323,16 +323,24 @@ fn parse_tags(raw: &Bytes) -> Option<HashMap<(Reg, String), Vec<i32>>> {
 }
 
 mod builtin_table {
+    /// `(offset, len)` in [`ENCHANTMENT_TEXT`].
+    type Span = (u32, u16);
     include!("generated/enchantments_26_1.rs");
+
+    pub(super) fn text((o, l): Span) -> &'static str {
+        let o = o as usize;
+        ENCHANTMENT_TEXT.get(o..o + usize::from(l)).unwrap_or("")
+    }
 }
 
 /// The vanilla definition of an enchantment (`max_level`, `anvil_cost`, supported items,
 /// exclusive set, trident spin attack strength effect).
 fn builtin(name: &str) -> Option<(i32, i32, &'static str, &'static str, &'static str)> {
+    use builtin_table::text;
     builtin_table::ENCHANTMENTS
         .iter()
-        .find(|e| e.0 == name)
-        .map(|e| (e.1, e.2, e.3, e.4, e.5))
+        .find(|e| text(e.0) == name)
+        .map(|e| (e.1, e.2, text(e.3), text(e.4), text(e.5)))
 }
 
 #[cfg(test)]

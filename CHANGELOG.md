@@ -74,6 +74,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   of the stack's enchantments as the server's enchantment registry defines it (vanilla's
   definition for entries sent without data; level-based values and value effects evaluated
   like the game).
+- `v26_1::item_name(id)`: an item's registry name without the item defaults table. The 26.1
+  item, registry-name and enchantment tables ghast reads are plain read-only data now (strings
+  as spans of one text, no pointers): about 205 KB less relocated data per process
+  (`.data.rel.ro` of the `afk` example 1 053 560 -> 843 896 B). `v26_1::defaults` builds its
+  table on the first call.
 - **26.1 creative inventory screen**: window 0 opened in creative mode sends what the real
   screen sends (`Outgoing::Creative(Vec<CreativePacket>)`: `set_creative_mode_slot` for the
   slots that differ from the last broadcast, drops as slot -1 with the arm swing; echoes of
