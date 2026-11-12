@@ -16,6 +16,8 @@ use ghast::{Behavior, Buttons, Controls, Interests, TickContext};
 
 struct UseItem {
     n: u64,
+    dead_ticks: u32,
+    launched: bool,
     was_using: bool,
     alerts: u32,
     started: Instant,
@@ -52,6 +54,20 @@ impl Behavior for UseItem {
             ctx.disconnect("time limit reached");
             return;
         }
+        if ctx.is_dead() {
+            // DeathScreen: respawn after 20 ticks.
+            self.dead_ticks += 1;
+            if self.dead_ticks == 20 {
+                ctx.respawn();
+            }
+            return;
+        }
+        self.dead_ticks = 0;
+        // A riptide launch (26.1) shows as a fast climb.
+        if ctx.pose().motion.y > 1.0 && !self.launched {
+            log::info!("launched: motion y {:.3}", ctx.pose().motion.y);
+        }
+        self.launched = ctx.pose().motion.y > 1.0;
         self.n += 1;
         ctx.set_aim(ctx.pose().yaw, -89.0);
         // 60-tick cycle: 40 ticks right held (walking slowly in a circle), 20 ticks idle.
@@ -96,6 +112,8 @@ fn main() {
         let mut b = UseItem {
             n: 0,
             was_using: false,
+            dead_ticks: 0,
+            launched: false,
             alerts: 0,
             started: Instant::now(),
             limit: opts.limit(),
