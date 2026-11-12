@@ -37,7 +37,7 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   block probes confirmed by the server).
 - **26.2 movement** in `ghast-physics`: rule set `modern::V26_2` (feature `v26_2`, on by
   default) over `ghast_data::v26_2`, bit-exact against the vanilla 26.2 oracle (all 26.2 movement
-  goldens; 15.2 M cached fuzz ticks, see "Known gaps"). 26.2 is the 26.1 row plus one structural
+  goldens; 16.2 M cached fuzz ticks at 0 diffs). 26.2 is the 26.1 row plus one structural
   change behind the new defaulted `Rules::RESTITUTION`: `Entity.restituteMovementAfterCollisions`
   (colliding axes reflected by the `bounciness` attribute, landing on slime (1) / beds (0.75,
   ×0.8 for a boat), gravity and drag compensation, no bounce when sneaking or on honey) and the
@@ -91,8 +91,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Known gaps
 
-- 26.2 cached fuzz: 3 of 152,000 cases differ — three teleport cases in which 26.2 vanilla
-  resets the fall distance and 26.1 vanilla does not (cause not found yet).
+- Vanilla's `FlowingFluid.getShape` caches one shape per fluid state for the whole process,
+  with the height of the first block it was built for (a water source first clipped under water
+  keeps a full-block shape). Only fluid ray clips read it (the fall-distance raycast of
+  `Entity.move`). `ghast-physics` computes the height per query, like a fresh client; the oracle
+  now starts every case with empty caches (three 26.2 cached teleport cases had picked up a
+  full-block source shape from earlier cases in the same JVM).
 
 ## 0.4.1 — 2026-11-12
 

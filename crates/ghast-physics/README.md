@@ -195,9 +195,11 @@ the air drags (`computeModifiedFriction`). The three attributes live in
 plain `tick` uses their defaults, which give the 26.1 arithmetic bit for bit.
 
 Verification: `tests/golden_26_2.rs` (all 26.2 movement goldens, incl. `fuzz_restitution_seed1`
-and 20 restitution scenarios) and the large-fuzz test over `oracle/cache/26.2/` (15.2 M ticks:
-plain 4.2 M, edges, extras, restitution and each extension mechanic 1 M). 4 cached cases differ
-(see CHANGELOG "Known gaps"). `tests/family_26_2_on_26_1.rs` (ignored) replays 26.2 vectors on
+and 20 restitution scenarios) and the large-fuzz test over `oracle/cache/26.2/` (16.2 M ticks at
+0 diffs: plain 4.2 M, edges, extras, restitution and each extension mechanic 1 M, plus 1 M of
+the entities fuzz around a player scaled up to 16; 26.1 has the same scaled run). Not modelled:
+vanilla's process-wide fluid shape cache (`FlowingFluid.getShape` keeps the height of the first
+block it was built for; ghast computes it per query, like a fresh client). `tests/family_26_2_on_26_1.rs` (ignored) replays 26.2 vectors on
 the 26.1 tables by state name, the measurement that put 26.2 into the 26.1 family.
 
 Instructions per plain tick (hardware counter, 40,000 ticks, memory world; walk / busy / swim):

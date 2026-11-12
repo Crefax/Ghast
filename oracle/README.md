@@ -939,6 +939,15 @@ random bits (biased towards the delta bits) and deltas up to ±20, and entity-mo
 same tick (either order) or the neighbouring ticks. Replayed by `golden_26_1.rs`
 (`teleports_26_1`); cached `fuzz-teleports` seeds 51 and 52 (204k ticks) also at 0 diffs.
 
+Fresh fluid shapes per case (both modern versions): `FlowingFluid.getShape` caches one shape per
+fluid state for the whole JVM, with the height of the first block it was built for (a water
+source, amount 8, first clipped with water above keeps a full-block shape for every later
+source). The fall-distance raycast of `Entity.move` clips with `Fluid.WATER`, so in a long run a
+case could reset its fall distance on the top ninth of a source cell because of an earlier case.
+`Harness.Run` empties the caches at the start of every case; within a case they work as in
+vanilla. (Found from three 26.2 `teleports_s52` cases: a fresh-JVM replay and a debugger
+watchpoint on `Entity.fallDistance` showed no reset, regenerating the seed in one JVM did.)
+
 ### net_crypto.jsonl.gz (26.1)
 
 `MC=26.1 oracle/run.sh net-crypto` (`NetCryptoDump`): login encryption as
