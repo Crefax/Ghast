@@ -46,6 +46,89 @@ pub(crate) struct Sim26 {
     ext_active: bool,
     /// Riptide strength of the trident in the main / off hand (`held_use_inputs`).
     riptide: [f32; 2],
+    /// With entity tracking: the boxes the player collides with this tick and the entities
+    /// that push it after its tick (buffers kept between ticks).
+    around: Around,
+}
+
+/// Entity collision and pushing around the player (only with entity tracking).
+#[derive(Debug, Default)]
+struct Around {
+    /// Collidable entity boxes (`canBeCollidedWith`), in `getEntities` section order.
+    boxes: Vec<ghast_physics::math::Aabb>,
+    /// Pushers of this tick: order key, push.
+    pushers: Vec<(i64, modern::Pusher)>,
+    /// The player ticked since the last entity tick (pushes come after its tick).
+    player_ticked: bool,
+}
+
+/// Per 26.1 entity type: the player collides with it ([`modern::collides_26_1`]).
+const COLLIDES: u8 = 1;
+/// Per 26.1 entity type: its tick pushes the player like a living entity.
+const PUSH_LIVING: u8 = 2;
+/// Per 26.1 entity type: its tick pushes the player like a boat.
+const PUSH_BOAT: u8 = 4;
+
+/// [`COLLIDES`] / [`PUSH_LIVING`] / [`PUSH_BOAT`] by entity type id.
+fn entity_bits(e: &ghast_entity::Entity) -> u8 {
+    static BITS: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    let bits = BITS.get_or_init(|| {
+        let types = ghast_data::v26_1::entity_types();
+        let mut v = vec![
+            0u8;
+            types
+                .iter()
+                .map(|t| usize::from(t.id) + 1)
+                .max()
+                .unwrap_or(0)
+        ];
+        for t in types {
+            let mut b = 0;
+            if modern::collides_26_1(t.name) {
+                b |= COLLIDES;
+            }
+            match modern::push_kind_26_1(t.name, t.is_living()) {
+                Some(modern::PushKind::Living) => b |= PUSH_LIVING,
+                Some(modern::PushKind::Boat) => b |= PUSH_BOAT,
+                _ => {}
+            }
+            v[usize::from(t.id)] = b;
+        }
+        v.into_boxed_slice()
+    });
+    ghast_entity::v26_1::entity_type(e)
+        .map_or(0, |t| bits.get(usize::from(t.id)).copied().unwrap_or(0))
+}
+
+/// `SectionPos` of a position, as `getEntities` orders sections: x, then z, then y.
+fn section_order(pos: [f64; 3]) -> (i32, u64) {
+    let b = |v: f64| (v.floor() as i32) >> 4;
+    let (x, y, z) = (b(pos[0]), b(pos[1]), b(pos[2]));
+    (
+        x,
+        (u64::from(z as u32 & 0x3F_FFFF) << 20) | u64::from(y as u32 & 0xF_FFFF),
+    )
+}
+
+/// Position and box of an entity, with the shulker's own rules where the tracker has no box (its
+/// size follows the peek): `Shulker.setPos` snaps to the block (`floor(x) + 0.5`,
+/// `floor(y + 0.5)`, `floor(z) + 0.5`) and the closed shell is the unit cube there
+/// (`Shulker.makeBoundingBox` at peek 0, scale 1; an open shell, taller toward its attach face,
+/// and a scaled shulker are not modelled).
+fn entity_box(e: &ghast_entity::Entity) -> Option<([f64; 3], [f64; 6])> {
+    if let Some(b) = e.bounding_box() {
+        return Some((e.position(), b));
+    }
+    let t = ghast_entity::v26_1::entity_type(e)?;
+    (t.name == "shulker" && e.vehicle().is_none()).then(|| {
+        let [x, y, z] = e.position();
+        let (x, y, z) = (x.floor() + 0.5, (y + 0.5).floor(), z.floor() + 0.5);
+        ([x, y, z], [x - 0.5, y, z - 0.5, x + 0.5, y + 1.0, z + 0.5])
+    })
+}
+
+fn aabb(b: [f64; 6]) -> ghast_physics::math::Aabb {
+    ghast_physics::math::Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5])
 }
 
 /// The entity packets the modern movement reads without entity tracking: the player's own
@@ -357,6 +440,101 @@ impl Sim26 {
         self.ext_active = true;
     }
 
+    /// The boxes of the entities the player may collide with this tick (`canBeCollidedWith`:
+    /// boats, rafts, living shulkers), near enough for any move of this tick, in `getEntities`
+    /// section order. Only with entity tracking.
+    #[inline(never)]
+    fn collect_colliders(&mut self) {
+        let a = &mut self.around;
+        a.boxes.clear();
+        let Some(t) = &self.entities else { return };
+        let p = &self.player;
+        // Farther than any move of one tick can reach (the physics filters exactly).
+        let reach = |v: f64| v.abs() + 3.0;
+        let (rx, ry, rz) = (reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2]));
+        let mut found: Vec<((i32, u64), [f64; 6])> = Vec::new();
+        for e in t.iter() {
+            if entity_bits(e) & COLLIDES == 0 {
+                continue;
+            }
+            let Some((pos, b)) = entity_box(e) else {
+                continue;
+            };
+            if b[3] < p.bb.min_x - rx
+                || b[0] > p.bb.max_x + rx
+                || b[4] < p.bb.min_y - ry
+                || b[1] > p.bb.max_y + ry
+                || b[5] < p.bb.min_z - rz
+                || b[2] > p.bb.max_z + rz
+            {
+                continue;
+            }
+            // isAlive: a dying shulker (health 0) no longer collides.
+            if ghast_entity::v26_1::health(e).is_some_and(|h| h <= 0.0) {
+                continue;
+            }
+            found.push((section_order(pos), b));
+        }
+        // getEntities walks sections by x, then z / y (the order does not change the result:
+        // each box only shortens the move).
+        found.sort_by_key(|f| f.0);
+        a.boxes.extend(found.into_iter().map(|(_, b)| aabb(b)));
+    }
+
+    /// The pushes of the entities that ticked after the player (`LivingEntity.pushEntities`,
+    /// `AbstractBoat.tick`), each with its box after its own tick.
+    #[inline(never)]
+    fn push_player(&mut self, pose: &mut Pose) {
+        let Some(t) = &self.entities else { return };
+        let p = &self.player;
+        let a = &mut self.around;
+        a.pushers.clear();
+        for e in t.iter() {
+            let bits = entity_bits(e);
+            if bits & (PUSH_LIVING | PUSH_BOAT) == 0 {
+                continue;
+            }
+            let Some((pos, b)) = entity_box(e) else {
+                continue;
+            };
+            // Boats reach 0.2 farther; nothing else can touch the player.
+            let m = 0.25;
+            if b[3] < p.bb.min_x - m
+                || b[0] > p.bb.max_x + m
+                || b[4] < p.bb.min_y - m
+                || b[1] > p.bb.max_y + m
+                || b[5] < p.bb.min_z - m
+                || b[2] > p.bb.max_z + m
+            {
+                continue;
+            }
+            // Only ticking entities push (their column is loaded).
+            if !t.is_ticking(e) {
+                continue;
+            }
+            let kind = if bits & PUSH_BOAT != 0 {
+                modern::PushKind::Boat
+            } else {
+                modern::PushKind::Living
+            };
+            // Placeholder tick order: by entity id (vanilla: the tick list's insertion order).
+            a.pushers
+                .push((i64::from(e.id()), modern::Pusher::new(pos, aabb(b), kind)));
+        }
+        if a.pushers.is_empty() {
+            return;
+        }
+        a.pushers.sort_by_key(|x| x.0);
+        let p = &mut self.player;
+        let view = self
+            .world
+            .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        for (_, pusher) in &a.pushers {
+            modern::push_by::<V26_1, _>(p, &self.ext, &view, pusher);
+        }
+        pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+    }
+
     pub(crate) fn new() -> Self {
         Sim26 {
             world: ghast_world::v26_1::World::new(config()),
@@ -374,6 +552,7 @@ impl Sim26 {
             rain_level: 0.0,
             ext_active: false,
             riptide: [0.0; 2],
+            around: Around::default(),
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -1008,7 +1187,7 @@ impl Sim for Sim26 {
         self.player.age += 1;
     }
 
-    fn tick_entities(&mut self) {
+    fn tick_entities(&mut self, pose: &mut Pose) {
         // ClientLevel.tickEntities; a moved interpolation target must be free of blocks and
         // the border (Level.noCollision without the entity part).
         if let Some(t) = &mut self.entities {
@@ -1026,6 +1205,9 @@ impl Sim for Sim26 {
                     },
                 )
             });
+            if std::mem::take(&mut self.around.player_ticked) {
+                self.push_player(pose);
+            }
         }
     }
 
@@ -1108,11 +1290,32 @@ impl Sim for Sim26 {
         };
         // Entity.setOldPosAndRot at the start of the entity tick.
         self.old_pos = self.player.pos;
+        if self.entities.is_some() {
+            self.collect_colliders();
+        }
         let p = &mut self.player;
         let view = self
             .world
             .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
-        if self.ext_active {
+        self.around.player_ticked = true;
+        if !self.around.boxes.is_empty() {
+            // Entities to collide with: the extended tick with them (tick_in).
+            let around = modern::Surroundings::new().with_entities(&self.around.boxes);
+            modern::tick_in::<V26_1, _>(
+                p,
+                &mut self.ext,
+                &around,
+                &input,
+                &view,
+                &mut self.packets,
+            );
+            let x = &self.ext;
+            self.ext_active = x.fall_flying
+                || x.glider
+                || x.rocket_count() > 0
+                || x.spin_attack
+                || x.auto_spin_ticks > 0;
+        } else if self.ext_active {
             modern::tick_ext::<V26_1, _>(p, &mut self.ext, &input, &view, &mut self.packets);
             let x = &self.ext;
             self.ext_active = x.fall_flying

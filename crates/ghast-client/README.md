@@ -180,7 +180,12 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
 - **Entities** (opt-in, `Interests::ENTITIES`): `ghast_entity::v26_1::Tracker` gets every packet
   it wants (also the `map_chunk` / `unload_chunk` the world reads) and ticks once per client tick
   after the pick (interpolation, with the block / border collision test); `entities()`,
-  `target_entity()` and `attack()` work as on the older versions.
+  `target_entity()` and `attack()` work as on the older versions. With it the player also
+  collides with boats, rafts and shulkers and is pushed by the mobs and boats around it, as the
+  real client does. **Without `Interests::ENTITIES` neither happens**: a bot that walks into a
+  boat or through a crowd then moves differently from a vanilla client (an anticheat can flag
+  it); turn the interest on where that can happen. Not modelled: team collision rules, the
+  exact tick order of several pushers (entity id order is used), open or scaled shulkers.
 - **Chat** arrives as NBT components: system chat, player chat (rendered with the vanilla
   pattern of its chat type: `<name> message`, whispers, `/say`, `/me`) and disguised chat.
 - **Proven against the real 26.1 client** (oracle vectors, `cargo test`):

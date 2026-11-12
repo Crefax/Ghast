@@ -394,7 +394,9 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     }
     /// One client tick of the tracked entities (`ClientLevel.tickEntities`), after the tick's
     /// crosshair pick. Versions whose tracker has no client-side motion do nothing.
-    fn tick_entities(&mut self) {}
+    fn tick_entities(&mut self, pose: &mut Pose) {
+        let _ = pose;
+    }
     /// 1.21.4+ level-load gate: the server's `game_event` 13 (`LEVEL_CHUNKS_LOAD_START`).
     fn level_load_start(&mut self) {}
     /// 1.21.4+ level-load gate: the player is alive (`set_health` above 0).
@@ -1241,8 +1243,8 @@ impl Sim for Box<dyn Sim> {
     fn pick_margin(&self, e: &ghast_entity::Entity) -> Option<f32> {
         (**self).pick_margin(e)
     }
-    fn tick_entities(&mut self) {
-        (**self).tick_entities();
+    fn tick_entities(&mut self, pose: &mut Pose) {
+        (**self).tick_entities(pose);
     }
     fn level_load_start(&mut self) {
         (**self).level_load_start();

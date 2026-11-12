@@ -170,9 +170,20 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   inventory (kept raw until a screen needs them), mount screens with the entity's type and saddle /
   body slots (from a minimal mount lookup that works without entity tracking),
   `TickContext::anvil_rename` / `select_loom_pattern` / `select_trade`.
+- **26.1 entity collision and pushing in the client** (with `Interests::ENTITIES` only): the
+  player collides with boats, rafts and living shulkers (`modern::tick_in`, boxes in
+  `getEntities` section order), and after its tick the tracked mobs and boats push it
+  (`modern::push_by`, each with its box after its own tick), as the real client does. 13
+  hand-written and 9 fuzz cases of `tests/golden/26.1/entities.jsonl.gz` replay through the
+  engine packet for packet. Without entity tracking the bot neither collides with nor is pushed
+  by entities (no cost; a server-side anticheat may then flag walking into a boat or a crowd).
+  Not modelled yet: the pushers' exact tick order (by entity id for now: equal for entities
+  spawned in id order), team collision rules, an open or scaled shulker's box, the happy ghast.
 
 ### Fixed
 
+- 26.1: the player kept still in a column that is not loaded; since the level-load gate the
+  real client ticks it there too (the blocks read as void air).
 - 26.1: `use_item` carried the previous tick's look instead of the rotation of the tick's
   movement packet (what the real client sends); Grim flags it as BadPacketsJ when an item is used
   while turning. 1.8.9 / 1.12.2 / 1.16.5 use packets carry no rotation.
