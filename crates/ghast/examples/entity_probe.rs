@@ -157,7 +157,7 @@ impl Probe {
                 let on = ctx.target_entity().is_some_and(|e| e.id == id);
                 ctx.set_buttons(Buttons {
                     left: false,
-                    right: on && ctx.tick() % 10 == 0,
+                    right: on && ctx.tick().is_multiple_of(10),
                 });
             }
             return;
@@ -185,20 +185,21 @@ impl Probe {
             sneak,
             ..Controls::NONE
         });
-        if t % 20 == 0 {
-            if let Some(v) = ctx.vehicle() {
-                log::info!(
-                    "vehicle at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
-                    v.pos.x,
-                    v.pos.y,
-                    v.pos.z,
-                    v.yaw,
-                    v.on_ground
-                );
-            }
+        if t % 20 == 0
+            && let Some(v) = ctx.vehicle()
+        {
+            log::info!(
+                "vehicle at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
+                v.pos.x,
+                v.pos.y,
+                v.pos.z,
+                v.yaw,
+                v.on_ground
+            );
         }
         if t > 400 {
-            self.failures.push("not dismounted after 140 sneaking ticks".into());
+            self.failures
+                .push("not dismounted after 140 sneaking ticks".into());
             self.finish(ctx);
         }
     }
