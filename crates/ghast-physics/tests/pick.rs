@@ -2,7 +2,7 @@
 //! (random worlds of random states, random viewpoints, the real client's pick) and
 //! `selection_shapes.jsonl.gz` (per-state outline / interaction shapes, model offsets), for 1.16.5
 //! and 26.1. Every field is compared bit for bit.
-#![cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#![cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
@@ -462,4 +462,111 @@ fn crosshair_matches_vanilla_cached_rays() {
         }
     }
     eprintln!("cached rays: {total} identical");
+}
+
+#[cfg(feature = "v26_2")]
+#[test]
+fn selection_shapes_match_vanilla_26_2() {
+    use ghast_data::v26_2::BlockState;
+    let (shapes, states) = dumped_shapes("26.2");
+    assert_eq!(states.len(), ghast_data::v26_2::STATE_COUNT);
+    for l in &states {
+        let s = BlockState::from_id(l["id"].as_u64().unwrap() as u16).unwrap();
+        assert_eq!(s.to_string(), l["state"].as_str().unwrap());
+        let sid = |k: &str| l[k].as_u64().map(|x| x as usize);
+        let outline = sid("outline_base").or(sid("outline")).unwrap();
+        assert_eq!(shape_key(s.outline_shape()), shapes[outline], "{s}");
+        assert_eq!(s.outline_offset(), l.get("outline_base").is_some(), "{s}");
+        let holding = sid("outline_holding_own_item").unwrap_or(outline);
+        assert_eq!(
+            shape_key(s.outline_shape_holding_own_item()),
+            shapes[holding],
+            "{s}"
+        );
+        assert_eq!(
+            shape_key(s.interaction_shape()),
+            shapes[sid("interaction").unwrap()],
+            "{s}"
+        );
+        if s.outline_offset() {
+            let (o, _) = ghast_physics::pick::v26_2::shapes(s, [0, 64, 0], None);
+            assert_eq!(
+                bits(o.shift.unwrap()),
+                bits(v3(&l["offset_at_dump"])),
+                "{s}"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "v26_2")]
+#[test]
+fn crosshair_matches_vanilla_26_2() {
+    let (ok, fails) = replay_26_2(golden("26.2", "raytrace.jsonl.gz"));
+    report("26.2", ok, &fails);
+}
+
+#[cfg(feature = "v26_2")]
+fn replay_26_2(input: impl Iterator<Item = Value>) -> (usize, Vec<String>) {
+    use ghast_data::v26_2::{Block, BlockState};
+    use ghast_physics::pick::v26_2 as pick;
+    let mut world = ghast_physics::modern::memory_world_26_2();
+    let (mut ok, mut fails) = (0, Vec::new());
+    let mut w = 0;
+    let mut entities = (Vec::new(), Vec::new());
+    for l in input {
+        if l["type"] == "ray_world" {
+            entities = world_entities(&l);
+            world = ghast_physics::modern::memory_world_26_2();
+            world.load_chunks(-2, -2, 2, 2);
+            for (p, id) in world_blocks(&l, |id| BlockState::from_id(id).unwrap().to_string()) {
+                world.set_raw(p[0], p[1], p[2], id);
+            }
+            w = l["world"].as_u64().unwrap();
+            continue;
+        }
+        let k = l["k"].as_u64().unwrap();
+        let eye = pick::eye_position(v3(&l["feet"]), v3(&l["old"]), f32v(&l["eye_height"]));
+        let view = pick::view_vector(f32v(&l["yaw"]), f32v(&l["pitch"]));
+        let held = l["held"]
+            .as_str()
+            .and_then(|n| Block::from_name(n.trim_start_matches("minecraft:")));
+        let (br, er) = (f64v(&l["block_range"]), f64v(&l["entity_range"]));
+        let r = if bits(eye) != bits(v3(&l["eyes"])) {
+            Err(format!("eyes {eye:?}, oracle {:?}", v3(&l["eyes"])))
+        } else if bits(view) != bits(v3(&l["view"])) {
+            Err(format!("view {view:?}, oracle {:?}", v3(&l["view"])))
+        } else {
+            let max = br.max(er);
+            let to = [
+                eye[0] + view[0] * max,
+                eye[1] + view[1] * max,
+                eye[2] + view[2] * max,
+            ];
+            let clip = pick::clip(&world, eye, to, held);
+            same_hit(&clip, &l["clip"])
+                .map_err(|e| format!("clip: {e}"))
+                .and_then(|()| {
+                    let t = match l.get("bb") {
+                        Some(bb) => pick::pick_target(
+                            &world,
+                            &aabb(bb),
+                            eye,
+                            view,
+                            br,
+                            er,
+                            held,
+                            &entities.0,
+                        ),
+                        None => Target::Block(pick::pick(&world, eye, view, br, er, held)),
+                    };
+                    same_target(&t, &l["pick"], &entities.1)
+                })
+        };
+        match r {
+            Ok(()) => ok += 1,
+            Err(e) => fails.push(format!("world {w} ray {k}: {e}")),
+        }
+    }
+    (ok, fails)
 }

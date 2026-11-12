@@ -27,7 +27,7 @@
 //! boxes are a full cube here; moving pistons have no outline here).
 
 #![cfg_attr(
-    not(any(feature = "v1_16_5", feature = "v26_1")),
+    not(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2")),
     allow(dead_code, unused_imports)
 )]
 
@@ -42,7 +42,31 @@ pub mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub mod v1_8;
 #[cfg(feature = "v26_1")]
-pub mod v26_1;
+pub mod v26_1 {
+    //! The 26.1 crosshair block pick (vanilla `LocalPlayer.raycastHitResult`, which `Minecraft.pick`
+    //! stores as the crosshair target), without entities.
+    //!
+    //! The block ray runs to `max(block_range, entity_range)` (the `block_interaction_range` and
+    //! `entity_interaction_range` attribute values); a block hit farther than `block_range` (or the
+    //! miss at the ray's end beyond it) becomes a miss at that point. Verified against the oracle:
+    //! `tests/golden/26.1/raytrace.jsonl.gz`.
+
+    use ghast_data::v26_1 as ver;
+    include!("modern_body.rs");
+}
+#[cfg(feature = "v26_2")]
+pub mod v26_2 {
+    //! The 26.2 crosshair block pick (vanilla `LocalPlayer.raycastHitResult`, which `Minecraft.pick`
+    //! stores as the crosshair target), without entities.
+    //!
+    //! The block ray runs to `max(block_range, entity_range)` (the `block_interaction_range` and
+    //! `entity_interaction_range` attribute values); a block hit farther than `block_range` (or the
+    //! miss at the ray's end beyond it) becomes a miss at that point. Verified against the oracle:
+    //! `tests/golden/26.2/raytrace.jsonl.gz`.
+
+    use ghast_data::v26_2 as ver;
+    include!("modern_body.rs");
+}
 
 /// A block face / direction, in vanilla's `Direction` order (its ordinal).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

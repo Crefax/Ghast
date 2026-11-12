@@ -1,12 +1,7 @@
-//! The 26.1 crosshair block pick (vanilla `LocalPlayer.raycastHitResult`, which `Minecraft.pick`
-//! stores as the crosshair target), without entities.
-//!
-//! The block ray runs to `max(block_range, entity_range)` (the `block_interaction_range` and
-//! `entity_interaction_range` attribute values); a block hit farther than `block_range` (or the
-//! miss at the ray's end beyond it) becomes a miss at that point. Verified against the oracle:
-//! `tests/golden/26.1/raytrace.jsonl.gz`.
+// The body of the modern crosshair pick modules (`pick::v26_1`, `pick::v26_2`), included by
+// each with its own `ver` (the version's `ghast_data` module).
 
-use ghast_data::v26_1::{Block, BlockState};
+use ver::{Block, BlockState};
 
 use ghast_data::Aabb;
 
