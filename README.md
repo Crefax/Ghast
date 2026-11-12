@@ -168,6 +168,11 @@ the same for `aarch64-unknown-linux-gnu` (also through `lab/build-pi.sh` with
 2026-11-12: private dirty memory 2.3 → 1.4 MB (26.1 and 1.8.9), RSS 7.3 → 6.1 MB (26.1) and
 7.2 → 5.6 MB (1.8.9).
 
+**Only the versions you use.** Code for every version and mechanic is resident in each process
+(file-backed, shared between processes running the same binary). A single-version build is
+smaller: idle AFK RSS 2026-11-12 with every version 8.0 MB on 26.1 / 7.0 MB on 1.8.9; 26.1 only
+6.4 MB, 1.8.9 only 5.0 MB (private dirty 1.8 / 1.6 MB).
+
 ## Migrating from 0.3
 
 0.4 breaks the API once, for 26.1 and the shared infrastructure (details in

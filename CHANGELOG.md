@@ -268,6 +268,37 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   crafting grids, the crafter and result slots no longer cap stacks at 99 when the server
   sets them.
 
+### Memory
+
+Idle AFK bot, x86-64, release profile, 2026-11-12 (kB; 0.4.0 → 0.4.1, two runs each):
+
+| build | VmRSS | private dirty |
+|---|---|---|
+| all versions, on 26.1 | 7,296 → 8,028–8,140 | 2,292–2,328 → 2,216–2,220 |
+| all versions, on 1.8.9 | 6,912–7,168 → 6,912–7,296 | 2,452 → 2,316 |
+| 26.1 only (`--no-default-features --features v26_1,libdeflate`) | — → 6,436–6,444 | — → 1,788–1,792 |
+| 1.8.9 only (`--features v1_8,libdeflate`) | — → 4,992 | — → 1,616 |
+
+Per-process private memory is lower than in 0.4.0: the inventory and data tables no longer hold
+load-time relocations, the idle heap keeps less. Resident shared code is higher (~0.9 MB on 26.1
+with every version compiled in: the code of this release's mechanics); it is file-backed and
+shared between processes running the same binary, and a single-version build avoids it. A
+non-PIE build (README) lowers private memory further (about 1.4 MB).
+
+### Known approximations
+
+- Team collision rules: unit-tested against the decompiled predicate and lab-tested, not
+  oracle-proven. Other players' teams need `Interests::PLAYER_LIST`.
+- Shulkers collide as a closed shell (an open lid or a scaled shulker is not modelled); the
+  happy ghast does not collide.
+- Living mounts (horses, pigs, striders, camels …) are not simulated: the client keeps its walking
+  physics while on one (0.4.2).
+- The tick order of passengers (the tracker does not place them on their vehicles).
+- Biome lookup inside a loaded column and sky light for rain are not oracle-proven (the climate,
+  temperature noise and zoom are).
+- Incoming signed chat messages are not verified; the online-mode path is tested against a local
+  stand-in of the account services, not real accounts.
+
 ## 0.4.0 — 2026-11-11
 
 Minecraft 26.1 (protocol 775) is the fourth supported version, built on a shared
