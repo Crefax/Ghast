@@ -181,7 +181,8 @@ fn every_captured_packet_decodes_and_reencodes() {
     );
     // Coverage: which packet types of each set the real bytes contain (the rest are checked
     // by the round-trip tests and the delta's per-op evidence only).
-    let sets: [(u8, u8, &[i32], fn(i32) -> Option<&'static str>); 9] = [
+    type Set = (u8, u8, &'static [i32], fn(i32) -> Option<&'static str>);
+    let sets: [Set; 9] = [
         (
             0,
             1,
