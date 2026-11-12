@@ -165,7 +165,12 @@ with, in the level's `getEntities` order), `push_by` after each entity's client 
 World border: `BorderState` (the client's lerping border, ticked after the entities;
 `collision_border` for the world view), both-sided bound clamp and the degenerate-border shape.
 
-Not modelled: vehicles, pistons, block entities. The nether's `fast_lava` (`LevelInfo`) and build height are oracle-proven
+Boats: `Boat` + `tick_boat` (module docs of `modern::Boat` give the tick order and what the client
+feeds and sends: `set_passengers` -> `Boat::board`, `move_vehicle` -> `Boat::server_move`, the boat's
+entity colliders). Not modelled there: bubble columns under a boat (server-driven), boats the player
+does not control, two passengers.
+
+Not modelled: other vehicles and mounts, pistons, block entities. The nether's `fast_lava` (`LevelInfo`) and build height are oracle-proven
 (`nether.jsonl.gz`).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every

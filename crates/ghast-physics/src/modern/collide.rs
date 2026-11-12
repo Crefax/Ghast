@@ -588,6 +588,9 @@ pub(crate) fn collide_with_shapes(m: V3, b: &Aabb, shapes: &Colliders, border: &
 pub(crate) trait Extra: Copy {
     /// The extended tick (gliding, spin, entities can be present).
     const ON: bool;
+    /// The tick of a vehicle (a boat), not of the player: no step height, no edge back-off, the
+    /// boat's fall check, non-living bounce and block effects.
+    const VEHICLE: bool = false;
     /// Boxes of the entities the player collides with (`canBeCollidedWith`).
     fn entities(&self) -> &[Aabb];
 }
@@ -610,6 +613,19 @@ pub(crate) struct Ents<'a>(pub &'a [Aabb]);
 
 impl Extra for Ents<'_> {
     const ON: bool = true;
+    #[inline(always)]
+    fn entities(&self) -> &[Aabb] {
+        self.0
+    }
+}
+
+/// A vehicle's (a boat's) tick with the entity boxes it collides with.
+#[derive(Clone, Copy)]
+pub(crate) struct Vehicle<'a>(pub &'a [Aabb]);
+
+impl Extra for Vehicle<'_> {
+    const ON: bool = true;
+    const VEHICLE: bool = true;
     #[inline(always)]
     fn entities(&self) -> &[Aabb] {
         self.0
@@ -845,6 +861,18 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
             c.push(s);
             true
         });
+    }
+
+    /// `Shapes.joinIsNotEmpty(shape, Shapes.create(query), AND)` for the collision shape of `s` at a
+    /// block position in the empty collision context (the boat's ground friction scan).
+    pub(crate) fn shape_overlaps(&self, s: R::State, x: i32, y: i32, z: i32, query: &Aabb) -> bool {
+        match self.shape_of_state(s, x, y, z, None) {
+            // Shapes.joinIsNotEmpty merges points closer than 1e-7: a cube touching the box by
+            // less than that does not overlap it.
+            Some(Placed::Cube(o)) => VoxelShape::FULL_CUBE.intersects(query, Some(o)),
+            Some(Placed::Shape(r, sh, o)) => shape_intersects(r, sh, o, query),
+            _ => false,
+        }
     }
 
     /// `findSupportingBlock(entity, box)`: the colliding block whose centre is closest to the

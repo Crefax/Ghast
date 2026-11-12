@@ -98,6 +98,12 @@ final class Ext {
     /** Remove entities packet. */
     record Remove(int id) implements Scenario.VersionEvent {}
 
+    /** Set-passengers packet: {@code passengers} (entity ids, the player is {@link Harness#PLAYER_ENTITY_ID}) ride {@code vehicle}. */
+    record Ride(int vehicle, int[] passengers) implements Scenario.VersionEvent {}
+
+    /** Move-vehicle packet: the server's correction of the player's vehicle. */
+    record VehicleMove(double x, double y, double z, float yaw, float pitch) implements Scenario.VersionEvent {}
+
     /** Set-border-center packet. */
     record BorderCenter(double x, double z) implements Scenario.VersionEvent {}
 
@@ -174,6 +180,11 @@ final class Ext {
 
     /** Applied at the end of setup (after the scenario's state overrides). */
     static void finishSetup(Harness.Run run) {
+        // The initial record lists no entity ticks (the lists are per tick; without this the first
+        // record of a case showed the previous case's last tick).
+        PRE.clear();
+        ORDER.clear();
+        QUERY_ORDER.clear();
         Setup s = of(run.sc);
         if (s != null && s.fallFlying) {
             sharedFlags(run, 0x80, 0);
@@ -247,6 +258,9 @@ final class Ext {
         if (s == null || s.entities == null) {
             return;
         }
+        if (run.player.getVehicle() instanceof net.minecraft.world.entity.vehicle.boat.AbstractBoat boat) {
+            boat(j.key("vehicle"), boat);
+        }
         j.key("entities").beginArray();
         for (Entity e : ORDER) {
             if (e.getId() == Harness.PLAYER_ENTITY_ID) {
@@ -270,6 +284,40 @@ final class Ext {
             j.endObject();
         }
         j.endArray();
+    }
+
+    /** The player's boat after the tick: everything its client tick reads and writes. */
+    private static void boat(Json j, net.minecraft.world.entity.vehicle.boat.AbstractBoat b) {
+        Class<?> c = net.minecraft.world.entity.vehicle.boat.AbstractBoat.class;
+        j.beginObject().field("id", b.getId()).field("type", BuiltInRegistries.ENTITY_TYPE.getKey(b.getType()).getPath());
+        j.key("pos").beginArray().f64(b.getX()).f64(b.getY()).f64(b.getZ()).endArray();
+        Vec3 v = b.getDeltaMovement();
+        j.key("vel").beginArray().f64(v.x).f64(v.y).f64(v.z).endArray();
+        j.fieldF32("yaw", b.getYRot()).fieldF32("pitch", b.getXRot());
+        box(j.key("bb"), b.getBoundingBox());
+        j.field("on_ground", b.onGround()).field("horizontal_collision", b.horizontalCollision).field("vertical_collision", b.verticalCollision);
+        j.fieldF64("fall_distance", b.fallDistance);
+        Object st = Reflect.get(c, b, "status"), old = Reflect.get(c, b, "oldStatus");
+        j.field("status", st == null ? null : st.toString().toLowerCase());
+        j.field("old_status", old == null ? null : old.toString().toLowerCase());
+        j.fieldF32("delta_rotation", (Float) Reflect.get(c, b, "deltaRotation"));
+        j.fieldF32("out_of_control", (Float) Reflect.get(c, b, "outOfControlTicks"));
+        j.fieldF64("water_level", (Double) Reflect.get(c, b, "waterLevel"));
+        j.fieldF32("land_friction", (Float) Reflect.get(c, b, "landFriction"));
+        j.fieldF64("last_yd", (Double) Reflect.get(c, b, "lastYd"));
+        j.key("input").beginArray().value((Boolean) Reflect.get(c, b, "inputLeft")).value((Boolean) Reflect.get(c, b, "inputRight"))
+                .value((Boolean) Reflect.get(c, b, "inputUp")).value((Boolean) Reflect.get(c, b, "inputDown")).endArray();
+        j.key("paddle").beginArray().value(b.getPaddleState(0)).value(b.getPaddleState(1)).endArray();
+        j.field("interpolating", b.isInterpolating());
+        j.endObject();
+    }
+
+    /** Mouse turning of a passenger ({@code Entity.turn}): the vehicle then clamps the rotation. */
+    static void afterTurn(Harness.Run run) {
+        Entity v = run.player.getVehicle();
+        if (v != null) {
+            v.onPassengerTurned(run.player);
+        }
     }
 
     private static void box(Json j, net.minecraft.world.phys.AABB b) {
@@ -304,6 +352,22 @@ final class Ext {
             spawn(sp);
         } else if (e instanceof Move m) {
             move(m);
+        } else if (e instanceof Ride r) {
+            // Boarding shows (and narrates) the "press sneak to dismount" message: a narrator that
+            // narrates nothing (narrator option off).
+            net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+            if (mc.getNarrator() == null) {
+                net.minecraft.client.GameNarrator n = Reflect.allocate(net.minecraft.client.GameNarrator.class);
+                Reflect.set(net.minecraft.client.GameNarrator.class, n, "minecraft", mc);
+                Reflect.set(net.minecraft.client.Minecraft.class, mc, "narrator", n);
+            }
+            net.minecraft.network.RegistryFriendlyByteBuf b = Harness.buf();
+            b.writeVarInt(r.vehicle());
+            b.writeVarIntArray(r.passengers());
+            Harness.listener.handleSetEntityPassengersPacket(net.minecraft.network.protocol.game.ClientboundSetPassengersPacket.STREAM_CODEC.decode(b));
+        } else if (e instanceof VehicleMove m) {
+            Harness.listener.handleMoveVehicle(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundMoveVehiclePacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundMoveVehiclePacket(new Vec3(m.x(), m.y(), m.z()), m.yaw(), m.pitch())));
         } else if (e instanceof Remove r) {
             Harness.listener.handleRemoveEntities(Harness.roundTrip(ClientboundRemoveEntitiesPacket.STREAM_CODEC,
                     new ClientboundRemoveEntitiesPacket(r.id())));
@@ -441,6 +505,15 @@ final class Ext {
             j.fieldF32("yaw", m.yaw()).field("on_ground", m.onGround());
         } else if (e instanceof Remove r) {
             j.field("type", "remove_entity").field("id", r.id());
+        } else if (e instanceof Ride r) {
+            j.field("type", "ride").field("vehicle", r.vehicle()).key("passengers").beginArray();
+            for (int id : r.passengers()) {
+                j.value(id);
+            }
+            j.endArray();
+        } else if (e instanceof VehicleMove m) {
+            j.field("type", "vehicle_move").key("pos").beginArray().f64(m.x()).f64(m.y()).f64(m.z()).endArray();
+            j.fieldF32("yaw", m.yaw()).fieldF32("pitch", m.pitch());
         } else {
             throw new IllegalArgumentException("event " + e);
         }
@@ -504,6 +577,19 @@ final class Ext {
                 com.google.gson.JsonArray p = ev.getAsJsonArray("pos");
                 yield new Move(ev.get("id").getAsInt(), ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)), ScenarioReader.f64(p.get(2)),
                         ScenarioReader.f32(ev.get("yaw")), ev.get("on_ground").getAsBoolean());
+            }
+            case "ride" -> {
+                com.google.gson.JsonArray p = ev.getAsJsonArray("passengers");
+                int[] ids = new int[p.size()];
+                for (int k = 0; k < ids.length; k++) {
+                    ids[k] = p.get(k).getAsInt();
+                }
+                yield new Ride(ev.get("vehicle").getAsInt(), ids);
+            }
+            case "vehicle_move" -> {
+                com.google.gson.JsonArray p = ev.getAsJsonArray("pos");
+                yield new VehicleMove(ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)), ScenarioReader.f64(p.get(2)),
+                        ScenarioReader.f32(ev.get("yaw")), ScenarioReader.f32(ev.get("pitch")));
             }
             default -> null;
         };

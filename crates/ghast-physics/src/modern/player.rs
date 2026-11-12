@@ -777,6 +777,8 @@ pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
         glider: x.glider,
         spin_attack: x.spin_attack,
         auto_spin_ticks: x.auto_spin_ticks,
+        riding: None,
+        last_yd: 0.0,
     };
     let pending = x.pending_move.take();
     tick_core::<R, W, Ents<'_>>(p, &mut g, pending, Ents(around.entities), input, world, out);
@@ -788,15 +790,33 @@ pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
 /// The part of [`PlayerExt`] the player's own tick reads and writes (kept small so a plain
 /// [`tick`] does not build the rocket list).
 #[derive(Clone, Copy, Default)]
-struct Glide {
-    fall_flying: bool,
-    glider: bool,
-    spin_attack: bool,
-    auto_spin_ticks: i32,
+pub(super) struct Glide {
+    pub(super) fall_flying: bool,
+    pub(super) glider: bool,
+    pub(super) spin_attack: bool,
+    pub(super) auto_spin_ticks: i32,
+    /// The player rides a boat (its tick as a passenger, see `boat.rs`).
+    pub(super) riding: Option<Ride>,
+    /// A boat's `lastYd` (its fall check), boat ticks only.
+    pub(super) last_yd: f64,
+}
+
+/// What a passenger's tick reads from its boat (after the boat's tick).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Ride {
+    /// Top of the boat's box (the passenger's fluid box starts there).
+    pub(super) top: f64,
+    /// The boat is under water (the passenger's fluid box is then not cut).
+    pub(super) under_water: bool,
+    /// The boat's position, rotation and ground flag for the move-vehicle packet.
+    pub(super) pos: [f64; 3],
+    pub(super) yaw: f32,
+    pub(super) pitch: f32,
+    pub(super) on_ground: bool,
 }
 
 #[inline(always)]
-fn tick_core<R: Rules, W: BlockView<State = R::State>, E: Extra>(
+pub(super) fn tick_core<R: Rules, W: BlockView<State = R::State>, E: Extra>(
     p: &mut PlayerState,
     x: &mut Glide,
     pending: Option<Movement>,
@@ -885,6 +905,8 @@ pub fn riptide<R: Rules, W: BlockView<State = R::State>>(
                 glider: x.glider,
                 spin_attack: x.spin_attack,
                 auto_spin_ticks: x.auto_spin_ticks,
+                riding: None,
+                last_yd: 0.0,
             },
             w: &w,
             old_pos: V3::ZERO,
@@ -927,16 +949,22 @@ pub fn in_water_or_rain<R: Rules, W: BlockView<State = R::State>>(
     open(floor(p.pos[1])) || open(floor(p.bb.max_y))
 }
 
-struct Ctx<'a, 'b, R: Rules, W, E: Extra> {
-    p: &'a mut PlayerState,
-    x: Glide,
-    w: &'a World<'b, R, W, E>,
-    old_pos: V3,
-    moves: [Option<Movement>; 4],
-    using_item: bool,
+pub(super) struct Ctx<'a, 'b, R: Rules, W, E: Extra> {
+    pub(super) p: &'a mut PlayerState,
+    pub(super) x: Glide,
+    pub(super) w: &'a World<'b, R, W, E>,
+    pub(super) old_pos: V3,
+    pub(super) moves: [Option<Movement>; 4],
+    pub(super) using_item: bool,
 }
 
 impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
+    /// `isPassenger()` (the extended tick only).
+    #[inline(always)]
+    fn riding(&self) -> bool {
+        E::ON && self.x.riding.is_some()
+    }
+
     fn ctx(&self) -> ShapeCtx {
         ShapeCtx {
             feet_y: self.p.pos[1],
@@ -966,7 +994,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         self.p.age += 1;
         // Player.tick
         self.p.no_physics = self.p.spectator;
-        if self.p.spectator {
+        if self.p.spectator || self.riding() {
             self.set_on_ground(false, None);
         }
         // LocalPlayer.updateIsUnderwater
@@ -993,7 +1021,11 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             out.push(Packet::PlayerInput(self.p.input.keys));
             self.p.sent.input = self.p.input.keys;
         }
-        self.send_position(out);
+        if let Some(r) = self.x.riding.filter(|_| E::ON) {
+            self.send_passenger(r, out);
+        } else {
+            self.send_position(out);
+        }
     }
 
     fn base_tick(&mut self) {
@@ -1002,8 +1034,9 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         p.in_powder_snow = false;
         self.update_fluid_interaction();
         // updateSwimming (Player: flying -> false)
+        let riding = self.riding();
         let p = &mut *self.p;
-        if p.abilities.flying {
+        if p.abilities.flying || riding {
             p.swimming = false;
         } else if p.is_swimming() {
             p.swimming = p.sprinting && p.touching_water;
@@ -1022,13 +1055,16 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     }
 
     /// `Entity.updateFluidInteraction`.
-    fn update_fluid_interaction(&mut self) {
+    pub(super) fn update_fluid_interaction(&mut self) {
         let p = &*self.p;
         let pushed = !p.abilities.flying;
         let block_xz = [floor(p.pos[0]), floor(p.pos[2])];
-        let fi = self
-            .w
-            .fluid_interaction(&p.bb, block_xz, p.eye_y(), !pushed);
+        let fi = if let Some(r) = self.x.riding.filter(|_| E::ON) {
+            self.passenger_fluids(r, block_xz, !pushed)
+        } else {
+            self.w
+                .fluid_interaction(&p.bb, block_xz, p.eye_y(), !pushed)
+        };
         let p = &mut *self.p;
         p.water_height = fi.water.height;
         p.lava_height = fi.lava.height;
@@ -1040,7 +1076,12 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         }
         p.touching_water = in_water;
         if pushed {
-            if in_water && let Some(i) = fi.water.current_impulse(V3::of(p.vel), 0.014) {
+            let water = if E::VEHICLE {
+                fi.water.current_impulse_entity(V3::of(p.vel), 0.014)
+            } else {
+                fi.water.current_impulse(V3::of(p.vel), 0.014)
+            };
+            if in_water && let Some(i) = water {
                 let v = V3::of(p.vel).add(i);
                 if v.is_finite() {
                     p.vel = v.arr();
@@ -1052,7 +1093,12 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
                 } else {
                     0.002_333_333_333_333_333_5
                 };
-                if let Some(i) = fi.lava.current_impulse(V3::of(p.vel), scale) {
+                let lava = if E::VEHICLE {
+                    fi.lava.current_impulse_entity(V3::of(p.vel), scale)
+                } else {
+                    fi.lava.current_impulse(V3::of(p.vel), scale)
+                };
+                if let Some(i) = lava {
                     let v = V3::of(p.vel).add(i);
                     if v.is_finite() {
                         p.vel = v.arr();
@@ -1060,6 +1106,28 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
                 }
             }
         }
+    }
+
+    /// The fluid interaction of a boat's passenger (`AbstractBoat.modifyPassengerFluidInteractionBox`):
+    /// out of the water while the boat's top is at or above the passenger's, else the box above it.
+    #[cold]
+    #[inline(never)]
+    fn passenger_fluids(
+        &self,
+        r: Ride,
+        block_xz: [i32; 2],
+        ignore: bool,
+    ) -> super::fluid::Interaction {
+        let p = &*self.p;
+        let mut b = super::math::deflate(&p.bb, 0.001);
+        if !r.under_water {
+            if r.top >= b.max_y {
+                return super::fluid::Interaction::default();
+            }
+            b.min_y = super::math::java_max(b.min_y, r.top);
+        }
+        self.w
+            .fluid_interaction_in(&b, p.bb.min_y, block_xz, p.eye_y(), ignore)
     }
 
     /// `canPlayerFitWithinBlocksAndEntitiesWhen(pose)`.
@@ -1089,7 +1157,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         // Vanilla: fits(crouching) && (shift || !fits(standing)). At one scale the pose boxes are
         // nested (same feet and width, heights 0.6 < 1.5 < 1.8), so a fitting standing box
         // answers the crouching one.
-        let crouching = if p.abilities.flying || p.is_swimming() {
+        let crouching = if p.abilities.flying || p.is_swimming() || self.riding() {
             false
         } else if self.fits(Pose::Standing) {
             self.p.shift()
@@ -1117,7 +1185,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             self.move_towards_closest_space(x + r, z - r, &mut memo);
             self.move_towards_closest_space(x + r, z + r, &mut memo);
         }
-        let slow_using = self.using_item && !self.p.use_effects.can_sprint;
+        let slow_using = self.using_item && !self.p.use_effects.can_sprint && !self.riding();
         let p = &mut *self.p;
         if was_shift || slow_using || p.input.keys.back {
             p.sprint_trigger_time = 0;
@@ -1145,6 +1213,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             }
         }
         let mut just_toggled = false;
+        let riding = self.riding();
         let p = &mut *self.p;
         if p.abilities.allow_flying {
             if p.spectator {
@@ -1156,7 +1225,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             } else if !was_jumping && p.input.keys.jump && !was_auto_jump {
                 if p.jump_trigger_time == 0 {
                     p.jump_trigger_time = 7;
-                } else if !p.is_swimming() {
+                } else if !p.is_swimming() && !riding {
                     p.abilities.flying = !p.abilities.flying;
                     if p.abilities.flying && p.on_ground {
                         self.jump_from_ground();
@@ -1192,7 +1261,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         if p.jump_trigger_time > 0 {
             p.jump_trigger_time -= 1;
         }
-        if p.abilities.flying {
+        if p.abilities.flying && !riding {
             p.fall_distance = 0.0;
         }
         self.living_ai_step();
@@ -1213,6 +1282,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             && !p.on_ground
             && p.effects.levitation.is_none()
             && !p.touching_water
+            && !self.riding()
     }
 
     /// `isVisuallyCrawling()`: the swimming pose out of water, or (`LivingEntity`) the gliding pose
@@ -1225,7 +1295,8 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
 
     fn sprinting_possible(&self, allow_shallow: bool) -> bool {
         let p = &self.p;
-        let food = p.food_level as f32 > 6.0 || p.abilities.allow_flying;
+        // A passenger: vehicleCanSprint (no boat can sprint).
+        let food = (p.food_level as f32 > 6.0 || p.abilities.allow_flying) && !self.riding();
         !p.effects.blindness && food && (allow_shallow || !(p.touching_water && !p.is_underwater()))
     }
 
@@ -1378,7 +1449,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             return v;
         }
         let (mut x, mut y) = (x * 0.98, y * 0.98);
-        if self.using_item {
+        if self.using_item && !self.riding() {
             let k = self.p.use_effects.speed_multiplier;
             x *= k;
             y *= k;
@@ -1491,6 +1562,11 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
 
     /// `Player.travel`.
     fn player_travel(&mut self, input: V3) {
+        if self.riding() {
+            // Player.travel of a passenger: LivingEntity.travel only.
+            self.travel(input);
+            return;
+        }
         if self.p.is_swimming() {
             let look_y = f64::from(-m::sin(f64::from(self.p.pitch * DEG_TO_RAD)));
             let k = if look_y < -0.2 { 0.085 } else { 0.06 };
@@ -1775,7 +1851,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
 
     /// `Entity.move(SELF, delta)`.
     #[allow(clippy::too_many_lines)]
-    fn entity_move(&mut self, delta: V3) {
+    pub(super) fn entity_move(&mut self, delta: V3) {
         if self.p.no_physics {
             let p = self.pos();
             let n = p.add(delta);
@@ -1794,15 +1870,23 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             self.p.stuck_multiplier = [0.0; 3];
             self.set_vel(V3::ZERO);
         }
-        delta = self.back_off_from_edge(delta);
+        if !E::VEHICLE {
+            delta = self.back_off_from_edge(delta);
+        }
         let ctx = self.ctx();
+        // A boat has no step height (Entity.maxUpStep).
+        let step = if E::VEHICLE {
+            0.0
+        } else {
+            self.p.step_height()
+        };
         let movement = collide::<R, _, E>(
             self.w,
             self.p.pos,
             &self.p.bb,
             delta,
             self.p.on_ground,
-            self.p.step_height(),
+            step,
             &ctx,
         );
         let len = movement.length_sqr();
@@ -1828,10 +1912,14 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         let below = self.p.vertical_collision_below;
         self.set_on_ground(below, Some(movement));
         self.p.minor_horizontal_collision =
-            self.p.horizontal_collision && self.minor_collision(movement);
+            !E::VEHICLE && self.p.horizontal_collision && self.minor_collision(movement);
         let effect_pos = self.on_pos(0.2);
         let effect = self.w.state(effect_pos[0], effect_pos[1], effect_pos[2]);
-        self.check_fall_damage(movement.y);
+        if E::VEHICLE {
+            self.boat_fall(movement.y);
+        } else {
+            self.check_fall_damage(movement.y);
+        }
         if self.p.horizontal_collision {
             let v = self.vel();
             self.set_vel(V3::new(
@@ -1853,16 +1941,36 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         let d = R::block(s);
         let kind_ = R::phys(s).kind();
         let v = self.vel();
+        // bounceUp: a factor of 1 for living entities, 0.8 for others (a boat).
+        let factor = if E::VEHICLE { 0.8 } else { 1.0 };
         if !self.p.shift() && kind_ == BlockKind::SlimeBlock as u8 {
             if v.y < 0.0 {
-                self.set_vel(V3::new(v.x, -v.y * 1.0, v.z));
+                self.set_vel(V3::new(v.x, -v.y * factor, v.z));
             }
         } else if !self.p.shift() && d.flags & bf::BED != 0 {
             if v.y < 0.0 {
-                self.set_vel(V3::new(v.x, -v.y * f64::from(0.66f32) * 1.0, v.z));
+                self.set_vel(V3::new(v.x, -v.y * f64::from(0.66f32) * factor, v.z));
             }
         } else {
             self.set_vel(V3::new(v.x, v.y * 0.0, v.z));
+        }
+    }
+
+    /// `AbstractBoat.checkFallDamage` (the boat is no passenger): the last vertical speed, then the
+    /// fall distance (not over water).
+    fn boat_fall(&mut self, ya: f64) {
+        self.x.last_yd = self.p.vel[1];
+        if self.p.on_ground {
+            self.p.fall_distance = 0.0;
+        } else if ya < 0.0 {
+            let (x, y, z) = (
+                floor(self.p.pos[0]),
+                floor(self.p.pos[1]),
+                floor(self.p.pos[2]),
+            );
+            if kind(self.w.fluid(x, y - 1, z)) != 1 {
+                self.p.fall_distance -= f64::from(ya as f32);
+            }
         }
     }
 
@@ -2069,7 +2177,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     }
 
     /// `applyEffectsFromBlocks()`: step-on effects, then the inside-block sweep.
-    fn apply_effects_from_blocks(&mut self) {
+    pub(super) fn apply_effects_from_blocks(&mut self) {
         let mut list = [None; 5];
         let mut n = 0;
         for mvt in self.moves.iter().flatten() {
@@ -2225,7 +2333,8 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
                 [0.25, f64::from(0.05f32), 0.25]
             };
         } else if k == BlockKind::SweetBerryBush as u8 {
-            if !stuck {
+            // Living entities only.
+            if !stuck || E::VEHICLE {
                 return;
             }
             self.p.fall_distance = 0.0;
@@ -2238,7 +2347,8 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             )
             .kind()
                 == BlockKind::PowderSnow as u8;
-            if in_block && stuck {
+            // Living entities only while inside the block; a boat always.
+            if (in_block || E::VEHICLE) && stuck {
                 self.p.fall_distance = 0.0;
                 self.p.stuck_multiplier = [f64::from(0.9f32), 1.5, f64::from(0.9f32)];
             }
@@ -2263,7 +2373,8 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
                 || above.flags() & sf::CONTEXT != 0 && above.kind() == BlockKind::PowderSnow as u8;
             let nothing_above = nothing_above && kind(above.fluid()) == 0;
             let drag = ph.aux() & 1 != 0;
-            if self.p.abilities.flying {
+            // A boat on top of a column: only its server-side bubble timer (onAboveBubbleColumn).
+            if self.p.abilities.flying || E::VEHICLE && nothing_above {
                 return;
             }
             let v = self.vel();
@@ -2315,6 +2426,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             && p.auto_jump_time <= 0
             && p.on_ground
             && !p.shift()
+            && !self.riding()
             && moving
             && f64::from(self.block_jump_factor()) >= 1.0)
         {
@@ -2489,7 +2601,11 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
             desired
         } else if !self.fits(Pose::Swimming) {
             return;
-        } else if self.p.spectator || desired == Pose::Swimming || self.fits(desired) {
+        } else if self.p.spectator
+            || self.riding()
+            || desired == Pose::Swimming
+            || self.fits(desired)
+        {
             desired
         } else if self.fits(Pose::Crouching) {
             Pose::Crouching
@@ -2499,6 +2615,35 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
         if actual != self.p.pose {
             self.p.pose = actual;
             self.refresh_dimensions();
+        }
+    }
+
+    /// `LocalPlayer.tick`'s packets for a passenger: the rotation (with the player's own ground and
+    /// collision flags), the vehicle's move, then `sendIsSprintingIfNeeded`. The last sent position
+    /// and rotation are not updated (vanilla's `sendPosition` does not run).
+    #[cold]
+    #[inline(never)]
+    fn send_passenger(&mut self, r: Ride, out: &mut Packets) {
+        let p = &mut *self.p;
+        out.push(Packet::Move {
+            pos: None,
+            look: Some((p.yaw, p.pitch)),
+            on_ground: p.on_ground,
+            horizontal_collision: p.horizontal_collision,
+        });
+        out.push(Packet::MoveVehicle {
+            pos: r.pos,
+            yaw: r.yaw,
+            pitch: r.pitch,
+            on_ground: r.on_ground,
+        });
+        if p.sprinting != p.sent.sprinting {
+            out.push(if p.sprinting {
+                Packet::StartSprinting
+            } else {
+                Packet::StopSprinting
+            });
+            p.sent.sprinting = p.sprinting;
         }
     }
 

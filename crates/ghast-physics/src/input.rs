@@ -138,6 +138,25 @@ pub enum Packet {
     /// The modern `player_command` `START_FALL_FLYING`: the client started gliding (see
     /// `modern::PlayerExt`).
     StartFallFlying,
+    /// The modern `vehicle_move` packet: the position and rotation of the vehicle the player
+    /// controls (see `modern::Boat`).
+    MoveVehicle {
+        /// Position.
+        pos: [f64; 3],
+        /// Yaw.
+        yaw: f32,
+        /// Pitch.
+        pitch: f32,
+        /// The vehicle's on-ground flag.
+        on_ground: bool,
+    },
+    /// The modern `steer_boat` (paddle) packet: the boat's paddle states, sent every boat tick.
+    PaddleBoat {
+        /// Left paddle.
+        left: bool,
+        /// Right paddle.
+        right: bool,
+    },
     /// Position and rotation.
     PositionLook {
         /// X.

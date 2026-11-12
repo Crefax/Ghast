@@ -484,6 +484,7 @@ final class Harness {
             if (!sc.delayedLoad || listener.hasClientLoaded()) {
                 player.setYRot(t.yaw());
                 player.setXRot(t.pitch());
+                Ext.afterTurn(this);
             }
             level.tickRateManager().tick();
             if (rightClickDelay > 0) {

@@ -57,6 +57,20 @@ impl Tracker {
         }
         Some(imp)
     }
+
+    /// [`Tracker::current_impulse`] for an entity that is not a player: the current is normalized
+    /// instead of averaged.
+    pub(crate) fn current_impulse_entity(&self, vel: V3, scale: f64) -> Option<V3> {
+        if self.count == 0 || self.current.length_sqr() < f64::from(1.0e-5f32) {
+            return None;
+        }
+        let mut imp = self.current.normalize().scale(scale);
+        if vel.x.abs() < 0.003 && vel.z.abs() < 0.003 && imp.length() < 0.004_500_000_000_000_000_5
+        {
+            imp = imp.normalize().scale(0.004_500_000_000_000_000_5);
+        }
+        Some(imp)
+    }
 }
 
 impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
@@ -84,15 +98,29 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
         eye_y: f64,
         ignore_current: bool,
     ) -> Interaction {
-        let mut out = Interaction::default();
         // getFluidInteractionBox: the box deflated by 0.001.
         let b = super::math::deflate(bb, 0.001);
+        self.fluid_interaction_in(&b, bb.min_y, block_xz, eye_y, ignore_current)
+    }
+
+    /// [`World::fluid_interaction`] for an interaction box `b` already made (a passenger's box cut
+    /// by its boat); `entity_y` is the bottom of the entity's own box.
+    #[inline(always)]
+    pub(crate) fn fluid_interaction_in(
+        &self,
+        b: &Aabb,
+        entity_y: f64,
+        block_xz: [i32; 2],
+        eye_y: f64,
+        ignore_current: bool,
+    ) -> Interaction {
+        let b = *b;
+        let mut out = Interaction::default();
         let (x0, y0, z0) = (floor(b.min_x), floor(b.min_y), floor(b.min_z));
         let (x1, y1, z1) = (ceil(b.max_x) - 1, ceil(b.max_y) - 1, ceil(b.max_z) - 1);
         if !self.fluid_region_loaded(x0 - 1, y0, z0 - 1, x1 + 1, y1, z1 + 1) {
             return out;
         }
-        let entity_y = bb.min_y;
         for x in x0..=x1 {
             for y in y0..=y1 {
                 for z in z0..=z1 {

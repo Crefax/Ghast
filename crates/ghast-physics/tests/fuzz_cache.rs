@@ -42,6 +42,7 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/26.1/fuzz-entities"),
             repo_root().join("oracle/cache/26.1/fuzz-nether"),
             repo_root().join("oracle/cache/26.1/fuzz-border"),
+            repo_root().join("oracle/cache/26.1/fuzz-boats"),
         ],
     };
     let mut files = Vec::new();

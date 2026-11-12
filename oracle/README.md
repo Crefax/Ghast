@@ -1054,6 +1054,32 @@ centre changes. Quirks:
   thinner than `1e-7` (both bounds clamped together) collides as `Shapes.INFINITY`: an entity inside
   it is never stopped, but every "does the box fit" test fails.
 
+**`boats`** (11 cases + 100 fuzz): a boat spawned by `add_entity` and boarded through the real
+`set_passengers` packet (event `ride {vehicle, passengers}`; an empty list takes the player off);
+server corrections are real `move_vehicle` packets (event `vehicle_move {pos, yaw, pitch}`). Mouse
+turning of a passenger goes through `onPassengerTurned` (the harness sets the rotation, then the
+vehicle clamps it, as `Entity.turn` does). Tick records add `vehicle`: the boat's position, motion,
+rotation, box, flags, status / old status, turn speed, out-of-control counter, water level, land
+friction, last vertical motion, paddle input and paddles. Packets add `vehicle_move` and
+`steer_boat`. Cases: paddling on still water, a raft turning while the player looks around, a chest
+boat on land, packed and blue ice, a drop into water, walls, flowing water, a boat held under water,
+slabs and soul sand, another boat in the way, server corrections, sneaking and a dismount. Fuzz
+(`ExtCases.boatsFuzz`, cases `…_bo`): pools, land patches (ice, soul sand, slime, honey, magma, sand,
+lily pads), walls and water roofs around a boat of a random kind; random paddling keys, looks,
+corrections, other boats and dismounts. Quirks:
+
+- The boat ticks before its passenger and paddles with the keys the player held in the previous
+  tick (`LocalPlayer.rideTick` hands them over after the passenger's tick).
+- The paddle sound check calls `getStatus()` again: where a stroke's sound would play, the water
+  level and the land friction are re-read (the land friction is then not halved that tick).
+- A non-player entity's water current is normalized, not averaged (`Tracker.applyCurrentTo`).
+- `Shapes.joinIsNotEmpty` merges points closer than `1e-7`: a block touching the boat's friction
+  probe by less than that does not count.
+- Every tick of the passenger runs the whole player tick (travel included) before the boat seats
+  it; its own ground / collision flags go out in the rotation packet.
+- Fixed with this mechanic: the first record of a case with entities listed the previous case's
+  last entity tick (static lists); `entities.jsonl.gz` changed in its `t = 0` records only.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

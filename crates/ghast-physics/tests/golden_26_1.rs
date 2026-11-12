@@ -94,6 +94,13 @@ fn border_26_1() {
     check("border.jsonl.gz");
 }
 
+/// Boats the player rides and controls: water, land, ice, falls, walls, flowing water, under
+/// water, other boats, server corrections, dismounts.
+#[test]
+fn boats_26_1() {
+    check("boats.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

@@ -13,6 +13,7 @@ import static ghast.oracle.Scenario.BACK;
 import static ghast.oracle.Scenario.FORWARD;
 import static ghast.oracle.Scenario.JUMP;
 import static ghast.oracle.Scenario.LEFT;
+import static ghast.oracle.Scenario.RIGHT;
 import static ghast.oracle.Scenario.SNEAK;
 import static ghast.oracle.Scenario.SPRINT;
 import static ghast.oracle.Scenario.USE;
@@ -44,7 +45,7 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether", "border"};
+    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether", "border", "boats"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
@@ -53,6 +54,7 @@ final class ExtCases {
             case "entities" -> entities();
             case "nether" -> nether();
             case "border" -> border();
+            case "boats" -> boats();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -64,6 +66,7 @@ final class ExtCases {
             case "entities" -> entitiesFuzz(seed, index, ticks);
             case "nether" -> netherFuzz(seed, index, ticks);
             case "border" -> borderFuzz(seed, index, ticks);
+            case "boats" -> boatsFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -675,6 +678,150 @@ final class ExtCases {
     }
 
     /** Every field a fuzz case sets. */
+    // ---- boats: the local player controls a boat (client-authoritative vehicle) ------------------------
+
+    private static final int BOAT = 100;
+    private static final String[] BOAT_TYPES = {"oak_boat", "spruce_boat", "birch_chest_boat", "bamboo_raft", "bamboo_chest_raft",
+            "mangrove_boat", "pale_oak_chest_boat"};
+
+    /** A case with a boat {@code type} at a position; the player boards it in the first tick (set-passengers packet). */
+    private static Scenario boat(Scenario sc, String type, double x, double y, double z, float yaw) {
+        with(sc, new Ext.Spawn(BOAT, type, x, y, z, yaw));
+        addEvent(sc, 0, new Ext.Ride(BOAT, new int[] {Harness.PLAYER_ENTITY_ID}));
+        return sc;
+    }
+
+    private static Scenario pond(String name) {
+        return new Scenario(name).fill(-24, 58, -24, 24, 58, 24, s("stone"), 0).fill(-24, 59, -24, 24, 62, 24, s("water"), 0);
+    }
+
+    static List<Scenario> boats() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(boat(pond("boat_water_paddle").desc("paddle a boat on still water: forward, turns, back, idle drift")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(40, FORWARD).run(15, FORWARD | LEFT).run(15, RIGHT).run(10, LEFT)
+                .run(15, BACK).run(10, LEFT | RIGHT).run(10, FORWARD | BACK).run(30, 0), "oak_boat", 0.5, 62.6, 0.5, 0.0F));
+        l.add(boat(pond("boat_raft_turn_look").desc("a raft: turn in place while looking around (rotation clamp to 105 degrees)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(20, LEFT, 150, 10).run(20, RIGHT, -40, -20).run(20, FORWARD, 200, 30), "bamboo_raft", 0.5, 62.6, 0.5, 30.0F));
+        l.add(boat(flat("boat_land").desc("a chest boat on stone: paddling on land (land friction, halved each tick)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(30, FORWARD).run(20, FORWARD | RIGHT).run(10, 0), "birch_chest_boat", 0.5, 64, 0.5, 0.0F));
+        Scenario ice = new Scenario("boat_ice").fill(-24, 63, -24, 24, 63, 24, s("packed_ice"), 0).fill(-24, 63, 6, 24, 63, 24, s("blue_ice"), 0)
+                .fill(-24, 64, 30, 24, 66, 30, s("stone"), 0);
+        l.add(boat(ice.desc("a boat on packed and blue ice: speed up, turn, hit nothing").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(60, FORWARD)
+                .run(20, FORWARD | LEFT).run(20, 0), "oak_boat", 0.5, 64, 0.5, 0.0F));
+        l.add(boat(pond("boat_drop_into_water").desc("a boat falls from the air into water (IN_AIR to IN_WATER snaps to the surface)")
+                .spawn(0.5, 70, 0.5, 0, 0).run(60, FORWARD), "spruce_boat", 0.5, 69, 0.5, 0.0F));
+        Scenario wall = pond("boat_wall").fill(-3, 59, 5, 3, 65, 5, s("stone"), 0).fill(4, 59, -3, 4, 65, 3, s("oak_planks"), 0);
+        l.add(boat(wall.desc("paddle into walls head-on and at an angle").spawn(0.5, 63, 0.5, 0, 0).run(3, 0).run(40, FORWARD)
+                .run(20, FORWARD | RIGHT).run(20, FORWARD), "oak_boat", 0.5, 62.6, 0.5, 0.0F));
+        Scenario flow = pond("boat_flowing").fill(-24, 62, -24, 24, 62, 24, s("air"), 0).fill(-24, 61, -2, 24, 61, 2, s("water[level=1]"), 0)
+                .fill(-24, 61, 3, 24, 61, 8, s("water[level=3]"), 0);
+        l.add(boat(flow.desc("flowing water pushes the boat; paddle against and along it").spawn(0.5, 62, 0.5, 90, 0).run(3, 0).run(30, 0)
+                .run(30, FORWARD).run(30, BACK), "oak_boat", 0.5, 61.6, 0.5, 90.0F));
+        Scenario under = pond("boat_under_water").fill(-24, 63, -24, 24, 64, 24, s("water"), 0).fill(-24, 65, -24, 24, 65, 24, s("glass"), 0);
+        l.add(boat(under.desc("a boat held under a water roof (UNDER_WATER, the out-of-control counter)").spawn(0.5, 62, 0.5, 0, 0).run(80, FORWARD),
+                "oak_boat", 0.5, 61.5, 0.5, 0.0F));
+        Scenario step = flat("boat_slab_soul_sand").fill(-3, 64, 4, 3, 64, 4, s("smooth_stone_slab"), 0).fill(-3, 64, 7, 3, 64, 9, s("soul_sand"), 0);
+        l.add(boat(step.desc("a boat on land meets a slab (no step-up) and soul sand").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(60, FORWARD),
+                "oak_boat", 0.5, 64, 0.5, 0.0F));
+        Scenario two = pond("boat_hits_boat").desc("paddle into another boat (entity collision)").spawn(0.5, 63, 0.5, 0, 0).run(3, 0).run(50, FORWARD);
+        with(two, new Ext.Spawn(BOAT + 1, "oak_boat", 0.6, 62.6, 4.5, 90.0F));
+        l.add(boat(two, "oak_boat", 0.5, 62.6, 0.5, 0.0F));
+        Scenario fix = boat(pond("boat_server_correction").desc("the server corrects the boat (move-vehicle packets)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(40, FORWARD), "oak_boat", 0.5, 62.6, 0.5, 0.0F);
+        addEvent(fix, 15, new Ext.VehicleMove(0.5, 62.6, 2.0, 10.0F, 0.0F));
+        addEvent(fix, 25, new Ext.VehicleMove(0.5, 62.6, 3.0, 0.0F, 0.0F));
+        addEvent(fix, 26, new Ext.VehicleMove(0.5, 62.6, 3.0, 0.0F, 0.0F));
+        l.add(fix);
+        Scenario off = boat(pond("boat_dismount").desc("sneak while paddling, then the server takes the player off (set-passengers)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(20, FORWARD).run(5, FORWARD | SNEAK).run(30, 0), "oak_boat", 0.5, 62.6, 0.5, 0.0F);
+        addEvent(off, 27, new Ext.Ride(BOAT, new int[0]));
+        l.add(off);
+        return l;
+    }
+
+    /**
+     * Randomized boat cases: a terrain of water pools, land, ice and walls around a boat of a random type
+     * the player boards in the first tick; random paddling keys, looks, server corrections, other boats
+     * and dismounts. Cases get a {@code _bo} suffix.
+     */
+    static Scenario boatsFuzz(long seed, int index, int ticks) {
+        Harness.init();
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x626f617473L);
+        Scenario sc = new Scenario("fuzz_s" + seed + "_" + index + "_bo");
+        sc.fill(-32, 58, -32, 32, 58, 32, s("stone"), 0);
+        String[] grounds = {"water", "water", "water", "stone", "grass_block", "ice", "packed_ice", "blue_ice", "soul_sand", "slime_block",
+                "honey_block", "sand", "water[level=2]", "water[level=5]", "magma_block", "lily_pad"};
+        int patches = x.range(3, 12);
+        for (int i = 0; i < patches; i++) {
+            int cx = x.range(-12, 12), cz = x.range(-12, 12), r = x.range(1, 6);
+            String g = x.pick(grounds);
+            int top = x.chance(0.7) ? 62 : x.range(60, 63);
+            if (g.equals("lily_pad")) {
+                sc.fill(cx - r, 59, cz - r, cx + r, 62, cz + r, s("water"), 0).fill(cx - r, 63, cz - r, cx + r, 63, cz + r, s("lily_pad"), 0);
+            } else if (g.startsWith("water")) {
+                sc.fill(cx - r, 59, cz - r, cx + r, top, cz + r, s("water"), 0);
+                if (!g.equals("water")) {
+                    sc.fill(cx - r, top, cz - r, cx + r, top, cz + r, s(g), 0);
+                }
+            } else {
+                sc.fill(cx - r, 59, cz - r, cx + r, top, cz + r, s(g), 0);
+            }
+        }
+        int walls = x.range(0, 5);
+        for (int i = 0; i < walls; i++) {
+            int cx = x.range(-10, 10), cz = x.range(-10, 10), len = x.range(1, 6);
+            String w = x.pick(new String[] {"stone", "oak_planks", "oak_fence", "cobblestone_wall", "oak_slab", "glass_pane"});
+            if (x.chance(0.5)) {
+                sc.fill(cx, 63, cz, cx + len, 63 + x.range(0, 2), cz, s(w), 0);
+            } else {
+                sc.fill(cx, 63, cz, cx, 63 + x.range(0, 2), cz + len, s(w), 0);
+            }
+        }
+        if (x.chance(0.2)) {
+            // a water roof somewhere (boats under water)
+            int cx = x.range(-8, 8), cz = x.range(-8, 8);
+            sc.fill(cx - 3, 59, cz - 3, cx + 3, 64, cz + 3, s("water"), 0).fill(cx - 3, 65, cz - 3, cx + 3, 65, cz + 3, s("glass"), 0);
+        }
+        double bx = x.range(-3, 3) + 0.5, bz = x.range(-3, 3) + 0.5;
+        double by = x.chance(0.8) ? 63.2 : 63 + x.range(1, 6);
+        float yaw = (float) (x.nextDouble() * 360 - 180);
+        sc.spawn(bx, by + 0.5, bz, yaw, 0);
+        float look = yaw, pitch = 0;
+        int[] keySets = {0, FORWARD, FORWARD, FORWARD | LEFT, FORWARD | RIGHT, LEFT, RIGHT, BACK, BACK | LEFT, LEFT | RIGHT, FORWARD | BACK,
+                FORWARD | JUMP, FORWARD | SPRINT};
+        int keys = 0;
+        for (int t = 0; t < ticks; t++) {
+            if (x.chance(0.12)) {
+                keys = keySets[x.nextInt(keySets.length)];
+            }
+            if (x.chance(0.2)) {
+                look += (float) ((x.nextDouble() - 0.5) * 90);
+                pitch = (float) Math.max(-90, Math.min(90, pitch + (x.nextDouble() - 0.5) * 40));
+            }
+            sc.run(1, keys, look, pitch);
+        }
+        boat(sc, x.pick(BOAT_TYPES), bx, by, bz, yaw);
+        if (x.chance(0.4)) {
+            int n = x.range(1, 3);
+            for (int i = 0; i < n; i++) {
+                with(sc, new Ext.Spawn(BOAT + 1 + i, x.pick(BOAT_TYPES), bx + (x.nextDouble() - 0.5) * 8, 63.2, bz + (x.nextDouble() - 0.5) * 8,
+                        (float) (x.nextDouble() * 360)));
+            }
+        }
+        for (int t = 5; t < ticks; t++) {
+            if (x.chance(0.02)) {
+                addEvent(sc, t, new Ext.VehicleMove(bx + (x.nextDouble() - 0.5) * 6, 63 + x.nextDouble(), bz + (x.nextDouble() - 0.5) * 6,
+                        (float) (x.nextDouble() * 360 - 180), 0.0F));
+            }
+        }
+        if (x.chance(0.15)) {
+            addEvent(sc, x.range(ticks / 2, ticks - 1), new Ext.Ride(BOAT, new int[0]));
+        }
+        sc.description = "randomized boat case: pools, land, ice, walls; paddling keys, looks, corrections";
+        return sc;
+    }
+
     static void copy(Scenario src, Scenario sc) {
         sc.description = src.description;
         sc.outside = src.outside;

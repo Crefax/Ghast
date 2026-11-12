@@ -441,12 +441,70 @@ pub fn packet_json(p: &Packet) -> Value {
             v["horizontal_collision"] = json!(horizontal_collision);
             v
         }
+        Packet::MoveVehicle {
+            pos,
+            yaw,
+            pitch,
+            on_ground,
+        } => json!({"name": "vehicle_move", "pos": [jf64(pos[0]), jf64(pos[1]), jf64(pos[2])],
+            "yaw": jf32(yaw), "pitch": jf32(pitch), "on_ground": on_ground}),
+        Packet::PaddleBoat { left, right } => {
+            json!({"name": "steer_boat", "left": left, "right": right})
+        }
         other => unimplemented!("{other:?}"),
     }
 }
 
+fn status_name(s: Option<modern::BoatStatus>) -> Value {
+    match s {
+        None => Value::Null,
+        Some(modern::BoatStatus::InWater) => json!("in_water"),
+        Some(modern::BoatStatus::UnderWater) => json!("under_water"),
+        Some(modern::BoatStatus::UnderFlowingWater) => json!("under_flowing_water"),
+        Some(modern::BoatStatus::OnLand) => json!("on_land"),
+        Some(modern::BoatStatus::InAir) => json!("in_air"),
+        Some(other) => panic!("{other:?}"),
+    }
+}
+
+/// The oracle's `vehicle` record of a boat.
+pub fn boat_json(id: i64, ty: &str, bt: &modern::Boat) -> Value {
+    let [x, y, z] = bt.pos();
+    let v = bt.vel();
+    let bb = bt.bounding_box();
+    let [l, r, u, d] = bt.input();
+    let [pl, pr] = bt.paddles();
+    json!({
+        "id": id, "type": ty,
+        "pos": [jf64(x), jf64(y), jf64(z)],
+        "vel": [jf64(v[0]), jf64(v[1]), jf64(v[2])],
+        "yaw": jf32(bt.yaw()), "pitch": jf32(bt.pitch()),
+        "bb": [jf64(bb.min_x), jf64(bb.min_y), jf64(bb.min_z), jf64(bb.max_x), jf64(bb.max_y), jf64(bb.max_z)],
+        "on_ground": bt.on_ground(), "horizontal_collision": bt.horizontal_collision(),
+        "vertical_collision": bt.vertical_collision(),
+        "fall_distance": jf64(bt.fall_distance()),
+        "status": status_name(bt.status()), "old_status": status_name(bt.old_status()),
+        "delta_rotation": jf32(bt.delta_rotation()),
+        "out_of_control": jf32(bt.out_of_control_ticks()),
+        "water_level": jf64(bt.water_level()),
+        "land_friction": jf32(bt.land_friction()),
+        "last_yd": jf64(bt.last_yd()),
+        "input": [l, r, u, d],
+        "paddle": [pl, pr],
+        "interpolating": false,
+    })
+}
+
+/// An add-entity packet's rotation byte, decoded (`Mth.packDegrees` / `unpackDegrees`).
+fn angle_byte(deg: f32) -> f32 {
+    let b = (deg * 256.0 / 360.0).floor() as i32 as i8;
+    (f32::from(i16::from(b)) * 360.0) / 256.0
+}
+
 /// Packet names ghast-physics produces for 26.1.
-const PACKETS_26: [&str; 8] = [
+const PACKETS_26: [&str; 10] = [
+    "vehicle_move",
+    "steer_boat",
     "player_loaded",
     "entity_action",
     "abilities",
@@ -629,6 +687,24 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     }
     let mut compiled = false;
     let mut out = Packets::new();
+    // Entities spawned (setup and events): id -> (type, position, yaw); the boat the player rides.
+    let mut spawned: std::collections::HashMap<i64, (String, [f64; 3], f32)> = Default::default();
+    if let Some(list) = ext
+        .and_then(|e| e.get("entities"))
+        .and_then(Value::as_array)
+    {
+        for e in list {
+            spawned.insert(
+                e["id"].as_i64().unwrap(),
+                (
+                    e["entity"].as_str().unwrap().to_string(),
+                    f3(&e["pos"]),
+                    f32_of(&e["yaw"]),
+                ),
+            );
+        }
+    }
+    let mut riding: Option<(i64, String, modern::Boat)> = None;
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
         let input = &rec["input"];
@@ -720,7 +796,46 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     }
                     "remove_entity" => x.remove_rocket(i(&e["id"])),
                     // Other entities: their boxes come with the tick record.
-                    "spawn" | "entity_move" => {}
+                    "spawn" => {
+                        spawned.insert(
+                            e["id"].as_i64().unwrap(),
+                            (
+                                e["entity"].as_str().unwrap().to_string(),
+                                f3(&e["pos"]),
+                                f32_of(&e["yaw"]),
+                            ),
+                        );
+                    }
+                    "entity_move" => {}
+                    "ride" => {
+                        let vehicle = e["vehicle"].as_i64().unwrap();
+                        let on = e["passengers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|v| v.as_i64() == Some(1));
+                        if on {
+                            if riding.as_ref().is_none_or(|r| r.0 != vehicle) {
+                                let (ty, pos, yaw) = spawned[&vehicle].clone();
+                                let kind = modern::BoatKind::from_entity_name(&ty).unwrap();
+                                let bt = modern::Boat::new(kind, pos, angle_byte(yaw), 0.0);
+                                bt.board(&mut p);
+                                riding = Some((vehicle, ty, bt));
+                            }
+                        } else if riding.as_ref().is_some_and(|r| r.0 == vehicle) {
+                            riding = None;
+                        }
+                    }
+                    "vehicle_move" => {
+                        if let Some((_, _, bt)) = riding.as_mut() {
+                            let reply = bt.server_move(
+                                f3(&e["pos"]),
+                                f32_of(&e["yaw"]),
+                                f32_of(&e["pitch"]),
+                            );
+                            sent.push(packet_json(&reply));
+                        }
+                    }
                     "border_center" => border.set_center(f64_of(&e["x"]), f64_of(&e["z"])),
                     "border_size" => border.set_size(f64_of(&e["size"])),
                     "border_lerp" => border.lerp_size(
@@ -768,11 +883,20 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let ents = rec.get("entities").and_then(Value::as_array);
         let mut colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
         let mut after: Vec<modern::Pusher> = Vec::new();
+        let vehicle_id = riding.as_ref().map(|r| r.0);
+        let mut boat_colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
         if let Some(ents) = ents {
             let mut before_player = true;
             for e in ents {
-                if e.get("player").is_some() {
+                // A passenger ticks with its vehicle.
+                let here = match vehicle_id {
+                    Some(v) => e["id"].as_i64() == Some(v),
+                    None => e.get("player").is_some(),
+                };
+                if here {
                     before_player = false;
+                }
+                if e.get("player").is_some() || e["id"].as_i64() == vehicle_id {
                     continue;
                 }
                 let name = e["type"].as_str().unwrap();
@@ -782,15 +906,23 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 let post = e.get("post").map(aabb_of);
                 let pre = e.get("pre").map(aabb_of);
                 let at_tick = if before_player { post } else { pre };
+                let order = e
+                    .get("query_order")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(i64::MAX);
                 if modern::collides_26_1(name)
                     && b(&e["alive"])
                     && let Some(bb) = at_tick
                 {
-                    let order = e
-                        .get("query_order")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(i64::MAX);
                     colliders.push((order, bb));
+                }
+                // A boat collides with collidable and pushable entities (canVehicleCollide).
+                if vehicle_id.is_some()
+                    && (modern::collides_26_1(name) || living)
+                    && b(&e["alive"])
+                    && let Some(bb) = at_tick
+                {
+                    boat_colliders.push((order, bb));
                 }
                 if let (Some(kind), Some(bb)) = (modern::push_kind_26_1(name, living), post) {
                     let pusher = modern::Pusher::new(f3(&e["pos"]), bb, kind);
@@ -807,7 +939,13 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let colliders: Vec<ghast_physics::math::Aabb> =
             colliders.into_iter().map(|c| c.1).collect();
         let around = modern::Surroundings::new().with_entities(&colliders);
-        gate.step_in::<V26_1, _>(&mut p, &mut x, &around, &ti, &world, compiled, &mut out);
+        if let Some((_, _, bt)) = riding.as_mut() {
+            boat_colliders.sort_by_key(|c| c.0);
+            let bc: Vec<ghast_physics::math::Aabb> = boat_colliders.iter().map(|c| c.1).collect();
+            modern::tick_boat::<V26_1, _>(bt, &mut p, &mut x, &around, &bc, &ti, &world, &mut out);
+        } else {
+            gate.step_in::<V26_1, _>(&mut p, &mut x, &around, &ti, &world, compiled, &mut out);
+        }
         if gate.is_loaded() {
             for pusher in &after {
                 modern::push_by::<V26_1, _>(&mut p, &x, &world, pusher);
@@ -832,6 +970,27 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             ));
         }
         sent.extend(out.as_slice().iter().map(packet_json));
+        match (rec.get("vehicle"), riding.as_ref()) {
+            (Some(v), Some((id, ty, bt))) => {
+                if let Some(d) = diff("vehicle", v, &boat_json(*id, ty, bt)) {
+                    if std::env::var("BOAT_DEBUG").is_ok() {
+                        eprintln!("{name} t{t}\n  exp {v}\n  act {}", boat_json(*id, ty, bt));
+                    }
+                    return Err(mm(t, d));
+                }
+            }
+            (None, None) => {}
+            (v, r) => {
+                return Err(mm(
+                    t,
+                    (
+                        "vehicle".into(),
+                        format!("{v:?}"),
+                        format!("riding {:?}", r.map(|r| r.0)),
+                    ),
+                ));
+            }
+        }
         if let Some(d) = diff(
             "state",
             &rec["state"],

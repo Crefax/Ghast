@@ -145,6 +145,15 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - **26.1 world border, moving and set**, proven against the real client (oracle `border`,
   `tests/golden/26.1/border.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): `modern::BorderState`
   (the client's tick-based lerp; `collision_border` lags it by a tick as vanilla's collision does).
+- **26.1 boats the player rides and controls**, proven against the real client (oracle `boats`,
+  `tests/golden/26.1/boats.jsonl.gz`, 112 cases; 1 M cached fuzz ticks, 0 diffs): `modern::Boat`
+  (`BoatKind`, `BoatStatus`, `board`, `server_move`) and `modern::tick_boat` — the boat's tick
+  (status, fluid pushing, floating, paddling with the previous tick's keys, collisions with blocks
+  and entities, block effects), the player's tick as a passenger and its seat on the boat, with
+  the `steer_boat`, rotation-only movement and `vehicle_move` packets in vanilla order.
+  `Packet::{MoveVehicle, PaddleBoat}`.
+- The plain 26.1 tick (`modern::tick`) compiles to the code it had in 0.4.0 again: the extensions
+  are a compile-time type (instructions per tick at or below 0.4.0's in the tick benchmarks).
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 

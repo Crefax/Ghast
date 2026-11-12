@@ -390,6 +390,12 @@ final class Recorder {
             j.field("name", "held_item_slot").field("slot", s.getSlot());
         } else if (pk instanceof ServerboundSwingPacket s) {
             j.field("name", "arm_animation").field("hand", s.getHand().ordinal());
+        } else if (pk instanceof net.minecraft.network.protocol.game.ServerboundMoveVehiclePacket v) {
+            j.field("name", "vehicle_move");
+            j.key("pos").beginArray().f64(v.position().x).f64(v.position().y).f64(v.position().z).endArray();
+            j.fieldF32("yaw", v.yRot()).fieldF32("pitch", v.xRot()).field("on_ground", v.onGround());
+        } else if (pk instanceof net.minecraft.network.protocol.game.ServerboundPaddleBoatPacket b) {
+            j.field("name", "steer_boat").field("left", b.getLeft()).field("right", b.getRight());
         } else {
             j.field("name", "other");
             j.field("class", pk.getClass().getName());
