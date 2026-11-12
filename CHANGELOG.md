@@ -6,6 +6,24 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.2 — unreleased
+
+### Added
+
+- **Minecraft 26.2 protocol (776)** in `ghast-protocol`: module `v26_2`, feature `v26_2` (on by
+  default), version table row 776 → 26.2. minecraft-data has no 26.2 data yet, so the packets are
+  generated from its 26.1 data plus a reviewed delta (`codegen/protocol/delta/776.json`: each
+  change names the vanilla 26.2 code it follows): the session id after the login profile,
+  `onlineMode` in the play `login`, the new team parameter order with an optional team colour,
+  `spectator_action` (replaces `spectate_entity`), the geyser particles, the
+  `sulfur_cube_content` component, and the 26.2 particle, component, attribute and command
+  parser ids. 487 of the 573 definitions are shared with older protocols. Packet ids are checked
+  against the 26.2 server's packet report; a capture from a vanilla 26.2 server (status, login,
+  configuration, play) decodes strictly and re-encodes byte-identically
+  (`tests/capture_26_2.rs`); example `login_26_2`.
+- `slot::v775::ComponentPatch` / `ItemStack` also hold 26.2 stacks: `read_776`, `decode_776`,
+  `decode_all_776`, `from_parts_776`, `ComponentPatch::protocol`.
+
 ## 0.4.1 — 2026-11-12
 
 ### Added

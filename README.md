@@ -87,6 +87,7 @@ planned paths with the async helpers).
 | 1.12.2 | 340 | oracle-verified, lab-tested (Paper 1.12.2 + Grim) |
 | 1.16.4 – 1.16.5 | 754 | oracle-verified, lab-tested (Paper 1.16.5 + Grim) |
 | 26.1, 26.1.1, 26.1.2 | 775 | oracle-verified (physics, crosshair, block breaking), lab-tested (Paper 26.1.2 + Grim 2.3.74) |
+| 26.2 | 776 | protocol only so far (`ghast-protocol` feature `v26_2`, checked against a vanilla 26.2 server); the client does not connect with it yet |
 
 *Oracle-verified*: the behaviour is replayed against the real client code of that version
 (26.1, 26.1.1 and 26.1.2 share one protocol number and give identical oracle records, so they

@@ -17,6 +17,9 @@ pub struct Paths {
     root: PathBuf,
     map: BTreeMap<String, String>,
     pub version: String,
+    /// Files given in memory instead of read (versions minecraft-data has no data for; see
+    /// `v26_2::synthesise`).
+    overrides: BTreeMap<String, Value>,
 }
 
 impl Paths {
@@ -33,7 +36,14 @@ impl Paths {
             root: data_root.to_owned(),
             map,
             version: version.into(),
+            overrides: BTreeMap::new(),
         })
+    }
+
+    /// These paths with `files` served from memory instead of minecraft-data.
+    pub fn with_overrides(mut self, files: BTreeMap<String, Value>) -> Paths {
+        self.overrides = files;
+        self
     }
 
     /// The `pc/<x>` directory a kind resolves to (for provenance comments).
@@ -45,6 +55,9 @@ impl Paths {
     }
 
     pub fn json(&self, kind: &str) -> R<Value> {
+        if let Some(v) = self.overrides.get(kind) {
+            return Ok(v.clone());
+        }
         let dir = self.dir(kind)?;
         load(&self.root.join(dir).join(format!("{kind}.json")))
     }
