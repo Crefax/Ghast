@@ -19,12 +19,13 @@
 //! - **Lazy NBT.** Stacks keep their NBT as raw bytes ([`ghast_protocol::nbt::RawNbt`]);
 //!   `window_items` is applied without parsing any NBT. Stack comparisons compare the bytes
 //!   and only parse when they differ (vanilla compares trees).
-//! - **26.1** has no confirms: the server applies every click and answers only the slots whose
-//!   hash (vanilla `HashedStack`) differs from its own result. A 26.1 click is never refused:
+//! - **26.1 / 26.2** have no confirms: the server applies every click and answers only the slots
+//!   whose hash (vanilla `HashedStack`) differs from its own result. A modern click is never refused:
 //!   one ghast cannot predict is sent unpredicted ([`ContainerClick::predicted`]) and the
 //!   server's corrections bring the result. Data components stay raw too
 //!   ([`ItemData::Components`]); `window_items` is applied with a structural skip
-//!   ([`Inventory::apply_raw_v26_1`]). Item facts come from Mojang's reports ([`v26_1`]).
+//!   ([`Inventory::apply_raw_modern`]). Item facts come from Mojang's reports ([`modern`]; one
+//!   implementation over per-version tables).
 //! - **Item accessors** ([`Stack::item_name`], [`Stack::max_stack_size`],
 //!   [`Stack::damage_value`], [`Stack::custom_name`], [`Stack::enchantments`], …) answer from NBT
 //!   or components, decoding only what they read.

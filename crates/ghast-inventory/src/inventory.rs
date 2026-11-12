@@ -1197,7 +1197,7 @@ impl Inventory {
 
     /// 26.1: whether the player is in creative mode (instant build): middle-click clones,
     /// clone drags, armor with the binding curse comes off, overflow vanishes. Set from the
-    /// `abilities` packet by [`Inventory::apply_raw_v26_1`] / [`Inventory::apply_v26_1`].
+    /// `abilities` packet by [`Inventory::apply_raw_modern`].
     #[cfg(modern)]
     pub fn set_creative_modern(&mut self, creative: bool) {
         self.w26.creative = creative;
@@ -1206,7 +1206,7 @@ impl Inventory {
     /// 26.1 `update_tags` (configuration `tags` or play `tags`): the body is kept and parsed
     /// at the first click in an anvil, grindstone, loom or mount screen (the item, enchantment,
     /// banner pattern and entity type tags those read). The play packet is also handled by
-    /// [`Inventory::apply_raw_v26_1`].
+    /// [`Inventory::apply_raw_modern`].
     #[cfg(modern)]
     pub fn on_update_tags_modern(&mut self, body: bytes::Bytes) {
         self.d26.set_tags_raw(body);
@@ -1570,7 +1570,7 @@ impl Inventory {
     }
 
     /// 26.1: the player's experience level (the anvil's result can only be taken with enough);
-    /// set from the `experience` packet by [`Inventory::apply_raw_v26_1`].
+    /// set from the `experience` packet by [`Inventory::apply_raw_modern`].
     #[cfg(modern)]
     pub fn set_experience_level_modern(&mut self, level: i32) {
         self.w26.xp_level = Some(level);
