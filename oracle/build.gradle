@@ -1,8 +1,8 @@
 // ghast oracle: runs the real vanilla movement code headless and writes golden vectors.
 //
 // The Minecraft version is a parameter: -Pmc=1.8.9 (default). Everything version-specific comes from
-// versions/<mc>.properties; the harness for a version lives in its own source set (src/mc_x_y_z) and is
-// compiled against the jar that `prepareVanilla` downloads and remaps into cache/<mc>/ (git-ignored).
+// versions/<mc>.properties; the harness for a version lives in its own source set (src/mc_x_y_z; modern
+// versions: the shared src/modern tree plus a per-version shim set) and is compiled against the jar that `prepareVanilla` downloads and remaps into cache/<mc>/ (git-ignored).
 //
 // Tasks:
 //   prepareVanilla   download client jar + libraries + mappings (SHA-1 checked), remap to Yarn names
@@ -22,6 +22,12 @@ def versionProps = new Properties()
 versionFile.withReader('UTF-8') { versionProps.load(it) }
 def harnessSetName = versionProps.getProperty('harness.sourceSet')
 def harnessMain = versionProps.getProperty('harness.mainClass')
+// Modern versions share one harness tree (src/<harness.shared>) and add a small per-version shim set
+// (src/<harness.sourceSet>): the shared tree is compiled once per version against that version's jar.
+def harnessShared = versionProps.getProperty('harness.shared')
+// The label the harness writes into headers and uses for tests/golden/<label> (patch releases that are
+// checked against an existing row set it to that row, e.g. 26.1.1 -> 26.1).
+def harnessLabel = versionProps.getProperty('harness.label', mcVersion)
 def cacheRoot = file('cache')
 def cacheDir = file("cache/${mcVersion}")
 def namedJar = file("cache/${mcVersion}/client-${versionProps.getProperty('mappings.to')}.jar")
@@ -55,6 +61,9 @@ sourceSets {
     setup
     common
     create(harnessSetName) {
+        if (harnessShared != null) {
+            java.srcDir("src/${harnessShared}/java")
+        }
         compileClasspath += sourceSets.common.output + vanillaFiles
         runtimeClasspath += sourceSets.common.output + vanillaFiles
     }
@@ -91,6 +100,7 @@ tasks.named("compile${harnessSetName.capitalize()}Java") {
         javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(harnessJava as int) }
         options.release = harnessJava as int
     }
+    options.compilerArgs += ['-Xmaxerrs', '2000']
 }
 
 tasks.register('oracle', JavaExec) {
@@ -108,6 +118,7 @@ tasks.register('oracle', JavaExec) {
     jvmArgs '-Duser.language=en', '-Duser.country=US', '-Duser.timezone=UTC', '-Dfile.encoding=UTF-8',
             '-Dlog4j.configurationFile=' + file('log4j2-quiet.xml').absolutePath
     systemProperty 'ghast.oracle.version', mcVersion
+    systemProperty 'ghast.oracle.label', harnessLabel
     systemProperty 'ghast.oracle.repoRoot', rootDir.parentFile.absolutePath
 }
 
@@ -135,7 +146,7 @@ tasks.register('decompile', JavaExec) {
     dependsOn prepareVanilla
     classpath = configurations.decompiler
     mainClass = 'org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler'
-    maxHeapSize = '2g'
+    maxHeapSize = '1536m'
     if (harnessLauncher != null) {
         javaLauncher = harnessLauncher
     }

@@ -17,6 +17,9 @@ cd "$(dirname "$0")"
 GRADLE=${GRADLE:-./gradlew}
 MC=${MC:-1.8.9}
 cmd=${1:-golden}
+# Golden directory: the version's own, or the row it is checked against (harness.label, e.g. 26.1.1 -> 26.1).
+LABEL=$(sed -n 's/^harness.label=//p' "versions/$MC.properties" 2>/dev/null || true)
+LABEL=${LABEL:-$MC}
 
 case "$cmd" in
   coverage|decompile|prepareVanilla)
@@ -25,7 +28,7 @@ case "$cmd" in
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     "$GRADLE" -q -Pmc="$MC" oracle --args="golden --out $tmp"
-    "$GRADLE" -q -Pmc="$MC" oracle --args="compare $tmp $(cd .. && pwd)/tests/golden/$MC" ;;
+    "$GRADLE" -q -Pmc="$MC" oracle --args="compare $tmp $(cd .. && pwd)/tests/golden/$LABEL" ;;
   golden)
     # Extra arguments (e.g. --out DIR) are passed on; without --out the set goes to tests/golden/<mc>.
     exec "$GRADLE" -q -Pmc="$MC" oracle --args="$*" ;;

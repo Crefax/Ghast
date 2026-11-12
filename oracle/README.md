@@ -62,7 +62,10 @@ oracle/
   src/mc_1_8_9/              the 1.8.9 harness (Harness, Recorder, Scenarios, Fuzz, CollisionDump, …)
   src/mc_1_12_2/             the 1.12.2 harness (same structure as 1.8.9, see "1.12.2" below)
   src/mc_1_16_5/             the 1.16.5 harness
-  src/mc_26_1/               the 26.1 harness (unobfuscated jar, Java 25 toolchain; see "26.1")
+  src/modern/                the shared modern (26.x) harness, compiled once per modern version (see
+                             "Modern versions: one shared harness")
+  src/mc_26_1/, src/mc_26_2/ the per-version shims of the modern harness (`Compat`: calls whose shape
+                             differs between versions)
   cache/                     (git-ignored) jars, libraries, mappings, remapped jar, fuzz output
 tests/golden/1.8.9/
   scenarios.jsonl.gz         hand-written scenarios
@@ -82,7 +85,24 @@ tests/golden/1.8.9/
 The version is a parameter (`MC=1.16.5 oracle/run.sh …` → `-Pmc=1.16.5`): `Setup` and `Coverage` are
 version-agnostic, a version needs `versions/<mc>.properties` + `versions/<mc>.coverage` and its own
 harness source set (`src/mc_x_y_z`) compiled against that version's named jar. Implemented: 1.8.9,
-1.16.5 (see "1.16.5" below), 1.12.2 (see "1.12.2" below) and 26.1 (see "26.1" below).
+1.16.5 (see "1.16.5" below), 1.12.2 (see "1.12.2" below), 26.1 (see "26.1" below) and 26.2 (see
+"26.2" below). The modern versions share one harness tree instead of one copy each (next section).
+
+## Modern versions: one shared harness
+
+`src/modern/` (package `ghast.oracle.modern`) is the whole harness for 26.x: every generator and
+dump. `versions/<mc>.properties` names it with `harness.shared=modern`, and `harness.sourceSet`
+names the version's shim set (`src/mc_26_1/`, `src/mc_26_2/`). Gradle compiles the shared tree plus
+that one shim set against that version's jar, so each version is checked by `javac` against its own
+classes. The shim is one class, `Compat`, with the same static methods in every version: the calls
+whose shape changed (moved or renamed classes, changed constructors, stand-ins for subclassed
+client systems). Constant holders that move between versions are avoided altogether: the harness
+looks entity types and items up by id (`Reg`), which reaches the same objects in every version.
+`harness.label` lets a patch release run against an existing row (26.1.1 and 26.1.2 write `26.1`
+headers and `verify` compares them with `tests/golden/26.1/`).
+
+The restructuring was checked by regenerating every 26.1 golden file: all 28 are content-identical
+to the ones the per-version 26.1 harness wrote, and `selftest` passes.
 
 ## How a run works (1.8.9)
 
