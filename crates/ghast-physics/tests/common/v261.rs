@@ -563,6 +563,18 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let t0 = &case.ticks[0];
     let mut p = player_of(&case.header, t0);
     let mut x = ext_of(&case.header, t0);
+    if case.header["setup"]
+        .get("ext")
+        .and_then(|e| e.get("dimension"))
+        .and_then(Value::as_str)
+        == Some("the_nether")
+    {
+        p.level = modern::LevelInfo {
+            min_y: 0,
+            height: 256,
+            fast_lava: true,
+        };
+    }
     let mm = |tick: i64, (field, expected, actual): (String, String, String)| Mismatch {
         case: name.clone(),
         tick,

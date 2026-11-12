@@ -212,7 +212,7 @@ final class Harness {
             Reflect.set(ClientPacketListener.class, listener, "levelData", levelData);
             Reflect.setInt(ClientPacketListener.class, listener, "serverChunkRadius", LOAD_DISTANCE);
             Reflect.setInt(ClientPacketListener.class, listener, "serverSimulationDistance", SIMULATION_DISTANCE);
-            level = new ClientLevel(listener, levelData, Level.OVERWORLD, overworld, LOAD_DISTANCE, SIMULATION_DISTANCE,
+            level = new ClientLevel(listener, levelData, Ext.dimensionKey(sc), Ext.dimensionType(sc), LOAD_DISTANCE, SIMULATION_DISTANCE,
                     client.levelRenderer, false, 0L, SEA_LEVEL);
             Reflect.set(ClientPacketListener.class, listener, "level", level);
             // Fixed seeds instead of time-seeded randoms (only particles and sounds draw from them).

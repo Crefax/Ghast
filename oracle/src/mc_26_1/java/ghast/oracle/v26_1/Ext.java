@@ -52,6 +52,8 @@ final class Ext {
         int riptide;
         /** It rains (the server's start-raining and rain-level game events at setup). */
         boolean raining;
+        /** Dimension type of the level ({@code the_nether}); null: the overworld. */
+        String dimension;
         /**
          * Other entities spawned at setup (after the player, so they tick after it); non-null also when
          * empty: tick records then list every other entity ({@code entities}).
@@ -101,6 +103,22 @@ final class Ext {
     record Move(int id, double x, double y, double z, float yaw, boolean onGround) implements Scenario.VersionEvent {}
 
     // ---- harness hooks -----------------------------------------------------------------------------
+
+    static net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimensionKey(Scenario sc) {
+        Setup s = of(sc);
+        return s != null && "the_nether".equals(s.dimension) ? net.minecraft.world.level.Level.NETHER
+                : net.minecraft.world.level.Level.OVERWORLD;
+    }
+
+    static net.minecraft.core.Holder<net.minecraft.world.level.dimension.DimensionType> dimensionType(Scenario sc) {
+        Setup s = of(sc);
+        if (s == null || s.dimension == null) {
+            return Harness.overworld;
+        }
+        return Harness.registries.lookupOrThrow(net.minecraft.core.registries.Registries.DIMENSION_TYPE)
+                .getOrThrow(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION_TYPE,
+                        Identifier.withDefaultNamespace(s.dimension)));
+    }
 
     /** The hand item for the use key ({@code null}: the harness's shield). */
     static ItemStack handItem(Scenario sc) {
@@ -350,6 +368,9 @@ final class Ext {
         if (s.raining) {
             j.field("raining", true);
         }
+        if (s.dimension != null) {
+            j.field("dimension", s.dimension);
+        }
         if (s.entities != null) {
             j.key("entities").beginArray();
             for (Spawn sp : s.entities) {
@@ -414,6 +435,9 @@ final class Ext {
         st.leftHanded = x.has("left_handed") && x.get("left_handed").getAsBoolean();
         st.riptide = x.has("riptide") ? x.get("riptide").getAsInt() : 0;
         st.raining = x.has("raining") && x.get("raining").getAsBoolean();
+        if (x.has("dimension")) {
+            st.dimension = x.get("dimension").getAsString();
+        }
         if (x.has("entities")) {
             st.entities = new ArrayList<>();
             for (com.google.gson.JsonElement e : x.getAsJsonArray("entities")) {

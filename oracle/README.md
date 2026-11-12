@@ -1034,6 +1034,12 @@ place in the level's own `getEntities` order around the player). Quirks:
 - The collision list found for the movement is reused for the step-up query, and auto-jump's
   obstacle search sees entity boxes before blocks.
 
+**`nether`** (4 cases + 100 fuzz): the level built with the `the_nether` dimension type
+(`setup.ext.dimension`; `Level.NETHER`): its `fast_lava` environment attribute (lava pushes with
+0.007 instead of 0.0023), build height 0-255. Cases: still and flowing lava, a fall into lava,
+the bottom and the top of the world. Fuzz (`ExtCases.netherFuzz`, cases `…_x_ne`): the
+`withExtras` case in the nether with still and flowing lava pools around the spawn.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.

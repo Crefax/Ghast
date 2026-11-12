@@ -82,6 +82,12 @@ fn entities_26_1() {
     check("entities.jsonl.gz");
 }
 
+/// The nether: fast lava flow (the dimension's fast_lava attribute), build height 0-255.
+#[test]
+fn nether_26_1() {
+    check("nether.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

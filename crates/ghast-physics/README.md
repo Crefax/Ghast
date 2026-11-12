@@ -163,7 +163,8 @@ with, in the level's `getEntities` order), `push_by` after each entity's client 
 (`push_kind_26_1`, `collides_26_1`).
 
 Not modelled: vehicles, pistons, block entities, a
-moving world border; the nether's `fast_lava` is supported only as a flag (no oracle vector yet).
+moving world border. The nether's `fast_lava` (`LevelInfo`) and build height are oracle-proven
+(`nether.jsonl.gz`).
 **Known gap, shulker boxes:** an opening shulker box collides past its cube (the lid follows the
 block entity); the tables hold the closed box. The client push-out probe also relies on every
 suffocating large shape staying inside its cube — pinned by the `ghast-data` test

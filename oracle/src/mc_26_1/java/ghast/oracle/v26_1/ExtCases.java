@@ -44,13 +44,14 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra", "riptide", "entities"};
+    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
             case "elytra" -> elytra();
             case "riptide" -> riptide();
             case "entities" -> entities();
+            case "nether" -> nether();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -60,6 +61,7 @@ final class ExtCases {
             case "elytra" -> elytraFuzz(seed, index, ticks);
             case "riptide" -> riptideFuzz(seed, index, ticks);
             case "entities" -> entitiesFuzz(seed, index, ticks);
+            case "nether" -> netherFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -560,6 +562,55 @@ final class ExtCases {
             }
         }
         sc.description += ", entities";
+        return sc;
+    }
+
+    // ---- the nether: fast lava (the dimension's fast_lava attribute), build height 0-255 ----------
+
+    private static Scenario nether(Scenario sc) {
+        Ext.setup(sc).dimension = "the_nether";
+        return sc;
+    }
+
+    static List<Scenario> nether() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        int lava = s("lava"), flowing = s("lava[level=3]"), netherrack = s("netherrack");
+        Scenario base = new Scenario("nether_lava_flow").fill(-8, 30, -8, 8, 30, 8, netherrack, 0);
+        l.add(nether(base.fill(-3, 31, -3, 3, 31, 3, lava, 0).fill(4, 31, -3, 6, 31, 3, flowing, 0))
+                .desc("walk through still and flowing lava in the nether: the stronger flow push").spawn(0.5, 31, 0.5, 90, 0)
+                .run(3, 0).run(30, FORWARD).run(20, FORWARD | JUMP));
+        Scenario fall = new Scenario("nether_lava_fall").fill(-8, 30, -8, 8, 30, 8, netherrack, 0);
+        l.add(nether(fall.fill(-3, 31, -3, 3, 32, 3, flowing, 0)).desc("fall into flowing lava from 6 blocks, swim up")
+                .spawn(0.5, 38, 0.5, 0, 0).run(30, 0).run(20, JUMP));
+        Scenario roof = new Scenario("nether_low_world").fill(-8, 0, -8, 8, 0, 8, s("bedrock"), 0);
+        l.add(nether(roof.fill(-8, 4, -8, 8, 4, 8, s("bedrock"), 0)).desc("walk and jump at the bottom of the nether (build height 0-255)")
+                .spawn(0.5, 1, 0.5, 0, 0).run(3, 0).run(20, FORWARD | JUMP));
+        Scenario top = new Scenario("nether_top").fill(-8, 254, -8, 8, 254, 8, s("bedrock"), 0);
+        l.add(nether(top).desc("jump on the highest layer (y 254-255)").spawn(0.5, 255, 0.5, 0, 0).run(3, 0).run(20, FORWARD | JUMP));
+        return l;
+    }
+
+    /**
+     * Randomized nether cases: the {@code withExtras} case in the nether dimension type (fast lava, build
+     * height 0-255), with lava pools (still and flowing) at and around the spawn. Cases get an
+     * {@code _ne} suffix.
+     */
+    static Scenario netherFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_ne");
+        copy(base, sc);
+        nether(sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x6e6574686572L);
+        int bx = (int) Math.floor(sc.x), by = (int) Math.floor(sc.y), bz = (int) Math.floor(sc.z);
+        int pools = x.range(1, 4);
+        for (int i = 0; i < pools; i++) {
+            int r = x.range(1, 4);
+            int cx = bx + x.range(-4, 4), cz = bz + x.range(-4, 4), y = by + x.range(-2, 0);
+            int level = x.chance(0.4) ? 0 : x.range(1, 7);
+            sc.fill(cx - r, y, cz - r, cx + r, y + x.range(0, 2), cz + r, s(level == 0 ? "lava" : "lava[level=" + level + "]"), 0);
+        }
+        sc.description += ", nether";
         return sc;
     }
 
