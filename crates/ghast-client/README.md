@@ -161,6 +161,12 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   components (`ghast_inventory::v26_1::item_use`: duration, `use_effects`, `food`); the server's
   entity event 9 completes a use (the client never does it itself); clicks that drop a stack
   send their swings first.
+- **Elytra and riptide** (`ghast_physics::modern::PlayerExt`): glide starts on a jump press in the
+  air with a glider equipped (`TickContext::start_gliding`, `is_gliding`), the server's own shared
+  and living entity flags, firework rockets attached to the player and riptide launches are applied
+  as the real client does; the own-entity packets are decoded only for the player's id, attached
+  rockets and mounts (no entity tracking needed). `use_item` carries the rotation of the tick's
+  movement packet.
 - **Physics** is `ghast_physics::modern` (`V26_1`), fed every movement attribute in packet order,
   effects (weaving too), abilities, teleports with all nine relative bits and their delta,
   `LpVec3` motion, explosions, server rotations (answered with a look packet), leather boots.
@@ -420,6 +426,10 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `lab/proxy-switch.sh 10`: Velocity 3.5.1 + two backends (overworld y -64.. and a datapack overworld y -128..), `/server` ten times while walking | 10/10 switches, the bot sees each backend's floor (-64 / -128), 0 flags on both backends, resident memory flat (6.0 → 4.6 MB over the switches) |
 | `lab/online-26.1.sh`: online mode + `enforce-secure-profile` against a local account stand-in | encryption + session join, signed chat, `/say`, `/me`, `/msg` accepted as secure, 0 flags; control run with `--unsigned`: chat refused ("missing profile public key") |
 | `lab/transfer.sh`: `/transfer` back to the same server twice (`--follow-transfers`) | both followed (3 logins), 0 flags |
+| `lab/elytra.sh 4`: walk off a tower, glide with a turn, rockets, land | 233 ticks gliding, 3 rockets attached and boosting, landed, 0 flags |
+| `lab/riptide.sh`: riptide III trident in the water strip, then on grass in the rain | 2 + 11 launches, 0 flags |
+| `lab/use-items.sh 26.1`: golden apple, shield, bow while walking | 0 flags |
+| `creative_probe` (creative screen: clone, place, Q, drop outside, ctrl+Q) | 6 clicks accepted, 0 corrections, 0 flags |
 
 AFK cost, `lab/bench-afk.sh` (30 s warm-up, 300 s), x86-64 WSL, one bot:
 

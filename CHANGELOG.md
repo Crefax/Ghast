@@ -144,6 +144,17 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   id and rockets), and swings when a rocket is used while gliding. `EntityAction::StartFallFlying`.
   13 oracle elytra cases replay through the engine packet for packet; `lab/elytra.sh`.
 
+- **26.1 riptide in the client**: releasing a riptide trident after at least 10 ticks in water
+  or rain launches the player like the real client (oracle-proven `modern::riptide`, along the
+  tick's look); a riptide trident has no use state out of water and rain; the rain comes from the
+  weather game events, the spin pose from the server's living entity flags. 11 oracle riptide cases
+  replay through the engine; `lab/riptide.sh`. Not known: biome precipitation (every biome counts
+  as rainy), touching an entity while spinning.
+- **26.1 inventory routing** for every predicted menu: configuration registry and tag bodies to the
+  inventory (kept raw until a screen needs them), mount screens with the entity's type and saddle /
+  body slots (from a minimal mount lookup that works without entity tracking),
+  `TickContext::anvil_rename` / `select_loom_pattern` / `select_trade`.
+
 ### Fixed
 
 - 26.1: `use_item` carried the previous tick's look instead of the rotation of the tick's
