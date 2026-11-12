@@ -123,10 +123,20 @@ fn main() {
         writeln!(out, "    ({a}, {b}, {c}),").unwrap();
     }
     writeln!(out, "];").unwrap();
-    std::fs::write("src/generated/menus_26_1.rs", out).unwrap();
+    std::fs::write(format!("src/generated/menus_{}.rs", ver_of(&path)), out).unwrap();
     eprintln!(
-        "wrote src/generated/menus_26_1.rs: {} items, {} remainders",
+        "wrote src/generated/menus_{}.rs: {} items, {} remainders",
+        ver_of(&path),
         flags.len(),
         remainders.len()
     );
+}
+
+/// `26_2` for an input under `tests/golden/26.2/`, else `26_1` (the output file's suffix).
+fn ver_of(path: &str) -> &'static str {
+    if path.contains("26.2") {
+        "26_2"
+    } else {
+        "26_1"
+    }
 }

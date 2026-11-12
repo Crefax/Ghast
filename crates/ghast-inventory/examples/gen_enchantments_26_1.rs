@@ -74,9 +74,22 @@ fn main() {
             out,
             "/// The strings of [`ENCHANTMENTS`].\npub(super) const ENCHANTMENT_TEXT: &str = {text:?};"
         );
-        std::fs::write("src/generated/enchantments_26_1.rs", out).unwrap();
+        std::fs::write(
+            format!("src/generated/enchantments_{}.rs", ver_of(&path)),
+            out,
+        )
+        .unwrap();
         eprintln!("{} enchantments", specs.len());
         return;
     }
     panic!("no enchantment registry_data line");
+}
+
+/// `26_2` for an input under `tests/golden/26.2/`, else `26_1` (the output file's suffix).
+fn ver_of(path: &str) -> &'static str {
+    if path.contains("26.2") {
+        "26_2"
+    } else {
+        "26_1"
+    }
 }
