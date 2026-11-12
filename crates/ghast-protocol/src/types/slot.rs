@@ -164,13 +164,48 @@ pub mod modern {
 /// structural skip ([`SlotComponent::skip`](crate::defs::p775::types::SlotComponent::skip))
 /// and keeps the patch as one zero-copy [`Bytes`](bytes::Bytes) slice; a
 /// component is decoded only when asked for.
-#[cfg(feature = "v26_1")]
+///
+/// 26.2 (protocol 776) has the same slot format with its own component registry (one more
+/// component type, so most type ids differ). Its stacks use the same
+/// [`ComponentPatch`](v775::ComponentPatch) and [`ItemStack`](v775::ItemStack) types, read
+/// with [`ComponentPatch::read_776`](v775::ComponentPatch::read_776) /
+/// [`ItemStack::read_776`](v775::ItemStack::read_776); the patch remembers which protocol's
+/// component codec it was read with ([`ComponentPatch::protocol`](v775::ComponentPatch::protocol)),
+/// so iteration skips with the right one. Type ids in a
+/// patch are always the ids of that protocol.
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod v775 {
     use bytes::{BufMut, Bytes, BytesMut};
 
     use crate::codec::{DecodeResult, McWrite, Reader};
+    #[cfg(feature = "v26_1")]
     use crate::defs::p775::types::SlotComponent;
     use crate::error::DecodeError;
+
+    /// The component codec a patch was read with.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    enum Codec {
+        /// Protocol 775 (26.1 - 26.1.2).
+        #[default]
+        P775,
+        /// Protocol 776 (26.2).
+        P776,
+    }
+
+    /// Skips one component (type id + value) with `codec`'s generated structural skip.
+    #[inline]
+    fn skip_one(codec: Codec, r: &mut Reader<'_>) -> DecodeResult<()> {
+        match codec {
+            #[cfg(feature = "v26_1")]
+            Codec::P775 => SlotComponent::skip(r),
+            #[cfg(feature = "v26_2")]
+            Codec::P776 => crate::defs::p776::types::SlotComponent::skip(r),
+            #[allow(unreachable_patterns)]
+            _ => Err(DecodeError::Invalid(
+                "component codec of a disabled protocol",
+            )),
+        }
+    }
 
     /// The data component patch of a stack (added components, then removed types), exactly as
     /// received.
@@ -186,6 +221,8 @@ pub mod v775 {
         /// (lookups of such types scan). Lets lookups of absent types skip the scan.
         added_mask: u128,
         removed_mask: u128,
+        /// Fits in the padding after `removed`: the struct does not grow.
+        codec: Codec,
     }
 
     /// The mask bit of a component type.
@@ -207,7 +244,10 @@ pub mod v775 {
     /// [`ComponentPatch::same_components`] for vanilla's map equality).
     impl PartialEq for ComponentPatch {
         fn eq(&self, other: &Self) -> bool {
-            self.added == other.added && self.removed == other.removed && self.bytes == other.bytes
+            self.added == other.added
+                && self.removed == other.removed
+                && self.bytes == other.bytes
+                && (self.codec == other.codec || self.bytes.is_empty())
         }
     }
 
@@ -228,10 +268,38 @@ pub mod v775 {
             removed: 0,
             added_mask: 0,
             removed_mask: 0,
+            codec: Codec::P775,
         };
 
-        /// Reads `added` components and `removed` types by skipping over them.
+        /// Reads `added` components and `removed` types (protocol 775) by skipping over them.
+        #[cfg(feature = "v26_1")]
         pub fn read(r: &mut Reader<'_>, added: i32, removed: i32) -> DecodeResult<Self> {
+            Self::read_with(Codec::P775, r, added, removed)
+        }
+
+        /// [`read`](Self::read) for protocol 776 (26.2).
+        #[cfg(feature = "v26_2")]
+        pub fn read_776(r: &mut Reader<'_>, added: i32, removed: i32) -> DecodeResult<Self> {
+            Self::read_with(Codec::P776, r, added, removed)
+        }
+
+        /// The protocol number whose component registry the type ids belong to (775 or
+        /// 776).
+        #[must_use]
+        pub fn protocol(&self) -> i32 {
+            match self.codec {
+                Codec::P775 => 775,
+                Codec::P776 => 776,
+            }
+        }
+
+        #[inline]
+        fn read_with(
+            codec: Codec,
+            r: &mut Reader<'_>,
+            added: i32,
+            removed: i32,
+        ) -> DecodeResult<Self> {
             let added_n = r.check_count(i64::from(added), 1)?;
             let removed_n = r.check_count(i64::from(removed), 1)?;
             let (Ok(added), Ok(removed)) = (u16::try_from(added_n), u16::try_from(removed_n))
@@ -242,7 +310,7 @@ pub mod v775 {
             let mut added_mask = 0u128;
             for _ in 0..added_n {
                 added_mask |= bit(r.clone().read_varint()?);
-                SlotComponent::skip(r)?;
+                skip_one(codec, r)?;
             }
             let split = (r.position() - start) as u32;
             let mut removed_mask = 0u128;
@@ -256,6 +324,7 @@ pub mod v775 {
                 removed,
                 added_mask,
                 removed_mask,
+                codec,
             })
         }
 
@@ -289,6 +358,7 @@ pub mod v775 {
                 bytes: self.bytes.slice(..self.split as usize),
                 pos: 0,
                 left: self.added,
+                codec: self.codec,
                 _p: std::marker::PhantomData,
             }
         }
@@ -327,9 +397,8 @@ pub mod v775 {
             self.iter().filter(|(t, _)| *t == ty).last().map(|(_, b)| b)
         }
 
-        /// Decodes added component `ty` with the generated type (the last one of that type).
-        #[must_use]
-        pub fn decode(&self, ty: i32) -> Option<DecodeResult<SlotComponent>> {
+        /// Byte offset of the last added component of type `ty`.
+        fn last_of(&self, ty: i32) -> Option<DecodeResult<usize>> {
             if !may_have(self.added_mask, ty) {
                 return None;
             }
@@ -341,29 +410,79 @@ pub mod v775 {
                     Ok(t) => t,
                     Err(e) => return Some(Err(e)),
                 };
-                if let Err(e) = SlotComponent::skip(&mut r) {
+                if let Err(e) = skip_one(self.codec, &mut r) {
                     return Some(Err(e));
                 }
                 if t == ty {
                     last = Some(start);
                 }
             }
-            let start = last?;
+            last.map(Ok)
+        }
+
+        /// Decodes the component at byte offset `start` with `T`.
+        fn decode_at<T: crate::codec::Decode>(&self, start: usize) -> DecodeResult<T> {
             let mut r = Reader::new(&self.bytes);
-            if let Err(e) = r.skip(start) {
-                return Some(Err(e));
+            r.skip(start)?;
+            T::decode(&mut r)
+        }
+
+        /// Decodes added component `ty` with the generated type (the last one of that type).
+        /// A patch of protocol 776 gives `Some(Err(..))`; use
+        /// [`decode_776`](Self::decode_776).
+        #[cfg(feature = "v26_1")]
+        #[must_use]
+        pub fn decode(&self, ty: i32) -> Option<DecodeResult<SlotComponent>> {
+            if self.codec != Codec::P775 {
+                return Some(Err(DecodeError::Invalid("patch of protocol 776")));
             }
-            Some(<SlotComponent as crate::codec::Decode>::decode(&mut r))
+            Some(self.last_of(ty)?.and_then(|start| self.decode_at(start)))
         }
 
         /// Decodes every added component with the generated type.
         ///
         /// # Errors
-        /// A malformed component.
+        /// A malformed component, or a patch of protocol 776.
+        #[cfg(feature = "v26_1")]
         pub fn decode_all(&self) -> DecodeResult<Vec<SlotComponent>> {
+            if self.codec != Codec::P775 {
+                return Err(DecodeError::Invalid("patch of protocol 776"));
+            }
             let mut r = Reader::new(&self.bytes);
             (0..self.added)
                 .map(|_| <SlotComponent as crate::codec::Decode>::decode(&mut r))
+                .collect()
+        }
+
+        /// [`decode`](Self::decode) for a patch of protocol 776 (26.2).
+        #[cfg(feature = "v26_2")]
+        #[must_use]
+        pub fn decode_776(
+            &self,
+            ty: i32,
+        ) -> Option<DecodeResult<crate::defs::p776::types::SlotComponent>> {
+            if self.codec != Codec::P776 {
+                return Some(Err(DecodeError::Invalid("patch of protocol 775")));
+            }
+            Some(self.last_of(ty)?.and_then(|start| self.decode_at(start)))
+        }
+
+        /// [`decode_all`](Self::decode_all) for a patch of protocol 776 (26.2).
+        ///
+        /// # Errors
+        /// A malformed component, or a patch of protocol 775.
+        #[cfg(feature = "v26_2")]
+        pub fn decode_all_776(&self) -> DecodeResult<Vec<crate::defs::p776::types::SlotComponent>> {
+            if self.codec != Codec::P776 {
+                return Err(DecodeError::Invalid("patch of protocol 775"));
+            }
+            let mut r = Reader::new(&self.bytes);
+            (0..self.added)
+                .map(|_| {
+                    <crate::defs::p776::types::SlotComponent as crate::codec::Decode>::decode(
+                        &mut r,
+                    )
+                })
                 .collect()
         }
 
@@ -400,9 +519,23 @@ pub mod v775 {
         }
 
         /// Builds a patch from `(type, value bytes)` components and removed types (tests,
-        /// creative clients).
+        /// creative clients). Type ids of protocol 775.
         #[must_use]
         pub fn from_parts(added: &[(i32, &[u8])], removed: &[i32]) -> ComponentPatch {
+            Self::from_parts_with(Codec::P775, added, removed)
+        }
+
+        /// [`from_parts`](Self::from_parts) with type ids of protocol 776 (26.2).
+        #[must_use]
+        pub fn from_parts_776(added: &[(i32, &[u8])], removed: &[i32]) -> ComponentPatch {
+            Self::from_parts_with(Codec::P776, added, removed)
+        }
+
+        fn from_parts_with(
+            codec: Codec,
+            added: &[(i32, &[u8])],
+            removed: &[i32],
+        ) -> ComponentPatch {
             let mut w = BytesMut::new();
             for (t, v) in added {
                 w.put_varint(*t);
@@ -419,6 +552,7 @@ pub mod v775 {
                 removed: removed.len() as u16,
                 added_mask: added.iter().fold(0, |m, (t, _)| m | bit(*t)),
                 removed_mask: removed.iter().fold(0, |m, t| m | bit(*t)),
+                codec,
             }
         }
     }
@@ -429,6 +563,7 @@ pub mod v775 {
         bytes: Bytes,
         pos: usize,
         left: u16,
+        codec: Codec,
         _p: std::marker::PhantomData<&'a ComponentPatch>,
     }
 
@@ -445,7 +580,7 @@ pub mod v775 {
             let mut value = r.clone();
             let ty = value.read_varint().ok()?;
             let value_start = value.position();
-            SlotComponent::skip(&mut r).ok()?;
+            skip_one(self.codec, &mut r).ok()?;
             self.pos = r.position();
             Some((ty, self.bytes.slice(value_start..self.pos)))
         }
@@ -464,7 +599,19 @@ pub mod v775 {
 
     impl ItemStack {
         /// Reads one slot; `None` for an empty one (count `<= 0`, as vanilla reads it).
+        #[cfg(feature = "v26_1")]
         pub fn read(r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
+            Self::read_with(Codec::P775, r)
+        }
+
+        /// [`read`](Self::read) for protocol 776 (26.2).
+        #[cfg(feature = "v26_2")]
+        pub fn read_776(r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
+            Self::read_with(Codec::P776, r)
+        }
+
+        #[inline]
+        fn read_with(codec: Codec, r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
             let count = r.read_varint()?;
             if count <= 0 {
                 return Ok(None);
@@ -472,7 +619,7 @@ pub mod v775 {
             let id = r.read_varint()?;
             let added = r.read_varint()?;
             let removed = r.read_varint()?;
-            let components = ComponentPatch::read(r, added, removed)?;
+            let components = ComponentPatch::read_with(codec, r, added, removed)?;
             Ok(Some(ItemStack {
                 id,
                 count,

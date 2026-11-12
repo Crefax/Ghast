@@ -5,7 +5,7 @@
 
 //! Definitions of the configuration state.
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod clientbound;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod serverbound;

@@ -7,7 +7,7 @@
 //! - [`types`], [`nbt`], [`chat`]: hand-written shared types — [`BlockPos`] with the
 //!   per-version bit layout, slots, lazily parsed NBT ([`nbt::RawNbt`]), chat JSON.
 //! - Generated packet modules per protocol version (`v1_8` = protocol 47, `v1_12_2` =
-//!   340, `v1_16_5` = 754, `v26_1` = 775), each with typed packets, one enum per state
+//!   340, `v1_16_5` = 754, `v26_1` = 775, `v26_2` = 776), each with typed packets, one enum per state
 //!   and direction, and id constants. The definitions themselves live once in [`defs`]
 //!   and are shared by every version whose code for them is identical. A [`Version`]
 //!   marker type ties a version's packet sets together so a version-agnostic layer can be
@@ -68,6 +68,10 @@ pub mod v1_16_5;
 #[cfg(feature = "v26_1")]
 #[path = "generated/v26_1/mod.rs"]
 pub mod v26_1;
+
+#[cfg(feature = "v26_2")]
+#[path = "generated/v26_2/mod.rs"]
+pub mod v26_2;
 
 pub use codec::{Decode, Encode, McWrite, Reader};
 pub use error::{DecodeError, EncodeError, FrameError};

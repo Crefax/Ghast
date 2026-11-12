@@ -14,12 +14,13 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-protocol"
 
 [features]
-default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "tokio", "libdeflate"]
+default = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "v26_2", "tokio", "libdeflate"]
 # Protocol versions (generated packet modules).
 v1_8 = []
 v1_12_2 = []
 v1_16_5 = []
 v26_1 = []
+v26_2 = []
 # Inflate/deflate whole packets with libdeflate (C, ~2.4x faster inflate than zlib-rs in
 # the `inflate_chunk` bench). Without it everything uses flate2 + zlib-rs (pure Rust).
 # Packet-id peeking for the filter always uses flate2's streaming inflater.
@@ -59,6 +60,10 @@ required-features = ["v1_8", "libdeflate"]
 [[example]]
 name = "login_26_1"
 required-features = ["v26_1"]
+
+[[example]]
+name = "login_26_2"
+required-features = ["v26_2"]
 
 [[bench]]
 name = "packets"

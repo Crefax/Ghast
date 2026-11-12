@@ -25,7 +25,7 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `query_block_nbt` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryBlockNbt<const V: i32> {
@@ -34,7 +34,7 @@ pub struct QueryBlockNbt<const V: i32> {
     /// `location`
     pub location: BlockPos,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for QueryBlockNbt<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -47,7 +47,7 @@ impl<const V: i32> Decode for QueryBlockNbt<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for QueryBlockNbt<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).transaction_id);
@@ -55,7 +55,7 @@ impl<const V: i32> Encode for QueryBlockNbt<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for QueryBlockNbt<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -144,7 +144,7 @@ impl<const V: i32> Generate for SetDifficulty<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `tab_complete` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TabComplete<const V: i32> {
@@ -153,7 +153,7 @@ pub struct TabComplete<const V: i32> {
     /// `text`
     pub text: ByteString,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for TabComplete<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -166,7 +166,7 @@ impl<const V: i32> Decode for TabComplete<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for TabComplete<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).transaction_id);
@@ -174,7 +174,7 @@ impl<const V: i32> Encode for TabComplete<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for TabComplete<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -314,7 +314,7 @@ impl<const V: i32> Generate for EditBook<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `query_entity_nbt` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryEntityNbt<const V: i32> {
@@ -323,7 +323,7 @@ pub struct QueryEntityNbt<const V: i32> {
     /// `entityId`
     pub entity_id: i32,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for QueryEntityNbt<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -336,7 +336,7 @@ impl<const V: i32> Decode for QueryEntityNbt<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for QueryEntityNbt<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).transaction_id);
@@ -344,7 +344,7 @@ impl<const V: i32> Encode for QueryEntityNbt<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for QueryEntityNbt<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -475,7 +475,7 @@ impl<const V: i32> Generate for UseEntity<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `generate_structure` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenerateStructure<const V: i32> {
@@ -486,7 +486,7 @@ pub struct GenerateStructure<const V: i32> {
     /// `keepJigsaws`
     pub keep_jigsaws: bool,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for GenerateStructure<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -501,7 +501,7 @@ impl<const V: i32> Decode for GenerateStructure<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for GenerateStructure<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).location.write(w, PositionLayout::Xzy)?;
@@ -510,7 +510,7 @@ impl<const V: i32> Encode for GenerateStructure<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for GenerateStructure<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -527,14 +527,14 @@ impl<const V: i32> Generate for GenerateStructure<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `lock_difficulty` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockDifficulty<const V: i32> {
     /// `locked`
     pub locked: bool,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for LockDifficulty<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -543,14 +543,14 @@ impl<const V: i32> Decode for LockDifficulty<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for LockDifficulty<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_bool((*self).locked);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LockDifficulty<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -647,14 +647,14 @@ impl<const V: i32> Generate for CraftRecipeRequest<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `abilities` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Abilities<const V: i32> {
     /// `flags`
     pub flags: i8,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for Abilities<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -663,14 +663,14 @@ impl<const V: i32> Decode for Abilities<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for Abilities<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i8((*self).flags);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Abilities<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -733,7 +733,7 @@ impl<const V: i32> Generate for BlockDig<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `recipe_book` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecipeBook<const V: i32> {
@@ -744,7 +744,7 @@ pub struct RecipeBook<const V: i32> {
     /// `filterActive`
     pub filter_active: bool,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for RecipeBook<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -759,7 +759,7 @@ impl<const V: i32> Decode for RecipeBook<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for RecipeBook<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).book_id);
@@ -768,7 +768,7 @@ impl<const V: i32> Encode for RecipeBook<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for RecipeBook<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -819,14 +819,14 @@ impl<const V: i32> Generate for DisplayedRecipe<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `name_item` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NameItem<const V: i32> {
     /// `name`
     pub name: ByteString,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for NameItem<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -835,14 +835,14 @@ impl<const V: i32> Decode for NameItem<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for NameItem<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).name)?;
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for NameItem<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -853,14 +853,14 @@ impl<const V: i32> Generate for NameItem<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `select_trade` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectTrade<const V: i32> {
     /// `slot`
     pub slot: i32,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for SelectTrade<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -869,14 +869,14 @@ impl<const V: i32> Decode for SelectTrade<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for SelectTrade<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).slot);
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for SelectTrade<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -932,7 +932,7 @@ impl<const V: i32> Generate for SetBeaconEffect<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `update_command_block` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateCommandBlock<const V: i32> {
@@ -945,7 +945,7 @@ pub struct UpdateCommandBlock<const V: i32> {
     /// `flags`
     pub flags: u8,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for UpdateCommandBlock<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -962,7 +962,7 @@ impl<const V: i32> Decode for UpdateCommandBlock<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for UpdateCommandBlock<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).location.write(w, PositionLayout::Xzy)?;
@@ -972,7 +972,7 @@ impl<const V: i32> Encode for UpdateCommandBlock<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for UpdateCommandBlock<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -991,7 +991,7 @@ impl<const V: i32> Generate for UpdateCommandBlock<V> {
     }
 }
 
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 /// `update_command_block_minecart` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateCommandBlockMinecart<const V: i32> {
@@ -1002,7 +1002,7 @@ pub struct UpdateCommandBlockMinecart<const V: i32> {
     /// `track_output`
     pub track_output: bool,
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for UpdateCommandBlockMinecart<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1017,7 +1017,7 @@ impl<const V: i32> Decode for UpdateCommandBlockMinecart<V> {
         })
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for UpdateCommandBlockMinecart<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).entity_id);
@@ -1026,7 +1026,7 @@ impl<const V: i32> Encode for UpdateCommandBlockMinecart<V> {
         Ok(())
     }
 }
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for UpdateCommandBlockMinecart<V> {
     fn generate(g: &mut Gen) -> Self {

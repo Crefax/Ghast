@@ -57,6 +57,10 @@ pub struct VersionSpec {
     /// Has the configuration state (1.20.2+).
     configuration: bool,
     variant_names: &'static [(&'static str, &'static str)],
+    /// Reviewed deltas (`codegen/protocol/delta/<name>.json`) applied in order on top of
+    /// the patched `data_key` protocol.json, for versions minecraft-data has no release
+    /// data for (see [`apply_delta`]).
+    deltas: &'static [&'static str],
     /// `(switch path, condition with {d}, generator hints, doc)`: presence rules that
     /// replace minecraft-data's case keys where they disagree with vanilla.
     presence: &'static [(
@@ -95,6 +99,7 @@ const VERSIONS: &[VersionSpec] = &[
         // only when the (signed) object data is > 0; minecraft-data 3.119.0 models it as
         // `{"0": void}` + default, i.e. `!= 0`, so a negative value mis-decodes there
         // (node-minecraft-protocol shares the bug; see tests/node/README.md).
+        deltas: &[],
         presence: &[(
             "play.clientbound.spawn_entity.velocity",
             "{d} > 0",
@@ -129,6 +134,7 @@ const VERSIONS: &[VersionSpec] = &[
             ("EntityMetadataValue.12", "BlockState"),
             ("EntityMetadataValue.13", "Nbt"),
         ],
+        deltas: &[],
         presence: &[],
     },
     VersionSpec {
@@ -163,6 +169,7 @@ const VERSIONS: &[VersionSpec] = &[
             ("EntityMetadataValue.17", "OptVarInt"),
             ("EntityMetadataValue.18", "Pose"),
         ],
+        deltas: &[],
         presence: &[],
     },
     VersionSpec {
@@ -178,8 +185,40 @@ const VERSIONS: &[VersionSpec] = &[
         slot: None,
         configuration: true,
         variant_names: &[],
+        deltas: &[],
         // Vanilla 26.1 (`ItemStack.createOptionalStreamCodec`) reads an item stack as
         // empty when the count is <= 0; minecraft-data 3.119.0 only treats 0 as empty.
+        presence: &[
+            (
+                "types.Slot.body",
+                "{d} > 0",
+                &["0", "1", "-1", "64"],
+                "present iff `itemCount > 0`, as vanilla reads it (minecraft-data says `!= 0`)",
+            ),
+            (
+                "types.UntrustedSlot.body",
+                "{d} > 0",
+                &["0", "1", "-1", "64"],
+                "present iff `itemCount > 0`, as vanilla reads it (minecraft-data says `!= 0`)",
+            ),
+        ],
+    },
+    VersionSpec {
+        module: "v26_2",
+        feature: "v26_2",
+        marker: "V26_2",
+        name: "26.2",
+        covers: "26.2",
+        // minecraft-data 3.119.0 has no 26.2: the 26.1 data (with its patches) plus the
+        // reviewed delta `delta/776.json`, each op checked against the vanilla 26.2 code.
+        data_key: "26.1",
+        protocol: 776,
+        layout: "Xzy",
+        slot: None,
+        configuration: true,
+        variant_names: &[],
+        deltas: &["776"],
+        // Unchanged in 26.2 (`ItemStack.createOptionalStreamCodec`): empty iff count <= 0.
         presence: &[
             (
                 "types.Slot.body",
@@ -350,6 +389,98 @@ pub fn apply_patches(data_key: &str, proto: &mut Value) {
     }
 }
 
+/// Directory of the reviewed deltas (`delta/<name>.json`).
+fn delta_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("delta")
+}
+
+/// Applies one reviewed delta file to a protocol.json.
+///
+/// A delta describes a protocol minecraft-data has no released data for as JSON-pointer
+/// ops over an older version: `replace` and `remove` assert the current value (`expect`),
+/// so a delta cannot silently apply to a base that changed; `add` inserts an object key
+/// that must not exist yet, or an array element (`-` appends). Each op carries a `why`
+/// naming the vanilla code it follows.
+pub fn apply_delta(name: &str, proto: &mut Value) {
+    let path = delta_dir().join(format!("{name}.json"));
+    let delta = read_json(&path);
+    let ops = delta["ops"].as_array().expect("delta: ops array");
+    for (i, op) in ops.iter().enumerate() {
+        let kind = op["op"].as_str().expect("delta op: op");
+        let ptr = op["path"].as_str().expect("delta op: path");
+        assert!(
+            op["why"].as_str().is_some_and(|w| !w.is_empty()),
+            "delta {name} op {i}: no why"
+        );
+        let (parent_ptr, last) = ptr.rsplit_once('/').expect("delta op: absolute path");
+        let key = last.replace("~1", "/").replace("~0", "~");
+        match kind {
+            "replace" | "remove" => {
+                let target = proto
+                    .pointer_mut(ptr)
+                    .unwrap_or_else(|| panic!("delta {name} op {i}: {ptr} does not exist"));
+                assert!(
+                    *target == op["expect"],
+                    "delta {name} op {i}: {ptr} is {target}, the delta expects {}",
+                    op["expect"]
+                );
+                if kind == "replace" {
+                    *target = op["value"].clone();
+                } else {
+                    match proto.pointer_mut(parent_ptr).unwrap() {
+                        Value::Object(m) => {
+                            m.shift_remove(&key);
+                        }
+                        Value::Array(a) => {
+                            a.remove(key.parse::<usize>().expect("array index"));
+                        }
+                        _ => panic!("delta {name} op {i}: parent of {ptr} is no container"),
+                    }
+                }
+            }
+            "add" => {
+                let parent = proto
+                    .pointer_mut(parent_ptr)
+                    .unwrap_or_else(|| panic!("delta {name} op {i}: {parent_ptr} does not exist"));
+                match parent {
+                    Value::Object(m) => {
+                        assert!(
+                            !m.contains_key(&key),
+                            "delta {name} op {i}: {ptr} exists already"
+                        );
+                        m.insert(key, op["value"].clone());
+                    }
+                    Value::Array(a) if key == "-" => a.push(op["value"].clone()),
+                    Value::Array(a) => {
+                        a.insert(
+                            key.parse::<usize>().expect("array index"),
+                            op["value"].clone(),
+                        );
+                    }
+                    _ => panic!("delta {name} op {i}: parent of {ptr} is no container"),
+                }
+            }
+            other => panic!("delta {name} op {i}: unknown op {other}"),
+        }
+    }
+}
+
+/// The protocol.json a version is generated from: minecraft-data's file for its
+/// `data_key`, the [`PATCHES`] of that key, then the version's deltas.
+fn version_proto(data_dir: &Path, paths: &Value, spec: &VersionSpec) -> (Value, String) {
+    let proto_dir = paths["pc"][spec.data_key]["protocol"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no protocol path for {}", spec.data_key));
+    let mut proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
+    apply_patches(spec.data_key, &mut proto);
+    let mut rel = format!("data/{proto_dir}/protocol.json");
+    for d in spec.deltas {
+        apply_delta(d, &mut proto);
+        rel.push_str(&format!(" + codegen/protocol/delta/{d}.json"));
+    }
+    (proto, rel)
+}
+
 /// `(protocol.json key, Rust module, State variant)`.
 const STATES: &[(&str, &str, &str)] = &[
     ("handshaking", "handshaking", "Handshaking"),
@@ -378,14 +509,16 @@ fn main() {
     let paths: Value = read_json(&data_dir.join("dataPaths.json"));
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("packets-report") {
-        let [_, data_key, report, out] = &args[..] else {
-            panic!("usage: packets-report <minecraft-data version> <packets.json> <out.tsv>");
+        let [_, protocol, report, out] = &args[..] else {
+            panic!("usage: packets-report <protocol number> <packets.json> <out.tsv>");
         };
-        let proto_dir = paths["pc"][data_key.as_str()]["protocol"]
-            .as_str()
-            .unwrap_or_else(|| panic!("no protocol path for {data_key}"));
-        let proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
-        report::write_table(&proto, &read_json(Path::new(report)), Path::new(out));
+        let protocol: i32 = protocol.parse().expect("protocol number");
+        let spec = VERSIONS
+            .iter()
+            .find(|s| s.protocol == protocol)
+            .unwrap_or_else(|| panic!("no version with protocol {protocol}"));
+        let (proto, _) = version_proto(&data_dir, &paths, spec);
+        report::write_table(spec, &proto, &read_json(Path::new(report)), Path::new(out));
         return;
     }
     let proto_versions: Value = read_json(&data_dir.join("pc/common/protocolVersions.json"));
@@ -393,12 +526,7 @@ fn main() {
 
     let mut outs = Vec::new();
     for spec in VERSIONS {
-        let proto_dir = paths["pc"][spec.data_key]["protocol"]
-            .as_str()
-            .unwrap_or_else(|| panic!("no protocol path for {}", spec.data_key));
-        let mut proto: Value = read_json(&data_dir.join(proto_dir).join("protocol.json"));
-        apply_patches(spec.data_key, &mut proto);
-        let rel = format!("data/{proto_dir}/protocol.json");
+        let (proto, rel) = version_proto(&data_dir, &paths, spec);
         outs.push(emit_version(spec, &proto, rel));
     }
     let shared = share::analyse(&outs);
@@ -1293,6 +1421,81 @@ mod tests {
             apply_patches(p.data_key, &mut proto);
             let now = proto.pointer(p.pointer).unwrap();
             assert_eq!(*now, serde_json::from_str::<Value>(p.replace).unwrap());
+        }
+    }
+
+    /// Every delta applies to its base (each `replace`/`remove` still finds the value it
+    /// expects), and the registry mappers of delta 776 equal the 26.2 server's registries
+    /// report when that is in the git-ignored cache
+    /// (`.cache/mojang/26.2/generated/reports/registries.json`).
+    #[test]
+    fn deltas_apply_and_match_the_registry_report() {
+        let root = workspace_root();
+        let data = root
+            .join(".cache/minecraft-data")
+            .join(MCDATA_VERSION)
+            .join("package/minecraft-data/data");
+        let Ok(paths) = std::fs::read_to_string(data.join("dataPaths.json")) else {
+            eprintln!("skipped: no minecraft-data cache");
+            return;
+        };
+        let paths: Value = serde_json::from_str(&paths).unwrap();
+        for spec in VERSIONS.iter().filter(|s| !s.deltas.is_empty()) {
+            let (proto, _) = version_proto(&data, &paths, spec);
+            if spec.protocol != 776 {
+                continue;
+            }
+            let Ok(reg) = std::fs::read_to_string(
+                root.join(".cache/mojang/26.2/generated/reports/registries.json"),
+            ) else {
+                eprintln!("skipped: no 26.2 registries report");
+                continue;
+            };
+            let reg: Value = serde_json::from_str(&reg).unwrap();
+            let ids = |name: &str| -> Vec<String> {
+                let e = reg[name]["entries"].as_object().unwrap();
+                let mut v: Vec<(i64, String)> = e
+                    .iter()
+                    .map(|(k, v)| (v["protocol_id"].as_i64().unwrap(), k.clone()))
+                    .collect();
+                v.sort();
+                v.into_iter().map(|(_, k)| k).collect()
+            };
+            let mapping = |ptr: &str| -> Vec<String> {
+                let m = proto.pointer(ptr).unwrap().as_object().unwrap();
+                (0..m.len())
+                    .map(|i| m[&i.to_string()].as_str().unwrap().to_string())
+                    .collect()
+            };
+            let bare = |v: Vec<String>| -> Vec<String> {
+                v.into_iter()
+                    .map(|k| k.trim_start_matches("minecraft:").to_string())
+                    .collect()
+            };
+            assert_eq!(
+                mapping("/types/Particle/1/0/type/1/mappings"),
+                bare(ids("minecraft:particle_type"))
+            );
+            assert_eq!(
+                mapping("/types/SlotComponentType/1/mappings"),
+                bare(ids("minecraft:data_component_type"))
+            );
+            // Attribute labels keep minecraft-data's prefixes (`generic.armor`).
+            let attrs = mapping(
+                "/play/toClient/types/packet_entity_update_attributes/1/1/type/1/type/1/0/type/1/mappings",
+            );
+            let want = bare(ids("minecraft:attribute"));
+            assert_eq!(attrs.len(), want.len());
+            for (a, w) in attrs.iter().zip(&want) {
+                assert_eq!(a.rsplit('.').next().unwrap(), w);
+            }
+            // Parser labels: minecraft-data calls nbt_compound_tag `minecraft:nbt`.
+            let parsers = mapping("/types/command_node/1/3/type/1/fields/2/1/1/type/1/mappings");
+            let want = ids("minecraft:command_argument_type");
+            assert_eq!(parsers.len(), want.len());
+            for (a, w) in parsers.iter().zip(&want) {
+                assert!(a == w || (a == "minecraft:nbt" && w == "minecraft:nbt_compound_tag"));
+            }
         }
     }
 }

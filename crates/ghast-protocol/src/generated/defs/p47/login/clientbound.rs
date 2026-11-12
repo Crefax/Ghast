@@ -29,7 +29,8 @@ use bytes::{BufMut, Bytes, BytesMut};
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `disconnect` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +42,8 @@ pub struct Disconnect<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Disconnect<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -55,7 +57,8 @@ impl<const V: i32> Decode for Disconnect<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Disconnect<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -67,7 +70,8 @@ impl<const V: i32> Encode for Disconnect<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Disconnect<V> {
@@ -180,7 +184,8 @@ impl<const V: i32> Generate for Success<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `compress` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
@@ -192,7 +197,8 @@ pub struct Compress<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Compress<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -206,7 +212,8 @@ impl<const V: i32> Decode for Compress<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Compress<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -218,7 +225,8 @@ impl<const V: i32> Encode for Compress<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Compress<V> {

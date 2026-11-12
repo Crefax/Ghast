@@ -63,7 +63,8 @@ impl<const V: i32> Generate for LoginStart<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `encryption_begin` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
@@ -77,7 +78,8 @@ pub struct EncryptionBegin<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for EncryptionBegin<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -95,7 +97,8 @@ impl<const V: i32> Decode for EncryptionBegin<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for EncryptionBegin<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -108,7 +111,8 @@ impl<const V: i32> Encode for EncryptionBegin<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EncryptionBegin<V> {

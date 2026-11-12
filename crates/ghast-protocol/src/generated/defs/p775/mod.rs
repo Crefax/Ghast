@@ -5,11 +5,11 @@
 
 //! Definitions first used by protocol 775 (Minecraft 26.1 – 26.1.2).
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod configuration;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod login;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod play;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod types;

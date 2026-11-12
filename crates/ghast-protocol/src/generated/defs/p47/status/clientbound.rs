@@ -29,7 +29,8 @@ use bytes::{BufMut, Bytes, BytesMut};
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `server_info` (clientbound status).
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +42,8 @@ pub struct ServerInfo<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for ServerInfo<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -55,7 +57,8 @@ impl<const V: i32> Decode for ServerInfo<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for ServerInfo<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -67,7 +70,8 @@ impl<const V: i32> Encode for ServerInfo<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for ServerInfo<V> {
@@ -83,7 +87,8 @@ impl<const V: i32> Generate for ServerInfo<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `ping` (clientbound status).
 #[derive(Debug, Clone, PartialEq)]
@@ -95,7 +100,8 @@ pub struct Ping<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Ping<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -109,7 +115,8 @@ impl<const V: i32> Decode for Ping<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Ping<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -121,7 +128,8 @@ impl<const V: i32> Encode for Ping<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Ping<V> {

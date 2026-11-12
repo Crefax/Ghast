@@ -25,7 +25,7 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `login_start` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginStart<const V: i32> {
@@ -34,7 +34,7 @@ pub struct LoginStart<const V: i32> {
     /// `playerUUID`
     pub player_uuid: Uuid,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for LoginStart<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -47,7 +47,7 @@ impl<const V: i32> Decode for LoginStart<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for LoginStart<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).username)?;
@@ -55,7 +55,7 @@ impl<const V: i32> Encode for LoginStart<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LoginStart<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -70,23 +70,23 @@ impl<const V: i32> Generate for LoginStart<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `login_acknowledged` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoginAcknowledged<const V: i32> {}
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for LoginAcknowledged<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({ Self {} })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for LoginAcknowledged<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for LoginAcknowledged<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -94,7 +94,7 @@ impl<const V: i32> Generate for LoginAcknowledged<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `cookie_response` (serverbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CookieResponse<const V: i32> {
@@ -103,7 +103,7 @@ pub struct CookieResponse<const V: i32> {
     /// `value`
     pub value: Option<Bytes>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for CookieResponse<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -117,7 +117,7 @@ impl<const V: i32> Decode for CookieResponse<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for CookieResponse<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).key)?;
@@ -131,7 +131,7 @@ impl<const V: i32> Encode for CookieResponse<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CookieResponse<V> {
     fn generate(g: &mut Gen) -> Self {

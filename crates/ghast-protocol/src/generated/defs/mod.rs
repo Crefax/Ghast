@@ -12,19 +12,28 @@
 //! modules (`crate::v1_8`, …): they alias and re-export what they use from here.
 
 /// Definitions first used by protocol 340 (Minecraft 1.12.2).
-#[cfg(any(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
 pub mod p340;
 /// Definitions first used by protocol 47 (Minecraft 1.8 – 1.8.9).
 #[cfg(any(
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 pub mod p47;
 /// Definitions first used by protocol 754 (Minecraft 1.16.4 – 1.16.5).
-#[cfg(any(feature = "v1_16_5", feature = "v26_1"))]
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 pub mod p754;
 /// Definitions first used by protocol 775 (Minecraft 26.1 – 26.1.2).
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod p775;
+/// Definitions first used by protocol 776 (Minecraft 26.2).
+#[cfg(feature = "v26_2")]
+pub mod p776;

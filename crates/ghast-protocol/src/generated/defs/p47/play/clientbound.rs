@@ -313,7 +313,8 @@ impl<const V: i32> Generate for SpawnPosition<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `update_health` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -329,7 +330,8 @@ pub struct UpdateHealth<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for UpdateHealth<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -349,7 +351,8 @@ impl<const V: i32> Decode for UpdateHealth<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for UpdateHealth<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -363,7 +366,8 @@ impl<const V: i32> Encode for UpdateHealth<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for UpdateHealth<V> {
@@ -596,7 +600,8 @@ impl<const V: i32> Generate for Bed<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `animation` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -610,7 +615,8 @@ pub struct Animation<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Animation<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -628,7 +634,8 @@ impl<const V: i32> Decode for Animation<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Animation<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -641,7 +648,8 @@ impl<const V: i32> Encode for Animation<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Animation<V> {
@@ -1535,7 +1543,8 @@ impl<const V: i32> Generate for EntityVelocity<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `entity_destroy` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -1547,7 +1556,8 @@ pub struct EntityDestroy<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for EntityDestroy<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -1571,7 +1581,8 @@ impl<const V: i32> Decode for EntityDestroy<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for EntityDestroy<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -1586,7 +1597,8 @@ impl<const V: i32> Encode for EntityDestroy<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EntityDestroy<V> {
@@ -1709,7 +1721,8 @@ impl<const V: i32> Generate for RelEntityMove<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `entity_look` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -1727,7 +1740,8 @@ pub struct EntityLook<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for EntityLook<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -1749,7 +1763,8 @@ impl<const V: i32> Decode for EntityLook<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for EntityLook<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -1764,7 +1779,8 @@ impl<const V: i32> Encode for EntityLook<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EntityLook<V> {
@@ -1948,7 +1964,8 @@ impl<const V: i32> Generate for EntityTeleport<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `entity_head_rotation` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -1962,7 +1979,8 @@ pub struct EntityHeadRotation<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for EntityHeadRotation<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -1980,7 +1998,8 @@ impl<const V: i32> Decode for EntityHeadRotation<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for EntityHeadRotation<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -1993,7 +2012,8 @@ impl<const V: i32> Encode for EntityHeadRotation<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EntityHeadRotation<V> {
@@ -2013,7 +2033,8 @@ impl<const V: i32> Generate for EntityHeadRotation<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `entity_status` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -2027,7 +2048,8 @@ pub struct EntityStatus<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for EntityStatus<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -2045,7 +2067,8 @@ impl<const V: i32> Decode for EntityStatus<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for EntityStatus<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -2058,7 +2081,8 @@ impl<const V: i32> Encode for EntityStatus<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EntityStatus<V> {
@@ -2628,7 +2652,8 @@ impl<const V: i32> Generate for RemoveEntityEffect<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `experience` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -2644,7 +2669,8 @@ pub struct Experience<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Experience<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -2664,7 +2690,8 @@ impl<const V: i32> Decode for Experience<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Experience<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -2678,7 +2705,8 @@ impl<const V: i32> Encode for Experience<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Experience<V> {
@@ -4930,7 +4958,8 @@ impl<const V: i32> Generate for PlayerInfo<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `abilities` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -4946,7 +4975,8 @@ pub struct Abilities<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Abilities<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -4966,7 +4996,8 @@ impl<const V: i32> Decode for Abilities<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Abilities<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -4980,7 +5011,8 @@ impl<const V: i32> Encode for Abilities<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Abilities<V> {
@@ -5528,7 +5560,8 @@ impl<const V: i32> Generate for ScoreboardTeam<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `custom_payload` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -5542,7 +5575,8 @@ pub struct CustomPayload<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for CustomPayload<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -5560,7 +5594,8 @@ impl<const V: i32> Decode for CustomPayload<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for CustomPayload<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -5573,7 +5608,8 @@ impl<const V: i32> Encode for CustomPayload<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CustomPayload<V> {
@@ -5837,7 +5873,8 @@ impl<const V: i32> Generate for CombatEvent<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `camera` (clientbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -5849,7 +5886,8 @@ pub struct Camera<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Camera<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -5863,7 +5901,8 @@ impl<const V: i32> Decode for Camera<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Camera<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -5875,7 +5914,8 @@ impl<const V: i32> Encode for Camera<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Camera<V> {

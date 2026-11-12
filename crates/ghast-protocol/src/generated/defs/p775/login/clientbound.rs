@@ -25,7 +25,7 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `encryption_begin` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncryptionBegin<const V: i32> {
@@ -38,7 +38,7 @@ pub struct EncryptionBegin<const V: i32> {
     /// `shouldAuthenticate`
     pub should_authenticate: bool,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for EncryptionBegin<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -55,7 +55,7 @@ impl<const V: i32> Decode for EncryptionBegin<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for EncryptionBegin<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).server_id)?;
@@ -65,7 +65,7 @@ impl<const V: i32> Encode for EncryptionBegin<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for EncryptionBegin<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -84,7 +84,7 @@ impl<const V: i32> Generate for EncryptionBegin<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuccessProperties {
@@ -198,14 +198,14 @@ impl<const V: i32> Generate for Success<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `cookie_request` (clientbound login).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CookieRequest<const V: i32> {
     /// `cookie`
     pub cookie: ByteString,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for CookieRequest<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -214,14 +214,14 @@ impl<const V: i32> Decode for CookieRequest<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for CookieRequest<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).cookie)?;
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CookieRequest<V> {
     fn generate(g: &mut Gen) -> Self {

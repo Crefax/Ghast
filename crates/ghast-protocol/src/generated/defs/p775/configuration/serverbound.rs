@@ -25,11 +25,11 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SettingsParticleStatus(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SettingsParticleStatus {
     /// `all`
     pub const ALL: Self = Self(0);
@@ -47,7 +47,7 @@ impl SettingsParticleStatus {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SettingsParticleStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -57,7 +57,7 @@ impl std::fmt::Debug for SettingsParticleStatus {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `settings` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings<const V: i32> {
@@ -80,7 +80,7 @@ pub struct Settings<const V: i32> {
     /// `particleStatus`
     pub particle_status: crate::defs::p775::configuration::serverbound::SettingsParticleStatus,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for Settings<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -109,7 +109,7 @@ impl<const V: i32> Decode for Settings<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for Settings<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).locale)?;
@@ -124,7 +124,7 @@ impl<const V: i32> Encode for Settings<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Settings<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -155,7 +155,7 @@ impl<const V: i32> Generate for Settings<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `cookie_response` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CookieResponse<const V: i32> {
@@ -164,7 +164,7 @@ pub struct CookieResponse<const V: i32> {
     /// `value`
     pub value: Option<Bytes>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for CookieResponse<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -178,7 +178,7 @@ impl<const V: i32> Decode for CookieResponse<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for CookieResponse<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).key)?;
@@ -192,7 +192,7 @@ impl<const V: i32> Encode for CookieResponse<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CookieResponse<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -204,7 +204,7 @@ impl<const V: i32> Generate for CookieResponse<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `custom_payload` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomPayload<const V: i32> {
@@ -213,7 +213,7 @@ pub struct CustomPayload<const V: i32> {
     /// `data`
     pub data: Bytes,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for CustomPayload<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -226,7 +226,7 @@ impl<const V: i32> Decode for CustomPayload<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for CustomPayload<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).channel)?;
@@ -234,7 +234,7 @@ impl<const V: i32> Encode for CustomPayload<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CustomPayload<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -249,23 +249,23 @@ impl<const V: i32> Generate for CustomPayload<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `finish_configuration` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FinishConfiguration<const V: i32> {}
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for FinishConfiguration<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({ Self {} })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for FinishConfiguration<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for FinishConfiguration<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -273,14 +273,14 @@ impl<const V: i32> Generate for FinishConfiguration<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `keep_alive` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeepAlive<const V: i32> {
     /// `keepAliveId`
     pub keep_alive_id: i64,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for KeepAlive<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -289,14 +289,14 @@ impl<const V: i32> Decode for KeepAlive<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for KeepAlive<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i64((*self).keep_alive_id);
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for KeepAlive<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -307,14 +307,14 @@ impl<const V: i32> Generate for KeepAlive<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `pong` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pong<const V: i32> {
     /// `id`
     pub id: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for Pong<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -323,14 +323,14 @@ impl<const V: i32> Decode for Pong<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for Pong<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i32((*self).id);
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Pong<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -341,7 +341,7 @@ impl<const V: i32> Generate for Pong<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `resource_pack_receive` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourcePackReceive<const V: i32> {
@@ -350,7 +350,7 @@ pub struct ResourcePackReceive<const V: i32> {
     /// `result`
     pub result: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for ResourcePackReceive<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -363,7 +363,7 @@ impl<const V: i32> Decode for ResourcePackReceive<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for ResourcePackReceive<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_uuid(&(*self).uuid);
@@ -371,7 +371,7 @@ impl<const V: i32> Encode for ResourcePackReceive<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for ResourcePackReceive<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -386,7 +386,7 @@ impl<const V: i32> Generate for ResourcePackReceive<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectKnownPacksPacks {
@@ -398,14 +398,14 @@ pub struct SelectKnownPacksPacks {
     pub version: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `select_known_packs` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectKnownPacks<const V: i32> {
     /// `packs`
     pub packs: Vec<crate::defs::p775::configuration::serverbound::SelectKnownPacksPacks>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for SelectKnownPacks<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -433,7 +433,7 @@ impl<const V: i32> Decode for SelectKnownPacks<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for SelectKnownPacks<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_len_varint((*self).packs.len())?;
@@ -445,7 +445,7 @@ impl<const V: i32> Encode for SelectKnownPacks<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for SelectKnownPacks<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -472,7 +472,7 @@ impl<const V: i32> Generate for SelectKnownPacks<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `custom_click_action` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomClickAction<const V: i32> {
@@ -481,7 +481,7 @@ pub struct CustomClickAction<const V: i32> {
     /// `nbt`
     pub nbt: Option<AnonNbt>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for CustomClickAction<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -495,7 +495,7 @@ impl<const V: i32> Decode for CustomClickAction<V> {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for CustomClickAction<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).id)?;
@@ -509,7 +509,7 @@ impl<const V: i32> Encode for CustomClickAction<V> {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CustomClickAction<V> {
     fn generate(g: &mut Gen) -> Self {
@@ -521,23 +521,23 @@ impl<const V: i32> Generate for CustomClickAction<V> {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// `accept_code_of_conduct` (serverbound configuration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AcceptCodeOfConduct<const V: i32> {}
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Decode for AcceptCodeOfConduct<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({ Self {} })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl<const V: i32> Encode for AcceptCodeOfConduct<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for AcceptCodeOfConduct<V> {
     fn generate(g: &mut Gen) -> Self {

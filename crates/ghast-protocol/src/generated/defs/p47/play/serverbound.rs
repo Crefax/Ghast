@@ -524,7 +524,8 @@ impl<const V: i32> Generate for BlockPlace<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `held_item_slot` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -536,7 +537,8 @@ pub struct HeldItemSlot<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for HeldItemSlot<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -550,7 +552,8 @@ impl<const V: i32> Decode for HeldItemSlot<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for HeldItemSlot<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -562,7 +565,8 @@ impl<const V: i32> Encode for HeldItemSlot<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for HeldItemSlot<V> {
@@ -1308,7 +1312,8 @@ impl<const V: i32> Generate for ClientCommand<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `custom_payload` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -1322,7 +1327,8 @@ pub struct CustomPayload<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for CustomPayload<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -1340,7 +1346,8 @@ impl<const V: i32> Decode for CustomPayload<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for CustomPayload<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -1353,7 +1360,8 @@ impl<const V: i32> Encode for CustomPayload<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for CustomPayload<V> {
@@ -1373,7 +1381,8 @@ impl<const V: i32> Generate for CustomPayload<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 /// `spectate` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
@@ -1385,7 +1394,8 @@ pub struct Spectate<const V: i32> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Decode for Spectate<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
@@ -1399,7 +1409,8 @@ impl<const V: i32> Decode for Spectate<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 impl<const V: i32> Encode for Spectate<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
@@ -1411,7 +1422,8 @@ impl<const V: i32> Encode for Spectate<V> {
     feature = "v1_8",
     feature = "v1_12_2",
     feature = "v1_16_5",
-    feature = "v26_1"
+    feature = "v26_1",
+    feature = "v26_2"
 ))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for Spectate<V> {

@@ -25,11 +25,11 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ServerLinkType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl ServerLinkType {
     /// `bug_report`
     pub const BUG_REPORT: Self = Self(0);
@@ -68,7 +68,7 @@ impl ServerLinkType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for ServerLinkType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -431,7 +431,7 @@ impl std::fmt::Debug for SlotComponentType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviousMessages {
@@ -441,7 +441,7 @@ pub struct PreviousMessages {
     pub signature: Option<Bytes>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatSessionPublicKey {
@@ -453,7 +453,7 @@ pub struct ChatSessionPublicKey {
     pub key_signature: Bytes,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatSession {
@@ -463,11 +463,11 @@ pub struct ChatSession {
     pub public_key: crate::defs::p775::types::ChatSessionPublicKey,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SoundSource(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SoundSource {
     /// `master`
     pub const MASTER: Self = Self(0);
@@ -509,7 +509,7 @@ impl SoundSource {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SoundSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -519,11 +519,11 @@ impl std::fmt::Debug for SoundSource {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DebugSubscriptionDataType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl DebugSubscriptionDataType {
     /// `DedicatedServerTickTime`
     pub const DEDICATED_SERVER_TICK_TIME: Self = Self(0);
@@ -580,7 +580,7 @@ impl DebugSubscriptionDataType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for DebugSubscriptionDataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -590,7 +590,7 @@ impl std::fmt::Debug for DebugSubscriptionDataType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArmorTrimMaterialOverrideArmorAssets {
@@ -600,7 +600,7 @@ pub struct ArmorTrimMaterialOverrideArmorAssets {
     pub value: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ArmorTrimMaterial`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArmorTrimMaterial {
@@ -611,7 +611,7 @@ pub struct ArmorTrimMaterial {
     /// `description`
     pub description: AnonNbt,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ArmorTrimMaterial {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -643,7 +643,7 @@ impl Decode for ArmorTrimMaterial {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ArmorTrimMaterial {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).asset_base)?;
@@ -656,7 +656,7 @@ impl Encode for ArmorTrimMaterial {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ArmorTrimMaterial {
     fn generate(g: &mut Gen) -> Self {
@@ -687,7 +687,7 @@ impl Generate for ArmorTrimMaterial {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ArmorTrimPattern`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArmorTrimPattern {
@@ -698,7 +698,7 @@ pub struct ArmorTrimPattern {
     /// `decal`
     pub decal: bool,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ArmorTrimPattern {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -713,7 +713,7 @@ impl Decode for ArmorTrimPattern {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ArmorTrimPattern {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).asset_id)?;
@@ -722,7 +722,7 @@ impl Encode for ArmorTrimPattern {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ArmorTrimPattern {
     fn generate(g: &mut Gen) -> Self {
@@ -739,7 +739,7 @@ impl Generate for ArmorTrimPattern {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `BannerPattern`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BannerPattern {
@@ -748,7 +748,7 @@ pub struct BannerPattern {
     /// `translationKey`
     pub translation_key: ByteString,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for BannerPattern {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -761,7 +761,7 @@ impl Decode for BannerPattern {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for BannerPattern {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).asset_id)?;
@@ -769,7 +769,7 @@ impl Encode for BannerPattern {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for BannerPattern {
     fn generate(g: &mut Gen) -> Self {
@@ -784,7 +784,7 @@ impl Generate for BannerPattern {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `BannerPatternLayer`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BannerPatternLayer {
@@ -793,7 +793,7 @@ pub struct BannerPatternLayer {
     /// `colorId`
     pub color_id: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for BannerPatternLayer {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -815,7 +815,7 @@ impl Decode for BannerPatternLayer {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for BannerPatternLayer {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match &(*self).pattern {
@@ -834,7 +834,7 @@ impl Encode for BannerPatternLayer {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for BannerPatternLayer {
     fn generate(g: &mut Gen) -> Self {
@@ -856,11 +856,11 @@ impl Generate for BannerPatternLayer {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DamageTypeDataScaling(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl DamageTypeDataScaling {
     /// `never`
     pub const NEVER: Self = Self(0);
@@ -878,7 +878,7 @@ impl DamageTypeDataScaling {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for DamageTypeDataScaling {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -888,11 +888,11 @@ impl std::fmt::Debug for DamageTypeDataScaling {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DamageTypeDataEffects(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl DamageTypeDataEffects {
     /// `hurt`
     pub const HURT: Self = Self(0);
@@ -919,7 +919,7 @@ impl DamageTypeDataEffects {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for DamageTypeDataEffects {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -929,11 +929,11 @@ impl std::fmt::Debug for DamageTypeDataEffects {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DamageTypeDataDeathMessageType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl DamageTypeDataDeathMessageType {
     /// `default`
     pub const DEFAULT: Self = Self(0);
@@ -951,7 +951,7 @@ impl DamageTypeDataDeathMessageType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for DamageTypeDataDeathMessageType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -961,7 +961,7 @@ impl std::fmt::Debug for DamageTypeDataDeathMessageType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `DamageTypeData`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DamageTypeData {
@@ -976,7 +976,7 @@ pub struct DamageTypeData {
     /// `deathMessageType`
     pub death_message_type: crate::defs::p775::types::DamageTypeDataDeathMessageType,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for DamageTypeData {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -995,7 +995,7 @@ impl Decode for DamageTypeData {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for DamageTypeData {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).msg_id)?;
@@ -1006,7 +1006,7 @@ impl Encode for DamageTypeData {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for DamageTypeData {
     fn generate(g: &mut Gen) -> Self {
@@ -1126,7 +1126,7 @@ impl Generate for DataComponentMatchers {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugStructureInfoPieces {
@@ -1138,7 +1138,7 @@ pub struct DebugStructureInfoPieces {
     pub is_start: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `DebugStructureInfo`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugStructureInfo {
@@ -1149,7 +1149,7 @@ pub struct DebugStructureInfo {
     /// `pieces`
     pub pieces: Vec<crate::defs::p775::types::DebugStructureInfoPieces>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for DebugStructureInfo {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1183,7 +1183,7 @@ impl Decode for DebugStructureInfo {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for DebugStructureInfo {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).bounding_box_min.write(w, PositionLayout::Xzy)?;
@@ -1197,7 +1197,7 @@ impl Encode for DebugStructureInfo {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for DebugStructureInfo {
     fn generate(g: &mut Gen) -> Self {
@@ -1230,7 +1230,7 @@ impl Generate for DebugStructureInfo {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueBees {
@@ -1244,7 +1244,7 @@ pub struct DebugSubscriptionEventValueBees {
     pub blacklisted_hives: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueBrains {
@@ -1278,7 +1278,7 @@ pub struct DebugSubscriptionEventValueBrains {
     pub potential_pois: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueBreezes {
@@ -1288,7 +1288,7 @@ pub struct DebugSubscriptionEventValueBreezes {
     pub jump_target: Option<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueGoalSelectors {
@@ -1300,7 +1300,7 @@ pub struct DebugSubscriptionEventValueGoalSelectors {
     pub name: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueEntityPaths {
@@ -1310,7 +1310,7 @@ pub struct DebugSubscriptionEventValueEntityPaths {
     pub max_node_distance: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueEntityBlockIntersections {
@@ -1318,7 +1318,7 @@ pub struct DebugSubscriptionEventValueEntityBlockIntersections {
     pub id: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueBeeHives {
@@ -1332,7 +1332,7 @@ pub struct DebugSubscriptionEventValueBeeHives {
     pub sedated: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValuePois {
@@ -1344,7 +1344,7 @@ pub struct DebugSubscriptionEventValuePois {
     pub free_ticket_count: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueRedstoneWireOrientations {
@@ -1352,7 +1352,7 @@ pub struct DebugSubscriptionEventValueRedstoneWireOrientations {
     pub index: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueRaids {
@@ -1360,7 +1360,7 @@ pub struct DebugSubscriptionEventValueRaids {
     pub positions: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueStructures {
@@ -1368,7 +1368,7 @@ pub struct DebugSubscriptionEventValueStructures {
     pub structures: Vec<crate::defs::p775::types::DebugStructureInfo>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueGameEventListeners {
@@ -1376,7 +1376,7 @@ pub struct DebugSubscriptionEventValueGameEventListeners {
     pub listener_radius: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueNeighborUpdates {
@@ -1384,7 +1384,7 @@ pub struct DebugSubscriptionEventValueNeighborUpdates {
     pub pos: BlockPos,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEventValueGameEvents {
@@ -1394,7 +1394,7 @@ pub struct DebugSubscriptionEventValueGameEvents {
     pub pos: crate::defs::p775::types::Vec3f64,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DebugSubscriptionEventValue {
@@ -1438,7 +1438,7 @@ pub enum DebugSubscriptionEventValue {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `DebugSubscriptionEvent`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionEvent {
@@ -1447,7 +1447,7 @@ pub struct DebugSubscriptionEvent {
     /// `value`
     pub value: crate::defs::p775::types::DebugSubscriptionEventValue,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for DebugSubscriptionEvent {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -1724,7 +1724,7 @@ impl Decode for DebugSubscriptionEvent {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for DebugSubscriptionEvent {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).r#type.0);
@@ -1963,7 +1963,7 @@ impl Encode for DebugSubscriptionEvent {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for DebugSubscriptionEvent {
     fn generate(g: &mut Gen) -> Self {
@@ -2203,7 +2203,7 @@ impl Generate for DebugSubscriptionEvent {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadBees {
@@ -2217,7 +2217,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadBees {
     pub blacklisted_hives: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadBrains {
@@ -2251,7 +2251,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadBrains {
     pub potential_pois: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadBreezes {
@@ -2261,7 +2261,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadBreezes {
     pub jump_target: Option<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadGoalSelectorsGoals {
@@ -2273,7 +2273,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadGoalSelectorsGoals {
     pub name: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadGoalSelectors {
@@ -2282,7 +2282,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadGoalSelectors {
         Vec<crate::defs::p775::types::DebugSubscriptionUpdateBodyDefaultPayloadGoalSelectorsGoals>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadEntityPaths {
@@ -2292,7 +2292,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadEntityPaths {
     pub max_node_distance: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadEntityBlockIntersections {
@@ -2300,7 +2300,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadEntityBlockIntersections {
     pub id: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadBeeHives {
@@ -2314,7 +2314,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadBeeHives {
     pub sedated: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadPois {
@@ -2326,7 +2326,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadPois {
     pub free_ticket_count: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadRedstoneWireOrientations {
@@ -2334,7 +2334,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadRedstoneWireOrientations {
     pub index: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadRaids {
@@ -2342,7 +2342,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadRaids {
     pub positions: Vec<BlockPos>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadStructures {
@@ -2350,7 +2350,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadStructures {
     pub structures: Vec<crate::defs::p775::types::DebugStructureInfo>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadGameEventListeners {
@@ -2358,7 +2358,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadGameEventListeners {
     pub listener_radius: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadNeighborUpdates {
@@ -2366,7 +2366,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadNeighborUpdates {
     pub pos: BlockPos,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefaultPayloadGameEvents {
@@ -2376,7 +2376,7 @@ pub struct DebugSubscriptionUpdateBodyDefaultPayloadGameEvents {
     pub pos: crate::defs::p775::types::Vec3f64,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DebugSubscriptionUpdateBodyDefaultPayload {
@@ -2424,7 +2424,7 @@ pub enum DebugSubscriptionUpdateBodyDefaultPayload {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdateBodyDefault {
@@ -2432,7 +2432,7 @@ pub struct DebugSubscriptionUpdateBodyDefault {
     pub payload: Option<crate::defs::p775::types::DebugSubscriptionUpdateBodyDefaultPayload>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `DebugSubscriptionUpdate`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DebugSubscriptionUpdate {
@@ -2441,7 +2441,7 @@ pub struct DebugSubscriptionUpdate {
     /// Anonymous switch
     pub body: Option<crate::defs::p775::types::DebugSubscriptionUpdateBodyDefault>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for DebugSubscriptionUpdate {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2501,7 +2501,7 @@ impl Decode for DebugSubscriptionUpdate {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for DebugSubscriptionUpdate {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).r#type.0);
@@ -2523,7 +2523,7 @@ impl Encode for DebugSubscriptionUpdate {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for DebugSubscriptionUpdate {
     fn generate(g: &mut Gen) -> Self {
@@ -2589,7 +2589,7 @@ impl Generate for DebugSubscriptionUpdate {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `EntityMetadataPaintingVariant`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityMetadataPaintingVariant {
@@ -2604,7 +2604,7 @@ pub struct EntityMetadataPaintingVariant {
     /// `author`
     pub author: Option<AnonNbt>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for EntityMetadataPaintingVariant {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2631,7 +2631,7 @@ impl Decode for EntityMetadataPaintingVariant {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for EntityMetadataPaintingVariant {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i32((*self).width);
@@ -2654,7 +2654,7 @@ impl Encode for EntityMetadataPaintingVariant {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for EntityMetadataPaintingVariant {
     fn generate(g: &mut Gen) -> Self {
@@ -2675,7 +2675,7 @@ impl Generate for EntityMetadataPaintingVariant {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `GameProfile`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameProfile {
@@ -2686,7 +2686,7 @@ pub struct GameProfile {
     /// `properties`
     pub properties: Vec<crate::defs::p775::types::GameProfileProperty>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for GameProfile {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2711,7 +2711,7 @@ impl Decode for GameProfile {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for GameProfile {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_uuid(&(*self).uuid);
@@ -2723,7 +2723,7 @@ impl Encode for GameProfile {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for GameProfile {
     fn generate(g: &mut Gen) -> Self {
@@ -2749,7 +2749,7 @@ impl Generate for GameProfile {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `GameProfileProperty`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameProfileProperty {
@@ -2760,7 +2760,7 @@ pub struct GameProfileProperty {
     /// `signature`
     pub signature: Option<ByteString>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for GameProfileProperty {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2779,7 +2779,7 @@ impl Decode for GameProfileProperty {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for GameProfileProperty {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).name)?;
@@ -2794,7 +2794,7 @@ impl Encode for GameProfileProperty {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for GameProfileProperty {
     fn generate(g: &mut Gen) -> Self {
@@ -2811,7 +2811,7 @@ impl Generate for GameProfileProperty {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `GameRule`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameRule {
@@ -2820,7 +2820,7 @@ pub struct GameRule {
     /// `value`
     pub value: ByteString,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for GameRule {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2833,7 +2833,7 @@ impl Decode for GameRule {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for GameRule {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).name)?;
@@ -2841,7 +2841,7 @@ impl Encode for GameRule {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for GameRule {
     fn generate(g: &mut Gen) -> Self {
@@ -2856,7 +2856,7 @@ impl Generate for GameRule {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `GlobalPos`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalPos {
@@ -2865,7 +2865,7 @@ pub struct GlobalPos {
     /// `location`
     pub location: BlockPos,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for GlobalPos {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -2878,7 +2878,7 @@ impl Decode for GlobalPos {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for GlobalPos {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).dimension_name)?;
@@ -2886,7 +2886,7 @@ impl Encode for GlobalPos {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for GlobalPos {
     fn generate(g: &mut Gen) -> Self {
@@ -3065,7 +3065,7 @@ impl Generate for HashedSlot {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `InstrumentData`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstrumentData {
@@ -3078,7 +3078,7 @@ pub struct InstrumentData {
     /// `description`
     pub description: AnonNbt,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for InstrumentData {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3102,7 +3102,7 @@ impl Decode for InstrumentData {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for InstrumentData {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match &(*self).sound_event {
@@ -3123,7 +3123,7 @@ impl Encode for InstrumentData {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for InstrumentData {
     fn generate(g: &mut Gen) -> Self {
@@ -3260,7 +3260,7 @@ impl Generate for ItemBlockPredicate {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemBlockPropertyValueTrue {
@@ -3268,7 +3268,7 @@ pub struct ItemBlockPropertyValueTrue {
     pub exact_value: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemBlockPropertyValueFalse {
@@ -3278,7 +3278,7 @@ pub struct ItemBlockPropertyValueFalse {
     pub max_value: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `isExactMatch`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemBlockPropertyValue {
@@ -3290,7 +3290,7 @@ pub enum ItemBlockPropertyValue {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemBlockProperty`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemBlockProperty {
@@ -3301,7 +3301,7 @@ pub struct ItemBlockProperty {
     /// `value`
     pub value: crate::defs::p775::types::ItemBlockPropertyValue,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemBlockProperty {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3332,7 +3332,7 @@ impl Decode for ItemBlockProperty {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemBlockProperty {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).name)?;
@@ -3360,7 +3360,7 @@ impl Encode for ItemBlockProperty {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemBlockProperty {
     fn generate(g: &mut Gen) -> Self {
@@ -3393,7 +3393,7 @@ impl Generate for ItemBlockProperty {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemBookPage`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemBookPage {
@@ -3402,7 +3402,7 @@ pub struct ItemBookPage {
     /// `filteredContent`
     pub filtered_content: Option<ByteString>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemBookPage {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3419,7 +3419,7 @@ impl Decode for ItemBookPage {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemBookPage {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).content)?;
@@ -3433,7 +3433,7 @@ impl Encode for ItemBookPage {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemBookPage {
     fn generate(g: &mut Gen) -> Self {
@@ -3448,11 +3448,11 @@ impl Generate for ItemBookPage {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ItemConsumeEffectType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl ItemConsumeEffectType {
     /// `apply_effects`
     pub const APPLY_EFFECTS: Self = Self(0);
@@ -3476,7 +3476,7 @@ impl ItemConsumeEffectType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for ItemConsumeEffectType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -3486,7 +3486,7 @@ impl std::fmt::Debug for ItemConsumeEffectType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemConsumeEffectBodyApplyEffects {
@@ -3496,7 +3496,7 @@ pub struct ItemConsumeEffectBodyApplyEffects {
     pub probability: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemConsumeEffectBodyRemoveEffects {
@@ -3504,7 +3504,7 @@ pub struct ItemConsumeEffectBodyRemoveEffects {
     pub effects: HolderSet,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemConsumeEffectBodyTeleportRandomly {
@@ -3512,7 +3512,7 @@ pub struct ItemConsumeEffectBodyTeleportRandomly {
     pub diameter: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemConsumeEffectBodyPlaySound {
@@ -3520,7 +3520,7 @@ pub struct ItemConsumeEffectBodyPlaySound {
     pub sound: Holder<crate::defs::p775::types::ItemSoundEvent>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemConsumeEffectBody {
@@ -3538,7 +3538,7 @@ pub enum ItemConsumeEffectBody {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemConsumeEffect`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemConsumeEffect {
@@ -3547,7 +3547,7 @@ pub struct ItemConsumeEffect {
     /// Anonymous switch
     pub body: crate::defs::p775::types::ItemConsumeEffectBody,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemConsumeEffect {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3609,7 +3609,7 @@ impl Decode for ItemConsumeEffect {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemConsumeEffect {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).r#type.0);
@@ -3672,7 +3672,7 @@ impl Encode for ItemConsumeEffect {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemConsumeEffect {
     fn generate(g: &mut Gen) -> Self {
@@ -3739,7 +3739,7 @@ impl Generate for ItemConsumeEffect {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemEffectDetail`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemEffectDetail {
@@ -3756,7 +3756,7 @@ pub struct ItemEffectDetail {
     /// `hiddenEffect`
     pub hidden_effect: Option<Box<crate::defs::p775::types::ItemEffectDetail>>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemEffectDetail {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3783,7 +3783,7 @@ impl Decode for ItemEffectDetail {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemEffectDetail {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).amplifier);
@@ -3801,7 +3801,7 @@ impl Encode for ItemEffectDetail {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemEffectDetail {
     fn generate(g: &mut Gen) -> Self {
@@ -3830,11 +3830,11 @@ impl Generate for ItemEffectDetail {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ItemFireworkExplosionShape(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl ItemFireworkExplosionShape {
     /// `small_ball`
     pub const SMALL_BALL: Self = Self(0);
@@ -3858,7 +3858,7 @@ impl ItemFireworkExplosionShape {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for ItemFireworkExplosionShape {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -3868,7 +3868,7 @@ impl std::fmt::Debug for ItemFireworkExplosionShape {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemFireworkExplosion`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemFireworkExplosion {
@@ -3883,7 +3883,7 @@ pub struct ItemFireworkExplosion {
     /// `hasTwinkle`
     pub has_twinkle: bool,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemFireworkExplosion {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -3922,7 +3922,7 @@ impl Decode for ItemFireworkExplosion {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemFireworkExplosion {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).shape.0);
@@ -3939,7 +3939,7 @@ impl Encode for ItemFireworkExplosion {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemFireworkExplosion {
     fn generate(g: &mut Gen) -> Self {
@@ -3978,7 +3978,7 @@ impl Generate for ItemFireworkExplosion {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemPotionEffect`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemPotionEffect {
@@ -3987,7 +3987,7 @@ pub struct ItemPotionEffect {
     /// `details`
     pub details: crate::defs::p775::types::ItemEffectDetail,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemPotionEffect {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4000,7 +4000,7 @@ impl Decode for ItemPotionEffect {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemPotionEffect {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).id);
@@ -4008,7 +4008,7 @@ impl Encode for ItemPotionEffect {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemPotionEffect {
     fn generate(g: &mut Gen) -> Self {
@@ -4023,7 +4023,7 @@ impl Generate for ItemPotionEffect {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemSoundEvent`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemSoundEvent {
@@ -4032,7 +4032,7 @@ pub struct ItemSoundEvent {
     /// `fixedRange`
     pub fixed_range: Option<f32>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemSoundEvent {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4049,7 +4049,7 @@ impl Decode for ItemSoundEvent {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemSoundEvent {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).sound_name)?;
@@ -4063,7 +4063,7 @@ impl Encode for ItemSoundEvent {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemSoundEvent {
     fn generate(g: &mut Gen) -> Self {
@@ -4228,7 +4228,7 @@ impl Generate for ItemStackTemplate {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ItemWrittenBookPage`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemWrittenBookPage {
@@ -4237,7 +4237,7 @@ pub struct ItemWrittenBookPage {
     /// `filteredContent`
     pub filtered_content: Option<AnonNbt>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ItemWrittenBookPage {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4250,7 +4250,7 @@ impl Decode for ItemWrittenBookPage {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ItemWrittenBookPage {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).content.write(w);
@@ -4258,7 +4258,7 @@ impl Encode for ItemWrittenBookPage {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ItemWrittenBookPage {
     fn generate(g: &mut Gen) -> Self {
@@ -4273,7 +4273,7 @@ impl Generate for ItemWrittenBookPage {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `JukeboxSongData`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JukeboxSongData {
@@ -4286,7 +4286,7 @@ pub struct JukeboxSongData {
     /// `comparatorOutput`
     pub comparator_output: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for JukeboxSongData {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4310,7 +4310,7 @@ impl Decode for JukeboxSongData {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for JukeboxSongData {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match &(*self).sound_event {
@@ -4331,7 +4331,7 @@ impl Encode for JukeboxSongData {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for JukeboxSongData {
     fn generate(g: &mut Gen) -> Self {
@@ -4357,7 +4357,7 @@ impl Generate for JukeboxSongData {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `KineticWeaponCondition`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KineticWeaponCondition {
@@ -4368,7 +4368,7 @@ pub struct KineticWeaponCondition {
     /// `minRelativeSpeed`
     pub min_relative_speed: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for KineticWeaponCondition {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4383,7 +4383,7 @@ impl Decode for KineticWeaponCondition {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for KineticWeaponCondition {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).max_duration_ticks);
@@ -4392,7 +4392,7 @@ impl Encode for KineticWeaponCondition {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for KineticWeaponCondition {
     fn generate(g: &mut Gen) -> Self {
@@ -4409,11 +4409,11 @@ impl Generate for KineticWeaponCondition {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct NodeType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl NodeType {
     /// `blocked`
     pub const BLOCKED: Self = Self(0);
@@ -4500,7 +4500,7 @@ impl NodeType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -4510,7 +4510,7 @@ impl std::fmt::Debug for NodeType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `Node`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
@@ -4527,7 +4527,7 @@ pub struct Node {
     /// `f`
     pub f: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Node {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4548,7 +4548,7 @@ impl Decode for Node {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Node {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).position.encode(w)?;
@@ -4560,7 +4560,7 @@ impl Encode for Node {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Node {
     fn generate(g: &mut Gen) -> Self {
@@ -4590,7 +4590,7 @@ impl Generate for Node {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `PartialResolvableProfile`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartialResolvableProfile {
@@ -4601,7 +4601,7 @@ pub struct PartialResolvableProfile {
     /// `properties`
     pub properties: Vec<crate::defs::p775::types::GameProfileProperty>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for PartialResolvableProfile {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -4634,7 +4634,7 @@ impl Decode for PartialResolvableProfile {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for PartialResolvableProfile {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match &(*self).name {
@@ -4658,7 +4658,7 @@ impl Encode for PartialResolvableProfile {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for PartialResolvableProfile {
     fn generate(g: &mut Gen) -> Self {
@@ -5058,7 +5058,7 @@ impl std::fmt::Debug for ParticleType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataDust {
@@ -5068,7 +5068,7 @@ pub struct ParticleDataDust {
     pub scale: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataDustColorTransition {
@@ -5080,11 +5080,11 @@ pub struct ParticleDataDustColorTransition {
     pub scale: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ParticleDataVibrationPositionType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl ParticleDataVibrationPositionType {
     /// `block`
     pub const BLOCK: Self = Self(0);
@@ -5099,7 +5099,7 @@ impl ParticleDataVibrationPositionType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for ParticleDataVibrationPositionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -5109,7 +5109,7 @@ impl std::fmt::Debug for ParticleDataVibrationPositionType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataVibrationPositionEntity {
@@ -5119,7 +5119,7 @@ pub struct ParticleDataVibrationPositionEntity {
     pub entity_eye_height: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `positionType`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParticleDataVibrationPosition {
@@ -5131,7 +5131,7 @@ pub enum ParticleDataVibrationPosition {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataVibration {
@@ -5143,7 +5143,7 @@ pub struct ParticleDataVibration {
     pub ticks: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataTrail {
@@ -5155,7 +5155,7 @@ pub struct ParticleDataTrail {
     pub duration: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataDragonBreath {
@@ -5163,7 +5163,7 @@ pub struct ParticleDataDragonBreath {
     pub power: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataEffect {
@@ -5173,7 +5173,7 @@ pub struct ParticleDataEffect {
     pub power: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParticleDataInstantEffect {
@@ -5696,7 +5696,7 @@ impl Generate for Particle {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `Path`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Path {
@@ -5711,7 +5711,7 @@ pub struct Path {
     /// `debugData`
     pub debug_data: crate::defs::p775::types::PathDebugData,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Path {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -5740,7 +5740,7 @@ impl Decode for Path {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Path {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_bool((*self).reached);
@@ -5754,7 +5754,7 @@ impl Encode for Path {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Path {
     fn generate(g: &mut Gen) -> Self {
@@ -5782,7 +5782,7 @@ impl Generate for Path {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `PathDebugData`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathDebugData {
@@ -5793,7 +5793,7 @@ pub struct PathDebugData {
     /// `targetNodes`
     pub target_nodes: Vec<crate::defs::p775::types::Node>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for PathDebugData {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -5838,7 +5838,7 @@ impl Decode for PathDebugData {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for PathDebugData {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_len_varint((*self).open_set.len())?;
@@ -5856,7 +5856,7 @@ impl Encode for PathDebugData {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for PathDebugData {
     fn generate(g: &mut Gen) -> Self {
@@ -5894,11 +5894,11 @@ impl Generate for PathDebugData {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct PlayerSkinPatchModel(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl PlayerSkinPatchModel {
     /// `wide`
     pub const WIDE: Self = Self(0);
@@ -5913,7 +5913,7 @@ impl PlayerSkinPatchModel {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for PlayerSkinPatchModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -5923,7 +5923,7 @@ impl std::fmt::Debug for PlayerSkinPatchModel {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `PlayerSkinPatch`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerSkinPatch {
@@ -5936,7 +5936,7 @@ pub struct PlayerSkinPatch {
     /// `model`
     pub model: Option<crate::defs::p775::types::PlayerSkinPatchModel>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for PlayerSkinPatch {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -5971,7 +5971,7 @@ impl Decode for PlayerSkinPatch {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for PlayerSkinPatch {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         match &(*self).body {
@@ -6005,7 +6005,7 @@ impl Encode for PlayerSkinPatch {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for PlayerSkinPatch {
     fn generate(g: &mut Gen) -> Self {
@@ -6033,11 +6033,11 @@ impl Generate for PlayerSkinPatch {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct ResolvableProfileType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl ResolvableProfileType {
     /// `partial`
     pub const PARTIAL: Self = Self(0);
@@ -6052,7 +6052,7 @@ impl ResolvableProfileType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for ResolvableProfileType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6062,7 +6062,7 @@ impl std::fmt::Debug for ResolvableProfileType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `type`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolvableProfileBody {
@@ -6074,7 +6074,7 @@ pub enum ResolvableProfileBody {
     Other,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `ResolvableProfile`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvableProfile {
@@ -6085,7 +6085,7 @@ pub struct ResolvableProfile {
     /// `skinPatch`
     pub skin_patch: crate::defs::p775::types::PlayerSkinPatch,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ResolvableProfile {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -6110,7 +6110,7 @@ impl Decode for ResolvableProfile {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ResolvableProfile {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).r#type.0);
@@ -6137,7 +6137,7 @@ impl Encode for ResolvableProfile {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ResolvableProfile {
     fn generate(g: &mut Gen) -> Self {
@@ -6168,7 +6168,7 @@ impl Generate for ResolvableProfile {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `RespawnData`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RespawnData {
@@ -6179,7 +6179,7 @@ pub struct RespawnData {
     /// `pitch`
     pub pitch: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for RespawnData {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -6194,7 +6194,7 @@ impl Decode for RespawnData {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for RespawnData {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         (*self).global_pos.encode(w)?;
@@ -6203,7 +6203,7 @@ impl Encode for RespawnData {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for RespawnData {
     fn generate(g: &mut Gen) -> Self {
@@ -6448,7 +6448,7 @@ impl Slot {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataUseEffects {
@@ -6460,11 +6460,11 @@ pub struct SlotComponentDataUseEffects {
     pub speed_multiplier: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataRarity(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataRarity {
     /// `common`
     pub const COMMON: Self = Self(0);
@@ -6485,7 +6485,7 @@ impl SlotComponentDataRarity {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataRarity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6495,7 +6495,7 @@ impl std::fmt::Debug for SlotComponentDataRarity {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataEnchantmentsEnchantments {
@@ -6505,7 +6505,7 @@ pub struct SlotComponentDataEnchantmentsEnchantments {
     pub level: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataEnchantments {
@@ -6513,7 +6513,7 @@ pub struct SlotComponentDataEnchantments {
     pub enchantments: Vec<crate::defs::p775::types::SlotComponentDataEnchantmentsEnchantments>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataStoredEnchantmentsEnchantments {
@@ -6523,7 +6523,7 @@ pub struct SlotComponentDataStoredEnchantmentsEnchantments {
     pub level: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataStoredEnchantments {
@@ -6548,11 +6548,11 @@ pub struct SlotComponentDataCanBreak {
     pub predicates: Vec<crate::defs::p775::types::ItemBlockPredicate>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataAttributeModifiersOperation(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataAttributeModifiersOperation {
     /// `add`
     pub const ADD: Self = Self(0);
@@ -6570,7 +6570,7 @@ impl SlotComponentDataAttributeModifiersOperation {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataAttributeModifiersOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6584,11 +6584,11 @@ impl std::fmt::Debug for SlotComponentDataAttributeModifiersOperation {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataAttributeModifiersSlot(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataAttributeModifiersSlot {
     /// `any`
     pub const ANY: Self = Self(0);
@@ -6630,7 +6630,7 @@ impl SlotComponentDataAttributeModifiersSlot {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataAttributeModifiersSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6640,11 +6640,11 @@ impl std::fmt::Debug for SlotComponentDataAttributeModifiersSlot {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataAttributeModifiersDisplayType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataAttributeModifiersDisplayType {
     /// `default`
     pub const DEFAULT: Self = Self(0);
@@ -6662,7 +6662,7 @@ impl SlotComponentDataAttributeModifiersDisplayType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataAttributeModifiersDisplayType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6676,7 +6676,7 @@ impl std::fmt::Debug for SlotComponentDataAttributeModifiersDisplayType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataAttributeModifiersDisplay {
@@ -6686,7 +6686,7 @@ pub struct SlotComponentDataAttributeModifiersDisplay {
     pub component: Option<AnonNbt>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataAttributeModifiers {
@@ -6704,7 +6704,7 @@ pub struct SlotComponentDataAttributeModifiers {
     pub display: crate::defs::p775::types::SlotComponentDataAttributeModifiersDisplay,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataCustomModelData {
@@ -6718,7 +6718,7 @@ pub struct SlotComponentDataCustomModelData {
     pub colors: Vec<i32>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataTooltipDisplay {
@@ -6728,7 +6728,7 @@ pub struct SlotComponentDataTooltipDisplay {
     pub hidden_components: Vec<i32>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlocksAttacksDamageReductions {
@@ -6742,7 +6742,7 @@ pub struct SlotComponentDataBlocksAttacksDamageReductions {
     pub factor: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlocksAttacksItemDamage {
@@ -6754,7 +6754,7 @@ pub struct SlotComponentDataBlocksAttacksItemDamage {
     pub factor: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlocksAttacks {
@@ -6775,7 +6775,7 @@ pub struct SlotComponentDataBlocksAttacks {
     pub disable_sound: Option<Holder<crate::defs::p775::types::ItemSoundEvent>>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataFood {
@@ -6787,11 +6787,11 @@ pub struct SlotComponentDataFood {
     pub can_always_eat: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataConsumableAnimation(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataConsumableAnimation {
     /// `none`
     pub const NONE: Self = Self(0);
@@ -6833,7 +6833,7 @@ impl SlotComponentDataConsumableAnimation {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataConsumableAnimation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6843,7 +6843,7 @@ impl std::fmt::Debug for SlotComponentDataConsumableAnimation {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataConsumable {
@@ -6859,7 +6859,7 @@ pub struct SlotComponentDataConsumable {
     pub effects: Vec<crate::defs::p775::types::ItemConsumeEffect>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataUseCooldown {
@@ -6869,7 +6869,7 @@ pub struct SlotComponentDataUseCooldown {
     pub cooldown_group: Option<ByteString>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataDamageResistant {
@@ -6877,7 +6877,7 @@ pub struct SlotComponentDataDamageResistant {
     pub types: HolderSet,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataToolRules {
@@ -6889,7 +6889,7 @@ pub struct SlotComponentDataToolRules {
     pub correct_drop_for_blocks: Option<bool>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataTool {
@@ -6903,7 +6903,7 @@ pub struct SlotComponentDataTool {
     pub can_destroy_blocks_in_creative: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataWeapon {
@@ -6913,7 +6913,7 @@ pub struct SlotComponentDataWeapon {
     pub disable_blocking_for_seconds: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataAttackRange {
@@ -6931,11 +6931,11 @@ pub struct SlotComponentDataAttackRange {
     pub mob_factor: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataEquippableSlot(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataEquippableSlot {
     /// `main_hand`
     pub const MAIN_HAND: Self = Self(0);
@@ -6968,7 +6968,7 @@ impl SlotComponentDataEquippableSlot {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataEquippableSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -6978,7 +6978,7 @@ impl std::fmt::Debug for SlotComponentDataEquippableSlot {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataEquippable {
@@ -7006,7 +7006,7 @@ pub struct SlotComponentDataEquippable {
     pub shearing_sound: Holder<crate::defs::p775::types::ItemSoundEvent>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataRepairable {
@@ -7014,7 +7014,7 @@ pub struct SlotComponentDataRepairable {
     pub items: HolderSet,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataDeathProtection {
@@ -7022,7 +7022,7 @@ pub struct SlotComponentDataDeathProtection {
     pub effects: Vec<crate::defs::p775::types::ItemConsumeEffect>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataPiercingWeapon {
@@ -7036,7 +7036,7 @@ pub struct SlotComponentDataPiercingWeapon {
     pub hit_sound: Option<Holder<crate::defs::p775::types::ItemSoundEvent>>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataKineticWeapon {
@@ -7060,11 +7060,11 @@ pub struct SlotComponentDataKineticWeapon {
     pub hit_sound: Option<Holder<crate::defs::p775::types::ItemSoundEvent>>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SlotComponentDataSwingAnimationType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl SlotComponentDataSwingAnimationType {
     /// `none`
     pub const NONE: Self = Self(0);
@@ -7082,7 +7082,7 @@ impl SlotComponentDataSwingAnimationType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for SlotComponentDataSwingAnimationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -7092,7 +7092,7 @@ impl std::fmt::Debug for SlotComponentDataSwingAnimationType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataSwingAnimation {
@@ -7102,11 +7102,11 @@ pub struct SlotComponentDataSwingAnimation {
     pub duration: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DyeColor(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl DyeColor {
     /// `white`
     pub const WHITE: Self = Self(0);
@@ -7163,7 +7163,7 @@ impl DyeColor {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for DyeColor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -7189,7 +7189,7 @@ pub struct SlotComponentDataBundleContents {
     pub contents: Vec<crate::defs::p775::types::ItemStackTemplate>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataPotionContents {
@@ -7203,7 +7203,7 @@ pub struct SlotComponentDataPotionContents {
     pub custom_name: Option<ByteString>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataSuspiciousStewEffectsEffects {
@@ -7213,7 +7213,7 @@ pub struct SlotComponentDataSuspiciousStewEffectsEffects {
     pub duration: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataSuspiciousStewEffects {
@@ -7221,7 +7221,7 @@ pub struct SlotComponentDataSuspiciousStewEffects {
     pub effects: Vec<crate::defs::p775::types::SlotComponentDataSuspiciousStewEffectsEffects>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataWritableBookContent {
@@ -7229,7 +7229,7 @@ pub struct SlotComponentDataWritableBookContent {
     pub pages: Vec<crate::defs::p775::types::ItemBookPage>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataWrittenBookContent {
@@ -7247,7 +7247,7 @@ pub struct SlotComponentDataWrittenBookContent {
     pub resolved: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataTrim {
@@ -7257,7 +7257,7 @@ pub struct SlotComponentDataTrim {
     pub pattern: Holder<crate::defs::p775::types::ArmorTrimPattern>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataEntityData {
@@ -7267,7 +7267,7 @@ pub struct SlotComponentDataEntityData {
     pub data: AnonNbt,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlockEntityData {
@@ -7277,7 +7277,7 @@ pub struct SlotComponentDataBlockEntityData {
     pub data: AnonNbt,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataLodestoneTracker {
@@ -7287,7 +7287,7 @@ pub struct SlotComponentDataLodestoneTracker {
     pub tracked: bool,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataFireworks {
@@ -7297,7 +7297,7 @@ pub struct SlotComponentDataFireworks {
     pub explosions: Vec<crate::defs::p775::types::ItemFireworkExplosion>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBannerPatterns {
@@ -7305,7 +7305,7 @@ pub struct SlotComponentDataBannerPatterns {
     pub layers: Vec<crate::defs::p775::types::BannerPatternLayer>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataPotDecorations {
@@ -7321,7 +7321,7 @@ pub struct SlotComponentDataContainer {
     pub contents: Vec<Option<crate::defs::p775::types::ItemStackTemplate>>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlockStateProperties {
@@ -7331,7 +7331,7 @@ pub struct SlotComponentDataBlockStateProperties {
     pub value: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBlockState {
@@ -7339,7 +7339,7 @@ pub struct SlotComponentDataBlockState {
     pub properties: Vec<crate::defs::p775::types::SlotComponentDataBlockStateProperties>,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBeesBees {
@@ -7353,7 +7353,7 @@ pub struct SlotComponentDataBeesBees {
     pub min_ticks_in_hive: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlotComponentDataBees {
@@ -12864,7 +12864,7 @@ impl Generate for UntrustedSlotComponent {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `chunkBlockEntity`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChunkBlockEntity {
@@ -12879,7 +12879,7 @@ pub struct ChunkBlockEntity {
     /// `nbtData`
     pub nbt_data: Option<AnonNbt>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for ChunkBlockEntity {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -12899,7 +12899,7 @@ impl Decode for ChunkBlockEntity {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for ChunkBlockEntity {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         {
@@ -12926,7 +12926,7 @@ impl Encode for ChunkBlockEntity {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for ChunkBlockEntity {
     fn generate(g: &mut Gen) -> Self {
@@ -12947,7 +12947,7 @@ impl Generate for ChunkBlockEntity {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Packed bit field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CommandNodeFlags {
@@ -13159,7 +13159,7 @@ impl std::fmt::Debug for CommandNodeExtraNodeDataCase2Parser {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesTime {
@@ -13167,7 +13167,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesTime {
     pub min: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesResourceOrTagKey {
@@ -13175,7 +13175,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesResourceOrTagKey {
     pub registry: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesResourceKey {
@@ -13183,7 +13183,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesResourceKey {
     pub registry: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandNodeExtraNodeDataCase2PropertiesResourceSelector {
@@ -13191,7 +13191,7 @@ pub struct CommandNodeExtraNodeDataCase2PropertiesResourceSelector {
     pub registry: ByteString,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Switch on `parser`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandNodeExtraNodeDataCase2Properties {
@@ -13851,11 +13851,11 @@ impl Generate for CommandNode {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct EntityMetadataEntryType(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl EntityMetadataEntryType {
     /// `byte`
     pub const BYTE: Self = Self(0);
@@ -13993,7 +13993,7 @@ impl EntityMetadataEntryType {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for EntityMetadataEntryType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -14003,7 +14003,7 @@ impl std::fmt::Debug for EntityMetadataEntryType {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityMetadataEntryValueRotations {
@@ -14015,7 +14015,7 @@ pub struct EntityMetadataEntryValueRotations {
     pub roll: f32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Nested container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityMetadataEntryValueVillagerData {
@@ -14027,11 +14027,11 @@ pub struct EntityMetadataEntryValueVillagerData {
     pub level: i32,
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Mapped `i32` value; unknown values are kept as-is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct EntityMetadataEntryValueHumanoidArm(pub i32);
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl EntityMetadataEntryValueHumanoidArm {
     /// `left`
     pub const LEFT: Self = Self(0);
@@ -14046,7 +14046,7 @@ impl EntityMetadataEntryValueHumanoidArm {
         }
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl std::fmt::Debug for EntityMetadataEntryValueHumanoidArm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.name() {
@@ -15032,7 +15032,7 @@ impl Generate for EntityMetadataEntry {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `game_profile_name_prop`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameProfileNameProp {
@@ -15041,7 +15041,7 @@ pub struct GameProfileNameProp {
     /// `properties`
     pub properties: Vec<crate::defs::p775::types::GameProfileProperty>,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for GameProfileNameProp {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15064,7 +15064,7 @@ impl Decode for GameProfileNameProp {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for GameProfileNameProp {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_string(&(*self).name)?;
@@ -15075,7 +15075,7 @@ impl Encode for GameProfileNameProp {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for GameProfileNameProp {
     fn generate(g: &mut Gen) -> Self {
@@ -15099,7 +15099,7 @@ impl Generate for GameProfileNameProp {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `packedChunkPos`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PackedChunkPos {
@@ -15108,7 +15108,7 @@ pub struct PackedChunkPos {
     /// `x`
     pub x: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for PackedChunkPos {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15118,7 +15118,7 @@ impl Decode for PackedChunkPos {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for PackedChunkPos {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i32((*self).z);
@@ -15126,7 +15126,7 @@ impl Encode for PackedChunkPos {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for PackedChunkPos {
     fn generate(g: &mut Gen) -> Self {
@@ -15138,7 +15138,7 @@ impl Generate for PackedChunkPos {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec2f`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec2f {
@@ -15147,7 +15147,7 @@ pub struct Vec2f {
     /// `y`
     pub y: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec2f {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15157,7 +15157,7 @@ impl Decode for Vec2f {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec2f {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_f32((*self).x);
@@ -15165,7 +15165,7 @@ impl Encode for Vec2f {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec2f {
     fn generate(g: &mut Gen) -> Self {
@@ -15177,7 +15177,7 @@ impl Generate for Vec2f {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec3f`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec3f {
@@ -15188,7 +15188,7 @@ pub struct Vec3f {
     /// `z`
     pub z: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec3f {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15203,7 +15203,7 @@ impl Decode for Vec3f {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec3f {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_f32((*self).x);
@@ -15212,7 +15212,7 @@ impl Encode for Vec3f {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec3f {
     fn generate(g: &mut Gen) -> Self {
@@ -15229,7 +15229,7 @@ impl Generate for Vec3f {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec3f64`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec3f64 {
@@ -15240,7 +15240,7 @@ pub struct Vec3f64 {
     /// `z`
     pub z: f64,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec3f64 {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15255,7 +15255,7 @@ impl Decode for Vec3f64 {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec3f64 {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_f64((*self).x);
@@ -15264,7 +15264,7 @@ impl Encode for Vec3f64 {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec3f64 {
     fn generate(g: &mut Gen) -> Self {
@@ -15281,7 +15281,7 @@ impl Generate for Vec3f64 {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec3i`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec3i {
@@ -15292,7 +15292,7 @@ pub struct Vec3i {
     /// `z`
     pub z: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec3i {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15307,7 +15307,7 @@ impl Decode for Vec3i {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec3i {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).x);
@@ -15316,7 +15316,7 @@ impl Encode for Vec3i {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec3i {
     fn generate(g: &mut Gen) -> Self {
@@ -15333,7 +15333,7 @@ impl Generate for Vec3i {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec3i32`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec3i32 {
@@ -15344,7 +15344,7 @@ pub struct Vec3i32 {
     /// `z`
     pub z: i32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec3i32 {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15359,7 +15359,7 @@ impl Decode for Vec3i32 {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec3i32 {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_i32((*self).x);
@@ -15368,7 +15368,7 @@ impl Encode for Vec3i32 {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec3i32 {
     fn generate(g: &mut Gen) -> Self {
@@ -15385,7 +15385,7 @@ impl Generate for Vec3i32 {
     }
 }
 
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 /// Named type `vec4f`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vec4f {
@@ -15398,7 +15398,7 @@ pub struct Vec4f {
     /// `w`
     pub w: f32,
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Decode for Vec4f {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -15415,7 +15415,7 @@ impl Decode for Vec4f {
         })
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 impl Encode for Vec4f {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_f32((*self).x);
@@ -15425,7 +15425,7 @@ impl Encode for Vec4f {
         Ok(())
     }
 }
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 #[cfg(feature = "testgen")]
 impl Generate for Vec4f {
     fn generate(g: &mut Gen) -> Self {
