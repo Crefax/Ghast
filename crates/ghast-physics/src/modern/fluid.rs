@@ -3,7 +3,7 @@
 
 use ghast_data::v26_1::{StatePhys, block_flags as bf, state_flags as sf};
 
-use super::collide::World;
+use super::collide::{Extra, World};
 use super::math::{V3, ceil, floor};
 use super::rules::Rules;
 use crate::math::Aabb;
@@ -59,7 +59,7 @@ impl Tracker {
     }
 }
 
-impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
+impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
     /// The fluid byte at a position (`Level.getFluidState`).
     #[inline]
     pub(crate) fn fluid(&self, x: i32, y: i32, z: i32) -> u8 {

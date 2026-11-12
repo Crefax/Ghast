@@ -9,7 +9,7 @@
 use ghast_data::v26_1::{BlockKind, block_flags as bf, state_flags as sf};
 
 use super::attr::{Attribute, ModifierId, SPRINT_AMOUNT, sprinting_id};
-use super::collide::{Border, Placed, ShapeCtx, World, collide, make_box};
+use super::collide::{Border, Ents, Extra, Placed, Plain, ShapeCtx, World, collide, make_box};
 use super::ext::{self, PlayerExt};
 use super::fluid::kind;
 use super::inside::{Movement, Visited, axis_order, for_each_block_between};
@@ -631,10 +631,10 @@ pub fn on_climbable<R: Rules, W: BlockView<State = R::State>>(p: &PlayerState, w
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
-        entities: &[],
+        ext: Plain,
         _r: core::marker::PhantomData,
     };
-    climbable::<R, W>(&world, p, false)
+    climbable::<R, W, Plain>(&world, p, false)
 }
 
 /// `true` when the player is on a climbable block (vanilla `onClimbable`), with the extension
@@ -651,10 +651,10 @@ pub fn on_climbable_ext<R: Rules, W: BlockView<State = R::State>>(
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
-        entities: &[],
+        ext: Plain,
         _r: core::marker::PhantomData,
     };
-    climbable::<R, W>(&world, p, x.fall_flying)
+    climbable::<R, W, Plain>(&world, p, x.fall_flying)
 }
 
 /// The entity-dependent part of a block collision query (vanilla `EntityCollisionContext`).
@@ -690,7 +690,7 @@ pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
         border: &border,
         min_y: level.min_y,
         max_y: level.min_y + level.height - 1,
-        entities: &[],
+        ext: Plain,
         _r: core::marker::PhantomData,
     };
     let c = ShapeCtx {
@@ -703,8 +703,8 @@ pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
     world.no_collision(pos, &q, &c)
 }
 
-fn climbable<R: Rules, W: BlockView<State = R::State>>(
-    w: &World<'_, R, W>,
+fn climbable<R: Rules, W: BlockView<State = R::State>, E: Extra>(
+    w: &World<'_, R, W, E>,
     p: &PlayerState,
     gliding: bool,
 ) -> bool {
@@ -739,13 +739,14 @@ fn climbable<R: Rules, W: BlockView<State = R::State>>(
 /// part of the output.
 ///
 /// The same as [`tick_ext`] with a default [`PlayerExt`] (no glider, not gliding).
+#[inline(never)]
 pub fn tick<R: Rules, W: BlockView<State = R::State>>(
     p: &mut PlayerState,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
 ) {
-    tick_core::<R, W>(p, &mut Glide::default(), None, &[], input, world, out);
+    tick_core::<R, W, Plain>(p, &mut Glide::default(), None, Plain, input, world, out);
 }
 
 /// [`tick`] with the extension state of the mechanics added after 0.4.0 (gliding and rockets, see
@@ -778,7 +779,7 @@ pub fn tick_in<R: Rules, W: BlockView<State = R::State>>(
         auto_spin_ticks: x.auto_spin_ticks,
     };
     let pending = x.pending_move.take();
-    tick_core::<R, W>(p, &mut g, pending, around.entities, input, world, out);
+    tick_core::<R, W, Ents<'_>>(p, &mut g, pending, Ents(around.entities), input, world, out);
     x.fall_flying = g.fall_flying;
     x.auto_spin_ticks = g.auto_spin_ticks;
     x.tick_rockets(p, |cx, cz| world.is_chunk_loaded(cx, cz));
@@ -794,11 +795,12 @@ struct Glide {
     auto_spin_ticks: i32,
 }
 
-fn tick_core<R: Rules, W: BlockView<State = R::State>>(
+#[inline(always)]
+fn tick_core<R: Rules, W: BlockView<State = R::State>, E: Extra>(
     p: &mut PlayerState,
     x: &mut Glide,
     pending: Option<Movement>,
-    entities: &[Aabb],
+    ext: E,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -811,12 +813,12 @@ fn tick_core<R: Rules, W: BlockView<State = R::State>>(
     }
     let cache = TickCache::new(world, floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
     let border = Border::new(&world.world_border());
-    let w = World::<R, TickCache<'_, W>> {
+    let w = World::<R, TickCache<'_, W>, E> {
         w: &cache,
         border: &border,
         min_y: p.level.min_y,
         max_y: p.level.min_y + p.level.height - 1,
-        entities,
+        ext,
         _r: core::marker::PhantomData,
     };
     let mut t = Ctx {
@@ -868,12 +870,12 @@ pub fn riptide<R: Rules, W: BlockView<State = R::State>>(
     if p.on_ground {
         let cache = TickCache::new(world, floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
         let border = Border::new(&world.world_border());
-        let w = World::<R, TickCache<'_, W>> {
+        let w = World::<R, TickCache<'_, W>, Ents<'_>> {
             w: &cache,
             border: &border,
             min_y: p.level.min_y,
             max_y: p.level.min_y + p.level.height - 1,
-            entities: &[],
+            ext: Ents(&[]),
             _r: core::marker::PhantomData,
         };
         let mut t = Ctx {
@@ -925,16 +927,16 @@ pub fn in_water_or_rain<R: Rules, W: BlockView<State = R::State>>(
     open(floor(p.pos[1])) || open(floor(p.bb.max_y))
 }
 
-struct Ctx<'a, 'b, R: Rules, W> {
+struct Ctx<'a, 'b, R: Rules, W, E: Extra> {
     p: &'a mut PlayerState,
     x: Glide,
-    w: &'a World<'b, R, W>,
+    w: &'a World<'b, R, W, E>,
     old_pos: V3,
     moves: [Option<Movement>; 4],
     using_item: bool,
 }
 
-impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
+impl<R: Rules, W: BlockView<State = R::State>, E: Extra> Ctx<'_, '_, R, W, E> {
     fn ctx(&self) -> ShapeCtx {
         ShapeCtx {
             feet_y: self.p.pos[1],
@@ -1205,8 +1207,8 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     /// the ground, not riding, no levitation, a usable glider) and not in water.
     fn can_start_fall_flying(&self) -> bool {
         let p = &self.p;
-        self.x.glider
-            && !self.x.fall_flying
+        (E::ON && self.x.glider)
+            && !(E::ON && self.x.fall_flying)
             && !p.abilities.flying
             && !p.on_ground
             && p.effects.levitation.is_none()
@@ -1217,7 +1219,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     /// kept after gliding stopped.
     fn visually_crawling(&self) -> bool {
         let p = &self.p;
-        (p.pose == Pose::Swimming || !self.x.fall_flying && p.pose == Pose::FallFlying)
+        (p.pose == Pose::Swimming || !(E::ON && self.x.fall_flying) && p.pose == Pose::FallFlying)
             && !p.touching_water
     }
 
@@ -1235,7 +1237,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             && p.input.has_forward_impulse()
             && self.sprinting_possible(p.abilities.flying)
             && !slow_using
-            && (!self.x.fall_flying || p.is_underwater())
+            && (!(E::ON && self.x.fall_flying) || p.is_underwater())
             && (!moving_slowly || p.is_underwater())
     }
 
@@ -1351,7 +1353,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         }
         let p = &mut *self.p;
         // updateFallFlying (client: checkFallDistanceAccumulation only).
-        if self.x.fall_flying && p.vel[1] > -0.5 && p.fall_distance > 1.0 {
+        if (E::ON && self.x.fall_flying) && p.vel[1] > -0.5 && p.fall_distance > 1.0 {
             p.fall_distance = 1.0;
         }
         let input = V3::new(f64::from(p.xxa), 0.0, f64::from(p.zza));
@@ -1361,7 +1363,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         self.player_travel(input);
         self.apply_effects_from_blocks();
         // checkAutoSpinAttack (no other entities: a horizontal collision ends the spin counter).
-        if self.x.auto_spin_ticks > 0 {
+        if E::ON && self.x.auto_spin_ticks > 0 {
             self.x.auto_spin_ticks -= 1;
             if self.p.horizontal_collision {
                 self.x.auto_spin_ticks = 0;
@@ -1444,7 +1446,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     /// `getBlockSpeedFactor` (Player, LivingEntity, Entity).
     fn block_speed_factor(&self) -> f32 {
         let p = &self.p;
-        if p.abilities.flying || self.x.fall_flying {
+        if p.abilities.flying || (E::ON && self.x.fall_flying) {
             return 1.0;
         }
         let s = self
@@ -1549,7 +1551,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
             } else {
                 self.travel_in_lava(input, g, falling, old_y);
             }
-        } else if self.x.fall_flying {
+        } else if E::ON && self.x.fall_flying {
             self.travel_fall_flying(input);
         } else {
             self.travel_in_air(input);
@@ -1688,7 +1690,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
     }
 
     fn on_climbable(&self) -> bool {
-        climbable::<R, W>(self.w, self.p, self.x.fall_flying)
+        climbable::<R, W, E>(self.w, self.p, E::ON && self.x.fall_flying)
     }
 
     /// `handleOnClimbable`.
@@ -1794,7 +1796,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         }
         delta = self.back_off_from_edge(delta);
         let ctx = self.ctx();
-        let movement = collide::<R, _>(
+        let movement = collide::<R, _, E>(
             self.w,
             self.p.pos,
             &self.p.bb,
@@ -2202,7 +2204,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
                 });
                 m::collided_along(&at_from, to.sub(from), boxes[..n].iter().copied())
             }
-            Some(Placed::Border | Placed::Entity(_)) => false,
+            Some(Placed::Border) => false,
         }
     }
 
@@ -2402,7 +2404,7 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         let mut obstacle = f32::from_bits(1);
         let mut hit: Option<Aabb> = None;
         // getCollisions: the entity shapes first, then the blocks.
-        if !self.w.entities.is_empty() {
+        if E::ON && !self.w.ext.entities().is_empty() {
             hit = self
                 .w
                 .entity_colliders(&test)
@@ -2471,9 +2473,9 @@ impl<R: Rules, W: BlockView<State = R::State>> Ctx<'_, '_, R, W> {
         let p = &self.p;
         let desired = if p.is_swimming() {
             Pose::Swimming
-        } else if self.x.fall_flying {
+        } else if E::ON && self.x.fall_flying {
             Pose::FallFlying
-        } else if self.x.spin_attack {
+        } else if E::ON && self.x.spin_attack {
             Pose::SpinAttack
         } else if p.shift() && !p.abilities.flying {
             Pose::Crouching

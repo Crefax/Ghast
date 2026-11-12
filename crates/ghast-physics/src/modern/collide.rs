@@ -37,9 +37,6 @@ pub(crate) struct Border {
     max_x: f64,
     min_z: f64,
     max_z: f64,
-    /// The block-rounded inside is thinner than `1e-7` (a clamped border): `Shapes.box` gives the
-    /// empty shape, so the border shape is `Shapes.INFINITY`.
-    full: bool,
 }
 
 /// The `Shapes.INFINITY` grid.
@@ -52,8 +49,18 @@ impl Border {
     pub(crate) fn new(b: &WorldBorder) -> Border {
         // 26.x clamps each bound to [-29,999,984, 29,999,984] on both sides (`Mth.clamp`); the
         // shared `WorldBorder` accessors clamp one side only, as the older versions do.
+        // (`Mth.clamp` written out: with bounds of +-M it is the same for every value, NaN
+        // included, and cheaper than `java_min`; the plain tick builds this every tick.)
         let max = 29_999_984.0;
-        let c = |v: f64| super::math::clamp(v, -max, max);
+        let c = |v: f64| {
+            if v < -max {
+                -max
+            } else if v > max {
+                max
+            } else {
+                v
+            }
+        };
         let (west, east) = (c(b.center_x - b.size / 2.0), c(b.center_x + b.size / 2.0));
         let (north, south) = (c(b.center_z - b.size / 2.0), c(b.center_z + b.size / 2.0));
         Border {
@@ -69,12 +76,18 @@ impl Border {
             max_x: east,
             min_z: north,
             max_z: south,
-            full: east.ceil() - west.floor() < EPSILON || south.ceil() - north.floor() < EPSILON,
         }
     }
 
+    /// The block-rounded inside is thinner than `1e-7` (a clamped border): `Shapes.box` gives the
+    /// empty shape, so the border shape is `Shapes.INFINITY`. (Computed here, not in `new`: the
+    /// shape is only needed near the border.)
+    fn full(&self) -> bool {
+        self.xs[2] - self.xs[1] < EPSILON || self.zs[2] - self.zs[1] < EPSILON
+    }
+
     pub(crate) fn shape(&self) -> VoxelShape<'_> {
-        if self.full {
+        if self.full() {
             return VoxelShape {
                 axes: [
                     Points::Explicit(&INFINITE_POINTS),
@@ -122,8 +135,6 @@ pub(crate) enum Placed {
     Shape(&'static VoxelShapeRef, Option<[f64; 3]>, [f64; 3]),
     /// The world-border shape.
     Border,
-    /// A collidable entity's box (`Shapes.create(entity.getBoundingBox())`).
-    Entity(Aabb),
 }
 
 /// `Shapes.create(box)` of an entity box as a one-cell shape with explicit points.
@@ -420,9 +431,6 @@ impl Placed {
                 }
             }
             Placed::Border => {}
-            Placed::Entity(e) => {
-                let _ = f(*e);
-            }
         }
     }
 
@@ -442,7 +450,6 @@ impl Placed {
                 Some(s.axes[1].get(top + 1))
             }
             Placed::Border => None,
-            Placed::Entity(e) => Some(e.max_y),
         }
     }
 
@@ -450,24 +457,16 @@ impl Placed {
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             Placed::Shape(r, _, _) => r.empty,
-            Placed::Entity(e) => entity_shape_empty(e),
             _ => false,
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn collide(&self, border: &Border, axis: usize, b: &Aabb, d: f64) -> f64 {
         match self {
             Placed::Cube(o) => cube_collide(axis, b, d, *o),
             Placed::Shape(r, sh, o) => shape_collide(r, *sh, *o, axis, b, d),
             Placed::Border => border.shape().max_distance(axis, b, d, None),
-            Placed::Entity(e) => {
-                if entity_shape_empty(e) {
-                    d
-                } else {
-                    entity_shape_collide(e, axis, b, d)
-                }
-            }
         }
     }
 
@@ -491,11 +490,6 @@ impl Placed {
                     if !f(y) {
                         return;
                     }
-                }
-            }
-            Placed::Entity(e) => {
-                if !entity_shape_empty(e) {
-                    let _ = f(e.min_y) && f(e.max_y);
                 }
             }
         }
@@ -587,19 +581,54 @@ pub(crate) fn collide_with_shapes(m: V3, b: &Aabb, shapes: &Colliders, border: &
     r
 }
 
+/// What a tick knows beyond blocks, as a type: [`Plain`] (the plain player: nothing, zero-sized,
+/// every extension query is a compile-time constant) or [`Ents`] (the extended tick: the boxes of
+/// the entities the player collides with). The plain tick then compiles to the code it was before
+/// the extensions existed.
+pub(crate) trait Extra: Copy {
+    /// The extended tick (gliding, spin, entities can be present).
+    const ON: bool;
+    /// Boxes of the entities the player collides with (`canBeCollidedWith`).
+    fn entities(&self) -> &[Aabb];
+}
+
+/// The plain player: no extensions.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Plain;
+
+impl Extra for Plain {
+    const ON: bool = false;
+    #[inline(always)]
+    fn entities(&self) -> &[Aabb] {
+        &[]
+    }
+}
+
+/// The extended tick with the entity boxes it collides with.
+#[derive(Clone, Copy)]
+pub(crate) struct Ents<'a>(pub &'a [Aabb]);
+
+impl Extra for Ents<'_> {
+    const ON: bool = true;
+    #[inline(always)]
+    fn entities(&self) -> &[Aabb] {
+        self.0
+    }
+}
+
 /// The block collision queries of one player for one tick.
-pub(crate) struct World<'a, R: Rules, W> {
+pub(crate) struct World<'a, R: Rules, W, E: Extra = Plain> {
     pub w: &'a W,
     pub border: &'a Border,
     /// Build height `[min_y, max_y]`.
     pub min_y: i32,
     pub max_y: i32,
-    /// Boxes of the entities the player collides with (`canBeCollidedWith`).
-    pub entities: &'a [Aabb],
+    /// The extension surroundings (`Plain`: none, a zero-sized type).
+    pub ext: E,
     pub _r: core::marker::PhantomData<R>,
 }
 
-impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
+impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
     /// `Level.getBlockState`: air outside the build height (and in unloaded columns, which the
     /// world view returns as air).
     #[inline]
@@ -709,7 +738,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
                         Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
-                        Placed::Border | Placed::Entity(_) => false,
+                        Placed::Border => false,
                     };
                     if hit && !f(x, y, z, shape) {
                         return;
@@ -751,7 +780,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
                             intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0)
                         }
                         Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
-                        Placed::Border | Placed::Entity(_) => false,
+                        Placed::Border => false,
                     };
                     if hit {
                         return true;
@@ -772,7 +801,7 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
         if !empty {
             return false;
         }
-        if !self.entities.is_empty() && self.any_entity_collider(query) {
+        if E::ON && !self.ext.entities().is_empty() && self.any_entity_collider(query) {
             return false;
         }
         if self.border.inside_close(src[0], src[2], query) {
@@ -787,14 +816,6 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
         self.entity_colliders(area).next().is_some()
     }
 
-    #[cold]
-    #[inline(never)]
-    fn push_entity_colliders(&self, area: &Aabb, c: &mut Colliders) {
-        for e in self.entity_colliders(area) {
-            c.push(Placed::Entity(e));
-        }
-    }
-
     /// `getEntityCollisions(entity, area)`: the collidable entity boxes intersecting the area grown
     /// by `1e-7` (none for an area smaller than `1e-7` on average).
     pub(crate) fn entity_colliders<'q>(&'q self, area: &Aabb) -> impl Iterator<Item = Aabb> + 'q {
@@ -805,27 +826,18 @@ impl<R: Rules, W: BlockView<State = R::State>> World<'_, R, W> {
         let list = if size < 1.0e-7 {
             &[][..]
         } else {
-            self.entities
+            self.ext.entities()
         };
         list.iter()
             .copied()
             .filter(move |e| intersects(e, q.min_x, q.min_y, q.min_z, q.max_x, q.max_y, q.max_z))
     }
 
-    /// `collectColliders(entity, entityShapes, box)`: the entity shapes found for `entity_area`,
-    /// the border shape when the entity is inside and close to it, then every block shape.
-    pub(crate) fn colliders(
-        &self,
-        src: [f64; 3],
-        entity_area: &Aabb,
-        query: &Aabb,
-        ctx: &ShapeCtx,
-        c: &mut Colliders,
-    ) {
+    /// `collectColliders(entity, [], box)` without the entity shapes (they come first; the
+    /// extended [`collide`] keeps them in their own list): the border shape when the entity is
+    /// inside and close to it, then every block shape.
+    pub(crate) fn colliders(&self, src: [f64; 3], query: &Aabb, ctx: &ShapeCtx, c: &mut Colliders) {
         c.clear();
-        if !self.entities.is_empty() {
-            self.push_entity_colliders(entity_area, c);
-        }
         if self.border.inside_close(src[0], src[2], query) {
             c.push(Placed::Border);
         }
@@ -932,8 +944,8 @@ pub(crate) fn model_offset(limits: Option<(f32, f32, bool)>, x: i32, z: i32) -> 
 /// `Entity.collide(movement)` for the player: block collision, then step-up by the candidate
 /// heights taken from the colliders' Y coordinates.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
-    world: &World<'_, R, W>,
+pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>, E: Extra>(
+    world: &World<'_, R, W, E>,
     src: [f64; 3],
     bb: &Aabb,
     movement: V3,
@@ -941,12 +953,14 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
     step: f32,
     ctx: &ShapeCtx,
 ) -> V3 {
+    if E::ON && !world.ext.entities().is_empty() {
+        return collide_among_entities(world, src, bb, movement, on_ground, step, ctx);
+    }
     let mut colliders = Colliders::new();
     let step_v = if movement.length_sqr() == 0.0 {
         movement
     } else {
-        let area = expand_towards(bb, movement);
-        world.colliders(src, &area, &area, ctx, &mut colliders);
+        world.colliders(src, &expand_towards(bb, movement), ctx, &mut colliders);
         collide_with_shapes(movement, bb, &colliders, world.border)
     };
     let cx = movement.x != step_v.x;
@@ -963,8 +977,7 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
         if !landing {
             up = expand_towards(&up, V3::new(0.0, f64::from(-1.0e-5f32), 0.0));
         }
-        // The entity shapes are the ones found for the movement (vanilla reuses that list).
-        world.colliders(src, &expand_towards(bb, movement), &up, ctx, &mut colliders);
+        world.colliders(src, &up, ctx, &mut colliders);
         let skip = step_v.y as f32;
         // FloatArraySet: bitwise-distinct values; inline for the usual few, spilling when a tall
         // step height meets finely divided shapes (e.g. stacked daylight detectors: one value per
@@ -1015,6 +1028,131 @@ pub(crate) fn collide<R: Rules, W: BlockView<State = R::State>>(
         }
     }
     step_v
+}
+
+/// [`collide`] with collidable entities around: their shapes come before the border and block
+/// shapes (`collectColliders`), and the step-up reuses the ones found for the movement (vanilla
+/// passes that list on). Thin entity boxes are empty shapes and drop out. Out of line so the
+/// plain [`collide`] stays as it was.
+#[inline(never)]
+fn collide_among_entities<R: Rules, W: BlockView<State = R::State>, E: Extra>(
+    world: &World<'_, R, W, E>,
+    src: [f64; 3],
+    bb: &Aabb,
+    movement: V3,
+    on_ground: bool,
+    step: f32,
+    ctx: &ShapeCtx,
+) -> V3 {
+    let area = expand_towards(bb, movement);
+    let ents: Vec<Aabb> = world
+        .entity_colliders(&area)
+        .filter(|e| !entity_shape_empty(e))
+        .collect();
+    let mut colliders = Colliders::new();
+    let step_v = if movement.length_sqr() == 0.0 {
+        movement
+    } else {
+        world.colliders(src, &area, ctx, &mut colliders);
+        collide_with_entities_and_shapes(movement, bb, &ents, &colliders, world.border)
+    };
+    let cx = movement.x != step_v.x;
+    let cy = movement.y != step_v.y;
+    let cz = movement.z != step_v.z;
+    let landing = cy && movement.y < 0.0;
+    if step > 0.0 && (landing || on_ground) && (cx || cz) {
+        let grounded = if landing {
+            mv(bb, 0.0, step_v.y, 0.0)
+        } else {
+            *bb
+        };
+        let mut up = expand_towards(&grounded, V3::new(movement.x, f64::from(step), movement.z));
+        if !landing {
+            up = expand_towards(&up, V3::new(0.0, f64::from(-1.0e-5f32), 0.0));
+        }
+        world.colliders(src, &up, ctx, &mut colliders);
+        let skip = step_v.y as f32;
+        // FloatArraySet of the candidate heights (see `collide`).
+        let mut cands: Vec<f32> = Vec::new();
+        let mut add = |coord: f64| {
+            let rel = (coord - grounded.min_y) as f32;
+            if rel < 0.0 || rel == skip {
+                return true;
+            }
+            if rel > step {
+                return false;
+            }
+            if !cands.iter().any(|v| v.to_bits() == rel.to_bits()) {
+                cands.push(rel);
+            }
+            true
+        };
+        for e in &ents {
+            let _ = add(e.min_y) && add(e.max_y);
+        }
+        for c in colliders.iter() {
+            c.for_y_coords(world.border, &mut add);
+        }
+        cands.sort_by(f32::total_cmp);
+        for &h in &cands {
+            let s = collide_with_entities_and_shapes(
+                V3::new(movement.x, f64::from(h), movement.z),
+                &grounded,
+                &ents,
+                &colliders,
+                world.border,
+            );
+            if s.horizontal_sqr() > step_v.horizontal_sqr() {
+                let d = bb.min_y - grounded.min_y;
+                return V3::new(s.x, s.y - d, s.z);
+            }
+        }
+    }
+    step_v
+}
+
+/// [`collide_with_shapes`] over the entity shapes, then the other shapes (one list in vanilla).
+fn collide_with_entities_and_shapes(
+    m: V3,
+    b: &Aabb,
+    ents: &[Aabb],
+    shapes: &Colliders,
+    border: &Border,
+) -> V3 {
+    if ents.is_empty() {
+        return collide_with_shapes(m, b, shapes, border);
+    }
+    let mut r = V3::ZERO;
+    let order: [usize; 3] = if m.x.abs() < m.z.abs() {
+        [1, 2, 0]
+    } else {
+        [1, 0, 2]
+    };
+    for axis in order {
+        let am = m.get(axis);
+        if am != 0.0 {
+            let moved = mv(b, r.x, r.y, r.z);
+            // Shapes.collide over the one list (written out: a second call of `shapes_collide`
+            // would take it out of line in the plain path).
+            let mut d = am;
+            for e in ents {
+                if d.abs() < EPSILON {
+                    d = 0.0;
+                    break;
+                }
+                d = entity_shape_collide(e, axis, &moved, d);
+            }
+            for s in shapes.iter() {
+                if d.abs() < EPSILON {
+                    d = 0.0;
+                    break;
+                }
+                d = s.collide(border, axis, &moved, d);
+            }
+            r = r.with(axis, d);
+        }
+    }
+    r
 }
 
 /// A box of a pose at a position (`EntityDimensions.makeBoundingBox`).
