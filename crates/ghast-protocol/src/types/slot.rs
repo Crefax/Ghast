@@ -192,10 +192,21 @@ pub mod v775 {
         P776,
     }
 
+    /// `Codec::P775` / `Codec::P776` as const parameters: each reader is its own instance with
+    /// the codec as a constant (one shared body would test the codec per component).
+    const C775: u8 = 0;
+    const C776: u8 = 1;
+
+    /// The codec of a const parameter.
+    #[inline(always)]
+    const fn codec_of<const C: u8>() -> Codec {
+        if C == C776 { Codec::P776 } else { Codec::P775 }
+    }
+
     /// Skips one component (type id + value) with `codec`'s generated structural skip.
     #[inline]
-    fn skip_one(codec: Codec, r: &mut Reader<'_>) -> DecodeResult<()> {
-        match codec {
+    fn skip_one<const C: u8>(r: &mut Reader<'_>) -> DecodeResult<()> {
+        match codec_of::<C>() {
             #[cfg(feature = "v26_1")]
             Codec::P775 => SlotComponent::skip(r),
             #[cfg(feature = "v26_2")]
@@ -204,6 +215,15 @@ pub mod v775 {
             _ => Err(DecodeError::Invalid(
                 "component codec of a disabled protocol",
             )),
+        }
+    }
+
+    /// [`skip_one`] with the codec known at run time (iteration over a stored patch).
+    #[inline]
+    fn skip_codec(codec: Codec, r: &mut Reader<'_>) -> DecodeResult<()> {
+        match codec {
+            Codec::P775 => skip_one::<C775>(r),
+            Codec::P776 => skip_one::<C776>(r),
         }
     }
 
@@ -274,13 +294,13 @@ pub mod v775 {
         /// Reads `added` components and `removed` types (protocol 775) by skipping over them.
         #[cfg(feature = "v26_1")]
         pub fn read(r: &mut Reader<'_>, added: i32, removed: i32) -> DecodeResult<Self> {
-            Self::read_with(Codec::P775, r, added, removed)
+            Self::read_with::<C775>(r, added, removed)
         }
 
         /// [`read`](Self::read) for protocol 776 (26.2).
         #[cfg(feature = "v26_2")]
         pub fn read_776(r: &mut Reader<'_>, added: i32, removed: i32) -> DecodeResult<Self> {
-            Self::read_with(Codec::P776, r, added, removed)
+            Self::read_with::<C776>(r, added, removed)
         }
 
         /// The protocol number whose component registry the type ids belong to (775 or
@@ -294,8 +314,7 @@ pub mod v775 {
         }
 
         #[inline]
-        fn read_with(
-            codec: Codec,
+        fn read_with<const C: u8>(
             r: &mut Reader<'_>,
             added: i32,
             removed: i32,
@@ -310,7 +329,7 @@ pub mod v775 {
             let mut added_mask = 0u128;
             for _ in 0..added_n {
                 added_mask |= bit(r.clone().read_varint()?);
-                skip_one(codec, r)?;
+                skip_one::<C>(r)?;
             }
             let split = (r.position() - start) as u32;
             let mut removed_mask = 0u128;
@@ -324,7 +343,7 @@ pub mod v775 {
                 removed,
                 added_mask,
                 removed_mask,
-                codec,
+                codec: codec_of::<C>(),
             })
         }
 
@@ -410,7 +429,7 @@ pub mod v775 {
                     Ok(t) => t,
                     Err(e) => return Some(Err(e)),
                 };
-                if let Err(e) = skip_one(self.codec, &mut r) {
+                if let Err(e) = skip_codec(self.codec, &mut r) {
                     return Some(Err(e));
                 }
                 if t == ty {
@@ -581,7 +600,7 @@ pub mod v775 {
             let mut value = r.clone();
             let ty = value.read_varint().ok()?;
             let value_start = value.position();
-            skip_one(self.codec, &mut r).ok()?;
+            skip_codec(self.codec, &mut r).ok()?;
             self.pos = r.position();
             Some((ty, self.bytes.slice(value_start..self.pos)))
         }
@@ -602,17 +621,17 @@ pub mod v775 {
         /// Reads one slot; `None` for an empty one (count `<= 0`, as vanilla reads it).
         #[cfg(feature = "v26_1")]
         pub fn read(r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
-            Self::read_with(Codec::P775, r)
+            Self::read_with::<C775>(r)
         }
 
         /// [`read`](Self::read) for protocol 776 (26.2).
         #[cfg(feature = "v26_2")]
         pub fn read_776(r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
-            Self::read_with(Codec::P776, r)
+            Self::read_with::<C776>(r)
         }
 
         #[inline]
-        fn read_with(codec: Codec, r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
+        fn read_with<const C: u8>(r: &mut Reader<'_>) -> DecodeResult<Option<ItemStack>> {
             let count = r.read_varint()?;
             if count <= 0 {
                 return Ok(None);
@@ -620,7 +639,7 @@ pub mod v775 {
             let id = r.read_varint()?;
             let added = r.read_varint()?;
             let removed = r.read_varint()?;
-            let components = ComponentPatch::read_with(codec, r, added, removed)?;
+            let components = ComponentPatch::read_with::<C>(r, added, removed)?;
             Ok(Some(ItemStack {
                 id,
                 count,
