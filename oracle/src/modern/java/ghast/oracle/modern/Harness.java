@@ -192,6 +192,7 @@ final class Harness {
         Run(Scenario sc) {
             init();
             this.sc = sc;
+            clearFluidShapeCaches();
             releaseKeys();
             options.autoJump().set(sc.autoJump);
             options.sprintWindow().set(sc.sprintWindow != null ? sc.sprintWindow : 7);
@@ -642,6 +643,22 @@ final class Harness {
                 listener.handlePlayerAbilities(roundTrip(ClientboundPlayerAbilitiesPacket.STREAM_CODEC, new ClientboundPlayerAbilitiesPacket(ab)));
             } else if (e instanceof Scenario.VersionEvent ve) {
                 Ext.apply(this, ve);
+            }
+        }
+    }
+
+    /**
+     * {@code FlowingFluid.getShape} caches one shape per fluid state for the whole process, with the
+     * height of the first block it was asked about: a water source first clipped under water keeps a
+     * full-block shape for every later source (sources have amount 8, so the {@code amount == 9}
+     * shortcut never applies). Only ray clips with a fluid mode read it (here: the fall-distance
+     * raycast of {@code Entity.move}). Every case starts like a fresh client, so the caches are
+     * emptied at the start of each case; within a case the cache works as in vanilla.
+     */
+    static void clearFluidShapeCaches() {
+        for (net.minecraft.world.level.material.Fluid f : net.minecraft.core.registries.BuiltInRegistries.FLUID) {
+            if (f instanceof net.minecraft.world.level.material.FlowingFluid) {
+                ((Map<?, ?>) Reflect.get(net.minecraft.world.level.material.FlowingFluid.class, f, "shapes")).clear();
             }
         }
     }
