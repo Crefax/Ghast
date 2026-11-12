@@ -267,10 +267,59 @@ fn same_union(a: &[[f64; 6]], b: &[[f64; 6]]) -> bool {
     true
 }
 
+/// Shape pools shared by the modern versions (26.1, 26.2, ...): one table each in
+/// `generated/modern.rs`, indexed by every version. A version generated later reuses the
+/// entries of the earlier ones and appends what is new, so earlier indices never move.
+#[derive(Default)]
+pub struct Pools {
+    voxels: Vec<Voxel>,
+    selection: Vec<String>,
+}
+
+impl Pools {
+    /// `generated/modern.rs`: the pools of every modern version generated into `self`.
+    pub fn emit(&self) -> String {
+        let mut out = header(
+            "Shape pools shared by the modern versions (26.1, 26.2): collision voxel shapes and crosshair shapes. Later versions append, so indices of earlier versions never move.",
+            &[
+                ORACLE_VOXELS.to_owned(),
+                ORACLE_SELECTION.to_owned(),
+                "tests/golden/26.2/*".to_owned(),
+            ],
+        );
+        out.push_str(
+            "use crate::common::{Aabb, SelectionShape};
+use crate::modern::{VoxelClass, VoxelShapeRef};
+
+",
+        );
+        let _ = writeln!(
+            out,
+            "/// Distinct collision VoxelShapes (jar; index 0 = the empty shape; offset blocks list\n/// their unshifted shape).\npub(crate) static VOXEL_SHAPES: [VoxelShapeRef; {}] = [",
+            self.voxels.len()
+        );
+        for v in &self.voxels {
+            let _ = writeln!(out, "    {},", voxel_lit(v));
+        }
+        out.push_str("];\n\n");
+        let _ = writeln!(
+            out,
+            "/// Distinct outline / interaction shapes (oracle; offset outlines list their unshifted shape).\npub(crate) static SELECTION_SHAPES: [SelectionShape; {}] = [",
+            self.selection.len()
+        );
+        for s in &self.selection {
+            let _ = writeln!(out, "    {s},");
+        }
+        out.push_str("];\n");
+        out
+    }
+}
+
 pub fn generate(
     p: &Paths,
     oracle_voxels: &std::path::Path,
     notes: &mut Vec<String>,
+    pools: &mut Pools,
 ) -> R<Vec<File>> {
     let blocks = model::blocks(&p.json("blocks")?)?;
     for (i, b) in blocks.iter().enumerate() {
@@ -296,7 +345,7 @@ pub fn generate(
     let lines = oracle_lines(oracle_voxels)?;
     let mut ob: BTreeMap<String, OracleBlock> = BTreeMap::new();
     let mut dump_shapes: BTreeMap<u64, Voxel> = BTreeMap::new();
-    let mut shapes: Vec<Voxel> = Vec::new();
+    let mut shapes: Vec<Voxel> = std::mem::take(&mut pools.voxels);
     // Index 0 = the empty shape (as the dump's sid 0).
     let mut state_shape = vec![u32::MAX; state_count];
     let mut state_flags = vec![0u32; state_count];
@@ -667,7 +716,7 @@ pub fn generate(
             ORACLE_VOXELS.into(),
         ],
     );
-    out.push_str("use crate::common::Aabb;\nuse crate::v26_1::{BlockData, BlockKind, PropertyDef, StateLayout, VoxelClass, VoxelShapeRef};\n\n");
+    out.push_str("use crate::v26_1::{BlockData, BlockKind, PropertyDef, StateLayout};\n\n");
     let _ = writeln!(
         out,
         "pub(crate) static BLOCKS: [BlockData; {}] = [",
@@ -810,15 +859,7 @@ pub fn generate(
         out.push('\n');
     }
     out.push_str("];\n");
-    let _ = writeln!(
-        out,
-        "\n/// Distinct 26.1 collision VoxelShapes (jar; index 0 = the empty shape; offset blocks list\n/// their unshifted shape).\npub(crate) static VOXEL_SHAPES: [VoxelShapeRef; {}] = [",
-        shapes.len()
-    );
-    for s in &shapes {
-        let _ = writeln!(out, "    {},", voxel_lit(s));
-    }
-    out.push_str("];\n");
+    pools.voxels = shapes;
     let _ = writeln!(
         out,
         "\n/// The full cube (`Shapes.block()`).\npub(crate) const FULL_CUBE_VOXEL: u16 = {full_cube};\n/// Scaffolding's bottom shape (the \"collision shape\" below the stable top).\npub(crate) const SCAFFOLDING_BOTTOM_VOXEL: u16 = {scaffolding_bottom};\n/// Powder snow's shape for entities falling faster than 2.5 blocks.\npub(crate) const POWDER_SNOW_FALLING_VOXEL: u16 = {powder_falling};"
@@ -838,6 +879,7 @@ pub fn generate(
         &oracle_voxels.with_file_name("selection_shapes.jsonl.gz"),
         ORACLE_SELECTION,
         state_count,
+        Some(&mut pools.selection),
     )?;
     let entities =
         crate::v26_1_entities::generate(p, &oracle_voxels.with_file_name("entity_sizes.jsonl.gz"))?;

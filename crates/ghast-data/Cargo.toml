@@ -14,12 +14,13 @@ documentation = "https://docs.rs/ghast-data"
 readme = "README.md"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "display-names"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2", "display-names"]
 # Per-version tables. Each one is independent; enable only what you use to cut compile time.
 v1_8 = []
 v1_12 = []
 v1_16_5 = []
 v26_1 = []
+v26_2 = []
 # English display names (blocks, items, entities, biomes, enchantments, effects; 1.8 item
 # variants): ~6,300 strings. Off: the `display_name` / `variations` fields do not exist. Registry
 # names (`name`) are always present.

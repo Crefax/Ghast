@@ -1062,6 +1062,7 @@ pub fn v1_16_5(
             &oracle_voxels.with_file_name("selection_shapes.jsonl.gz"),
             facts::V1_16_5_ORACLE_SELECTION,
             state_count,
+            None,
         )?,
     ));
     let mut mods = MODS.to_vec();

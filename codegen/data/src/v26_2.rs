@@ -370,20 +370,115 @@ fn layout(states: &[String]) -> R<Vec<Value>> {
 
 /// Generates `generated/v26_2/` with the 26.1 generator from the synthesised inputs: the
 /// tables have the 26.1 layout, the emitted paths and headers name 26.2.
-pub fn generate(md: Paths, root: &Path, notes: &mut Vec<String>) -> R<Vec<(String, String)>> {
+pub fn generate(
+    md: Paths,
+    root: &Path,
+    notes: &mut Vec<String>,
+    pools: &mut crate::v26_1::Pools,
+) -> R<Vec<(String, String)>> {
     let voxels = root.join(ORACLE_VOXELS);
     let synth = synthesise(&md, &voxels)?;
+    let names = |kind: &str| -> Vec<(String, String)> {
+        synth[kind]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|x| {
+                        (
+                            x["name"].as_str().unwrap_or_default().to_owned(),
+                            x["displayName"].as_str().unwrap_or_default().to_owned(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let block_names = names("blocks");
+    let item_names = names("items");
     let p = md.with_overrides(synth);
     let mut own = Vec::new();
-    let files = crate::v26_1::generate(&p, &voxels, &mut own)?;
+    let files = crate::v26_1::generate(&p, &voxels, &mut own, pools)?;
     notes.extend(own.into_iter().map(|n| format!("[26.2] {n}")));
-    Ok(files
+    files
         .into_iter()
         .map(|(path, text)| {
             let path = path.replacen("v26_1/", "v26_2/", 1);
-            (path, retarget(&text))
+            let text = retarget(&text);
+            let text = match path.as_str() {
+                "v26_2/blocks.rs" => pointer_free(&text, "BlockData", "BLOCK", &block_names)?,
+                "v26_2/items.rs" => pointer_free(&text, "ItemData", "ITEM", &item_names)?,
+                _ => text,
+            };
+            Ok((path, text))
         })
-        .collect())
+        .collect()
+}
+
+/// 26.2 rows without pointers: removes the `name` / `display_name` string fields from the
+/// `{row}` rows (in id order) and appends them as text tables (`{prefix}_ID_NAMES_TEXT` +
+/// `_ENDS`, `{prefix}_DISPLAY_NAMES_TEXT` + `_ENDS` with `display-names`), read through
+/// accessors. Plain read-only data: no load-time relocations.
+fn pointer_free(text: &str, row: &str, prefix: &str, names: &[(String, String)]) -> R<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0usize;
+    let head = format!("    {row} {{ ");
+    for line in text.split_inclusive('\n') {
+        if let Some(rest) = line.strip_prefix(&head) {
+            let (n, d) = names
+                .get(i)
+                .ok_or_else(|| format!("{row}: more rows than names"))?;
+            let fields =
+                format!("name: {n:?}, #[cfg(feature = \"display-names\")] display_name: {d:?}, ");
+            let rest = rest
+                .strip_prefix(&fields)
+                .ok_or_else(|| format!("{row} row {i}: unexpected fields {rest}"))?;
+            out.push_str(&head);
+            out.push_str(rest);
+            i += 1;
+        } else {
+            out.push_str(line);
+        }
+    }
+    if i != names.len() {
+        return Err(format!("{row}: {i} rows, {} names", names.len()));
+    }
+    let table = |out: &mut String,
+                 name: &str,
+                 doc: &str,
+                 v: &mut dyn Iterator<Item = &String>,
+                 cfg: bool| {
+        let mut text = String::new();
+        let mut ends = Vec::new();
+        for s in v {
+            text.push_str(s);
+            ends.push(text.len().to_string());
+        }
+        let c = if cfg {
+            "#[cfg(feature = \"display-names\")]\n"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "\n/// {doc} by id: end offsets into `{name}_TEXT`.\n{c}pub(crate) static {name}_ENDS: [u32; {}] = [{}];\n{c}pub(crate) const {name}_TEXT: &str = {text:?};\n",
+            ends.len(),
+            ends.join(", ")
+        ));
+    };
+    table(
+        &mut out,
+        &format!("{prefix}_ID_NAMES"),
+        "Registry names",
+        &mut names.iter().map(|x| &x.0),
+        false,
+    );
+    table(
+        &mut out,
+        &format!("{prefix}_DISPLAY_NAMES"),
+        "English display names",
+        &mut names.iter().map(|x| &x.1),
+        true,
+    );
+    Ok(out)
 }
 
 /// Rewrites a 26.1 generated file for 26.2: module paths, version labels in the header, and

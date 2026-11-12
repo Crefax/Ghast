@@ -37,6 +37,8 @@ mod generated;
 )]
 mod macros;
 
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
+mod modern;
 #[cfg(feature = "v1_12")]
 pub mod v1_12;
 #[cfg(feature = "v1_16_5")]
@@ -45,6 +47,8 @@ pub mod v1_16_5;
 pub mod v1_8;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
+#[cfg(feature = "v26_2")]
+pub mod v26_2;
 
 pub use common::{
     Aabb, BiomeInfo, BlockInfo, BlockPhysics, BoundingBox, BreakTime, Collision, DigMaterial, Drop,

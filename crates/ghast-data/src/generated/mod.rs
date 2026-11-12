@@ -8,5 +8,10 @@ pub(crate) mod v1_12;
 pub(crate) mod v1_16_5;
 #[cfg(feature = "v1_8")]
 pub(crate) mod v1_8;
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
+#[rustfmt::skip]
+pub(crate) mod modern;
 #[cfg(feature = "v26_1")]
 pub(crate) mod v26_1;
+#[cfg(feature = "v26_2")]
+pub(crate) mod v26_2;

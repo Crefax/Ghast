@@ -10,32 +10,14 @@
 //! resolves it, or a direct block list). [`dig`](super::dig) turns these into vanilla's per-tick
 //! destroy progress.
 
+use super::g;
 use super::{Block, BlockState};
-use crate::generated::v26_1 as g;
 
 /// A 26.1 item type (registry id).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Item(pub(crate) u16);
 
-/// Static item data (default components).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ItemData {
-    /// Registry name without namespace.
-    pub name: &'static str,
-    /// English display name (minecraft-data).
-    #[cfg(feature = "display-names")]
-    pub display_name: &'static str,
-    /// Default `minecraft:max_stack_size`.
-    pub max_stack_size: u8,
-    /// Default `minecraft:max_damage` (damageable items).
-    pub max_damage: Option<u16>,
-    /// The block a `BlockItem` places (block id).
-    pub block: Option<u16>,
-    /// Default `minecraft:food`.
-    pub food: Option<Food>,
-    /// Default `minecraft:tool` (index into the tool table).
-    pub tool: Option<u16>,
-}
+pub use super::ItemData;
 
 /// The `minecraft:food` component.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,7 +143,14 @@ impl Item {
     /// Registry name.
     #[must_use]
     pub fn name(self) -> &'static str {
-        self.data().name
+        super::item_name(self.0)
+    }
+
+    /// English display name.
+    #[cfg(feature = "display-names")]
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
+        super::item_display_name(self.0)
     }
 
     /// Default max stack size.

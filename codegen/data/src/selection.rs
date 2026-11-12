@@ -88,7 +88,15 @@ fn shape_lit(v: &Value) -> R<String> {
 }
 
 /// `selection.rs` for one version: `what` names it in the header, `state_count` must match the dump.
-pub fn generate(what: &str, dump: &Path, rel: &str, state_count: usize) -> R<String> {
+/// With `pool`, the shapes go into that shared pool (deduplicated by content, appended) and the
+/// per-state indices point into it; no `SELECTION_SHAPES` table is emitted here.
+pub fn generate(
+    what: &str,
+    dump: &Path,
+    rel: &str,
+    state_count: usize,
+    pool: Option<&mut Vec<String>>,
+) -> R<String> {
     let lines = oracle_lines(dump)?;
     let mut shapes = Vec::new();
     let mut outline = vec![u32::MAX; state_count];
@@ -142,16 +150,39 @@ pub fn generate(what: &str, dump: &Path, rel: &str, state_count: usize) -> R<Str
         return Err("selection dump does not cover every state".into());
     }
     let mut out = header(what, &[rel.to_owned()]);
-    out.push_str("use crate::common::{Aabb, SelectionShape};\n\n");
-    let _ = writeln!(
-        out,
-        "/// Distinct outline / interaction shapes (oracle; offset outlines list their unshifted shape).\npub(crate) static SELECTION_SHAPES: [SelectionShape; {}] = [",
-        shapes.len()
-    );
-    for s in &shapes {
-        let _ = writeln!(out, "    {s},");
+    if let Some(pool) = pool {
+        let index: Vec<u32> = shapes
+            .iter()
+            .map(|lit| match pool.iter().position(|p| p == lit) {
+                Some(i) => i as u32,
+                None => {
+                    pool.push(lit.clone());
+                    (pool.len() - 1) as u32
+                }
+            })
+            .collect();
+        for s in outline.iter_mut().chain(interaction.iter_mut()) {
+            *s = index[*s as usize];
+        }
+        for h in &mut holding {
+            h.1 = index[h.1 as usize];
+        }
+        out.push('\n');
+    } else {
+        out.push_str("use crate::common::{Aabb, SelectionShape};\n\n");
+        let _ = writeln!(
+            out,
+            "/// Distinct outline / interaction shapes (oracle; offset outlines list their unshifted shape).\npub(crate) static SELECTION_SHAPES: [SelectionShape; {}] = [",
+            shapes.len()
+        );
+        for s in &shapes {
+            let _ = writeln!(out, "    {s},");
+        }
+        out.push_str("];\n\n");
     }
-    out.push_str("];\n\n/// Outline shape per state (empty hand; the unshifted shape for offset outlines).\n");
+    out.push_str(
+        "/// Outline shape per state (empty hand; the unshifted shape for offset outlines).\n",
+    );
     num_table(
         &mut out,
         "pub(crate) static STATE_OUTLINE",

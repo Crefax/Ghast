@@ -14,8 +14,8 @@
 //! the dimensions are fixed. Not modelled (the default size is returned): phantom size,
 //! pufferfish puff state; no box at all for the types flagged [`type_flags::NO_BOX`].
 
+use super::g;
 use crate::common::{EntityDimensions, EntityInfo, VanillaEntitySize, lookup_name};
-use crate::generated::v26_1 as g;
 
 /// Bits of [`EntityTypeData::flags`].
 pub mod type_flags {
