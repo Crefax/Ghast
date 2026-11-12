@@ -37,7 +37,8 @@
         feature = "v1_8",
         feature = "v1_12_2",
         feature = "v1_16_5",
-        feature = "v26_1"
+        feature = "v26_1",
+        feature = "v26_2"
     )),
     allow(
         dead_code,
@@ -91,6 +92,10 @@ pub enum Version {
     /// the `Follower` does it every tick), vanilla defaults otherwise.
     #[cfg(feature = "v26_1")]
     V26_1,
+    /// 26.2 (protocol 776): the modern core with the `V26_2` rule set (collision restitution),
+    /// live player state as for 26.1.
+    #[cfg(feature = "v26_2")]
+    V26_2,
 }
 
 impl Version {
@@ -108,6 +113,8 @@ impl Version {
             ghast_client::GameVersion::V1_16_5 => Some(Version::V1_16_5),
             #[cfg(feature = "v26_1")]
             ghast_client::GameVersion::V26_1 => Some(Version::V26_1),
+            #[cfg(feature = "v26_2")]
+            ghast_client::GameVersion::V26_2 => Some(Version::V26_2),
             _ => None,
         }
     }
@@ -128,6 +135,8 @@ mod tests_util {
             Version::V1_16_5,
             #[cfg(feature = "v26_1")]
             Version::V26_1,
+            #[cfg(feature = "v26_2")]
+            Version::V26_2,
         ]
     }
 }

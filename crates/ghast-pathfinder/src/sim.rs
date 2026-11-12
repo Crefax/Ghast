@@ -15,6 +15,8 @@ use crate::physics::P16;
 use crate::physics::P18;
 #[cfg(feature = "v26_1")]
 use crate::physics::P26;
+#[cfg(feature = "v26_2")]
+use crate::physics::P262;
 use crate::physics::{Live, Observation, Physics, SourceView};
 use crate::plan::Path;
 use crate::world::BlockSource;
@@ -147,6 +149,8 @@ fn stone(version: Version) -> u32 {
         Version::V1_16_5 => u32::from(ghast_data::v1_16_5::Block::STONE.default_state().id()),
         #[cfg(feature = "v26_1")]
         Version::V26_1 => u32::from(ghast_data::v26_1::Block::STONE.default_state().id()),
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => u32::from(ghast_data::v26_2::Block::STONE.default_state().id()),
     }
 }
 
@@ -161,6 +165,8 @@ enum Body {
     V16(<P16 as Physics>::State),
     #[cfg(feature = "v26_1")]
     V26(Box<<P26 as Physics>::State>),
+    #[cfg(feature = "v26_2")]
+    V262(Box<<P262 as Physics>::State>),
 }
 
 /// A resumable [`simulate`]: [`Simulation::step`] runs a slice of ticks, so a follower can
@@ -215,7 +221,7 @@ impl Simulation {
     /// speed, step height, jump strength, scale, ...), effects, abilities and build height
     /// (`ghast_client::TickContext::modern_player`) instead of vanilla defaults. The `Follower`
     /// verifies its plans this way. On other versions the player is ignored.
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     #[must_use]
     pub fn with_modern_player(
         path: &Path,
@@ -243,6 +249,8 @@ impl Simulation {
             Version::V1_16_5 => Body::V16(P16::new_state(start, yaw0, 0.0)),
             #[cfg(feature = "v26_1")]
             Version::V26_1 => Body::V26(Box::new(P26::new_state_live(start, yaw0, 0.0, live))),
+            #[cfg(feature = "v26_2")]
+            Version::V26_2 => Body::V262(Box::new(P262::new_state_live(start, yaw0, 0.0, live))),
         };
         let max_ticks = (path.cost * 4.0) as u32 + 20 * path.steps.len() as u32 + 200;
         Simulation {
@@ -294,6 +302,8 @@ impl Simulation {
                 Body::V16(ref mut s) => self.run.advance::<P16, S>(s, world, ticks, time),
                 #[cfg(feature = "v26_1")]
                 Body::V26(ref mut s) => self.run.advance::<P26, S>(s, world, ticks, time),
+                #[cfg(feature = "v26_2")]
+                Body::V262(ref mut s) => self.run.advance::<P262, S>(s, world, ticks, time),
             };
             self.run.done = done;
         }

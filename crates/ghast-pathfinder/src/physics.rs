@@ -31,13 +31,13 @@ pub struct Observation {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Live {
     /// 26.1: the client player's state.
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     pub(crate) modern: Option<Box<ghast_physics::modern::PlayerState>>,
 }
 
 impl Live {
     /// Stores the 26.1 player state (reusing the allocation).
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     pub(crate) fn set_modern(&mut self, p: &ghast_physics::modern::PlayerState) {
         match &mut self.modern {
             Some(b) => **b = *p,
@@ -56,7 +56,7 @@ pub(crate) trait Physics: 'static {
     fn new_state(pos: [f64; 3], yaw: f32, pitch: f32) -> Self::State;
     /// A standing player like [`Physics::new_state`], with the live player's attributes,
     /// effects, abilities and level when `live` has them (26.1).
-    #[cfg_attr(not(feature = "v26_1"), allow(dead_code))]
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
     fn new_state_live(pos: [f64; 3], yaw: f32, pitch: f32, live: &Live) -> Self::State {
         let _ = live;
         Self::new_state(pos, yaw, pitch)
@@ -109,6 +109,8 @@ pub(crate) struct P12;
 pub(crate) struct P16;
 #[cfg(feature = "v26_1")]
 pub(crate) struct P26;
+#[cfg(feature = "v26_2")]
+pub(crate) struct P262;
 
 #[cfg(feature = "v1_8")]
 impl Physics for P18 {
@@ -334,7 +336,7 @@ impl Physics for P16 {
 
 /// The movement rules of a modern version: the shared modern core with the version's rule set
 /// and block states (one row per version).
-#[cfg(feature = "v26_1")]
+#[cfg(ghast_modern)]
 macro_rules! modern_physics {
     ($p:ident, $version:expr, $block:ty, $rules:ty) => {
         impl Physics for $p {
@@ -409,7 +411,7 @@ macro_rules! modern_physics {
                 feature = "v1_8",
                 feature = "v1_12_2",
                 feature = "v1_16_5",
-                feature = "v26_1"
+                ghast_modern
             ))]
             fn as_modern(s: &Self::State) -> Option<&ghast_physics::modern::PlayerState> {
                 Some(s)
@@ -474,6 +476,14 @@ modern_physics!(
     Version::V26_1,
     ghast_data::v26_1::BlockState,
     ghast_physics::modern::V26_1
+);
+
+#[cfg(feature = "v26_2")]
+modern_physics!(
+    P262,
+    Version::V26_2,
+    ghast_data::v26_2::BlockState,
+    ghast_physics::modern::V26_2
 );
 
 /// A physics world view over a [`BlockSource`] (unknown reads as air, like the vanilla client),

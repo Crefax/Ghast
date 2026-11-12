@@ -47,13 +47,13 @@ pub(crate) trait Io {
     /// `true` when the place was sent.
     fn place_on_top(&mut self, against: [i32; 3]) -> bool;
     /// 26.1: the live client player (attributes, effects, abilities, level).
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
         None
     }
     /// The build height `(min_y, height)` of the player's dimension, when known.
     fn build_height(&self) -> Option<(i32, i32)> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(ghast_modern)]
         if let Some(p) = self.modern_player() {
             return Some((p.level.min_y, p.level.height));
         }
@@ -177,7 +177,7 @@ impl Io for TickContext<'_> {
             None => false,
         }
     }
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
         TickContext::modern_player(self)
     }
@@ -375,7 +375,7 @@ enum Planning {
 
 /// A search with the live player's movement limits when the client has one (26.1).
 fn with_player<I: Io + ?Sized>(ctx: &I, search: Search) -> Search {
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     if let Some(p) = ctx.modern_player() {
         return search.with_modern_player(p);
     }
@@ -385,7 +385,7 @@ fn with_player<I: Io + ?Sized>(ctx: &I, search: Search) -> Search {
 
 /// The verification of `path` with the live player when the client has one (26.1).
 fn new_sim<I: Io + ?Sized>(ctx: &I, path: &Path, cfg: &ControllerConfig) -> Simulation {
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     if let Some(p) = ctx.modern_player() {
         return Simulation::with_modern_player(path, cfg, p);
     }
@@ -696,7 +696,7 @@ impl Follower {
         }
         let obs = ctx.observation();
         let ctrl = self.ctrl.as_mut().expect("planned above");
-        #[cfg(feature = "v26_1")]
+        #[cfg(ghast_modern)]
         if let Some(p) = ctx.modern_player() {
             ctrl.set_modern_player(p);
         }

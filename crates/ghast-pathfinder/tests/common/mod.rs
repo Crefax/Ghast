@@ -34,6 +34,16 @@ pub fn raw(v: Version, b: B) -> u16 {
             };
             s.id()
         }
+        Version::V26_2 => {
+            use ghast_data::v26_2::Block;
+            let s = match b {
+                B::Air => Block::AIR.default_state(),
+                B::Stone => Block::STONE.default_state(),
+                B::Lava => Block::LAVA.default_state(),
+                B::Glass => Block::GLASS.default_state(),
+            };
+            s.id()
+        }
         _ => {
             use ghast_data::v1_16_5::Block;
             let s = match b {
@@ -53,13 +63,15 @@ pub enum World {
     V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
     V26(ghast_physics::modern::MemoryWorld26),
+    V262(ghast_physics::modern::MemoryWorld262),
 }
 
-pub const VERSIONS: [Version; 4] = [
+pub const VERSIONS: [Version; 5] = [
     Version::V1_8,
     Version::V1_12,
     Version::V1_16_5,
     Version::V26_1,
+    Version::V26_2,
 ];
 
 impl World {
@@ -69,6 +81,7 @@ impl World {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
             Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
             Version::V26_1 => World::V26(ghast_physics::modern::memory_world_26_1()),
+            Version::V26_2 => World::V262(ghast_physics::modern::memory_world_26_2()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
@@ -76,6 +89,7 @@ impl World {
             World::V12(m) => m.load_chunks(-r, -r, r, r),
             World::V16(m) => m.load_chunks(-r, -r, r, r),
             World::V26(m) => m.load_chunks(-r, -r, r, r),
+            World::V262(m) => m.load_chunks(-r, -r, r, r),
         }
         w.fill(
             [-16 * r, 63, -16 * r],
@@ -91,6 +105,7 @@ impl World {
             World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
             World::V26(_) => Version::V26_1,
+            World::V262(_) => Version::V26_2,
         }
     }
 
@@ -101,6 +116,7 @@ impl World {
             World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
             World::V26(m) => m.fill_raw(a, b, r),
+            World::V262(m) => m.fill_raw(a, b, r),
         }
     }
 
@@ -115,6 +131,7 @@ impl World {
             World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
             World::V26(m) => pf.plan(Version::V26_1, m, from, goal),
+            World::V262(m) => pf.plan(Version::V26_2, m, from, goal),
         }
     }
 
@@ -130,6 +147,7 @@ impl World {
             World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
             World::V26(m) => simulate(path, m, &cfg),
+            World::V262(m) => simulate(path, m, &cfg),
         }
     }
 }

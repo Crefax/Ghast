@@ -121,6 +121,8 @@ pub(crate) fn table(version: Version) -> &'static Table {
     static T16: OnceLock<Table> = OnceLock::new();
     #[cfg(feature = "v26_1")]
     static T26: OnceLock<Table> = OnceLock::new();
+    #[cfg(feature = "v26_2")]
+    static T262: OnceLock<Table> = OnceLock::new();
     match version {
         #[cfg(feature = "v1_8")]
         Version::V1_8 => T18.get_or_init(build_1_8),
@@ -130,6 +132,8 @@ pub(crate) fn table(version: Version) -> &'static Table {
         Version::V1_16_5 => T16.get_or_init(build_1_16_5),
         #[cfg(feature = "v26_1")]
         Version::V26_1 => T26.get_or_init(m26_1::build),
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => T262.get_or_init(m26_2::build),
     }
 }
 
@@ -409,7 +413,7 @@ fn classify_1_16_5(s: ghast_data::v1_16_5::BlockState) -> Class {
 }
 
 /// The class table of a modern version (one row per version: its `ghast-data` module).
-#[cfg(feature = "v26_1")]
+#[cfg(ghast_modern)]
 macro_rules! modern_classes {
     ($m:ident, $($data:ident)::+) => {
         mod $m {
@@ -441,7 +445,7 @@ macro_rules! modern_classes {
                 } else if phys.has(state_flags::OFFSET) {
                     // Bamboo, pointed dripstone: shifted per position.
                     ShapeDependency::PositionOffset
-                } else if phys.has(state_flags::MOVING_PISTON) || d.name.ends_with("shulker_box") {
+                } else if phys.has(state_flags::MOVING_PISTON) || block.name().ends_with("shulker_box") {
                     // The shape follows a block entity (moving piston, opening shulker lid).
                     ShapeDependency::BlockEntity
                 } else {
@@ -465,7 +469,7 @@ macro_rules! modern_classes {
                 }
                 let fluid = phys.fluid() >> 6;
                 classify(&Facts {
-                    name: d.name,
+                    name: block.name(),
                     boxes: s.voxel_shape().boxes,
                     dependency,
                     physics: PhysicsFlags(physics),
@@ -483,6 +487,8 @@ macro_rules! modern_classes {
 
 #[cfg(feature = "v26_1")]
 modern_classes!(m26_1, ghast_data::v26_1);
+#[cfg(feature = "v26_2")]
+modern_classes!(m26_2, ghast_data::v26_2);
 
 #[cfg(all(test, feature = "v26_1"))]
 mod tests_26_1 {

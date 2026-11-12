@@ -46,15 +46,22 @@ impl<T: BlockSource + ?Sized> BlockSource for &T {
     }
 }
 
+/// A modern dimension's `[lo, hi)` (a source without one: the vanilla overworld).
+#[cfg(ghast_modern)]
+#[inline]
+fn modern_range<S: BlockSource + ?Sized>(src: &S) -> (i32, i32) {
+    let (min_y, height) = src.build_height().unwrap_or((-64, 384));
+    (min_y, min_y.saturating_add(height.max(0)))
+}
+
 /// The build height the planner uses for a version and a source: `[lo, hi)`.
 #[inline]
 pub(crate) fn y_range<S: BlockSource + ?Sized>(version: Version, src: &S) -> (i32, i32) {
     match version {
         #[cfg(feature = "v26_1")]
-        Version::V26_1 => {
-            let (min_y, height) = src.build_height().unwrap_or((-64, 384));
-            (min_y, min_y.saturating_add(height.max(0)))
-        }
+        Version::V26_1 => modern_range(src),
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => modern_range(src),
         #[allow(unreachable_patterns)]
         _ => {
             let _ = src;
@@ -65,6 +72,27 @@ pub(crate) fn y_range<S: BlockSource + ?Sized>(version: Version, src: &S) -> (i3
 
 #[cfg(feature = "v26_1")]
 impl BlockSource for ghast_physics::modern::MemoryWorld26 {
+    #[inline]
+    fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+        use ghast_physics::BlockView;
+        let lo = self.min_y();
+        if y < lo || y >= lo + self.height() || !self.is_chunk_loaded(x >> 4, z >> 4) {
+            return None;
+        }
+        Some(u32::from(self.block(x, y, z).id()))
+    }
+
+    fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        ghast_physics::BlockView::is_chunk_loaded(self, chunk_x, chunk_z)
+    }
+
+    fn build_height(&self) -> Option<(i32, i32)> {
+        Some((self.min_y(), self.height()))
+    }
+}
+
+#[cfg(feature = "v26_2")]
+impl BlockSource for ghast_physics::modern::MemoryWorld262 {
     #[inline]
     fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
         use ghast_physics::BlockView;
@@ -196,6 +224,27 @@ mod client_impls {
 
         fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
             ghast_client::world::v26_1::World::is_column_loaded(self, chunk_x, chunk_z)
+        }
+
+        fn build_height(&self) -> Option<(i32, i32)> {
+            self.dimension().map(|d| (d.kind.min_y, d.kind.height))
+        }
+    }
+
+    #[cfg(feature = "v26_2")]
+    impl BlockSource for ghast_client::world::v26_2::World {
+        #[inline]
+        fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+            if let Some((lo, h)) = self.build_height()
+                && (y < lo || y >= lo + h)
+            {
+                return None;
+            }
+            self.block_state(x, y, z).map(|s| u32::from(s.id()))
+        }
+
+        fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+            ghast_client::world::v26_2::World::is_column_loaded(self, chunk_x, chunk_z)
         }
 
         fn build_height(&self) -> Option<(i32, i32)> {

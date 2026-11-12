@@ -97,7 +97,7 @@ impl Limits {
     /// The limits of a 26.1 player from its attributes and effects: step height, the apex of a
     /// standing jump (jump strength, jump boost, gravity); the gap-jump table only with vanilla
     /// jump, gravity, movement speed and scale.
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     pub(crate) fn of(p: &ghast_physics::modern::PlayerState) -> Limits {
         let a = &p.attributes;
         let boost = p
@@ -634,7 +634,7 @@ impl Search {
     /// 26.1: plans with the moves the live player's attributes and effects allow (step height,
     /// jump strength, jump boost, gravity; gap jumps only with vanilla jump, gravity, movement
     /// speed and scale) instead of the vanilla ones. Call before the first [`Search::step`].
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     #[must_use]
     pub fn with_modern_player(mut self, player: &ghast_physics::modern::PlayerState) -> Search {
         self.cfg.limits = Limits::of(player);
@@ -1601,6 +1601,8 @@ fn climbs_without_wall(version: Version) -> bool {
         Version::V1_16_5 => true,
         #[cfg(feature = "v26_1")]
         Version::V26_1 => true,
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => true,
         #[allow(unreachable_patterns)]
         _ => false,
     }

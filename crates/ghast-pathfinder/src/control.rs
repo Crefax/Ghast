@@ -29,6 +29,8 @@ use crate::physics::P16;
 use crate::physics::P18;
 #[cfg(feature = "v26_1")]
 use crate::physics::P26;
+#[cfg(feature = "v26_2")]
+use crate::physics::P262;
 use crate::physics::{Live, Observation, Physics, SourceView};
 use crate::plan::{Path, Pathfinder, Place, Step};
 use crate::world::BlockSource;
@@ -274,7 +276,7 @@ impl Controller {
     /// input timers and build height the one-tick look-ahead and the pre-jump check simulate
     /// with. Set it every tick before [`Controller::aim`] (the `Follower` does). Without it the
     /// look-ahead uses vanilla defaults rebuilt from the [`Observation`].
-    #[cfg(feature = "v26_1")]
+    #[cfg(ghast_modern)]
     pub fn set_modern_player(&mut self, player: &ghast_physics::modern::PlayerState) {
         self.live.set_modern(player);
     }
@@ -421,6 +423,8 @@ impl Controller {
             Version::V1_16_5 => self.move_keys::<P16, S>(obs, look, world),
             #[cfg(feature = "v26_1")]
             Version::V26_1 => self.move_keys::<P26, S>(obs, look, world),
+            #[cfg(feature = "v26_2")]
+            Version::V26_2 => self.move_keys::<P262, S>(obs, look, world),
         };
         Command {
             keys,
@@ -1099,6 +1103,8 @@ fn exact_look_ahead(version: Version) -> bool {
     match version {
         #[cfg(feature = "v26_1")]
         Version::V26_1 => true,
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => true,
         #[allow(unreachable_patterns)]
         _ => false,
     }

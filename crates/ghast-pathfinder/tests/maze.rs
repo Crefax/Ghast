@@ -74,6 +74,7 @@ fn plan_sliced(
             World::V12(m) => search.step(m, Budget::nodes(nodes)),
             World::V16(m) => search.step(m, Budget::nodes(nodes)),
             World::V26(m) => search.step(m, Budget::nodes(nodes)),
+            World::V262(m) => search.step(m, Budget::nodes(nodes)),
         };
         assert!(search.expanded() - before <= nodes);
         if let Some(r) = r {
@@ -105,7 +106,11 @@ fn mazes_of_growing_size() {
                 // sprint starts (1.16.5: a tick later; oracle-proven both), so the same path
                 // arrives at that corner faster and the momentum carries the box 0.007 past
                 // the wall line before braking can stop it.
-                let touches = if v == Version::V26_1 { 3 } else { 2 };
+                let touches = if matches!(v, Version::V26_1 | Version::V26_2) {
+                    3
+                } else {
+                    2
+                };
                 let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, touches);
                 // Sliced like the follower does it: the same path.
                 let (r, slices, _) = plan_sliced(&w, Config::default(), from, &goal, 2000);
@@ -129,7 +134,11 @@ fn mazes_of_growing_size() {
             pos: centre,
             radius: 1.0,
         };
-        let touches = if v == Version::V26_1 { 3 } else { 2 };
+        let touches = if matches!(v, Version::V26_1 | Version::V26_2) {
+            3
+        } else {
+            2
+        };
         let (p, _) = check_goal_touching(&w, Config::default(), from, &goal, touches);
         let straight = f64::from(from[0] - centre[0]).hypot(f64::from(from[2] - centre[2]));
         assert!(

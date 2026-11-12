@@ -54,6 +54,22 @@ fn raw(v: Version, b: B) -> u16 {
             };
             s.id()
         }
+        Version::V26_2 => {
+            use ghast_data::v26_2::{Block, BlockState};
+            let s = match b {
+                B::Air => Block::AIR.default_state(),
+                B::Stone => Block::STONE.default_state(),
+                B::Dirt => Block::DIRT.default_state(),
+                B::Slab => BlockState::parse("smooth_stone_slab[type=bottom]").unwrap(),
+                B::SoulSand => Block::SOUL_SAND.default_state(),
+                B::Water => Block::WATER.default_state(),
+                B::Lava => Block::LAVA.default_state(),
+                B::Glass => Block::GLASS.default_state(),
+                B::Fence => Block::OAK_FENCE.default_state(),
+                B::LadderSouthWall => BlockState::parse("ladder[facing=north]").unwrap(),
+            };
+            s.id()
+        }
         _ => {
             use ghast_data::v1_16_5::{Block, Property};
             let s = match b {
@@ -81,6 +97,7 @@ enum World {
     V12(ghast_physics::v1_12::MemoryWorld),
     V16(ghast_physics::v1_16_5::MemoryWorld),
     V26(ghast_physics::modern::MemoryWorld26),
+    V262(ghast_physics::modern::MemoryWorld262),
 }
 
 impl World {
@@ -90,6 +107,7 @@ impl World {
             Version::V1_8 => World::V18(ghast_physics::v1_8::memory_world()),
             Version::V1_12 => World::V12(ghast_physics::v1_12::memory_world()),
             Version::V26_1 => World::V26(ghast_physics::modern::memory_world_26_1()),
+            Version::V26_2 => World::V262(ghast_physics::modern::memory_world_26_2()),
             _ => World::V16(ghast_physics::v1_16_5::memory_world()),
         };
         match &mut w {
@@ -97,6 +115,7 @@ impl World {
             World::V12(m) => m.load_chunks(-4, -4, 4, 4),
             World::V16(m) => m.load_chunks(-4, -4, 4, 4),
             World::V26(m) => m.load_chunks(-4, -4, 4, 4),
+            World::V262(m) => m.load_chunks(-4, -4, 4, 4),
         }
         w.fill([-64, 63, -64], [79, 63, 79], B::Stone);
         w
@@ -108,6 +127,7 @@ impl World {
             World::V12(_) => Version::V1_12,
             World::V16(_) => Version::V1_16_5,
             World::V26(_) => Version::V26_1,
+            World::V262(_) => Version::V26_2,
         }
     }
 
@@ -118,6 +138,7 @@ impl World {
             World::V12(m) => m.fill_raw(a, b, r),
             World::V16(m) => m.fill_raw(a, b, r),
             World::V26(m) => m.fill_raw(a, b, r),
+            World::V262(m) => m.fill_raw(a, b, r),
         }
     }
 
@@ -132,6 +153,7 @@ impl World {
             World::V12(m) => pf.plan(Version::V1_12, m, from, goal),
             World::V16(m) => pf.plan(Version::V1_16_5, m, from, goal),
             World::V26(m) => pf.plan(Version::V26_1, m, from, goal),
+            World::V262(m) => pf.plan(Version::V26_2, m, from, goal),
         };
         r.unwrap_or_else(|e| panic!("{:?}: no plan {from:?} -> {goal:?}: {e}", self.version()))
     }
@@ -143,15 +165,17 @@ impl World {
             World::V12(m) => simulate(path, m, &cfg),
             World::V16(m) => simulate(path, m, &cfg),
             World::V26(m) => simulate(path, m, &cfg),
+            World::V262(m) => simulate(path, m, &cfg),
         }
     }
 }
 
-const VERSIONS: [Version; 4] = [
+const VERSIONS: [Version; 5] = [
     Version::V1_8,
     Version::V1_12,
     Version::V1_16_5,
     Version::V26_1,
+    Version::V26_2,
 ];
 
 /// Plans and simulates; asserts the run reached the goal block cleanly.
@@ -298,6 +322,7 @@ fn gap_jumps() {
             World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
             World::V26(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
+            World::V262(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([20, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
         // A gap jump down one block.
@@ -327,6 +352,7 @@ fn water() {
             World::V12(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
             World::V26(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
+            World::V262(m) => pf.plan(v, m, [0, 64, 0], &Goal::Block([12, 64, 0])),
         };
         assert!(r.is_err() || r.unwrap().partial);
     }
@@ -391,6 +417,7 @@ fn goals() {
             World::V12(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
             World::V16(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
             World::V26(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
+            World::V262(m) => pf.plan(v, m, [0, 64, 0], g).unwrap(),
         };
         let p = plan(&Goal::Near {
             pos: [10, 64, 10],
@@ -429,6 +456,7 @@ fn verified_plans_repair_failed_moves() {
             World::V12(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
             World::V16(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
             World::V26(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
+            World::V262(m) => pf.plan_verified(v, m, [0, 64, 0], &Goal::Block([10, 64, 0]), 3),
         }
         .unwrap();
         assert_eq!(sim.outcome, SimOutcome::Arrived);
@@ -478,6 +506,7 @@ fn run_terrain(seed: u64, v: Version) -> Result<(), String> {
         World::V12(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
         World::V16(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
         World::V26(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
+        World::V262(m) => pf.plan(v, m, [-10, 64, -10], &Goal::Block([10, 64, 10])),
     };
     let Ok(path) = r else { return Ok(()) };
     let rep = w.simulate(&path);

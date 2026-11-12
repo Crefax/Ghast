@@ -14,6 +14,8 @@ use crate::physics::P16;
 use crate::physics::P18;
 #[cfg(feature = "v26_1")]
 use crate::physics::P26;
+#[cfg(feature = "v26_2")]
+use crate::physics::P262;
 use crate::physics::{Physics, SourceView};
 
 /// Measured movement facts of one version (ticks and blocks per tick).
@@ -53,6 +55,8 @@ impl Costs {
         static C16: OnceLock<Costs> = OnceLock::new();
         #[cfg(feature = "v26_1")]
         static C26: OnceLock<Costs> = OnceLock::new();
+        #[cfg(feature = "v26_2")]
+        static C262: OnceLock<Costs> = OnceLock::new();
         match version {
             #[cfg(feature = "v1_8")]
             Version::V1_8 => C18.get_or_init(measure::<P18>),
@@ -62,6 +66,8 @@ impl Costs {
             Version::V1_16_5 => C16.get_or_init(measure::<P16>),
             #[cfg(feature = "v26_1")]
             Version::V26_1 => C26.get_or_init(measure::<P26>),
+            #[cfg(feature = "v26_2")]
+            Version::V26_2 => C262.get_or_init(measure::<P262>),
         }
     }
 
@@ -105,6 +111,12 @@ fn raws(version: Version) -> (u32, u32, u32) {
         #[cfg(feature = "v26_1")]
         Version::V26_1 => {
             use ghast_data::v26_1::BlockState;
+            let id = |s: &str| BlockState::parse(s).map_or(0, |s| u32::from(s.id()));
+            (id("stone"), id("ladder[facing=north]"), id("water"))
+        }
+        #[cfg(feature = "v26_2")]
+        Version::V26_2 => {
+            use ghast_data::v26_2::BlockState;
             let id = |s: &str| BlockState::parse(s).map_or(0, |s| u32::from(s.id()));
             (id("stone"), id("ladder[facing=north]"), id("water"))
         }
