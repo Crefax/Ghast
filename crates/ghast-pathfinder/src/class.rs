@@ -129,7 +129,7 @@ pub(crate) fn table(version: Version) -> &'static Table {
         #[cfg(feature = "v1_16_5")]
         Version::V1_16_5 => T16.get_or_init(build_1_16_5),
         #[cfg(feature = "v26_1")]
-        Version::V26_1 => T26.get_or_init(build_26_1),
+        Version::V26_1 => T26.get_or_init(m26_1::build),
     }
 }
 
@@ -408,69 +408,81 @@ fn classify_1_16_5(s: ghast_data::v1_16_5::BlockState) -> Class {
     })
 }
 
+/// The class table of a modern version (one row per version: its `ghast-data` module).
 #[cfg(feature = "v26_1")]
-fn build_26_1() -> Table {
-    use ghast_data::v26_1::{BlockState, STATE_COUNT};
-    let mut classes = Vec::new();
-    let mut map = vec![0u16; STATE_COUNT];
-    intern(&mut classes, classify_26_1(BlockState::AIR));
-    for (id, slot) in map.iter_mut().enumerate() {
-        let s = BlockState::from_id(id as u16).unwrap_or(BlockState::AIR);
-        *slot = intern(&mut classes, classify_26_1(s));
-    }
-    Table { classes, map }
+macro_rules! modern_classes {
+    ($m:ident, $($data:ident)::+) => {
+        mod $m {
+            use super::*;
+            use $($data)::+ as d;
+
+            pub(crate) fn build() -> Table {
+                use d::{BlockState, STATE_COUNT};
+                let mut classes = Vec::new();
+                let mut map = vec![0u16; STATE_COUNT];
+                intern(&mut classes, classify_modern(BlockState::AIR));
+                for (id, slot) in map.iter_mut().enumerate() {
+                    let s = BlockState::from_id(id as u16).unwrap_or(BlockState::AIR);
+                    *slot = intern(&mut classes, classify_modern(s));
+                }
+                Table { classes, map }
+            }
+
+            /// The jar's movement records (the version's `ghast-data` module) in the planner's terms.
+            pub(crate) fn classify_modern(s: d::BlockState) -> Class {
+                use d::{BlockKind, block_flags, state_flags};
+                let block = s.block();
+                let d = block.data();
+                let phys = s.phys();
+                let kind = d.kind;
+                let dependency = if phys.has(state_flags::CONTEXT) {
+                    // Scaffolding, powder snow: the shape depends on the player.
+                    ShapeDependency::EntityContext
+                } else if phys.has(state_flags::OFFSET) {
+                    // Bamboo, pointed dripstone: shifted per position.
+                    ShapeDependency::PositionOffset
+                } else if phys.has(state_flags::MOVING_PISTON) || d.name.ends_with("shulker_box") {
+                    // The shape follows a block entity (moving piston, opening shulker lid).
+                    ShapeDependency::BlockEntity
+                } else {
+                    ShapeDependency::None
+                };
+                let mut physics = 0u16;
+                if d.flags & block_flags::CLIMBABLE != 0 {
+                    physics |= PhysicsFlags::CLIMBABLE.0;
+                }
+                if d.flags & block_flags::FIRE != 0 {
+                    physics |= PhysicsFlags::FIRE.0;
+                }
+                match kind {
+                    BlockKind::Cobweb | BlockKind::SweetBerryBush | BlockKind::PowderSnow => {
+                        physics |= PhysicsFlags::STUCK.0;
+                    }
+                    BlockKind::BubbleColumn => physics |= PhysicsFlags::BUBBLE_COLUMN.0,
+                    BlockKind::SlimeBlock => physics |= PhysicsFlags::SLIME.0,
+                    BlockKind::HoneyBlock => physics |= PhysicsFlags::HONEY.0,
+                    _ => {}
+                }
+                let fluid = phys.fluid() >> 6;
+                classify(&Facts {
+                    name: d.name,
+                    boxes: s.voxel_shape().boxes,
+                    dependency,
+                    physics: PhysicsFlags(physics),
+                    slipperiness: d.friction,
+                    speed_factor: f64::from(d.speed_factor),
+                    fluid_water: fluid == 1,
+                    fluid_lava: fluid == 2,
+                    hardness: d.hardness,
+                    diggable: d.diggable,
+                })
+            }
+        }
+    };
 }
 
-/// 26.1: the jar's movement records (`ghast-data` v26_1) in the planner's terms.
 #[cfg(feature = "v26_1")]
-fn classify_26_1(s: ghast_data::v26_1::BlockState) -> Class {
-    use ghast_data::v26_1::{BlockKind, block_flags, state_flags};
-    let block = s.block();
-    let d = block.data();
-    let phys = s.phys();
-    let kind = d.kind;
-    let dependency = if phys.has(state_flags::CONTEXT) {
-        // Scaffolding, powder snow: the shape depends on the player.
-        ShapeDependency::EntityContext
-    } else if phys.has(state_flags::OFFSET) {
-        // Bamboo, pointed dripstone: shifted per position.
-        ShapeDependency::PositionOffset
-    } else if phys.has(state_flags::MOVING_PISTON) || d.name.ends_with("shulker_box") {
-        // The shape follows a block entity (moving piston, opening shulker lid).
-        ShapeDependency::BlockEntity
-    } else {
-        ShapeDependency::None
-    };
-    let mut physics = 0u16;
-    if d.flags & block_flags::CLIMBABLE != 0 {
-        physics |= PhysicsFlags::CLIMBABLE.0;
-    }
-    if d.flags & block_flags::FIRE != 0 {
-        physics |= PhysicsFlags::FIRE.0;
-    }
-    match kind {
-        BlockKind::Cobweb | BlockKind::SweetBerryBush | BlockKind::PowderSnow => {
-            physics |= PhysicsFlags::STUCK.0;
-        }
-        BlockKind::BubbleColumn => physics |= PhysicsFlags::BUBBLE_COLUMN.0,
-        BlockKind::SlimeBlock => physics |= PhysicsFlags::SLIME.0,
-        BlockKind::HoneyBlock => physics |= PhysicsFlags::HONEY.0,
-        _ => {}
-    }
-    let fluid = phys.fluid() >> 6;
-    classify(&Facts {
-        name: d.name,
-        boxes: s.voxel_shape().boxes,
-        dependency,
-        physics: PhysicsFlags(physics),
-        slipperiness: d.friction,
-        speed_factor: f64::from(d.speed_factor),
-        fluid_water: fluid == 1,
-        fluid_lava: fluid == 2,
-        hardness: d.hardness,
-        diggable: d.diggable,
-    })
-}
+modern_classes!(m26_1, ghast_data::v26_1);
 
 #[cfg(all(test, feature = "v26_1"))]
 mod tests_26_1 {
