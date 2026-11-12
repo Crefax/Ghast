@@ -544,7 +544,7 @@ impl Sim<'_> {
                             let cur = self.get(g).cloned();
                             match (self.v, cur) {
                                 (_, None) => self.set(g, Some(r.clone())),
-                                (Version::V1_16_5 | Version::V26_1, Some(c))
+                                (Version::V1_16_5 | Version::V26_1 | Version::V26_2, Some(c))
                                     if c.id == r.id && c.nbt_eq(r) =>
                                 {
                                     self.set(g, Some(r.with_count(r.count + c.count)));
@@ -706,7 +706,9 @@ impl Sim<'_> {
                 }
             }
             // 1.12 swaps with the hotbar only (buttons 0..9), 1.16 also with the offhand (40)
-            2 if matches!(self.v, Version::V1_16_5 | Version::V26_1) || button < 9 => {
+            2 if matches!(self.v, Version::V1_16_5 | Version::V26_1 | Version::V26_2)
+                || button < 9 =>
+            {
                 if let Ok(i) = usize::try_from(slot) {
                     self.swap_1_16(i, usize::from(button))?;
                 }

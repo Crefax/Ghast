@@ -708,6 +708,33 @@ mod v26_1_api {
     }
 }
 
+/// The typed 26.2 serverbound packets of the window intents (a client that writes 26.2 packets
+/// itself; [`Inventory::encode_modern`] gives them as raw id + body).
+#[cfg(feature = "v26_2")]
+mod v26_2_api {
+    use ghast_protocol::v26_2::play::serverbound as sb;
+
+    use super::m776;
+    use crate::inventory::{CreativePacket, Outgoing};
+    use crate::modern::HashRegistries;
+
+    impl CreativePacket {
+        /// The 26.2 serverbound packet: `swing` (main hand) or `set_creative_mode_slot`.
+        #[must_use]
+        pub fn to_v26_2(&self) -> sb::ServerboundPlayPacket {
+            m776::creative(self)
+        }
+    }
+
+    impl Outgoing {
+        /// The 26.2 serverbound packet (`None` for the legacy-only variants and `Creative`).
+        #[must_use]
+        pub fn to_v26_2(&self, reg: &HashRegistries) -> Option<sb::ServerboundPlayPacket> {
+            m776::outgoing(self, reg)
+        }
+    }
+}
+
 #[cfg(modern)]
 impl Inventory {
     /// Applies a modern window packet from its raw body (ids: [`crate::modern::packet_ids`]):

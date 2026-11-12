@@ -965,7 +965,11 @@ impl Inventory {
         }
         if let Click::Swap { hotbar, .. } = click {
             let ok = hotbar < 9
-                || (hotbar == 40 && matches!(self.version, Version::V1_16_5 | Version::V26_1));
+                || (hotbar == 40
+                    && matches!(
+                        self.version,
+                        Version::V1_16_5 | Version::V26_1 | Version::V26_2
+                    ));
             if !ok {
                 return Err(ClickError::InvalidButton);
             }
@@ -1803,8 +1807,10 @@ impl Inventory {
                     self.m.craft = Default::default();
                 }
                 self.m.craft_result = None;
-                self.m.craft_result_known =
-                    !matches!(self.version, Version::V1_16_5 | Version::V26_1);
+                self.m.craft_result_known = !matches!(
+                    self.version,
+                    Version::V1_16_5 | Version::V26_1 | Version::V26_2
+                );
                 self.m.craft_fresh = false;
             }
             ScreenState::Window(_) => {
