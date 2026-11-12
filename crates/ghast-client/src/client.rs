@@ -883,10 +883,11 @@ where
         self.client.profile_keys.lock().ok().and_then(|k| k.clone())
     }
 
-    /// handleLogin with an encrypted connection: `prepareKeyPair` — the cached pair right
-    /// away unless it is due for a refresh, else a request.
+    /// handleLogin on an online-mode connection (26.1: encrypted; 26.2+: the login packet's
+    /// `onlineMode`): `prepareKeyPair` — the cached pair right away unless it is due for a
+    /// refresh, else a request.
     fn on_join(&mut self) {
-        if !self.encrypted || !self.client.signed_chat {
+        if !V::online_mode(&self.wire, self.encrypted) || !self.client.signed_chat {
             return;
         }
         match self.cached_keys() {
@@ -958,7 +959,10 @@ where
 
     /// ClientPacketListener.tick: `shouldRefreshKeyPair` (at most hourly, once due).
     fn maybe_refresh_keys(&mut self) {
-        if self.keys_task.is_some() || !self.encrypted || !self.client.signed_chat {
+        if self.keys_task.is_some()
+            || !V::online_mode(&self.wire, self.encrypted)
+            || !self.client.signed_chat
+        {
             return;
         }
         let hour = Duration::from_secs(3600);

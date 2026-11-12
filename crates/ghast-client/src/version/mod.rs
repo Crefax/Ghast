@@ -302,6 +302,14 @@ pub trait ClientVersion: Version + sealed::Sealed {
         let _ = (wire, keys, profile_id);
         false
     }
+    /// The session is in online mode, so the client starts a chat session (`prepareKeyPair`):
+    /// up to 26.1 when the connection is encrypted, since 26.2 when the play login says so
+    /// (`onlineMode`).
+    #[inline]
+    fn online_mode(wire: &Self::Wire, encrypted: bool) -> bool {
+        let _ = wire;
+        encrypted
+    }
     /// What the client sends on `start_configuration` before `configuration_acknowledged`
     /// (26.1 `handleConfigurationStart`: the pending chat acknowledgement).
     fn write_configuration_start_replies(

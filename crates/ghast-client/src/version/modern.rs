@@ -69,6 +69,8 @@ pub struct Wire {
     entity_id: i32,
     /// The player's permission level (`LocalPlayer.permissions`; selectors need 2).
     op_level: u8,
+    /// The play login's `onlineMode` (26.2+; `None`: the version decides by encryption).
+    online_mode: Option<bool>,
 }
 
 /// `LocalChatSession` + its message encoder.
@@ -814,6 +816,7 @@ impl ClientVersion for Marker {
                 wire.chat = None;
                 wire.entity_id = p.entity_id;
                 wire.op_level = 0;
+                wire.online_mode = super::login_online_mode(&p);
                 Inbound::JoinGame(JoinGame {
                     entity_id: p.entity_id,
                     game_mode: GameMode::from_wire(w.gamemode.0 as u8),
@@ -1070,6 +1073,11 @@ impl ClientVersion for Marker {
             }
             _ => return Ok(None),
         }))
+    }
+
+    #[inline]
+    fn online_mode(wire: &Wire, encrypted: bool) -> bool {
+        wire.online_mode.unwrap_or(encrypted)
     }
 
     fn begin_chat_session(

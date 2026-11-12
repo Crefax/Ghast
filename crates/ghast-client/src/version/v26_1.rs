@@ -32,6 +32,13 @@ mod imp;
 
 pub use imp::Wire;
 
+/// The play login's `onlineMode` (26.2+); 26.1 decides by encryption.
+#[inline(always)]
+pub(crate) fn login_online_mode(p: &proto::play::clientbound::Login) -> Option<bool> {
+    let _ = p;
+    None
+}
+
 // The inventory's entry points of this version (the shared body calls these).
 
 pub(crate) fn inv_on_update_tags(inv: &mut ghast_inventory::Inventory, body: bytes::Bytes) {
