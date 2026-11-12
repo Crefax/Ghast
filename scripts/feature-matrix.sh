@@ -8,7 +8,7 @@
 #   PACKAGES="ghast-ext" scripts/feature-matrix.sh   # only these crates
 #
 # Version features per crate (lower crates name 1.12 `v1_12`, as ghast-data does; ghast-auth has
-# no version features; ghast-viewer draws 1.8.9 always and 26.1 with `v26_1`).
+# no version features; ghast-viewer draws 1.8.9 always, 26.1 with `v26_1` and 26.2 with `v26_2`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 status=0
@@ -29,11 +29,11 @@ crates=(
   "ghast-entity:v1_8 v1_12 v1_16_5 v26_1::all"
   "ghast-inventory:v1_8 v1_12 v1_16_5 v26_1 v26_2::all"
   "ghast-auth:::"
-  "ghast-client:v1_8 v1_12_2 v1_16_5 v26_1::all"
-  "ghast-pathfinder:v1_8 v1_12_2 v1_16_5 v26_1:client:all"
-  "ghast-ext:v1_8 v1_12_2 v1_16_5 v26_1:pathfinder:all"
-  "ghast-viewer:v26_1:download:all"
-  "ghast:v1_8 v1_12_2 v1_16_5 v26_1::all"
+  "ghast-client:v1_8 v1_12_2 v1_16_5 v26_1 v26_2::all"
+  "ghast-pathfinder:v1_8 v1_12_2 v1_16_5 v26_1 v26_2:client:all"
+  "ghast-ext:v1_8 v1_12_2 v1_16_5 v26_1 v26_2:pathfinder:all"
+  "ghast-viewer:v26_1 v26_2:download:all"
+  "ghast:v1_8 v1_12_2 v1_16_5 v26_1 v26_2::all"
 )
 want() { [ -z "${PACKAGES:-}" ] || [[ " $PACKAGES " == *" $1 "* ]]; }
 
@@ -53,8 +53,8 @@ done
 if [ -z "${PACKAGES:-}" ]; then
   # Lean builds: no display names (all versions); no version at all (connects fail with
   # VersionNotEnabled; lookups answer "unknown").
-  check "ghast --features v1_8,v1_12_2,v1_16_5,v26_1 (no display-names)" \
-    -p ghast --no-default-features --features v1_8,v1_12_2,v1_16_5,v26_1
+  check "ghast --features v1_8,v1_12_2,v1_16_5,v26_1,v26_2 (no display-names)" \
+    -p ghast --no-default-features --features v1_8,v1_12_2,v1_16_5,v26_1,v26_2
   check "ghast-client, ghast --no-default-features (no version)" \
     -p ghast-client -p ghast --no-default-features
   check "ghast-ext --no-default-features (no version)" -p ghast-ext --no-default-features
