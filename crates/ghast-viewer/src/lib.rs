@@ -53,6 +53,44 @@ pub mod tiles;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
 mod watch;
+mod window;
+
+/// A modern version's mapping onto the page's 1.8 assets and its entity accessors (one constant
+/// per modern version module, chosen once per session).
+#[derive(Clone, Copy)]
+pub(crate) struct ModernMap {
+    pub(crate) block: fn(u32) -> u16,
+    pub(crate) item: fn(i32, i16) -> (u16, u16),
+    pub(crate) entity_text: fn(&ghast_entity::Entity) -> Option<serde_json::Value>,
+    pub(crate) stack_text:
+        for<'a> fn(&ghast_inventory::Stack, &dyn Fn(i32) -> Option<&'a str>) -> serde_json::Value,
+    pub(crate) entity_name: fn(&str) -> String,
+    pub(crate) info: fn(ghast_entity::EntityType) -> Option<&'static ghast_data::EntityInfo>,
+    pub(crate) item_stack:
+        fn(&ghast_entity::Entity) -> Option<&ghast_protocol::types::slot::v775::ItemStack>,
+    pub(crate) flags: fn(&ghast_entity::Entity) -> u8,
+    pub(crate) inventory: ghast_inventory::Version,
+    /// The game version name (`"26.1"`).
+    pub(crate) game: &'static str,
+}
+
+impl std::fmt::Debug for ModernMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModernMap")
+            .field("inventory", &self.inventory)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The modern mapping of a session's version (`None`: not a modern version, or its feature is
+/// off).
+pub(crate) fn modern_map(v: ghast_client::GameVersion) -> Option<&'static ModernMap> {
+    match v {
+        #[cfg(feature = "v26_1")]
+        ghast_client::GameVersion::V26_1 => Some(&v26_1::MAP),
+        _ => None,
+    }
+}
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;

@@ -23,8 +23,8 @@ use ghast_protocol::BlockPos;
 use ghast_protocol::v1_8::play::clientbound as cb;
 
 use crate::entities::{
-    display_name, estate_flags, kind_of, leather_color_nbt, looks_of, name_of, object_info,
-    pitch_rad, size_of_entity, stack_of, variant_of, yaw_rad,
+    display_name_in, estate_flags_in, kind_of, leather_color_nbt, looks_of_in, name_of_in,
+    object_info, pitch_rad, size_of_entity_in, stack_of_in, variant_of, yaw_rad,
 };
 use crate::protocol::{
     Explosion, FX_EVENT, Looks, NO_COLOR, PROTOCOL, Particle, SELF, SectionIn, Sky, Writer, event,
@@ -32,6 +32,7 @@ use crate::protocol::{
 };
 use crate::skins::{SkinStore, Textures, slim_by_uuid};
 use crate::tiles::column_tiles;
+use crate::window::Window;
 
 /// Wall clock in ms since the Unix epoch (the page's clock sync compares against it).
 #[must_use]
@@ -106,12 +107,7 @@ pub trait BotView {
 
 /// Whether the page can show sessions of this version.
 fn drawn(v: GameVersion) -> bool {
-    match v {
-        GameVersion::V1_8_9 => true,
-        #[cfg(feature = "v26_1")]
-        GameVersion::V26_1 => true,
-        _ => false,
-    }
+    v == GameVersion::V1_8_9 || crate::modern_map(v).is_some()
 }
 
 /// 1.8 clientbound packet ids the feed reads while someone watches.
@@ -289,8 +285,13 @@ pub struct Feed {
     self_id: i32,
     dimension: String,
     has_sky: bool,
-    /// 26.1: blocks, items and entities are mapped onto 1.8 ones (see [`crate::v26_1`]).
+    /// A modern session: blocks, items and entities are mapped onto 1.8 ones (see
+    /// [`crate::v26_1`]).
     modern: bool,
+    /// The session version's modern mapping (with `modern`).
+    map: Option<&'static crate::ModernMap>,
+    /// The session's game version name (`HELLO` / `STATE` of a modern session).
+    game: &'static str,
     /// The lowest world row the page shows (page `y` = world `y − lo`; 0 for 1.8).
     lo: i32,
     center: Option<(i32, i32)>,
@@ -366,6 +367,8 @@ impl Feed {
             dimension: String::new(),
             has_sky: true,
             modern: false,
+            map: None,
+            game: "1.8.9",
             lo: 0,
             center: None,
             pose: None,
@@ -468,7 +471,7 @@ impl Feed {
         });
         if self.modern {
             // also here: a recording starts before the session, its HELLO names no game
-            j["game"] = "26.1".into();
+            j["game"] = self.game.into();
             j["drawnWith"] = "1.8.9".into();
             j["worldMinY"] = self.lo.into();
         }
@@ -497,9 +500,9 @@ impl Feed {
             "now": now_ms(),
         });
         if self.modern {
-            // The game is 26.1; the page draws it with the 1.8.9 assets (stand-ins are marked
+            // The game is 26.x; the page draws it with the 1.8.9 assets (stand-ins are marked
             // in ITEMS / ENTITY; page y = world y - worldMinY).
-            hello["game"] = "26.1".into();
+            hello["game"] = self.game.into();
             hello["drawnWith"] = "1.8.9".into();
             hello["worldMinY"] = self.lo.into();
         }
@@ -579,12 +582,9 @@ impl Feed {
     pub fn observe(&mut self, v: &dyn BotView) {
         self.live = drawn(v.version());
         if v.version() != GameVersion::V1_8_9 {
-            #[cfg(feature = "v26_1")]
             if self.live && !self.in_game {
                 // the HELLO of a page that comes now already names the game
-                self.modern = true;
-                let h = v.build_height().unwrap_or((-64, 384));
-                self.lo = crate::v26_1::Window::around(v.pose().pos.y, h).lo;
+                self.set_modern(v);
             }
             return;
         }
@@ -738,14 +738,23 @@ impl Feed {
         out
     }
 
-    /// 26.1: whether the bot is still inside the shown 256 rows.
+    /// A modern session: the version's mapping, its name and the shown 256 rows.
+    fn set_modern(&mut self, v: &dyn BotView) {
+        self.map = crate::modern_map(v.version());
+        self.modern = self.map.is_some();
+        if let Some(m) = self.map {
+            self.game = m.game;
+            let h = v.build_height().unwrap_or((-64, 384));
+            self.lo = Window::around(v.pose().pos.y, h).lo;
+        }
+    }
+
+    /// Modern: whether the bot is still inside the shown 256 rows.
     fn keeps_window(&self, v: &dyn BotView) -> bool {
-        #[cfg(feature = "v26_1")]
         if self.modern {
             let h = v.build_height().unwrap_or((-64, 384));
-            return crate::v26_1::Window { lo: self.lo }.keeps(v.pose().pos.y, h);
+            return Window { lo: self.lo }.keeps(v.pose().pos.y, h);
         }
-        let _ = v;
         true
     }
 
@@ -756,20 +765,18 @@ impl Feed {
 
     /// A block state on the page (1.8 `id << 4 | meta`).
     fn page_state(&self, state: u32) -> u16 {
-        #[cfg(feature = "v26_1")]
-        if self.modern {
-            return crate::v26_1::block(state);
+        if let Some(m) = self.map {
+            return (m.block)(state);
         }
         state as u16
     }
 
     /// An inventory stack on the page (1.8 `id, meta`).
     fn page_item(&self, st: &Stack) -> (u16, u16) {
-        #[cfg(feature = "v26_1")]
-        if self.modern {
-            // 26.1 keeps the damage in the `damage` component (`Stack::damage` is 0 there).
-            let d = st.damage_value(ghast_inventory::Version::V26_1);
-            return crate::v26_1::item(st.id(), d.clamp(0, i32::from(i16::MAX)) as i16);
+        if let Some(m) = self.map {
+            // Modern versions keep the damage in the `damage` component (`Stack::damage` is 0).
+            let d = st.damage_value(m.inventory);
+            return (m.item)(st.id(), d.clamp(0, i32::from(i16::MAX)) as i16);
         }
         (st.id() as u16, st.damage() as u16)
     }
@@ -777,12 +784,11 @@ impl Feed {
     fn bind(&mut self, v: &dyn BotView) {
         self.in_game = true;
         self.live = true;
-        self.modern = v.version() != GameVersion::V1_8_9;
+        self.modern = false;
+        self.map = None;
         self.lo = 0;
-        #[cfg(feature = "v26_1")]
-        if self.modern {
-            let h = v.build_height().unwrap_or((-64, 384));
-            self.lo = crate::v26_1::Window::around(v.pose().pos.y, h).lo;
+        if v.version() != GameVersion::V1_8_9 {
+            self.set_modern(v);
         }
         self.self_id = v.entity_id();
         self.dimension = v.dimension().to_string();
@@ -1079,7 +1085,7 @@ impl Feed {
                             // a new variant (slime size, sheared sheep …): spawn it again
                             respawn = true;
                         } else {
-                            let looks = looks_of(e);
+                            let looks = looks_of_in(e, self.map);
                             if looks != k.looks {
                                 write_looks(
                                     &mut self.reliable,
@@ -1088,7 +1094,7 @@ impl Feed {
                                 );
                                 k.looks = looks;
                             }
-                            let st = stack_of(e);
+                            let st = stack_of_in(e, self.map);
                             if st != k.item {
                                 k.item = st;
                                 let at = self.reliable.begin(s::EQUIP);
@@ -1096,20 +1102,11 @@ impl Feed {
                                 self.reliable.end(at);
                             }
                             if self.modern {
-                                let text = {
-                                    #[cfg(feature = "v26_1")]
-                                    {
-                                        crate::v26_1::entity_text(e).map(|j| {
-                                            let mut w = Writer::with_capacity(128);
-                                            w.json(s::ENTITY, &j);
-                                            w.into_vec()
-                                        })
-                                    }
-                                    #[cfg(not(feature = "v26_1"))]
-                                    {
-                                        None
-                                    }
-                                };
+                                let text = self.map.and_then(|m| (m.entity_text)(e)).map(|j| {
+                                    let mut w = Writer::with_capacity(128);
+                                    w.json(s::ENTITY, &j);
+                                    w.into_vec()
+                                });
                                 if text != k.text {
                                     if let Some(t) = &text {
                                         self.reliable.bytes(t);
@@ -1175,14 +1172,14 @@ impl Feed {
         } else if object_info(e).is_some() {
             String::new()
         } else {
-            display_name(e).to_string()
+            display_name_in(e, self.map).to_string()
         };
-        let looks = looks_of(e);
+        let looks = looks_of_in(e, self.map);
         let mut k = Known {
             seen: stamp,
             pos: self.page_pos(e.position()),
             rot: [e.yaw(), e.pitch(), e.head_yaw()],
-            item: stack_of(e),
+            item: stack_of_in(e, self.map),
             variant: variant_of(e),
             looks,
             estate: self.known.get(&id).map_or(0, |k| k.estate),
@@ -1191,9 +1188,9 @@ impl Feed {
             vehicle: e.vehicle(),
             skin: None,
             kind: kind_of(e),
-            name: name_of(e),
+            name: name_of_in(e, self.map),
             label,
-            size: size_of_entity(e),
+            size: size_of_entity_in(e, self.map),
             player,
             uuid: e.uuid().as_u128(),
             text: self.entity_text(e),
@@ -1213,9 +1210,8 @@ impl Feed {
 
     /// 26.1: the `ENTITY` text message of an entity.
     fn entity_text(&self, e: &Entity) -> Option<Vec<u8>> {
-        #[cfg(feature = "v26_1")]
-        if self.modern {
-            let j = crate::v26_1::entity_text(e)?;
+        if let Some(m) = self.map {
+            let j = (m.entity_text)(e)?;
             let mut w = Writer::with_capacity(128);
             w.json(s::ENTITY, &j);
             return Some(w.into_vec());
@@ -1547,7 +1543,7 @@ impl Feed {
     // ---- animation, state, chests --------------------------------------------------------------
 
     fn estate_of(&self, e: &Entity) -> u32 {
-        let flags = estate_flags(e, self.sleeping.contains(&e.id()));
+        let flags = estate_flags_in(e, self.map, self.sleeping.contains(&e.id()));
         let vehicle = e.vehicle().map_or(0, |v| v as u32 + 1);
         u32::from(flags) | (vehicle << 8)
     }
@@ -1710,13 +1706,11 @@ impl Feed {
             self.reliable.bytes(&m);
             self.last_inv = Some(m);
         }
-        #[cfg(feature = "v26_1")]
-        if self.modern {
+        if let Some(m) = self.map {
+            let names = |id| v.enchantment_name(id);
             let text = |s: Option<&Stack>| {
                 s.filter(|s| s.id() > 0 && s.count() > 0)
-                    .map_or(serde_json::Value::Null, |s| {
-                        crate::v26_1::stack_text(s, |id| v.enchantment_name(id))
-                    })
+                    .map_or(serde_json::Value::Null, |s| (m.stack_text)(s, &names))
             };
             let j = serde_json::json!({
                 "hotbar": (0..9).map(|k| text(v.hotbar(k))).collect::<Vec<_>>(),

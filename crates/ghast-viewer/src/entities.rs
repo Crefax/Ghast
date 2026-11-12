@@ -7,6 +7,7 @@
 
 use std::f64::consts::{PI, TAU};
 
+use crate::ModernMap;
 use ghast_entity::{Entity, EntityClass, EntityType, MetaValue};
 
 use crate::protocol::{Looks, NO_COLOR, kind, look};
@@ -103,49 +104,63 @@ pub fn object_info(e: &Entity) -> Option<ObjectInfo> {
     })
 }
 
+/// The modern mapping the public helpers read registry entity types with (26.1, the first
+/// modern version; a session uses its own version's mapping).
+fn default_modern() -> Option<&'static ModernMap> {
+    crate::modern_map(ghast_client::GameVersion::V26_1)
+}
+
 /// The entity's 1.8 name: an object's class name, a mob's entity list name, `"player"`,
-/// `"XPOrb"`, `"Painting"`.
+/// `"XPOrb"`, `"Painting"`. Registry types are read as 26.1's.
 #[must_use]
 pub fn name_of(e: &Entity) -> String {
+    name_of_in(e, default_modern())
+}
+
+/// [`name_of`] with the session's modern mapping.
+pub(crate) fn name_of_in(e: &Entity, m: Option<&ModernMap>) -> String {
     if let Some(o) = object_info(e) {
         return o.name;
     }
-    match e.entity_type() {
-        EntityType::Player => "player".into(),
-        EntityType::ExperienceOrb => "XPOrb".into(),
-        EntityType::Painting => "Painting".into(),
-        #[cfg(feature = "v26_1")]
-        t @ EntityType::Registry(_) => ghast_entity::v26_1::info(t)
-            .map_or_else(String::new, |i| crate::v26_1::entity_name(i.name)),
-        t => ghast_entity::v1_8::info(t).map_or_else(String::new, |i| i.name.to_string()),
+    match (e.entity_type(), modern(e, m)) {
+        (EntityType::Player, _) => "player".into(),
+        (EntityType::ExperienceOrb, _) => "XPOrb".into(),
+        (EntityType::Painting, _) => "Painting".into(),
+        (t @ EntityType::Registry(_), Some(m)) => {
+            (m.info)(t).map_or_else(String::new, |i| (m.entity_name)(i.name))
+        }
+        (t, _) => ghast_entity::v1_8::info(t).map_or_else(String::new, |i| i.name.to_string()),
     }
 }
 
-/// 26.1 (registry) types: the item ids are 26.1 ids, the metadata is 26.1's.
-fn modern(e: &Entity) -> bool {
-    matches!(e.entity_type(), EntityType::Registry(_))
+/// Modern (registry) types: the item ids are the version's ids, the metadata is its own.
+fn modern<'m>(e: &Entity, m: Option<&'m ModernMap>) -> Option<&'m ModernMap> {
+    m.filter(|_| matches!(e.entity_type(), EntityType::Registry(_)))
 }
 
 /// An entity's item `(id, damage)` as the page's 1.8 `(id, meta)`.
-fn page_item(e: &Entity, id: i32, damage: i16) -> (u16, u16) {
-    #[cfg(feature = "v26_1")]
-    if modern(e) {
-        return crate::v26_1::item(id, damage);
+fn page_item(e: &Entity, m: Option<&ModernMap>, id: i32, damage: i16) -> (u16, u16) {
+    if let Some(m) = modern(e, m) {
+        return (m.item)(id, damage);
     }
-    let _ = e;
     (id as u16, damage as u16)
 }
 
-/// The English display name of a mob (the page's fallback label).
+/// The English display name of a mob (the page's fallback label). Registry types are read as
+/// 26.1's.
 #[must_use]
 pub fn display_name(e: &Entity) -> &'static str {
-    match e.entity_type() {
-        EntityType::LegacyMob(_) => {
+    display_name_in(e, default_modern())
+}
+
+/// [`display_name`] with the session's modern mapping.
+pub(crate) fn display_name_in(e: &Entity, m: Option<&ModernMap>) -> &'static str {
+    match (e.entity_type(), modern(e, m)) {
+        (EntityType::LegacyMob(_), _) => {
             ghast_entity::v1_8::info(e.entity_type()).map_or("", |i| i.display_name)
         }
-        #[cfg(feature = "v26_1")]
-        EntityType::Registry(_) if e.class() == EntityClass::Mob => {
-            ghast_entity::v26_1::info(e.entity_type()).map_or("", |i| i.display_name)
+        (EntityType::Registry(_), Some(m)) if e.class() == EntityClass::Mob => {
+            (m.info)(e.entity_type()).map_or("", |i| i.display_name)
         }
         _ => "",
     }
@@ -167,8 +182,14 @@ pub fn kind_of(e: &Entity) -> u8 {
 }
 
 /// Width and height for the page (the page draws a box of this size when it has no model).
+/// Registry types are read as 26.1's.
 #[must_use]
 pub fn size_of_entity(e: &Entity) -> (f32, f32) {
+    size_of_entity_in(e, default_modern())
+}
+
+/// [`size_of_entity`] with the session's modern mapping.
+pub(crate) fn size_of_entity_in(e: &Entity, m: Option<&ModernMap>) -> (f32, f32) {
     if let Some(o) = object_info(e) {
         return (o.width, o.height);
     }
@@ -177,10 +198,8 @@ pub fn size_of_entity(e: &Entity) -> (f32, f32) {
     }
     e.size()
         .or_else(|| {
-            #[cfg(feature = "v26_1")]
-            if modern(e) {
-                return ghast_entity::v26_1::info(e.entity_type())
-                    .and_then(|i| Some((i.width?, i.height?)));
+            if let Some(m) = modern(e, m) {
+                return (m.info)(e.entity_type()).and_then(|i| Some((i.width?, i.height?)));
             }
             ghast_entity::v1_8::info(e.entity_type()).and_then(|i| Some((i.width?, i.height?)))
         })
@@ -200,22 +219,26 @@ fn num(v: Option<&MetaValue>) -> i32 {
 }
 
 /// The shown stack of an entity: a dropped item's stack (`id, meta`), a falling block's block,
-/// primed TNT, an orb's value (as the meta), else the held item.
+/// primed TNT, an orb's value (as the meta), else the held item. Registry types are read as
+/// 26.1's.
 #[must_use]
 pub fn stack_of(e: &Entity) -> (u16, u16) {
+    stack_of_in(e, default_modern())
+}
+
+/// [`stack_of`] with the session's modern mapping.
+pub(crate) fn stack_of_in(e: &Entity, m: Option<&ModernMap>) -> (u16, u16) {
     match e.class() {
         EntityClass::ExperienceOrb => return (0, e.data().clamp(0, 0xffff) as u16),
         EntityClass::Item => {
-            #[cfg(feature = "v26_1")]
-            if modern(e) {
-                // 26.1 keeps the item entity's stack in the component model.
-                return ghast_entity::v26_1::item_stack(e)
-                    .map_or((0, 0), |st| crate::v26_1::item(st.id, 0));
+            if let Some(m) = modern(e, m) {
+                // Modern versions keep the item entity's stack in the component model.
+                return (m.item_stack)(e).map_or((0, 0), |st| (m.item)(st.id, 0));
             }
             return e
                 .item()
                 .filter(|it| it.id > 0)
-                .map_or((0, 0), |it| page_item(e, it.id, it.damage));
+                .map_or((0, 0), |it| page_item(e, m, it.id, it.damage));
         }
         _ => {}
     }
@@ -228,7 +251,7 @@ pub fn stack_of(e: &Entity) -> (u16, u16) {
     }
     e.equipment(0)
         .filter(|it| it.id > 0)
-        .map_or((0, 0), |it| page_item(e, it.id, it.damage))
+        .map_or((0, 0), |it| page_item(e, m, it.id, it.damage))
 }
 
 /// Minecart display blocks by class (each class's default display tile, facing north).
@@ -285,7 +308,9 @@ pub fn mob_variant(name: &str, at: impl Fn(u8) -> i32) -> u16 {
 /// The variant of a tracked entity (mobs and objects only).
 #[must_use]
 pub fn variant_of(e: &Entity) -> u16 {
-    if modern(e) || (!matches!(e.class(), EntityClass::Mob) && object_info(e).is_none()) {
+    if matches!(e.entity_type(), EntityType::Registry(_))
+        || (!matches!(e.class(), EntityClass::Mob) && object_info(e).is_none())
+    {
         // 26.1: the variant indices are 1.8's (not read: the plain model).
         return 0;
     }
@@ -345,19 +370,24 @@ const STAND_POSE: [[f32; 3]; 6] = [
 ];
 
 /// The `LOOKS` of an entity, `None` when plain: baby, the armour it wears (equipment 1..4) and an
-/// armour stand's pose (metadata 11..16).
+/// armour stand's pose (metadata 11..16). Registry types are read as 26.1's.
 #[must_use]
 pub fn looks_of(e: &Entity) -> Option<Looks> {
-    let name = name_of(e);
+    looks_of_in(e, default_modern())
+}
+
+/// [`looks_of`] with the session's modern mapping.
+pub(crate) fn looks_of_in(e: &Entity, mm: Option<&ModernMap>) -> Option<Looks> {
+    let name = name_of_in(e, mm);
     let m = e.metadata();
     let at = |i: u8| num(m.get(i));
-    if modern(e) {
+    if modern(e, mm).is_some() {
         // 26.1: the armour only (baby flags and stand poses sit at other indices). Its
         // equipment slots: 0 main hand, 1 off hand, 2 feet, 3 legs, 4 chest, 5 head.
         let mut armour = Vec::new();
         for slot in 1..=4u8 {
             if let Some(it) = e.equipment(usize::from(slot) + 1).filter(|it| it.id > 0) {
-                let (id, meta) = page_item(e, it.id, it.damage);
+                let (id, meta) = page_item(e, mm, it.id, it.damage);
                 armour.push((slot, id, meta, NO_COLOR));
             }
         }
@@ -406,13 +436,18 @@ pub fn looks_of(e: &Entity) -> Option<Looks> {
 }
 
 /// The `ESTATE` flags byte of an entity (metadata 0 bits plus [`crate::protocol::eflag::SLEEP`]).
+/// Registry types are read as 26.1's.
 #[must_use]
 pub fn estate_flags(e: &Entity, sleeping: bool) -> u8 {
+    estate_flags_in(e, default_modern(), sleeping)
+}
+
+/// [`estate_flags`] with the session's modern mapping.
+pub(crate) fn estate_flags_in(e: &Entity, m: Option<&ModernMap>, sleeping: bool) -> u8 {
     use crate::protocol::eflag;
-    #[cfg(feature = "v26_1")]
-    if modern(e) {
-        // 26.1's bit 4 is swimming, not using an item.
-        let meta = ghast_entity::v26_1::flags(e);
+    if let Some(m) = modern(e, m) {
+        // The modern bit 4 is swimming, not using an item.
+        let meta = (m.flags)(e);
         return (meta & (eflag::FIRE | eflag::SNEAK | eflag::SPRINT | eflag::INVISIBLE))
             | if sleeping { eflag::SLEEP } else { 0 };
     }
