@@ -65,6 +65,9 @@ final class ExtCases {
             case "elytra" -> elytraFuzz(seed, index, ticks);
             case "riptide" -> riptideFuzz(seed, index, ticks);
             case "entities" -> entitiesFuzz(seed, index, ticks);
+            // Cache runs only (no golden file): the entities fuzz with the player scaled up to the
+            // attribute's maximum, entities spread over its box.
+            case "entities-large" -> entitiesLargeFuzz(seed, index, ticks);
             case "nether" -> netherFuzz(seed, index, ticks);
             case "border" -> borderFuzz(seed, index, ticks);
             case "boats" -> boatsFuzz(seed, index, ticks);
@@ -516,6 +519,19 @@ final class ExtCases {
         addEvent(spawnLate, 20, new Ext.Remove(200));
         addEvent(spawnLate, 30, new Ext.Remove(201));
         l.add(spawnLate);
+        // A boat's push query (Level.getEntities) visits only the entity sections of its box grown by
+        // 2 blocks horizontally and 4 downwards: a boat overlapping a scaled-up player far from the
+        // player's section does not find it. Mobs test the local player's box directly
+        // (ClientLevel.getPushableEntities). Player at x 15.5 (section 0), scale 16 (9.6 x 28.8).
+        Scenario large = with(flat("push_large_scale_section_reach"),
+                sp(100, "cow", 19.7, 64, 0.5), // overlaps, far from the player's section: pushes
+                sp(101, "zombie", 15.0, 84.5, 1.2), // overlaps high up: pushes
+                sp(102, "oak_boat", 19.4, 64, -1.5), // query from section 1 only: no push
+                sp(103, "birch_boat", 16.9, 64, 3.0), // query reaches section 0: pushes
+                sp(104, "sheep", 12.2, 64, -2.0))
+                .desc("a scale-16 player at a section edge: mobs push it, boats only when their query reaches its section");
+        large.attributeBases.put("minecraft:scale", 16.0);
+        l.add(large.spawn(15.5, 64, 0.5, 0, 0).run(30, 0).run(15, LEFT));
         return l;
     }
 
@@ -569,6 +585,54 @@ final class ExtCases {
             }
         }
         sc.description += ", entities";
+        return sc;
+    }
+
+    /**
+     * The entities fuzz with a large player: scale base 2-16 (the attribute's maximum; the extras'
+     * scale modifiers stay), 1-8 entities of the pool spread over the player's box (so many overlap
+     * it far from its position and across entity sections), moved, spawned and removed as in
+     * {@link #entitiesFuzz}. Cases {@code …_x_enl}.
+     */
+    static Scenario entitiesLargeFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_enl");
+        copy(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x656e746c7267L);
+        with(sc);
+        double scale = x.chance(0.3) ? 16.0 : 2.0 + 14.0 * x.nextDouble();
+        sc.attributeBases.put("minecraft:scale", scale);
+        double half = 0.3 * scale + 1.0, height = 1.8 * scale;
+        int n = x.range(1, 8);
+        int nextId = 300;
+        List<double[]> live = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            double ex = sc.x + (x.nextDouble() - 0.5) * 2 * half, ey = sc.y + (x.chance(0.6) ? 0 : x.nextDouble() * height),
+                    ez = sc.z + (x.nextDouble() - 0.5) * 2 * half;
+            Ext.setup(sc).entities.add(new Ext.Spawn(nextId, x.pick(ENTITY_POOL), ex, ey, ez, (float) (x.nextDouble() * 360)));
+            live.add(new double[] {nextId++, ex, ey, ez});
+        }
+        for (int t = 0; t < sc.ticks.size(); t++) {
+            for (double[] e : live) {
+                if (x.chance(0.15)) {
+                    double step = x.chance(0.3) ? 2.0 : 0.5;
+                    e[1] += (x.nextDouble() - 0.5) * step;
+                    e[2] += x.chance(0.7) ? 0 : (x.nextDouble() - 0.5) * step;
+                    e[3] += (x.nextDouble() - 0.5) * step;
+                    addEvent(sc, t, new Ext.Move((int) e[0], e[1], e[2], e[3], (float) (x.nextDouble() * 360), x.chance(0.7)));
+                }
+            }
+            if (x.chance(0.02) && !live.isEmpty()) {
+                double[] e = live.remove(x.nextInt(live.size()));
+                addEvent(sc, t, new Ext.Remove((int) e[0]));
+            }
+            if (x.chance(0.04) && live.size() < 10) {
+                double ex = sc.x + (x.nextDouble() - 0.5) * 2 * half, ez = sc.z + (x.nextDouble() - 0.5) * 2 * half;
+                addEvent(sc, t, new Ext.Spawn(nextId, x.pick(ENTITY_POOL), ex, sc.y, ez, (float) (x.nextDouble() * 360)));
+                live.add(new double[] {nextId++, ex, sc.y, ez});
+            }
+        }
+        sc.description += ", entities around a large player";
         return sc;
     }
 
