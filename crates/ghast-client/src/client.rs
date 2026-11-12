@@ -1084,6 +1084,10 @@ where
                     continue;
                 }
             }
+            // 26.1 handleMoveVehicle answers at once (sent with this read's replies).
+            if let Some(o) = self.engine.sim.take_reply() {
+                self.engine.outbound().push(o);
+            }
             // 1.20.2+ mount screens read the entity (type, saddle / body slots).
             if let Some(eid) = V::mount_screen_entity(&raw) {
                 let mount = self.engine.sim.mount_info(eid);
@@ -1277,6 +1281,10 @@ where
                     self.engine.note_inbound(now);
                     if let Some(end) = self.drain_inbound()? {
                         return Ok(end);
+                    }
+                    if self.engine.sim.take_filter_dirty() {
+                        let raw = self.raw_ids.clone();
+                        self.set_filter(self.interests, &raw);
                     }
                     if let Some(end) = self.reconfigure_if_asked().await? {
                         return Ok(end);

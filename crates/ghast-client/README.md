@@ -161,6 +161,11 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   components (`ghast_inventory::v26_1::item_use`: duration, `use_effects`, `food`); the server's
   entity event 9 completes a use (the client never does it itself); clicks that drop a stack
   send their swings first.
+- **Boats** (26.1): boarded when the server's `set_passengers` names the player (right-click a
+  boat with the crosshair on it, or `/ride`); `TickContext::vehicle` / `is_riding`. While riding,
+  the movement keys paddle (the client moves the boat, as vanilla); sneak to get off. The own
+  boat needs no entity tracking; collisions with other boats and mobs need
+  `Interests::ENTITIES`.
 - **Elytra and riptide** (`ghast_physics::modern::PlayerExt`): glide starts on a jump press in the
   air with a glider equipped (`TickContext::start_gliding`, `is_gliding`), the server's own shared
   and living entity flags, firework rockets attached to the player and riptide launches are applied
@@ -443,6 +448,7 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `lab/entities.sh` crowd: walk through 6 NoAI cows into an oak boat, entity tracking on, then off | on: pushed aside and over the boat, 0 flags; off: walks straight through, also 0 flags (Grim 2.3.74 does not check entity collision or pushes) |
 | `lab/entities.sh` horse / villager: sneak-click a tamed horse (saddle out and back), trade with a villager (select trade, take the result) | horse screen 2 clicks, merchant screen 1 click, all confirmed as predicted, 0 flags |
 | `lab/entities.sh` teams: two bots walk through each other, without a team, then in a `collisionRule never` team | without: pushed apart; with: pass straight through (x unchanged); 0 flags both ways |
+| `lab/entities.sh` boat: board an oak boat (right click with tracking, `/ride` without), paddle straight, left, right against the pool's edge, then from the ice strip onto grass, sneak off | 3 runs, boarded and dismounted each, 0 flags |
 | `lab/entities.sh` border: walk into a 24-wide border, keep walking while it shrinks to 10 | stops at the edge (rounded out to whole blocks, as vanilla), the shrinking border passes, border damage kills, respawn, stops at the new edge, 0 flags |
 | `creative_probe` (creative screen: clone, place, Q, drop outside, ctrl+Q) | 6 clicks accepted, 0 corrections, 0 flags |
 

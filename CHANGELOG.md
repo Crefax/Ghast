@@ -195,6 +195,17 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   inventory (kept raw until a screen needs them), mount screens with the entity's type and saddle /
   body slots (from a minimal mount lookup that works without entity tracking),
   `TickContext::anvil_rename` / `select_loom_pattern` / `select_trade`.
+- **26.1 boats in the client** (oracle-proven `modern::tick_boat`): `set_passengers` naming the
+  player boards a boat or raft (a right click on it with the crosshair on it, or the server's
+  `/ride`); while riding, the client moves the boat with the movement keys and sends
+  `steer_boat`, the look, `move_vehicle` (and `player_input` / sprint changes) in vanilla order;
+  the server's `move_vehicle` correction is answered at once; sneaking dismounts (server-side).
+  Works without entity tracking for the bot's own boat (boats are known from their spawn and
+  move packets, which are decoded only while some boat is known); other boats and mobs collide
+  with it only with `Interests::ENTITIES`. The boat the player left stays where it was driven.
+  `TickContext::vehicle` / `is_riding`, `Vehicle`, `Outbound::VehicleMove` / `SteerBoat`. 12
+  hand-written and 100 fuzz cases of `tests/golden/26.1/boats.jsonl.gz` replay through the
+  engine (72 of them also without entity tracking).
 - **26.1 entity collision and pushing in the client** (with `Interests::ENTITIES` only): the
   player collides with boats, rafts and living shulkers (`modern::tick_in`, boxes in
   `getEntities` section order), and after its tick the tracked mobs and boats push it

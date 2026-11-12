@@ -471,7 +471,9 @@ impl ClientVersion for V1_16_5 {
             | Outbound::Pong(_)
             | Outbound::ResourcePackStatus { .. }
             | Outbound::CookieResponse { .. }
-            | Outbound::LookAnswer { .. } => Ok(()),
+            | Outbound::LookAnswer { .. }
+            | Outbound::VehicleMove { .. }
+            | Outbound::SteerBoat { .. } => Ok(()),
         }
     }
 

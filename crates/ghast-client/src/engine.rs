@@ -2147,6 +2147,21 @@ impl TickContext<'_> {
         self.core.hands.using_item()
     }
 
+    /// The vehicle the player rides (26.1 boats and rafts: boarded when the server's
+    /// `set_passengers` names the player, e.g. after a right click on the boat with the
+    /// crosshair on it; the client then moves the boat with the movement keys). Leave it with
+    /// the sneak key (the server dismounts). `None` when not riding or on older versions.
+    #[must_use]
+    pub fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        self.world.vehicle()
+    }
+
+    /// Riding a vehicle ([`TickContext::vehicle`]).
+    #[must_use]
+    pub fn is_riding(&self) -> bool {
+        self.world.vehicle().is_some()
+    }
+
     /// Gliding with an elytra (26.1; shared flag 7: set by the client when a glide starts,
     /// cleared by the server on landing, in water or when the elytra breaks).
     #[must_use]
@@ -2497,6 +2512,8 @@ mod tests {
                 Outbound::ResourcePackStatus { .. } => "resource_pack",
                 Outbound::CookieResponse { .. } => "cookie_response",
                 Outbound::LookAnswer { .. } => "C05",
+                Outbound::VehicleMove { .. } => "vehicle_move",
+                Outbound::SteerBoat { .. } => "steer_boat",
             })
             .collect();
         out.clear();
@@ -3702,10 +3719,50 @@ mod tests {
         assert!(cases >= 4 && fuzz >= 5, "{cases} {fuzz}");
     }
 
+    /// 26.1 boats through the engine (`tests/golden/26.1/boats.jsonl.gz`): boarding from
+    /// `set_passengers`, the boat's tick with its passenger, `steer_boat` / look / `vehicle_move`
+    /// packets, the server's `move_vehicle` answered at once; with entity tracking (the boat's
+    /// position from the tracker, other boats collide) and without (the boat known from its spawn
+    /// packet).
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn boats_match_the_oracle_26_1() {
+        let hand = [
+            "boat_water_paddle",
+            "boat_raft_turn_look",
+            "boat_land",
+            "boat_ice",
+            "boat_drop_into_water",
+            "boat_wall",
+            "boat_flowing",
+            "boat_under_water",
+            "boat_slab_soul_sand",
+            "boat_hits_boat",
+            "boat_server_correction",
+            "boat_dismount",
+        ];
+        let (cases, fuzz) = ext_replay_26_1_with("boats.jsonl.gz", &hand, true);
+        assert!(cases >= 12 && fuzz >= 5, "{cases} {fuzz}");
+        // Without the tracker: only the cases without other entities near the boat.
+        let alone: Vec<&str> = hand
+            .iter()
+            .copied()
+            .filter(|n| *n != "boat_hits_boat")
+            .collect();
+        let (cases, fuzz) = ext_replay_26_1_with("boats.jsonl.gz", &alone, false);
+        assert!(cases >= 11 && fuzz >= 5, "{cases} {fuzz}");
+    }
+
     /// Replays the hand-written cases `hand` and the fuzz cases whose events it drives (entities,
     /// border, own velocity) of a 26.1 oracle file through the engine; returns (cases, fuzz).
     #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
     fn ext_replay_26_1(file: &str, hand: &[&str]) -> (usize, usize) {
+        ext_replay_26_1_with(file, hand, true)
+    }
+
+    /// [`ext_replay_26_1`] with or without entity tracking.
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn ext_replay_26_1_with(file: &str, hand: &[&str], tracking: bool) -> (usize, usize) {
         use crate::phys_golden::v261::{ext_of, player_of};
         use ghast_protocol::v26_1::play::clientbound as cb;
         use serde_json::Value;
@@ -3796,6 +3853,21 @@ mod tests {
                         _ => "other",
                     }
                 ]),
+                Outbound::VehicleMove {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } => serde_json::json!([
+                    "vehicle_move",
+                    bits([pos.x, pos.y, pos.z]),
+                    yaw.to_bits(),
+                    pitch.to_bits(),
+                    on_ground
+                ]),
+                Outbound::SteerBoat { left, right } => {
+                    serde_json::json!(["steer_boat", left, right])
+                }
                 Outbound::PlayerInput(c) => serde_json::json!([
                     "player_input",
                     [
@@ -3825,6 +3897,14 @@ mod tests {
                     hc
                 ]),
                 "flying" => serde_json::json!(["flying", og, hc]),
+                "vehicle_move" => serde_json::json!([
+                    "vehicle_move",
+                    bits(v3(&p["pos"])),
+                    f32v(&p["yaw"]).to_bits(),
+                    f32v(&p["pitch"]).to_bits(),
+                    og
+                ]),
+                "steer_boat" => serde_json::json!(["steer_boat", p["left"], p["right"]]),
                 "entity_action" => serde_json::json!(["entity_action", p["action_name"]]),
                 "player_input" => {
                     let i = &p["input"];
@@ -3906,6 +3986,8 @@ mod tests {
                                     | "border_size"
                                     | "border_lerp"
                                     | "velocity"
+                                    | "ride"
+                                    | "vehicle_move"
                             )
                         )
                     })
@@ -3913,7 +3995,19 @@ mod tests {
                 x.keys()
                     .all(|k| matches!(k.as_str(), "entities" | "border" | "dimension"))
             });
-            let fuzz = name.starts_with("fuzz") && plain;
+            // Without the tracker only cases where the ridden boat is the only entity.
+            let alone = tracking
+                || (sc["setup"]["ext"]["entities"]
+                    .as_array()
+                    .is_some_and(|l| l.len() <= 1)
+                    && ticks.iter().all(|t| {
+                        t["input"]["events"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .all(|ev| ev["type"] != "spawn")
+                    }));
+            let fuzz = name.starts_with("fuzz") && plain && alone;
             if !wanted.contains(&name.as_str()) && !fuzz {
                 continue;
             }
@@ -3943,13 +4037,13 @@ mod tests {
                 respawn_screen: true,
             }));
             e.sim.test_set_own_id(7);
-            e.sim.set_entities(Some(
+            e.sim.set_entities(tracking.then(|| {
                 ghast_entity::Config::default()
                     .with_metadata(true)
                     .with_equipment(false)
                     .with_effects(false)
-                    .with_events(false),
-            ));
+                    .with_events(false)
+            }));
             // The chunk window around the spawn (far cases).
             let (cx, cz) = (
                 (f64v(&setup["pos"][0]).floor() as i32) >> 4,
@@ -4106,6 +4200,44 @@ mod tests {
                                 entity_id: 7,
                                 motion: Vec3::new(x, y, z),
                             });
+                        }
+                        "ride" => {
+                            // The oracle's player is entity 1, ours 7.
+                            let passengers = ev["passengers"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .map(|v| match v.as_i64().unwrap() as i32 {
+                                    1 => 7,
+                                    x => x,
+                                })
+                                .collect();
+                            let raw = RawPacket {
+                                id: cb::id::SET_PASSENGERS,
+                                body: body(&cb::SetPassengers {
+                                    entity_id: ev["vehicle"].as_i64().unwrap() as i32,
+                                    passengers,
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                        "vehicle_move" => {
+                            let [x, y, z] = v3(&ev["pos"]);
+                            let raw = RawPacket {
+                                id: cb::id::VEHICLE_MOVE,
+                                body: body(&cb::VehicleMove {
+                                    x,
+                                    y,
+                                    z,
+                                    yaw: f32v(&ev["yaw"]),
+                                    pitch: f32v(&ev["pitch"]),
+                                }),
+                            };
+                            e.sim.world_packet(&raw).unwrap();
+                            // The client sends handleMoveVehicle's answer at once.
+                            if let Some(o) = e.sim.take_reply() {
+                                e.outbound().push(o);
+                            }
                         }
                         "remove_entity" => {
                             let raw = RawPacket {

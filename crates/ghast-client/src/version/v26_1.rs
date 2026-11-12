@@ -1166,6 +1166,23 @@ impl ClientVersion for V26_1 {
                     })
                 }
             },
+            Outbound::VehicleMove {
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            } => enc.write_packet(&sb::VehicleMove {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                yaw: *yaw,
+                pitch: *pitch,
+                on_ground: *on_ground,
+            }),
+            Outbound::SteerBoat { left, right } => enc.write_packet(&sb::SteerBoat {
+                left_paddle: *left,
+                right_paddle: *right,
+            }),
             Outbound::LookAnswer { yaw, pitch } => {
                 wire.last_look = (*yaw, *pitch);
                 enc.write_packet(&sb::Look {

@@ -28,6 +28,7 @@ enum Mode {
     Walk,
     Horse,
     Villager,
+    Boat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,9 @@ struct Probe {
     started: Instant,
     limit: Duration,
     reported: bool,
+    /// Boat mode: ticks since boarding (`None`: not on yet), whether it was ever on.
+    ride_ticks: Option<u32>,
+    rode: bool,
     /// Walk direction (`GHAST_YAW`, default 0 = +z).
     yaw: f32,
 }
@@ -88,6 +92,9 @@ impl Probe {
     }
 
     fn ok(&self) -> bool {
+        if self.mode == Mode::Boat {
+            return self.rode && self.failures.is_empty();
+        }
         self.mode == Mode::Walk
             || (self.opened
                 && self.failures.is_empty()
@@ -116,13 +123,105 @@ impl Probe {
     }
 }
 
+impl Probe {
+    /// Boat mode: board (a right click on the nearest boat with entity tracking; else wait for
+    /// the server to seat us, e.g. `ride <bot> mount <boat>`), paddle a course (straight, a
+    /// left turn, a right turn, straight on), then hold sneak until the server dismounts us.
+    fn boat(&mut self, ctx: &mut TickContext<'_>) {
+        let riding = ctx.is_riding();
+        if riding && self.ride_ticks.is_none() {
+            self.ride_ticks = Some(0);
+            self.rode = true;
+            println!("boarded: {:?}", ctx.vehicle());
+        }
+        let Some(t) = self.ride_ticks else {
+            // Not on yet: with tracking, look at the nearest boat and right-click it.
+            if self.wait < 40 {
+                self.wait += 1;
+                return;
+            }
+            if let Some((id, b)) = Self::find_boat(ctx) {
+                let eyes = ctx.eyes(ctx.pose());
+                // The box point nearest the eyes, pulled 0.1 inside (the pick range is 3).
+                let near = |lo: f64, hi: f64, v: f64| v.clamp(lo + 0.1, hi - 0.1);
+                let c = Vec3::new(
+                    near(b[0], b[3], eyes.x),
+                    near(b[1], b[4], eyes.y),
+                    near(b[2], b[5], eyes.z),
+                );
+                let (dx, dy, dz) = (c.x - eyes.x, c.y - eyes.y, c.z - eyes.z);
+                let yaw = (-dx).atan2(dz).to_degrees() as f32;
+                let pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
+                let cur = ctx.pose().yaw;
+                ctx.set_aim(cur + ghast::rotation::wrap_degrees(yaw - cur), pitch);
+                let on = ctx.target_entity().is_some_and(|e| e.id == id);
+                ctx.set_buttons(Buttons {
+                    left: false,
+                    right: on && ctx.tick() % 10 == 0,
+                });
+            }
+            return;
+        };
+        ctx.set_buttons(Buttons::default());
+        if !riding {
+            println!("dismounted after {t} ticks");
+            self.finish(ctx);
+            return;
+        }
+        self.ride_ticks = Some(t + 1);
+        let (forward, left, right, sneak) = match t {
+            0..20 => (false, false, false, false),
+            20..80 => (true, false, false, false),
+            80..110 => (true, true, false, false),
+            110..150 => (true, false, true, false),
+            150..230 => (true, false, false, false),
+            230..260 => (false, false, false, false),
+            _ => (false, false, false, true),
+        };
+        ctx.set_controls(Controls {
+            forward,
+            left,
+            right,
+            sneak,
+            ..Controls::NONE
+        });
+        if t % 20 == 0 {
+            if let Some(v) = ctx.vehicle() {
+                log::info!(
+                    "boat at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
+                    v.pos.x,
+                    v.pos.y,
+                    v.pos.z,
+                    v.yaw,
+                    v.on_ground
+                );
+            }
+        }
+        if t > 400 {
+            self.failures.push("not dismounted after 140 sneaking ticks".into());
+            self.finish(ctx);
+        }
+    }
+
+    fn find_boat(ctx: &TickContext<'_>) -> Option<(i32, [f64; 6])> {
+        let ents = ctx.entities()?;
+        ents.iter()
+            .filter(|e| {
+                ghast::entity::v26_1::entity_type(e)
+                    .is_some_and(|t| t.name.ends_with("_boat") || t.name.ends_with("_raft"))
+            })
+            .filter_map(|e| Some((e.id(), e.bounding_box()?)))
+            .next()
+    }
+}
+
 impl Behavior for Probe {
     fn name(&self) -> &str {
         "entity-probe"
     }
 
     fn interests(&self) -> Interests {
-        if self.entities || self.mode != Mode::Walk {
+        if self.entities || matches!(self.mode, Mode::Horse | Mode::Villager) {
             // The tab list gives other players' scoreboard names (their teams).
             Interests::ENTITIES | Interests::PLAYER_LIST | Interests::CHAT
         } else {
@@ -162,6 +261,10 @@ impl Behavior for Probe {
         }
         if ev.opened.is_some() {
             self.opened = true;
+        }
+        if self.mode == Mode::Boat {
+            self.boat(ctx);
+            return;
         }
         if self.mode == Mode::Walk {
             if self.wait < 40 {
@@ -336,9 +439,10 @@ fn main() {
     let mode = match std::env::var("GHAST_PROBE").as_deref() {
         Ok("horse") => Mode::Horse,
         Ok("villager") => Mode::Villager,
+        Ok("boat") => Mode::Boat,
         Ok("walk") | Err(_) => Mode::Walk,
         Ok(other) => {
-            eprintln!("GHAST_PROBE: walk | horse | villager, not {other}");
+            eprintln!("GHAST_PROBE: walk | horse | villager | boat, not {other}");
             std::process::exit(2);
         }
     };
@@ -370,6 +474,8 @@ fn main() {
             started: Instant::now(),
             limit,
             reported: false,
+            ride_ticks: None,
+            rode: false,
             yaw: std::env::var("GHAST_YAW")
                 .ok()
                 .and_then(|v| v.parse().ok())

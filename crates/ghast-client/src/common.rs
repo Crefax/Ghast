@@ -861,6 +861,24 @@ impl DigStatus {
     }
 }
 
+/// The vehicle the player rides ([`crate::TickContext::vehicle`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct Vehicle {
+    /// Its entity id.
+    pub entity_id: i32,
+    /// Position after this tick (the client's, for a vehicle it controls).
+    pub pos: Vec3,
+    /// Yaw.
+    pub yaw: f32,
+    /// Pitch.
+    pub pitch: f32,
+    /// On the ground.
+    pub on_ground: bool,
+    /// The client moves it (a boat) rather than the server (a minecart).
+    pub controlled: bool,
+}
+
 /// Serverbound play packets the core writes, common to every version.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -986,5 +1004,23 @@ pub enum Outbound {
         yaw: f32,
         /// Pitch.
         pitch: f32,
+    },
+    /// `move_vehicle` (serverbound): where the vehicle the player controls is (26.1 boats).
+    VehicleMove {
+        /// Position.
+        pos: Vec3,
+        /// Yaw.
+        yaw: f32,
+        /// Pitch.
+        pitch: f32,
+        /// The vehicle's on-ground flag.
+        on_ground: bool,
+    },
+    /// `paddle_boat` / `steer_boat`: the boat's paddle states (26.1, every boat tick).
+    SteerBoat {
+        /// Left paddle.
+        left: bool,
+        /// Right paddle.
+        right: bool,
     },
 }

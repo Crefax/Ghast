@@ -297,6 +297,21 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = entity_id;
         None
     }
+    /// The answer a world packet asks for at once (26.1 `move_vehicle`), taken after each one.
+    #[inline(always)]
+    fn take_reply(&mut self) -> Option<Outbound> {
+        None
+    }
+    /// The packets the sim reads changed since the last call (rebuild the packet filter).
+    #[inline(always)]
+    fn take_filter_dirty(&mut self) -> bool {
+        false
+    }
+    /// The vehicle the player rides, when the version models riding.
+    #[inline(always)]
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        None
+    }
     /// The client's main arm setting (left: `true`) for the parts of movement that read it.
     #[inline(always)]
     fn set_main_arm_left(&mut self, left: bool) {
@@ -903,6 +918,18 @@ pub(super) fn push_packets(
                     horizontal_collision,
                 },
             }),
+            P::MoveVehicle {
+                pos,
+                yaw,
+                pitch,
+                on_ground,
+            } => Outbound::VehicleMove {
+                pos: Vec3::new(pos[0], pos[1], pos[2]),
+                yaw,
+                pitch,
+                on_ground,
+            },
+            P::PaddleBoat { left, right } => Outbound::SteerBoat { left, right },
             P::PlayerInput(k) => Outbound::PlayerInput(Controls {
                 forward: k.forward,
                 back: k.back,
@@ -1218,6 +1245,19 @@ impl Sim for Box<dyn Sim> {
     }
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
         (**self).mount_info(entity_id)
+    }
+    #[cfg(feature = "v26_1")]
+    fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
+        (**self).modern_player()
+    }
+    fn take_reply(&mut self) -> Option<Outbound> {
+        (**self).take_reply()
+    }
+    fn take_filter_dirty(&mut self) -> bool {
+        (**self).take_filter_dirty()
+    }
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        (**self).vehicle()
     }
     #[cfg(all(test, feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
     fn test_set_modern(

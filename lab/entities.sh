@@ -10,6 +10,8 @@
 #           (0 flags), border reset
 #   teams   two bots walk through each other, without a team and in a collisionRule-never team
 #           (0 flags both ways; with the team they pass straight)
+#   boat    board an oak boat on the water strip (tracking on: right click; off: `ride`), paddle
+#           straight / left / right onto land, sneak off (0 flags; Grim checks vehicle moves)
 #   ./entities.sh [phase ...]   (default: crowd horse villager border)
 # Starts the 26.1 lab if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example entity_probe
@@ -114,6 +116,28 @@ for phase in "${phases[@]}"; do
         [ -z "$f" ] || { echo "FAIL: flags with teams $rule"; fail=1; }
       done
       con "team remove ghastlab" || true ;;
+    boat)
+      # Board an oak boat (tracking on: a right click; off: the server's `ride` command),
+      # paddle straight / left / right against the pool's edge, then on the ice strip, sneak
+      # to dismount.
+      for scene in water:on water:off ice:off; do
+        IFS=: read -r where tracking <<< "$scene"
+        clean
+        if [ "$where" = water ]; then at="35.5 4 10.5"; stand="35.5 4 7.6"; else at="3.5 4 10.5"; stand="3.5 4 7.6"; fi
+        con "summon oak_boat $at {Rotation:[0f,0f]}"
+        since=$(date +%H:%M:%S)
+        if [ "$tracking" = on ]; then
+          ( sleep 4; con "tp $BOT $stand 0 30" ) &
+          probe boat 40 --entities || { echo "FAIL: boat on $where (tracking on)"; fail=1; }
+        else
+          ( sleep 4; con "tp $BOT $stand 0 30"; sleep 3; con "ride $BOT mount @e[type=oak_boat,limit=1]" ) &
+          probe boat 40 || { echo "FAIL: boat on $where (tracking off)"; fail=1; }
+        fi
+        wait
+        f=$(flags_since "$since")
+        echo "boat on $where, tracking $tracking: ${f:-0 Grim flags}"
+        [ -z "$f" ] || { echo "FAIL: flags in the boat"; fail=1; }
+      done ;;
     *) echo "unknown phase $phase" >&2; exit 2 ;;
   esac
 done

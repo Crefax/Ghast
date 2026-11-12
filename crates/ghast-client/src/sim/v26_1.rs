@@ -53,6 +53,78 @@ pub(crate) struct Sim26 {
     teams: Option<Box<super::teams::Teams>>,
     /// The player's scoreboard name (its team membership).
     profile_name: Box<str>,
+    /// The vehicle the player rides and controls (`set_passengers` naming us).
+    riding: Option<Riding>,
+    /// The boat the player left: it stays where the player drove it (the client moved it; the
+    /// server sends no move for it) until the server moves it.
+    parked: Option<Parked>,
+    /// The answer to a server packet that goes out at once (`move_vehicle`).
+    reply: Option<Outbound>,
+    /// The packets the sim reads changed (boats appeared / are gone): rebuild the filter.
+    filter_dirty: bool,
+}
+
+/// A vehicle the player rides.
+#[derive(Debug)]
+enum Riding {
+    /// A boat or raft: client-authoritative (`modern::tick_boat`).
+    Boat { id: i32, boat: Box<modern::Boat> },
+}
+
+impl Riding {
+    fn id(&self) -> i32 {
+        match self {
+            Riding::Boat { id, .. } => *id,
+        }
+    }
+}
+
+/// A boat the player drove and left.
+#[derive(Debug, Clone, Copy)]
+struct Parked {
+    id: i32,
+    pos: [f64; 3],
+    bb: [f64; 6],
+    /// The tracker's position of it when the player left (a different one: the server moved it).
+    tracked: Option<[f64; 3]>,
+}
+
+impl Parked {
+    /// The parked position and box when `e` is the parked boat and the server has not moved it.
+    fn of(this: Option<&Parked>, e: &ghast_entity::Entity) -> Option<([f64; 3], [f64; 6])> {
+        let p = this?;
+        (p.id == e.id() && p.tracked == Some(e.position())).then_some((p.pos, p.bb))
+    }
+}
+
+/// A boat the player may board, known without entity tracking: its kind, last position and
+/// rotation from the server (spawn, then teleports and moves).
+#[derive(Debug, Clone, Copy)]
+struct KnownBoat {
+    id: i32,
+    kind: modern::BoatKind,
+    pos: [f64; 3],
+    /// `VecDeltaCodec` base of the relative moves.
+    base: [f64; 3],
+    yaw: f32,
+    pitch: f32,
+}
+
+/// At most this many boats are remembered without entity tracking (the oldest is forgotten).
+const MAX_BOATS: usize = 64;
+
+/// `Mth.unpackDegrees`.
+fn unpack_degrees(b: i8) -> f32 {
+    f32::from(b) * 360.0 / 256.0
+}
+
+/// `VecDeltaCodec.decode` of one coordinate.
+fn delta_decode(base: f64, d: i16) -> f64 {
+    if d == 0 {
+        base
+    } else {
+        ((base * 4096.0).floor() as i64 + i64::from(d)) as f64 / 4096.0
+    }
 }
 
 /// Entity collision and pushing around the player (only with entity tracking).
@@ -104,6 +176,73 @@ fn entity_bits(e: &ghast_entity::Entity) -> u8 {
         .map_or(0, |t| bits.get(usize::from(t.id)).copied().unwrap_or(0))
 }
 
+/// The boxes the player may collide with this tick (`canBeCollidedWith`: boats, rafts, living
+/// shulkers; its own vehicle excluded), and while riding the boxes its boat collides with
+/// (`canVehicleCollide`: those and every living entity, not the player), near enough for any
+/// move of this tick, each in `getEntities` section order. Only with entity tracking.
+#[inline(never)]
+fn collect_colliders(
+    t: Option<&ghast_entity::v26_1::Tracker>,
+    parked: Option<&Parked>,
+    p: &modern::PlayerState,
+    vehicle: Option<i32>,
+    boxes: &mut Vec<ghast_physics::math::Aabb>,
+    boat_boxes: &mut Vec<ghast_physics::math::Aabb>,
+) {
+    boxes.clear();
+    boat_boxes.clear();
+    // Farther than any move of one tick can reach (the physics filters exactly); a boat moves
+    // up to ~2 blocks a tick on ice.
+    let extra = if vehicle.is_some() { 4.0 } else { 3.0 };
+    let reach = |v: f64| v.abs() + extra;
+    let (rx, ry, rz) = (reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2]));
+    let mut found: Vec<((i32, u64), [f64; 6], bool)> = Vec::new();
+    // The boat the player left, where it drove it (without the tracker it is the only one).
+    if let Some(k) = parked
+        && t.is_none_or(|t| t.get(k.id).is_none())
+    {
+        found.push((section_order(k.pos), k.bb, true));
+    }
+    for e in t.into_iter().flat_map(|t| t.iter()) {
+        let bits = entity_bits(e);
+        let living =
+            vehicle.is_some() && ghast_entity::v26_1::entity_type(e).is_some_and(|t| t.is_living());
+        if bits & COLLIDES == 0 && !living {
+            continue;
+        }
+        if Some(e.id()) == vehicle {
+            continue;
+        }
+        let Some((pos, b)) = Parked::of(parked, e).or_else(|| entity_box(e)) else {
+            continue;
+        };
+        if b[3] < p.bb.min_x - rx
+            || b[0] > p.bb.max_x + rx
+            || b[4] < p.bb.min_y - ry
+            || b[1] > p.bb.max_y + ry
+            || b[5] < p.bb.min_z - rz
+            || b[2] > p.bb.max_z + rz
+        {
+            continue;
+        }
+        // isAlive: a dying shulker (health 0) no longer collides.
+        if ghast_entity::v26_1::health(e).is_some_and(|h| h <= 0.0) {
+            continue;
+        }
+        found.push((section_order(pos), b, bits & COLLIDES != 0));
+    }
+    // getEntities walks sections by x, then z / y.
+    found.sort_by_key(|f| f.0);
+    for (_, b, collides) in found {
+        if collides {
+            boxes.push(aabb(b));
+        }
+        if vehicle.is_some() {
+            boat_boxes.push(aabb(b));
+        }
+    }
+}
+
 /// `SectionPos` of a position, as `getEntities` orders sections: x, then z, then y.
 fn section_order(pos: [f64; 3]) -> (i32, u64) {
     let b = |v: f64| (v.floor() as i32) >> 4;
@@ -149,6 +288,8 @@ struct OwnEntity {
     /// Mountable animals with an inventory screen (horses, llamas, nautili …): what their
     /// screen reads off them (`canUseSlot(SADDLE / BODY)`).
     mounts: Vec<Mount>,
+    /// Boats the player may board (only without entity tracking; the tracker knows them).
+    boats: Vec<KnownBoat>,
 }
 
 /// A mount entity's screen facts.
@@ -299,6 +440,32 @@ impl Sim26 {
                 let id = r.read_varint()?;
                 r.skip(16)?; // uuid
                 let ty = r.read_varint()?;
+                // Boats the player may board (the tracker knows them when it runs).
+                if self.entities.is_none()
+                    && let Some(kind) = u16::try_from(ty)
+                        .ok()
+                        .and_then(ghast_data::v26_1::entity_type)
+                        .and_then(|t| modern::BoatKind::from_entity_name(t.name))
+                {
+                    let p: cb::SpawnEntity = raw.decode_as()?;
+                    let pos = [p.x, p.y, p.z];
+                    self.own.boats.retain(|b| b.id != id);
+                    if self.own.boats.len() >= MAX_BOATS {
+                        self.own.boats.remove(0);
+                    }
+                    self.own.boats.push(KnownBoat {
+                        id,
+                        kind,
+                        pos,
+                        base: pos,
+                        yaw: unpack_degrees(p.yaw),
+                        pitch: unpack_degrees(p.pitch),
+                    });
+                    if self.own.boats.len() == 1 {
+                        self.filter_dirty = true;
+                    }
+                    return Ok(());
+                }
                 if HORSES.contains(&ty) || LLAMAS.contains(&ty) || NAUTILI.contains(&ty) {
                     self.own.mounts.retain(|m| m.id != id);
                     if self.own.mounts.len() >= MAX_MOUNTS {
@@ -325,17 +492,195 @@ impl Sim26 {
                 if self.own.rockets.is_empty()
                     && self.ext.rocket_count() == 0
                     && self.own.mounts.is_empty()
+                    && self.own.boats.is_empty()
+                    && self.riding.is_none()
                 {
                     return Ok(());
                 }
                 let p: cb::EntityDestroy = raw.decode_as()?;
+                let had_boats = !self.own.boats.is_empty();
                 for id in p.entity_ids {
                     self.own.rockets.retain(|&(rid, _)| rid != id);
                     self.own.mounts.retain(|m| m.id != id);
+                    self.own.boats.retain(|b| b.id != id);
                     self.ext.remove_rocket(id);
+                    // The vehicle is gone: its passenger is off (removePassenger).
+                    if self.riding.as_ref().is_some_and(|v| v.id() == id) {
+                        self.riding = None;
+                    }
+                    if self.parked.is_some_and(|p| p.id == id) {
+                        self.parked = None;
+                    }
+                }
+                if had_boats && self.own.boats.is_empty() {
+                    self.filter_dirty = true;
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Forgets the known boats (a new level); marks the filter when that changes it.
+    fn set_boats_known(&mut self, keep: bool) {
+        if !keep && !self.own.boats.is_empty() {
+            self.own.boats.clear();
+            self.filter_dirty = true;
+        }
+    }
+
+    /// `set_passengers` and `move_vehicle` (the server's vehicle correction).
+    fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        if raw.id == cb::id::VEHICLE_MOVE {
+            // handleMoveVehicle: only for the vehicle this client controls; answered at once.
+            if let Some(Riding::Boat { boat, .. }) = &mut self.riding {
+                let p: cb::VehicleMove = raw.decode_as()?;
+                if let ghast_physics::Packet::MoveVehicle {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } = boat.server_move([p.x, p.y, p.z], p.yaw, p.pitch)
+                {
+                    self.reply = Some(Outbound::VehicleMove {
+                        pos: Vec3::new(pos[0], pos[1], pos[2]),
+                        yaw,
+                        pitch,
+                        on_ground,
+                    });
+                }
+            }
+            return Ok(());
+        }
+        let mut r = ghast_protocol::Reader::new(&raw.body);
+        let vehicle = r.read_varint()?;
+        let riding_it = self.riding.as_ref().is_some_and(|v| v.id() == vehicle);
+        let known = riding_it || self.own.boats.iter().any(|b| b.id == vehicle) || {
+            self.entities
+                .as_ref()
+                .is_some_and(|t| t.get(vehicle).is_some())
+        };
+        if !known {
+            return Ok(());
+        }
+        let p: cb::SetPassengers = raw.decode_as()?;
+        let on = p.passengers.contains(&self.own.id);
+        if on && !riding_it {
+            // startRiding: a boat the client knows (position and rotation as it holds them).
+            let boat = if let Some(t) = &self.entities {
+                t.get(vehicle).and_then(|e| {
+                    let kind = ghast_entity::v26_1::entity_type(e)
+                        .and_then(|t| modern::BoatKind::from_entity_name(t.name))?;
+                    Some(modern::Boat::new(kind, e.position(), e.yaw(), e.pitch()))
+                })
+            } else {
+                self.own
+                    .boats
+                    .iter()
+                    .find(|b| b.id == vehicle)
+                    .map(|b| modern::Boat::new(b.kind, b.pos, b.yaw, b.pitch))
+            };
+            if let Some(boat) = boat {
+                self.parked = None;
+                boat.board(&mut self.player);
+                log::debug!("riding boat {vehicle}");
+                self.riding = Some(Riding::Boat {
+                    id: vehicle,
+                    boat: Box::new(boat),
+                });
+            }
+        } else if !on && riding_it {
+            // Off the vehicle (the server teleports the player afterwards).
+            log::debug!("left vehicle {vehicle}");
+            if let Some(Riding::Boat { id, boat }) = self.riding.take() {
+                let b = boat.bounding_box();
+                let pos = boat.pos();
+                self.parked = Some(Parked {
+                    id,
+                    pos,
+                    bb: [b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z],
+                    tracked: self
+                        .entities
+                        .as_ref()
+                        .and_then(|t| t.get(id))
+                        .map(|e| e.position()),
+                });
+                if let Some(k) = self.own.boats.iter_mut().find(|k| k.id == id) {
+                    k.pos = pos;
+                    k.yaw = boat.yaw();
+                    k.pitch = boat.pitch();
+                }
+            }
+            // The extended tick runs once more (what the ride left in `ext` is read there).
+            self.ext_active = true;
+        }
+        Ok(())
+    }
+
+    /// Server moves of a known boat (no entity tracking): teleports, position syncs and
+    /// relative moves (the `VecDeltaCodec` base), rotations. The boat the player controls
+    /// ignores them, as vanilla does.
+    fn boat_moved(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v26_1::play::clientbound as cb;
+        let mut r = ghast_protocol::Reader::new(&raw.body);
+        let id = r.read_varint()?;
+        if self.riding.as_ref().is_some_and(|v| v.id() == id) {
+            return Ok(());
+        }
+        if self.parked.is_some_and(|p| p.id == id) {
+            self.parked = None;
+        }
+        let Some(b) = self.own.boats.iter_mut().find(|b| b.id == id) else {
+            return Ok(());
+        };
+        match raw.id {
+            cb::id::ENTITY_TELEPORT => {
+                let p: cb::EntityTeleport = raw.decode_as()?;
+                let f = p.flags.0;
+                let rel = |bit: u32, cur: f64, v: f64| if f & bit != 0 { cur + v } else { v };
+                b.pos = [
+                    rel(1, b.pos[0], p.x),
+                    rel(2, b.pos[1], p.y),
+                    rel(4, b.pos[2], p.z),
+                ];
+                b.yaw = if f & 8 != 0 { b.yaw + p.yaw } else { p.yaw };
+                b.pitch = if f & 16 != 0 {
+                    b.pitch + p.pitch
+                } else {
+                    p.pitch
+                };
+            }
+            cb::id::SYNC_ENTITY_POSITION => {
+                let p: cb::SyncEntityPosition = raw.decode_as()?;
+                b.pos = [p.x, p.y, p.z];
+                b.base = b.pos;
+                b.yaw = p.yaw;
+                b.pitch = p.pitch;
+            }
+            cb::id::ENTITY_LOOK => {
+                let yaw = r.read_i8()?;
+                let pitch = r.read_i8()?;
+                b.yaw = unpack_degrees(yaw);
+                b.pitch = unpack_degrees(pitch);
+            }
+            _ => {
+                // REL_ENTITY_MOVE, ENTITY_MOVE_LOOK: deltas in 1/4096 against the codec base.
+                let d = [r.read_i16()?, r.read_i16()?, r.read_i16()?];
+                let pos = [
+                    delta_decode(b.base[0], d[0]),
+                    delta_decode(b.base[1], d[1]),
+                    delta_decode(b.base[2], d[2]),
+                ];
+                b.pos = pos;
+                b.base = pos;
+                if raw.id == cb::id::ENTITY_MOVE_LOOK {
+                    let yaw = r.read_i8()?;
+                    let pitch = r.read_i8()?;
+                    b.yaw = unpack_degrees(yaw);
+                    b.pitch = unpack_degrees(pitch);
+                }
+            }
         }
         Ok(())
     }
@@ -443,61 +788,30 @@ impl Sim26 {
         self.ext_active = true;
     }
 
-    /// The boxes of the entities the player may collide with this tick (`canBeCollidedWith`:
-    /// boats, rafts, living shulkers), near enough for any move of this tick, in `getEntities`
-    /// section order. Only with entity tracking.
-    #[inline(never)]
-    fn collect_colliders(&mut self) {
-        let a = &mut self.around;
-        a.boxes.clear();
-        let Some(t) = &self.entities else { return };
-        let p = &self.player;
-        // Farther than any move of one tick can reach (the physics filters exactly).
-        let reach = |v: f64| v.abs() + 3.0;
-        let (rx, ry, rz) = (reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2]));
-        let mut found: Vec<((i32, u64), [f64; 6])> = Vec::new();
-        for e in t.iter() {
-            if entity_bits(e) & COLLIDES == 0 {
-                continue;
-            }
-            let Some((pos, b)) = entity_box(e) else {
-                continue;
-            };
-            if b[3] < p.bb.min_x - rx
-                || b[0] > p.bb.max_x + rx
-                || b[4] < p.bb.min_y - ry
-                || b[1] > p.bb.max_y + ry
-                || b[5] < p.bb.min_z - rz
-                || b[2] > p.bb.max_z + rz
-            {
-                continue;
-            }
-            // isAlive: a dying shulker (health 0) no longer collides.
-            if ghast_entity::v26_1::health(e).is_some_and(|h| h <= 0.0) {
-                continue;
-            }
-            found.push((section_order(pos), b));
-        }
-        // getEntities walks sections by x, then z / y (the order does not change the result:
-        // each box only shortens the move).
-        found.sort_by_key(|f| f.0);
-        a.boxes.extend(found.into_iter().map(|(_, b)| aabb(b)));
-    }
-
     /// The pushes of the entities that ticked after the player (`LivingEntity.pushEntities`,
     /// `AbstractBoat.tick`), each with its box after its own tick.
     #[inline(never)]
     fn push_player(&mut self, pose: &mut Pose) {
-        let Some(t) = &self.entities else { return };
         let p = &self.player;
         let a = &mut self.around;
         a.pushers.clear();
-        for e in t.iter() {
+        let parked = self.parked.as_ref();
+        // The boat the player left pushes from where it is (without the tracker, only it).
+        if let Some(k) = parked
+            && self.entities.as_ref().is_none_or(|t| t.get(k.id).is_none())
+        {
+            a.pushers.push((
+                i64::from(k.id),
+                modern::Pusher::new(k.pos, aabb(k.bb), modern::PushKind::Boat),
+            ));
+        }
+        for e in self.entities.iter().flat_map(|t| t.iter()) {
+            let t = self.entities.as_ref().unwrap();
             let bits = entity_bits(e);
             if bits & (PUSH_LIVING | PUSH_BOAT) == 0 {
                 continue;
             }
-            let Some((pos, b)) = entity_box(e) else {
+            let Some((pos, b)) = Parked::of(parked, e).or_else(|| entity_box(e)) else {
                 continue;
             };
             // Boats reach 0.2 farther; nothing else can touch the player.
@@ -569,6 +883,10 @@ impl Sim26 {
             around: Around::default(),
             teams: None,
             profile_name: "".into(),
+            riding: None,
+            parked: None,
+            reply: None,
+            filter_dirty: false,
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
         }
@@ -763,7 +1081,24 @@ impl Sim for Sim26 {
             cb::id::ENTITY_METADATA | cb::id::SPAWN_ENTITY | cb::id::ENTITY_DESTROY => {
                 self.own_entity_packet(raw)?;
             }
+            cb::id::SET_PASSENGERS | cb::id::VEHICLE_MOVE => self.vehicle_packet(raw)?,
+            cb::id::ENTITY_TELEPORT
+            | cb::id::SYNC_ENTITY_POSITION
+            | cb::id::REL_ENTITY_MOVE
+            | cb::id::ENTITY_MOVE_LOOK
+            | cb::id::ENTITY_LOOK
+                if !self.own.boats.is_empty() =>
+            {
+                self.boat_moved(raw)?;
+            }
+            cb::id::RESPAWN => {
+                self.riding = None;
+                self.parked = None;
+            }
             cb::id::LOGIN => {
+                self.riding = None;
+                self.parked = None;
+                self.set_boats_known(false);
                 self.own.id = raw.decode_as::<cb::Login>()?.entity_id;
                 // A new play phase: a new client scoreboard.
                 if let Some(t) = &mut self.teams {
@@ -874,10 +1209,8 @@ impl Sim for Sim26 {
         // EnchantmentHelper.getTridentSpinAttackStrength through the synced registry (None:
         // not computable -> no riptide). Only tridents are looked at.
         let trident = |s: Option<&ghast_inventory::Stack>| {
-            s.filter(|s| {
-                ghast_inventory::v26_1::item_name(s.id()) == Some("trident")
-            })
-            .cloned()
+            s.filter(|s| ghast_inventory::v26_1::item_name(s.id()) == Some("trident"))
+                .cloned()
         };
         let hands = [trident(inv.held()), trident(inv.offhand())];
         for (k, s) in hands.into_iter().enumerate() {
@@ -1180,8 +1513,52 @@ impl Sim for Sim26 {
             cb::id::ENTITY_METADATA,
             cb::id::SPAWN_ENTITY,
             cb::id::ENTITY_DESTROY,
+            // The vehicle the player rides.
+            cb::id::SET_PASSENGERS,
+            cb::id::VEHICLE_MOVE,
         ];
-        self.world.packet_ids().chain(own).collect()
+        // Moves of the boats the player may board, only while some are known without the
+        // tracker (entity moves are frequent: not decoded otherwise).
+        let boats: &[i32] = if self.entities.is_none() && !self.own.boats.is_empty() {
+            &[
+                cb::id::ENTITY_TELEPORT,
+                cb::id::SYNC_ENTITY_POSITION,
+                cb::id::REL_ENTITY_MOVE,
+                cb::id::ENTITY_MOVE_LOOK,
+                cb::id::ENTITY_LOOK,
+            ]
+        } else {
+            &[]
+        };
+        self.world
+            .packet_ids()
+            .chain(own)
+            .chain(boats.iter().copied())
+            .collect()
+    }
+
+    fn take_reply(&mut self) -> Option<Outbound> {
+        self.reply.take()
+    }
+
+    fn take_filter_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.filter_dirty)
+    }
+
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        match self.riding.as_ref()? {
+            Riding::Boat { id, boat } => {
+                let [x, y, z] = boat.pos();
+                Some(crate::common::Vehicle {
+                    entity_id: *id,
+                    pos: Vec3::new(x, y, z),
+                    yaw: boat.yaw(),
+                    pitch: boat.pitch(),
+                    on_ground: boat.on_ground(),
+                    controlled: true,
+                })
+            }
+        }
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {
@@ -1207,6 +1584,11 @@ impl Sim for Sim26 {
         });
         // Teams sent before tracking started are not known (all pushes then allowed).
         self.teams = self.entities.is_some().then(Box::default);
+        // The tracker knows the boats from now on (it starts empty: boats spawned before are
+        // known again once the server resends them).
+        if self.entities.is_some() {
+            self.own.boats.clear();
+        }
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
@@ -1263,9 +1645,11 @@ impl Sim for Sim26 {
                     },
                 )
             });
-            if std::mem::take(&mut self.around.player_ticked) {
-                self.push_player(pose);
-            }
+        }
+        if std::mem::take(&mut self.around.player_ticked)
+            && (self.entities.is_some() || self.parked.is_some())
+        {
+            self.push_player(pose);
         }
         // ClientLevel.tick: the world border steps after the entities (the player included).
         self.world.tick();
@@ -1350,8 +1734,52 @@ impl Sim for Sim26 {
         };
         // Entity.setOldPosAndRot at the start of the entity tick.
         self.old_pos = self.player.pos;
-        if self.entities.is_some() {
-            self.collect_colliders();
+        if let Some(Riding::Boat { id, boat }) = &mut self.riding {
+            // The boat ticks with its passenger (tickNonPassenger -> tickPassenger).
+            let id = *id;
+            let mut boat_boxes = Vec::new();
+            if self.entities.is_some() {
+                collect_colliders(
+                    self.entities.as_ref(),
+                    None,
+                    &self.player,
+                    Some(id),
+                    &mut self.around.boxes,
+                    &mut boat_boxes,
+                );
+            } else {
+                self.around.boxes.clear();
+            }
+            let p = &mut self.player;
+            let view = self
+                .world
+                .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+            let around = modern::Surroundings::new().with_entities(&self.around.boxes);
+            modern::tick_boat::<V26_1, _>(
+                boat,
+                p,
+                &mut self.ext,
+                &around,
+                &boat_boxes,
+                &input,
+                &view,
+                &mut self.packets,
+            );
+            push_packets(&self.packets, entity_id, out);
+            sync_pose_26(pose, &self.player);
+            return;
+        }
+        if self.entities.is_some() || self.parked.is_some() {
+            collect_colliders(
+                self.entities.as_ref(),
+                self.parked.as_ref(),
+                &self.player,
+                None,
+                &mut self.around.boxes,
+                &mut Vec::new(),
+            );
+        } else {
+            self.around.boxes.clear();
         }
         let p = &mut self.player;
         let view = self

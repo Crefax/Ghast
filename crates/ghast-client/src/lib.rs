@@ -97,7 +97,9 @@ mod trace_replay;
 pub mod version;
 
 pub use client::{Account, Client, TICK};
-pub use common::{ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3};
+pub use common::{
+    ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3, Vehicle,
+};
 pub use engine::{
     Behavior, ClickRefused, ClickTicket, Idle, RawInbound, TeleportEvent, TickContext, TickEvents,
     TickView,
