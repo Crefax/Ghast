@@ -1121,8 +1121,7 @@ goldens on 26.1.1, gave tick records identical to 26.1's, byte for byte (state a
 MC=26.1.2 oracle/run.sh replay --in "$PWD/tests/golden/26.1/fuzz_extras_seed1.jsonl.gz" --out /tmp/x.jsonl.gz
 ```
 
-26.2 (protocol 776) and 26.3 (777) need harness changes first (the harness does not compile
-against their jars: renderer / level extractor, entity size and authlib API changes).
+26.2 (protocol 776) has its own row (see "26.2" below).
 
 ### 26.1 quirks (observed in the vectors)
 
@@ -1147,6 +1146,60 @@ against their jars: renderer / level extractor, entity size and authlib API chan
   modifiers.
 - A scale change rebuilds the box at the end of the tick that applied the attributes packet
   (`refreshDirtyAttributes` in `LivingEntity.tick`), from the position.
+
+## 26.2 (fifth version, protocol 776)
+
+Run with `MC=26.2` (`versions/26.2.properties`: the unobfuscated 26.2 client jar, Java 25). Output:
+`tests/golden/26.2/`, the same 28 files as 26.1 plus `fuzz_restitution_seed1.jsonl.gz`. The harness
+is the shared modern tree (see "Modern versions: one shared harness"); the 26.2 shim
+(`src/mc_26_2/…/Compat.java`) covers what moved for the harness:
+
+- the client level reports block and section changes to a `LevelExtractor` (split out of
+  `LevelRenderer`): the stand-in is an allocated extractor with no-op hooks;
+- the level-load tracker no longer polls the renderer: once the player's section is compiled the
+  extractor runs `ClientPacketListener.getPlayerCompiledSectionCallback()`, which sets the
+  tracker's `playerSectionReady` flag for good. A scenario's `section_compiled` event makes the
+  stand-in run that callback in the frame before the next tick (a `false` after a `true` does not
+  undo it, as in the real client);
+- `GameRenderer.getMainCamera()` is `mainCamera()`; the debug overlay lives in `Gui.hud`, the open
+  screen in `Gui` (`Gui.screen()`); slimes, magma cubes and the new sulfur cube share
+  `monster.cubemob.AbstractCubeMob`; the social manager's constructor takes friend services;
+- entity type constants moved from `EntityType` to `EntityTypes` (the shared tree looks types and
+  items up by id instead).
+
+What 26.2 changed in the game, and where the vectors cover it:
+
+- **Collision restitution** (`Entity.restituteMovementAfterCollisions`, replacing the zeroed axes
+  of `Entity.move` and `Block.updateEntityMovementAfterFallOn`): each colliding axis becomes
+  `-v * restitution`; the restitution is the new `bounciness` attribute (living entities, default 0,
+  so a plain collision leaves a signed zero), on landing the larger of that and the block's bounce
+  restitution (slime block 1, beds 0.75, times 0.8 for an entity that is not living), none when
+  falling slower than the effective gravity, while the bounce is suppressed (sneaking) or on a
+  block tagged `suppresses_bounce` (honey). The vertical rebound compensates gravity and drag for
+  the part of the tick after the impact (`portion = moved.y / v.y`,
+  `((portion * gravity) - v.y) * lerp(portion, 1, getAirDrag()) * restitution`; a boat's air drag
+  is 1). The slime block and bed overrides are gone, so a slime ceiling now stops an upward move.
+- **Movement attributes** `friction_modifier`, `air_drag_modifier` (both 1, 0 – 2048) and
+  `bounciness` (0, 0 – 1): `LivingEntity.computeModifiedFriction` (`clamp(1 - (1 - f) * m, 0, 1)`
+  in float) on the block friction and on the 0.91 / 0.98 air drags; `getFrictionInfluencedSpeed`
+  only scales the walk speed when the friction is above 0.6. At their defaults all of this is the
+  26.1 arithmetic bit for bit. Recorded in tick records' `attributes` (only where the version has
+  them).
+- **New blocks** (sulfur, potent sulfur, sulfur spike and the sulfur / cinnabar stone families: 28
+  blocks, 2,493 states) and the sulfur cube; the shapes and properties of all 29,873 earlier states
+  are unchanged.
+- Vectors: `scenarios.jsonl.gz` adds 20 cases (`ScenariosRestitution`: bounciness against walls,
+  floors, ceilings, while sneaking, on honey, with slow falling; slime ceiling, low drops, sneaking
+  landings, slime with bounciness, a high bed drop; friction and air drag modifiers; the new
+  blocks). `fuzz_restitution_seed1.jsonl.gz` (`Fuzz.withRestitution`, cases `…_x_r`, 100 × 60): the
+  extras case plus the three attributes (bases, modifiers, packets during the case), the new and
+  the bouncing blocks around the spawn, ceilings and drops. `entity_sizes.jsonl.gz`: cube mobs have
+  a baby form in 26.2 and still their sizes (both are dumped).
+- Data dumps (compared by name with 26.1): 34 entity size lines differ (e.g. the bee, the baby armadillo); tool rules of
+  shears (new `shears_*_breaking_speed` tags; the `leaves` / `wool` mining tags are gone); the
+  attribute registry has five new entries (ids shift); a new biome (`sulfur_caves`).
+
+`fuzz --restitution true` generates the restitution stream for big runs.
 
 ## Crosshair pick (1.16.5 and 26.1)
 

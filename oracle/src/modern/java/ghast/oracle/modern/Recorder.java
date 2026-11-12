@@ -46,6 +46,18 @@ final class Recorder {
             Map.entry("safe_fall_distance", Attributes.SAFE_FALL_DISTANCE),
     };
 
+    /** Movement attributes of later versions, recorded after {@link #ATTRIBUTES} where they exist (26.2+). */
+    static final java.util.List<Map.Entry<String, Holder<Attribute>>> LATER_ATTRIBUTES = laterAttributes();
+
+    private static java.util.List<Map.Entry<String, Holder<Attribute>>> laterAttributes() {
+        java.util.List<Map.Entry<String, Holder<Attribute>>> l = new java.util.ArrayList<>();
+        for (String name : new String[] {"friction_modifier", "air_drag_modifier", "bounciness"}) {
+            net.minecraft.core.registries.BuiltInRegistries.ATTRIBUTE.get(net.minecraft.resources.Identifier.withDefaultNamespace(name))
+                    .ifPresent(h -> l.add(Map.entry(name, h)));
+        }
+        return l;
+    }
+
     static String header(Scenario sc, Harness.Run run, String version) {
         Json j = new Json().beginObject();
         j.field("type", "scenario");
@@ -297,6 +309,9 @@ final class Recorder {
         j.fieldF32("movement_speed", p.getSpeed());
         j.key("attributes").beginObject();
         for (Map.Entry<String, Holder<Attribute>> a : ATTRIBUTES) {
+            j.fieldF64(a.getKey(), p.getAttributeValue(a.getValue()));
+        }
+        for (Map.Entry<String, Holder<Attribute>> a : LATER_ATTRIBUTES) {
             j.fieldF64(a.getKey(), p.getAttributeValue(a.getValue()));
         }
         j.endObject();

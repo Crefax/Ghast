@@ -238,6 +238,7 @@ final class Scenarios {
         l.add(flat("blindness_no_sprint").desc("blindness blocks sprinting").effect(eff("blindness"), 0)
                 .spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(15, FORWARD | SPRINT));
         Scenarios26.add(l);
+        ScenariosRestitution.add(l);
         if (air != 0) {
             throw new IllegalStateException("air is not state 0");
         }

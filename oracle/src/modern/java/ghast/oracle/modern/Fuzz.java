@@ -634,6 +634,91 @@ final class Fuzz {
         return sc;
     }
 
+    /** Blocks 26.2 added, plus the blocks with a bounce restitution or the suppresses_bounce tag. */
+    private static final Entry[] RESTITUTION_BLOCKS = {
+            new Entry("slime_block", 6), new Entry("red_bed", 3), new Entry("white_bed", 2), new Entry("honey_block", 3),
+            new Entry("sulfur", 3), new Entry("potent_sulfur", 2), new Entry("sulfur_slab", 3), new Entry("sulfur_stairs", 3),
+            new Entry("sulfur_wall", 2), new Entry("polished_sulfur_slab", 1), new Entry("sulfur_brick_stairs", 1),
+            new Entry("cinnabar", 1), new Entry("cinnabar_slab", 2), new Entry("cinnabar_stairs", 2), new Entry("cinnabar_wall", 2),
+            new Entry("polished_cinnabar_wall", 1), new Entry("cinnabar_brick_slab", 1), new Entry("sulfur_spike", 4),
+            new Entry("stone", 3),
+    };
+
+    private static final String[] RESTITUTION_ATTRS = {"minecraft:bounciness", "minecraft:friction_modifier",
+            "minecraft:air_drag_modifier"};
+
+    private static double restitutionBase(Rng x, String attr) {
+        if (attr.equals("minecraft:bounciness")) {
+            return x.chance(0.2) ? pickD(x, new double[] {0.0, 1.0}) : x.nextDouble();
+        }
+        return x.chance(0.25) ? pickD(x, new double[] {0.0, 0.5, 1.0, 2.0, 2048.0}) : 3.0 * x.nextDouble();
+    }
+
+    private static List<Scenario.AttributeModifierSpec> restitutionModifiers(Rng x, String attr) {
+        List<Scenario.AttributeModifierSpec> mods = new ArrayList<>();
+        int n = x.range(0, 2);
+        for (int i = 0; i < n; i++) {
+            int op = x.nextInt(3);
+            double amount = (x.nextDouble() - 0.4) * (op == 0 ? 0.6 : 1.2);
+            mods.add(new Scenario.AttributeModifierSpec(attr, "oracle:r" + Long.toHexString(x.nextLong() >>> 16), amount, op));
+        }
+        return mods;
+    }
+
+    /**
+     * 26.2 restitution (cases {@code …_x_r}): the extras case plus, from another stream, the
+     * movement attributes 26.2 added ({@code bounciness}, {@code friction_modifier},
+     * {@code air_drag_modifier}: bases, modifiers and attribute packets during the case), the
+     * blocks 26.2 added and the bouncing blocks around the spawn, and sometimes a drop from up to
+     * 12 blocks. Only for versions that have these ({@link Reg#hasRestitution()}).
+     */
+    static Scenario withRestitution(long seed, int index, int ticks, boolean useItem) {
+        Scenario base = withExtras(seed, index, ticks, useItem);
+        Scenario sc = new Scenario(base.name + "_r");
+        copyInto(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x7265737469L);
+        for (String attr : RESTITUTION_ATTRS) {
+            if (x.chance(0.45)) {
+                sc.attributeBases.put(attr, restitutionBase(x, attr));
+            }
+            if (x.chance(0.25)) {
+                sc.attributeModifiers.addAll(restitutionModifiers(x, attr));
+            }
+        }
+        int bx = (int) Math.floor(sc.x), bz = (int) Math.floor(sc.z);
+        int n = x.chance(0.8) ? x.range(2, 10) : 0;
+        for (int i = 0; i < n; i++) {
+            String b = pick(x, RESTITUTION_BLOCKS);
+            int px = bx + x.range(-4, 4), pz = bz + x.range(-4, 4), py = 63 + x.range(0, 2);
+            if (b.endsWith("_bed")) {
+                sc.block(px, py, pz, States.id(b + "[facing=south,part=foot]"), 0);
+                sc.block(px, py, pz + 1, States.id(b + "[facing=south,part=head]"), 0);
+            } else if (x.chance(0.5)) {
+                sc.fill(px, py, pz, px + x.range(0, 2), py + x.range(0, 1), pz + x.range(0, 2), randomState(x, b), 0);
+            } else {
+                sc.block(px, py, pz, randomState(x, b), 0);
+            }
+        }
+        if (x.chance(0.3)) {
+            // A ceiling to bounce off.
+            sc.fill(bx - 3, 66 + x.range(0, 2), bz - 3, bx + 3, 66 + x.range(0, 2), bz + 3,
+                    randomState(x, x.chance(0.5) ? "slime_block" : "stone"), 0);
+        } else if (x.chance(0.35) && sc.gameMode != Scenario.GameMode.SPECTATOR) {
+            sc.y += x.range(2, 12);
+            sc.onGround = false;
+        }
+        int t = sc.ticks.size();
+        if (t > 1) {
+            int events = x.chance(0.5) ? x.range(1, 4) : 0;
+            for (int k = 0; k < events; k++) {
+                String attr = RESTITUTION_ATTRS[x.nextInt(RESTITUTION_ATTRS.length)];
+                addEvent(sc, x.nextInt(t), new Scenario.Attribute(attr, restitutionBase(x, attr), restitutionModifiers(x, attr)));
+            }
+        }
+        sc.description += ", 26.2 restitution";
+        return sc;
+    }
+
     private static void copyInto(Scenario src, Scenario sc) {
         sc.description = src.description;
         sc.outside = src.outside;

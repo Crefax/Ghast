@@ -65,6 +65,14 @@ final class EntitySizeDump {
                 if (e instanceof Mob m && hasSetBaby(m)) {
                     m.setBaby(true);
                     write(sink, id, name, "baby", e, base);
+                    if (Compat.isCubeMob(e)) {
+                        // 26.2: cube mobs have a baby form and still a size.
+                        m.setBaby(false);
+                        for (int size : new int[] {1, 2, 3, 4}) {
+                            Compat.setCubeSize(e, size);
+                            write(sink, id, name, "size_" + size, e, base);
+                        }
+                    }
                 } else if (Compat.isCubeMob(e)) {
                     for (int size : new int[] {1, 2, 3, 4}) {
                         Compat.setCubeSize(e, size);

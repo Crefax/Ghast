@@ -39,10 +39,12 @@ public final class Main {
                 boolean edges = Boolean.parseBoolean(a.str("--edges", "false")) || "edges".equals(a.str("--palette", ""));
                 boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
                 boolean teleports = Boolean.parseBoolean(a.str("--teleports", "false"));
+                boolean restitution = Boolean.parseBoolean(a.str("--restitution", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 Io.write(out, sink -> {
                     for (int i = 0; i < count; i++) {
                         run(edges ? Fuzz.edge(seed, i, ticks)
+                                : restitution ? Fuzz.withRestitution(seed, i, ticks, useItem)
                                 : teleports ? Fuzz.withTeleports(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
@@ -164,6 +166,13 @@ public final class Main {
                 run(Fuzz.withExtras(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS, i % 2 == 0), sink);
             }
         });
+        if (Reg.hasRestitution()) {
+            Io.write(dir.resolve("fuzz_restitution_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"), sink -> {
+                for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
+                    run(Fuzz.withRestitution(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS, i % 2 == 0), sink);
+                }
+            });
+        }
         Io.write(dir.resolve("teleports.jsonl.gz"), sink -> {
             runAll(Scenarios26.teleports(), sink);
             for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
