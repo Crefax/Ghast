@@ -158,7 +158,19 @@ fn main() {
     let start = Instant::now();
     let mut play_since: Option<Instant> = None;
     let mut keepalives = 0;
+    let mut sent_spectator_action = false;
     loop {
+        // 26.2's new `spectator_action` (OPTIONAL_VAR_INT: 0 = none) once, near the end: the
+        // server must decode it and keep the connection.
+        if let Some(t) = play_since
+            && !sent_spectator_action
+            && t.elapsed() + Duration::from_secs(10) > Duration::from_secs(seconds)
+        {
+            c.send(&play::serverbound::SpectatorAction {
+                spectate_entity_id: 0,
+            });
+            sent_spectator_action = true;
+        }
         if let Some(t) = play_since
             && t.elapsed() > Duration::from_secs(seconds)
         {

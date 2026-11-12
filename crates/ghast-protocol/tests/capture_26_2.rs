@@ -174,6 +174,81 @@ fn every_captured_packet_decodes_and_reencodes() {
     );
     assert!(components >= 8, "only {components} item components decoded");
     delta.assert_complete();
+    // The changed serverbound packet, sent by the example and accepted by the server.
+    assert!(
+        has(4, 1, "spectator_action"),
+        "fixture has no spectator_action"
+    );
+    // Coverage: which packet types of each set the real bytes contain (the rest are checked
+    // by the round-trip tests and the delta's per-op evidence only).
+    let sets: [(u8, u8, &[i32], fn(i32) -> Option<&'static str>); 9] = [
+        (
+            0,
+            1,
+            handshaking::serverbound::ServerboundHandshakingPacket::IDS,
+            handshaking::serverbound::ServerboundHandshakingPacket::name_of,
+        ),
+        (
+            1,
+            0,
+            status::clientbound::ClientboundStatusPacket::IDS,
+            status::clientbound::ClientboundStatusPacket::name_of,
+        ),
+        (
+            1,
+            1,
+            status::serverbound::ServerboundStatusPacket::IDS,
+            status::serverbound::ServerboundStatusPacket::name_of,
+        ),
+        (
+            2,
+            0,
+            login::clientbound::ClientboundLoginPacket::IDS,
+            login::clientbound::ClientboundLoginPacket::name_of,
+        ),
+        (
+            2,
+            1,
+            login::serverbound::ServerboundLoginPacket::IDS,
+            login::serverbound::ServerboundLoginPacket::name_of,
+        ),
+        (
+            3,
+            0,
+            configuration::clientbound::ClientboundConfigurationPacket::IDS,
+            configuration::clientbound::ClientboundConfigurationPacket::name_of,
+        ),
+        (
+            3,
+            1,
+            configuration::serverbound::ServerboundConfigurationPacket::IDS,
+            configuration::serverbound::ServerboundConfigurationPacket::name_of,
+        ),
+        (
+            4,
+            0,
+            play::clientbound::ClientboundPlayPacket::IDS,
+            play::clientbound::ClientboundPlayPacket::name_of,
+        ),
+        (
+            4,
+            1,
+            play::serverbound::ServerboundPlayPacket::IDS,
+            play::serverbound::ServerboundPlayPacket::name_of,
+        ),
+    ];
+    let (mut seen, mut total) = (0, 0);
+    for (st, d, ids, name_of) in sets {
+        let missing: Vec<&str> = ids
+            .iter()
+            .filter_map(|&i| name_of(i))
+            .filter(|n| !has(st, d, n))
+            .collect();
+        total += ids.len();
+        seen += ids.len() - missing.len();
+        eprintln!("never in real bytes ({st} {d}): {}", missing.join(" "));
+    }
+    eprintln!("packet types in real bytes: {seen} of {total}");
 }
 
 /// What the capture must show of the 775 -> 776 changes.

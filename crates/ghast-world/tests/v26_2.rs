@@ -7,7 +7,8 @@
 //!   equals `ghast_protocol::types::chunk`'s independent decoder;
 //! - `data/probes_26_2.tsv.gz`: `record dimension x y z state` lines, each confirmed by the
 //!   same server afterwards (`execute if block <x y z> <state>` printed "Test passed" for all
-//!   of them; ticks frozen, nothing changed the world after the capture);
+//!   1576 of them, ticks frozen; 5 more candidates were left out: grass under the placed
+//!   blocks that random ticks turned into dirt after the capture had ended);
 //! - state ids against Mojang's 26.2 `blocks.json` report when it is cached.
 #![cfg(feature = "v26_2")]
 
@@ -237,12 +238,17 @@ fn capture_loads_and_matches_the_server_probes() {
         rp.probes_checked,
         probes.values().map(Vec::len).sum::<usize>()
     );
-    assert!(rp.probes_checked > 500, "{}", rp.probes_checked);
+    assert!(rp.probes_checked > 1500, "{}", rp.probes_checked);
     // The 26.2 blocks the console placed.
     let w = &rp.raw;
     for (x, y, z, want) in [
         (2, -60, 2, "minecraft:cinnabar"),
-        (3, -60, 2, "minecraft:potent_sulfur[potent_sulfur_state=dry]"),
+        (
+            3,
+            -60,
+            2,
+            "minecraft:potent_sulfur[potent_sulfur_state=dry]",
+        ),
         (6, -59, 6, "minecraft:sulfur_bricks"),
     ] {
         assert_eq!(w.block_state(x, y, z).unwrap().to_string(), want);
