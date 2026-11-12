@@ -658,3 +658,13 @@ pub(crate) static TYPES: [EntityTypeData; 158] = [
     EntityTypeData { id: 156, name: "player", flags: type_flags::LIVING | type_flags::PICKABLE, interpolation: Some(3), max_head_y_rot: 0, fixed_poses: 0x84, baby_meta: None, size_meta: None, flags_meta: None, size: Some(&VANILLA_ENTITY_SIZES[106]) },
     EntityTypeData { id: 157, name: "fishing_bobber", flags: 0, interpolation: Some(3), max_head_y_rot: 0, fixed_poses: 0x0, baby_meta: None, size_meta: None, flags_meta: None, size: Some(&VANILLA_ENTITY_SIZES[54]) },
 ];
+/// Network id of `minecraft:player`.
+pub(crate) const ID_PLAYER: u16 = 156;
+/// Network id of `minecraft:item`.
+pub(crate) const ID_ITEM: u16 = 71;
+/// Network id of `minecraft:experience_orb`.
+pub(crate) const ID_EXPERIENCE_ORB: u16 = 49;
+/// Network id of `minecraft:painting`.
+pub(crate) const ID_PAINTING: u16 = 93;
+/// Network id of `minecraft:armor_stand`.
+pub(crate) const ID_ARMOR_STAND: u16 = 5;

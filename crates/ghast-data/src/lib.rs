@@ -38,7 +38,7 @@ mod generated;
 mod macros;
 
 #[cfg(any(feature = "v26_1", feature = "v26_2"))]
-mod modern;
+pub mod modern;
 #[cfg(feature = "v1_12")]
 pub mod v1_12;
 #[cfg(feature = "v1_16_5")]

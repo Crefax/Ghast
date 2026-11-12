@@ -360,5 +360,22 @@ pub fn generate(p: &Paths, dump: &std::path::Path) -> R<String> {
             return Err(format!("26.1: no entity type {n}"));
         }
     }
+    // Ids the hand-written code names (`entities::PLAYER`, ...).
+    for n in [
+        "player",
+        "item",
+        "experience_orb",
+        "painting",
+        "armor_stand",
+    ] {
+        let id = by_name
+            .get(n)
+            .ok_or_else(|| format!("no entity type {n}"))?;
+        let _ = writeln!(
+            out,
+            "/// Network id of `minecraft:{n}`.\npub(crate) const ID_{}: u16 = {id};",
+            n.to_uppercase()
+        );
+    }
     Ok(out)
 }

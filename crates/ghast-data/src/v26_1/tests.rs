@@ -453,3 +453,18 @@ fn dig_matches_the_client() {
     }
     assert!(n >= 3000 && timed > 3000, "{n} cases, {timed} digs");
 }
+
+/// The named entity ids are this version's (resolved from the generated table, not literals).
+#[test]
+fn named_entity_ids_match_their_names() {
+    use super::entities::{ARMOR_STAND, EXPERIENCE_ORB, ITEM, PAINTING, PLAYER};
+    for (id, name) in [
+        (PLAYER, "player"),
+        (ITEM, "item"),
+        (EXPERIENCE_ORB, "experience_orb"),
+        (PAINTING, "painting"),
+        (ARMOR_STAND, "armor_stand"),
+    ] {
+        assert_eq!(super::entity(id).map(|e| e.name), Some(name), "{id}");
+    }
+}
