@@ -40,8 +40,10 @@ pub(crate) struct Sim26 {
     /// `Level.rainLevel` from the weather game events (1 START_RAINING, 2 STOP_RAINING,
     /// 7 RAIN_LEVEL_CHANGE); the level rains above 0.2.
     rain_level: f32,
-    /// A launch made before this tick's movement (riptide): the tick must see the ext state.
-    ext_pending: bool,
+    /// The extension state can act this tick (gliding, a glider to start a glide, rockets, the
+    /// riptide spin or counter, a launch made before the tick): set wherever `ext` gains such a
+    /// state, recomputed after each extended tick. One flag keeps the plain tick's path lean.
+    ext_active: bool,
     /// `minecraft:enchantment` registry names in order (stack enchantments are indices).
     enchantments: Vec<String>,
 }
@@ -203,9 +205,11 @@ impl Sim26 {
                     match (&e.value, e.key) {
                         (V::Byte(b), DATA_SHARED_FLAGS) if id == self.own.id => {
                             self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                            self.ext_active |= self.ext.fall_flying;
                         }
                         (V::Byte(b), DATA_LIVING_FLAGS) if id == self.own.id => {
                             self.ext.apply_living_flags(*b as u8);
+                            self.ext_active |= self.ext.spin_attack;
                         }
                         (V::HumanoidArm(a), DATA_PLAYER_MAIN_HAND) if id == self.own.id => {
                             // HumanoidArm: LEFT 0, RIGHT 1.
@@ -223,6 +227,7 @@ impl Sim26 {
                             {
                                 let (rid, pos) = self.own.rockets.swap_remove(k);
                                 let ok = self.ext.attach_rocket(rid, pos);
+                                self.ext_active |= ok;
                                 log::debug!("firework rocket {rid} attached to us ({ok})");
                             }
                         }
@@ -300,6 +305,7 @@ impl Sim26 {
         // The glider is read only when a glide starts (a jump press in the air).
         if controls.jump {
             self.ext.glider = glider_equipped(inv);
+            self.ext_active |= self.ext.glider;
         }
         // Entity.getHandHoldingItemAngle(FIREWORK_ROCKET): the main arm, or the other one when
         // only the off hand holds a rocket. Read only while rockets are attached.
@@ -354,7 +360,7 @@ impl Sim26 {
             .world
             .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
         modern::riptide::<V26_1, _>(p, &mut self.ext, &view, strength);
-        self.ext_pending = true;
+        self.ext_active = true;
     }
 
     pub(crate) fn new() -> Self {
@@ -372,7 +378,7 @@ impl Sim26 {
             ext: modern::PlayerExt::default(),
             own: OwnEntity::default(),
             rain_level: 0.0,
-            ext_pending: false,
+            ext_active: false,
             enchantments: Vec::new(),
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
@@ -704,6 +710,7 @@ impl Sim for Sim26 {
         self.player = p;
         self.player.level = level;
         self.ext = x;
+        self.ext_active = true;
         self.old_pos = p.pos;
         self.gate = modern::LoadGate::loaded();
     }
@@ -744,6 +751,7 @@ impl Sim for Sim26 {
         self.player = modern::PlayerState::new([0.0; 3], 0.0, 0.0);
         // A new LocalPlayer: not gliding, no rockets attached.
         self.ext = modern::PlayerExt::default();
+        self.ext_active = false;
         self.player.abilities = abilities;
         self.player.food_level = food;
         self.player.level = level;
@@ -1077,15 +1085,14 @@ impl Sim for Sim26 {
         let view = self
             .world
             .view(p.pos[0].floor() as i32, p.pos[2].floor() as i32);
-        if self.ext.fall_flying
-            || self.ext.glider
-            || self.ext.rocket_count() > 0
-            || self.ext.spin_attack
-            || self.ext.auto_spin_ticks > 0
-            || self.ext_pending
-        {
-            self.ext_pending = false;
+        if self.ext_active {
             modern::tick_ext::<V26_1, _>(p, &mut self.ext, &input, &view, &mut self.packets);
+            let x = &self.ext;
+            self.ext_active = x.fall_flying
+                || x.glider
+                || x.rocket_count() > 0
+                || x.spin_attack
+                || x.auto_spin_ticks > 0;
         } else {
             // Nothing of the extension state can act (no glide, no glider to start one, no
             // rocket): the plain tick, which is tick_ext with a default state, folded.
