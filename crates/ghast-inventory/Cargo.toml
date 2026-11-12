@@ -61,6 +61,10 @@ name = "live_clicks_26_1"
 required-features = ["v26_1"]
 
 [[example]]
+name = "live_clicks_26_2"
+required-features = ["v26_2"]
+
+[[example]]
 name = "slot_debug_26_1"
 required-features = ["v26_1"]
 
