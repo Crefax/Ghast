@@ -257,18 +257,28 @@ pub(crate) fn clamp(s: &mut Option<Stack>) {
 /// The version's `SimpleContainer.setItem` cap (26.1: `limitSize(min(99, max stack size))`).
 #[inline]
 pub(crate) fn clamp_v(v: Version, s: &mut Option<Stack>) {
-    if v != Version::V26_1 {
+    if !v.is_modern() {
         return clamp(s);
     }
-    clamp_26_1(s);
+    if v == Version::V26_1 {
+        clamp_26::<775>(s);
+    } else {
+        clamp_26::<776>(s);
+    }
 }
 
+/// The modern cap; one instance per protocol `P` (its tables are constants inside).
 #[inline(never)]
-fn clamp_26_1(s: &mut Option<Stack>) {
+fn clamp_26<const P: i32>(s: &mut Option<Stack>) {
     if let Some(st) = s
         && st.count > 1
     {
-        let max = Version::V26_1.max_count(st).min(99);
+        let v = if P == 775 {
+            Version::V26_1
+        } else {
+            Version::V26_2
+        };
+        let max = v.max_count(st).min(99);
         if st.count > max {
             st.count = max;
         }
@@ -277,10 +287,11 @@ fn clamp_26_1(s: &mut Option<Stack>) {
 
 /// 26.1 binding curse check on a stack's `enchantments` (`Err` when it has enchantments but the
 /// curse's registry id is unknown).
-fn binding_curse_26(s: &Stack, id: Option<i32>) -> R<bool> {
-    #[cfg(feature = "v26_1")]
+fn binding_curse_26(v: Version, s: &Stack, id: Option<i32>) -> R<bool> {
+    #[cfg(modern)]
     {
-        let Some(list) = crate::v26_1::enchantments(s, false) else {
+        let mv = crate::tables::Mv::of(v).ok_or(Unpredictable)?;
+        let Some(list) = crate::item26::enchantments(mv, s, false) else {
             return Ok(false);
         };
         if list.is_empty() {
@@ -289,9 +300,9 @@ fn binding_curse_26(s: &Stack, id: Option<i32>) -> R<bool> {
         let id = id.ok_or(Unpredictable)?;
         Ok(list.iter().any(|&(e, level)| e == id && level > 0))
     }
-    #[cfg(not(feature = "v26_1"))]
+    #[cfg(not(modern))]
     {
-        let _ = (s, id);
+        let _ = (v, s, id);
         Ok(false)
     }
 }
@@ -383,7 +394,7 @@ impl Sim<'_> {
     fn gone(&self, count: i32) -> bool {
         match self.v {
             Version::V1_8 => count == 0,
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => count <= 0,
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => count <= 0,
         }
     }
 
@@ -416,7 +427,7 @@ impl Sim<'_> {
         match self.lay.kind(i) {
             SlotKind::Armor(_) => Ok(1),
             SlotKind::Special => Err(Unpredictable),
-            _ if self.v == Version::V26_1 => Ok(99),
+            _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
         }
     }
@@ -432,9 +443,9 @@ impl Sim<'_> {
             }
             // 26.1: an enchantment with the `prevent_armor_change` effect (vanilla: the binding
             // curse; enchantments are data-driven, so only its registry id can be checked)
-            SlotKind::Armor(_) if self.v == Version::V26_1 => match self.get(i) {
+            SlotKind::Armor(_) if self.v.is_modern() => match self.get(i) {
                 None => Ok(true),
-                Some(s) => binding_curse_26(s, self.binding_curse).map(|b| !b),
+                Some(s) => binding_curse_26(self.v, s, self.binding_curse).map(|b| !b),
             },
             SlotKind::Armor(_) if self.v == Version::V1_12 => {
                 Ok(!self.get(i).is_some_and(Stack::has_binding_curse_1_12))
@@ -471,7 +482,7 @@ impl Sim<'_> {
                     Some(out)
                 }
             }
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => {
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                 if whole {
                     return slot.take();
                 }
@@ -513,7 +524,7 @@ impl Sim<'_> {
                     }
                     Version::V1_16_5 => crafting::remainders_1_16(self.book, &grid),
                     // 26.1 recipes are not modelled
-                    Version::V26_1 => return Err(Unpredictable),
+                    Version::V26_1 | Version::V26_2 => return Err(Unpredictable),
                 }
                 .map_err(|()| Unpredictable)?;
                 for (k, &g) in slots.iter().enumerate() {
@@ -575,12 +586,12 @@ impl Sim<'_> {
                 return Err(Unpredictable);
             }
         }
-        if self.v == Version::V26_1 {
+        if self.v.is_modern() {
             self.check_26_1(slot, button, mode)?;
         }
         match self.v {
             Version::V1_8 => self.click_1_8(slot, button, mode),
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => {
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                 self.click_1_16(slot, button, mode)
             }
         }
@@ -590,9 +601,10 @@ impl Sim<'_> {
     /// `overrideStackedOnOther` / `overrideOtherStackedOnMe`) and stacks whose `equippable` is
     /// patched (their equipment slot is unknown here).
     fn check_26_1(&self, slot: i16, button: u8, mode: u8) -> R<()> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         {
-            use crate::v26_1::{equip, overrides_clicks};
+            use crate::item26::{equip, overrides_clicks};
+            let mv = crate::tables::Mv::of(self.v).ok_or(Unpredictable)?;
             let at = usize::try_from(slot).ok().and_then(|i| self.get(i));
             let cursor = self.m.cursor.as_ref();
             if mode == 0 && button <= 1 && slot >= 0 {
@@ -600,10 +612,10 @@ impl Sim<'_> {
                 // (right); a bundle in the slot under a carried stack (left) or an empty
                 // cursor (right)
                 let left = button == 0;
-                if cursor.is_some_and(overrides_clicks) && left == at.is_some() {
+                if cursor.is_some_and(|s| overrides_clicks(mv, s)) && left == at.is_some() {
                     return Err(Unpredictable);
                 }
-                if at.is_some_and(overrides_clicks) && left == cursor.is_some() {
+                if at.is_some_and(|s| overrides_clicks(mv, s)) && left == cursor.is_some() {
                     return Err(Unpredictable);
                 }
             }
@@ -612,7 +624,7 @@ impl Sim<'_> {
                 .flatten()
                 .and_then(Option::as_ref);
             for s in [at, cursor, hot].into_iter().flatten() {
-                if equip(s).is_err() {
+                if equip(mv, s).is_err() {
                     return Err(Unpredictable);
                 }
             }
@@ -983,7 +995,7 @@ impl Sim<'_> {
                                         self.insert(&mut st, 10, 37, false)?
                                     }
                                 }
-                                Version::V1_16_5 | Version::V26_1 => {
+                                Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                                     self.insert(&mut st, 1, 10, false)?
                                         || if i < 37 {
                                             self.insert(&mut st, 37, 46, false)?
@@ -1050,7 +1062,9 @@ impl Sim<'_> {
                             && (!v.has_subtypes(st.id) || st.damage == t.damage)
                             && t.nbt_eq(st)
                     }
-                    Version::V1_16_5 | Version::V26_1 => t.id == st.id && t.nbt_eq(st),
+                    Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
+                        t.id == st.id && t.nbt_eq(st)
+                    }
                 };
                 if !same {
                     continue;
@@ -1058,7 +1072,7 @@ impl Sim<'_> {
                 let tc = t.count;
                 let j = tc + st.count;
                 // 26.1 `slot.getMaxStackSize(target)`: the slot's limit counts too
-                let max = if v == Version::V26_1 {
+                let max = if v.is_modern() {
                     max.min(self.slot_limit(i)?)
                 } else {
                     max
@@ -1088,7 +1102,7 @@ impl Sim<'_> {
                         self.set(i, Some(st.clone()));
                         st.count = 0;
                     }
-                    Version::V1_12 | Version::V1_16_5 | Version::V26_1 => {
+                    Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                         if !self.can_insert(i, st)? {
                             continue;
                         }
@@ -1220,7 +1234,7 @@ impl Sim<'_> {
                     return;
                 }
             }
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => {
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                 if st.count <= 0 {
                     return;
                 }
@@ -1250,19 +1264,19 @@ impl Sim<'_> {
                 t.id == st.id
                     && v.is_stackable(t)
                     && t.count < v.max_count(t)
-                    && t.count < if v == Version::V26_1 { 99 } else { 64 }
+                    && t.count < if v.is_modern() { 99 } else { 64 }
                     && match v {
                         Version::V1_8 | Version::V1_12 => {
                             !v.has_subtypes(t.id) || t.damage == st.damage
                         }
-                        Version::V1_16_5 | Version::V26_1 => true,
+                        Version::V1_16_5 | Version::V26_1 | Version::V26_2 => true,
                     }
                     && t.nbt_eq(st)
             })
         };
         let found = match v {
             Version::V1_8 => (0..36).find(|&j| room(self.m, j)),
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => {
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
                 let sel = usize::from(self.m.selected.min(8));
                 if room(self.m, sel) {
                     Some(sel)
@@ -1296,7 +1310,7 @@ impl Sim<'_> {
         if i > max - t.count {
             k = max - t.count;
         }
-        let cap = if v == Version::V26_1 { 99 } else { 64 };
+        let cap = if v.is_modern() { 99 } else { 64 };
         if k > cap - t.count {
             k = cap - t.count;
         }
@@ -1359,7 +1373,7 @@ impl Sim<'_> {
                 // canInsertItemIntoSlot(slot, cursor, true)
                 let same = match v {
                     Version::V1_8 | Version::V1_12 => c.id == t.id && c.damage == t.damage,
-                    Version::V1_16_5 | Version::V26_1 => c.id == t.id,
+                    Version::V1_16_5 | Version::V26_1 | Version::V26_2 => c.id == t.id,
                 };
                 if !(same && t.nbt_eq(&c) && t.count <= max) {
                     continue;
@@ -1384,7 +1398,7 @@ impl Sim<'_> {
         // the cursor object is only grown in place (1.8 keeps it even at count 0)
         self.m.cursor = match v {
             Version::V1_8 => Some(c),
-            Version::V1_12 | Version::V1_16_5 | Version::V26_1 => self.norm(c),
+            Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => self.norm(c),
         };
         Ok(())
     }

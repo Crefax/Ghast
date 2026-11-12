@@ -24,6 +24,7 @@ const V18: u8 = 0;
 const V112: u8 = 1;
 const V1165: u8 = 2;
 const V261: u8 = 3;
+const V262: u8 = 4;
 
 /// One incoming `window_items` slot: [`Incoming::settle`] stores it (normalised and clamped
 /// like vanilla's handler) and says whether the slot changed.
@@ -74,7 +75,7 @@ fn legacy_same<const V: u8>(
     if V != V18 && (count <= 0 || id == 0) {
         return stored.is_none();
     }
-    if V == V261 || V == V1165 {
+    if V == V261 || V == V262 || V == V1165 {
         // legacy slots never reach these versions (see `on_window_items_legacy`)
         return false;
     }
@@ -114,6 +115,8 @@ fn normalize_as<const V: u8>(s: Option<Stack>) -> Option<Stack> {
 fn clamp_as<const V: u8>(mut s: Option<Stack>) -> Option<Stack> {
     if V == V261 {
         crate::sim::clamp_v(Version::V26_1, &mut s);
+    } else if V == V262 {
+        crate::sim::clamp_v(Version::V26_2, &mut s);
     } else {
         crate::sim::clamp(&mut s);
     }
@@ -134,7 +137,7 @@ fn same_slot(a: &Option<Stack>, b: &Option<Stack>) -> bool {
 }
 
 /// The `Window::menu` of a 26.1 mount screen (`horse_screen_open`; not a `minecraft:menu` id).
-#[cfg(feature = "v26_1")]
+#[cfg(modern)]
 const MOUNT_MENU: i32 = 1000;
 
 /// 26.1: ticks without a correcting container packet after which a click counts as accepted
@@ -345,16 +348,16 @@ pub enum Outgoing {
     /// 26.1 creative inventory screen (window 0 in creative mode): the packets the real
     /// client sends, in order (often none). See [`CreativePacket`].
     Creative(Vec<CreativePacket>),
-    /// 26.1 `rename_item`: the anvil's name field ([`Inventory::anvil_rename_26_1`]).
+    /// 26.1 `rename_item`: the anvil's name field ([`Inventory::anvil_rename_modern`]).
     RenameItem(String),
-    /// 26.1 `container_button_click` (a loom pattern: [`Inventory::select_loom_pattern_26_1`]).
+    /// 26.1 `container_button_click` (a loom pattern: [`Inventory::select_loom_pattern_modern`]).
     ButtonClick {
         /// Container id.
         window_id: i32,
         /// Button id.
         button: i32,
     },
-    /// 26.1 `select_trade` ([`Inventory::select_trade_26_1`]).
+    /// 26.1 `select_trade` ([`Inventory::select_trade_modern`]).
     SelectTrade(i32),
 }
 
@@ -495,7 +498,7 @@ impl Window {
     }
     /// 26.1: the `minecraft:menu` registry id of `open_screen` (`None` for other versions).
     #[must_use]
-    pub fn menu_26_1(&self) -> Option<i32> {
+    pub fn menu_modern(&self) -> Option<i32> {
         (self.menu >= 0).then_some(self.menu)
     }
 }
@@ -542,34 +545,34 @@ pub struct Inventory {
     state_player: i32,
     state_window: i32,
     /// 26.1 registry names for click hashes and the binding curse.
-    #[cfg(feature = "v26_1")]
-    reg26: crate::v26_1::HashRegistries,
+    #[cfg(modern)]
+    reg26: crate::item26::HashRegistries,
     /// 26.1: recipe item sets, game mode, experience level.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     w26: crate::sim26::World26,
     /// 26.1: window 0's and the open container's per-screen click state (drags, …).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     s26: [crate::sim26::Screen26; 2],
     /// 26.1: window 0's `lastSlots` (what its last `broadcastChanges` saw; the creative
     /// screen's listener sends every slot that differs).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     creative_last: Vec<Option<Stack>>,
     /// 26.1: the creative inventory screen is open (window 0 in creative mode).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     creative_screen: bool,
     /// 26.1: packets the creative screen sends in answer to server packets
-    /// ([`Inventory::take_creative_echo_26_1`]).
-    #[cfg(feature = "v26_1")]
+    /// ([`Inventory::take_creative_echo_modern`]).
+    #[cfg(modern)]
     creative_echo: Vec<CreativePacket>,
     /// 26.1 `LocalPlayer.dropSpamThrottler`: +20 per creative drop, -1 per tick; drops are
     /// refused from 1280 (`canDropItems`).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     drop_throttle: i32,
     /// 26.1 `update_recipes` body, not parsed yet (parsed when a menu needs its item sets).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     recipes_raw: Option<bytes::Bytes>,
     /// 26.1 tags and enchantment definitions (raw until a menu needs them).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     d26: crate::data26::Data26,
 }
 
@@ -602,23 +605,23 @@ impl Inventory {
             book: RecipeBook::default(),
             state_player: 0,
             state_window: 0,
-            #[cfg(feature = "v26_1")]
-            reg26: crate::v26_1::HashRegistries::default(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
+            reg26: crate::item26::HashRegistries::default(),
+            #[cfg(modern)]
             w26: crate::sim26::World26::default(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             s26: Default::default(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             creative_last: Vec::new(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             creative_screen: false,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             creative_echo: Vec::new(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             drop_throttle: 0,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             recipes_raw: None,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             d26: Default::default(),
         }
     }
@@ -646,30 +649,38 @@ impl Inventory {
         self.version
     }
 
+    /// The modern table set of this inventory's version (a placeholder for a legacy one: only
+    /// modern code paths read it).
+    #[cfg(modern)]
+    #[inline]
+    pub(crate) fn mv(&self) -> crate::tables::Mv {
+        crate::tables::Mv::of(self.version).unwrap_or(crate::tables::Mv::ANY)
+    }
+
     /// A new player entity (join, respawn, dimension change): everything is cleared,
     /// including the action counters; the server resends the inventory.
     /// The selected hotbar slot restarts at 0 too (a new `PlayerInventory`).
     pub fn reset(&mut self) {
         // the recipe book belongs to the connection, not to the player entity
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         let reg26 = std::mem::take(&mut self.reg26);
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         let w26 = std::mem::take(&mut self.w26);
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         let recipes_raw = self.recipes_raw.take();
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         let d26 = std::mem::take(&mut self.d26);
         *self = Inventory {
             timeout: self.timeout,
             settle: self.settle,
             book: std::mem::take(&mut self.book),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             reg26,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             w26,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             recipes_raw,
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             d26,
             ..Inventory::empty(self.version)
         };
@@ -680,13 +691,13 @@ impl Inventory {
     /// and ages the pending click.
     pub fn tick(&mut self) {
         self.flags = TickFlags::default();
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         if self.drop_throttle > 0 {
             self.drop_throttle -= 1;
         }
         if let Some(p) = &mut self.pending {
             p.age += 1;
-            if self.version == Version::V26_1 && p.age >= self.settle {
+            if self.version.is_modern() && p.age >= self.settle {
                 self.events.clicks.push(ClickResult {
                     window_id: p.window_id,
                     action: p.action,
@@ -947,7 +958,7 @@ impl Inventory {
             return Err(ClickError::InvalidSlot);
         }
         if matches!(click, Click::Clone { .. } | Click::QuickCraft { .. })
-            && self.version != Version::V26_1
+            && !self.version.is_modern()
         {
             // the older versions' drags and creative clicks are not modelled
             return Err(ClickError::Unpredictable);
@@ -959,8 +970,8 @@ impl Inventory {
                 return Err(ClickError::InvalidButton);
             }
         }
-        #[cfg(feature = "v26_1")]
-        if self.version == Version::V26_1 {
+        #[cfg(modern)]
+        if self.version.is_modern() {
             if self.creative_screen {
                 return self.creative_click(slot, button, mode);
             }
@@ -1006,7 +1017,7 @@ impl Inventory {
     }
 
     fn binding_curse(&self) -> Option<i32> {
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         {
             self.reg26
                 .enchantments
@@ -1014,7 +1025,7 @@ impl Inventory {
                 .position(|n| n == "minecraft:binding_curse")
                 .map(|i| i as i32)
         }
-        #[cfg(not(feature = "v26_1"))]
+        #[cfg(not(modern))]
         None
     }
 
@@ -1022,24 +1033,24 @@ impl Inventory {
     /// configuration phase's `minecraft:enchantment` keys in order). Without them, clicks with
     /// enchanted items send hashes the server corrects, and taking enchanted armor off is not
     /// predicted.
-    #[cfg(feature = "v26_1")]
-    pub fn set_registries_26_1(&mut self, reg: crate::v26_1::HashRegistries) {
+    #[cfg(modern)]
+    pub fn set_registries_modern(&mut self, reg: crate::item26::HashRegistries) {
         self.reg26 = reg;
     }
 
-    /// 26.1: the registry names set with [`Inventory::set_registries_26_1`].
-    #[cfg(feature = "v26_1")]
+    /// 26.1: the registry names set with [`Inventory::set_registries_modern`].
+    #[cfg(modern)]
     #[must_use]
-    pub fn registries_26_1(&self) -> &crate::v26_1::HashRegistries {
+    pub fn registries_modern(&self) -> &crate::item26::HashRegistries {
         &self.reg26
     }
 
     /// 26.1: the name of enchantment registry id `id` as the server's `registry_data` keyed it
     /// (`minecraft:sharpness`), from the registries set with
-    /// [`Inventory::set_registries_26_1`]; `None` for an unknown id.
-    #[cfg(feature = "v26_1")]
+    /// [`Inventory::set_registries_modern`]; `None` for an unknown id.
+    #[cfg(modern)]
     #[must_use]
-    pub fn enchantment_name_26_1(&self, id: i32) -> Option<&str> {
+    pub fn enchantment_name_modern(&self, id: i32) -> Option<&str> {
         self.reg26
             .enchantments()
             .get(usize::try_from(id).ok()?)
@@ -1056,7 +1067,7 @@ impl Inventory {
     }
 
     /// The 26.1 menu the click runs in.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     fn kind_26(&self) -> crate::sim26::Kind {
         match &self.screen {
             ScreenState::Window(w) => match (crate::sim26::Kind::from_menu(w.menu), w.kind) {
@@ -1075,7 +1086,7 @@ impl Inventory {
     /// every slot whose stack changed (in the order of its `Int2ObjectOpenHashMap`) and the
     /// carried stack. A click ghast cannot predict is sent unpredicted (nothing changes locally;
     /// the server applies it and sends the true slots), never refused.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     fn click_26(&mut self, slot: i16, button: u8, mode: u8) -> Outgoing {
         let kind = self.kind_26();
         if matches!(
@@ -1084,7 +1095,7 @@ impl Inventory {
                 | crate::sim26::Kind::Smithing
                 | crate::sim26::Kind::Stonecutter
         ) {
-            self.ensure_recipes_26_1();
+            self.ensure_recipes_modern();
         }
         if matches!(
             kind,
@@ -1093,7 +1104,7 @@ impl Inventory {
                 | crate::sim26::Kind::Loom
                 | crate::sim26::Kind::Mount(_)
         ) {
-            self.d26.ensure(&self.reg26.enchantments);
+            self.d26.ensure(self.mv(), &self.reg26.enchantments);
         }
         let w = usize::from(matches!(self.screen, ScreenState::Window(_)));
         let mut m = self.m.clone();
@@ -1108,6 +1119,7 @@ impl Inventory {
                 w: &self.w26,
                 d: &self.d26,
                 reg: &self.reg26,
+                mv: self.mv(),
                 swings: 0,
                 xp_spent: 0,
             };
@@ -1182,8 +1194,8 @@ impl Inventory {
     /// 26.1: whether the player is in creative mode (instant build): middle-click clones,
     /// clone drags, armor with the binding curse comes off, overflow vanishes. Set from the
     /// `abilities` packet by [`Inventory::apply_raw_v26_1`] / [`Inventory::apply_v26_1`].
-    #[cfg(feature = "v26_1")]
-    pub fn set_creative_26_1(&mut self, creative: bool) {
+    #[cfg(modern)]
+    pub fn set_creative_modern(&mut self, creative: bool) {
         self.w26.creative = creative;
     }
 
@@ -1191,16 +1203,16 @@ impl Inventory {
     /// at the first click in an anvil, grindstone, loom or mount screen (the item, enchantment,
     /// banner pattern and entity type tags those read). The play packet is also handled by
     /// [`Inventory::apply_raw_v26_1`].
-    #[cfg(feature = "v26_1")]
-    pub fn on_update_tags_26_1(&mut self, body: bytes::Bytes) {
+    #[cfg(modern)]
+    pub fn on_update_tags_modern(&mut self, body: bytes::Bytes) {
         self.d26.set_tags_raw(body);
     }
 
     /// 26.1 configuration `registry_data`: the `minecraft:enchantment` body is kept (parsed
     /// with the tags) for the anvil's rules; other registries are ignored. Entries sent without
     /// data (a server and client sharing the vanilla pack) use the vanilla definitions.
-    #[cfg(feature = "v26_1")]
-    pub fn on_registry_data_26_1(&mut self, body: bytes::Bytes) {
+    #[cfg(modern)]
+    pub fn on_registry_data_modern(&mut self, body: bytes::Bytes) {
         self.d26.set_registry_raw(body);
     }
 
@@ -1210,8 +1222,8 @@ impl Inventory {
     /// columns and `canUseSlot(SADDLE)` / `canUseSlot(BODY)` (horses, donkeys, mules, camels:
     /// saddle when alive, adult and tamed, body always; llamas: both always; nautili: both when
     /// alive, adult and tame).
-    #[cfg(feature = "v26_1")]
-    pub fn on_mount_screen_26_1(
+    #[cfg(modern)]
+    pub fn on_mount_screen_modern(
         &mut self,
         window_id: i32,
         columns: i32,
@@ -1241,9 +1253,9 @@ impl Inventory {
     }
 
     /// 26.1 `merchant_offers`: the open villager screen's offers.
-    #[cfg(feature = "v26_1")]
-    pub fn on_merchant_offers_26_1(&mut self, body: &bytes::Bytes) {
-        if let Some((window, offers)) = crate::sim26::parse_offers(body)
+    #[cfg(modern)]
+    pub fn on_merchant_offers_modern(&mut self, body: &bytes::Bytes) {
+        if let Some((window, offers)) = crate::sim26::parse_offers(self.mv(), body)
             && let ScreenState::Window(w) = &self.screen
             && w.id == window
             && w.menu == 19
@@ -1253,8 +1265,8 @@ impl Inventory {
     }
 
     /// Runs one 26.1 screen action on the open menu (no container click).
-    #[cfg(feature = "v26_1")]
-    fn screen_action_26_1<T>(
+    #[cfg(modern)]
+    fn screen_action_modern<T>(
         &mut self,
         f: impl FnOnce(&mut crate::sim26::Sim26<'_>) -> Result<T, crate::sim::Unpredictable>,
     ) -> Result<T, crate::sim::Unpredictable> {
@@ -1272,6 +1284,7 @@ impl Inventory {
                 w: &self.w26,
                 d: &self.d26,
                 reg: &self.reg26,
+                mv: self.mv(),
                 swings: 0,
                 xp_spent: 0,
             };
@@ -1291,8 +1304,8 @@ impl Inventory {
     ///
     /// # Errors
     /// [`ClickError::NoScreen`] when no anvil is open.
-    #[cfg(feature = "v26_1")]
-    pub fn anvil_rename_26_1(&mut self, name: &str) -> Result<Option<Outgoing>, ClickError> {
+    #[cfg(modern)]
+    pub fn anvil_rename_modern(&mut self, name: &str) -> Result<Option<Outgoing>, ClickError> {
         if self.kind_26() != crate::sim26::Kind::Anvil {
             return Err(ClickError::NoScreen);
         }
@@ -1306,9 +1319,9 @@ impl Inventory {
         if filtered.chars().count() > 50 || self.s26[1].anvil_name.as_deref() == Some(&filtered) {
             return Ok(None);
         }
-        self.d26.ensure(&self.reg26.enchantments);
+        self.d26.ensure(self.mv(), &self.reg26.enchantments);
         let n = filtered.clone();
-        let r = self.screen_action_26_1(|sim| {
+        let r = self.screen_action_modern(|sim| {
             sim.s.anvil_name = Some(n);
             sim.anvil_create()
         });
@@ -1329,13 +1342,13 @@ impl Inventory {
     /// with data and not vanilla), an effect that does not read, or one that draws on the
     /// holder's random (`remove_binomial`). The first call parses the raw registry data and
     /// tags (hence `&mut self`).
-    #[cfg(feature = "v26_1")]
-    pub fn trident_spin_attack_strength_26_1(&mut self, stack: &Stack) -> Option<f32> {
-        let list = crate::v26_1::enchantments(stack, false).unwrap_or_default();
+    #[cfg(modern)]
+    pub fn trident_spin_attack_strength_modern(&mut self, stack: &Stack) -> Option<f32> {
+        let list = crate::item26::enchantments(self.mv(), stack, false).unwrap_or_default();
         if list.is_empty() {
             return Some(0.0);
         }
-        self.d26.ensure(&self.reg26.enchantments);
+        self.d26.ensure(self.mv(), &self.reg26.enchantments);
         let mut v = 0.0f32;
         for (id, level) in list {
             match &self.d26.enchantment(id)?.spin {
@@ -1353,14 +1366,17 @@ impl Inventory {
     /// # Errors
     /// [`ClickError::NoScreen`] when no loom is open; [`ClickError::Unpredictable`] when the
     /// patterns are not known.
-    #[cfg(feature = "v26_1")]
-    pub fn select_loom_pattern_26_1(&mut self, index: i32) -> Result<Option<Outgoing>, ClickError> {
+    #[cfg(modern)]
+    pub fn select_loom_pattern_modern(
+        &mut self,
+        index: i32,
+    ) -> Result<Option<Outgoing>, ClickError> {
         if self.kind_26() != crate::sim26::Kind::Loom {
             return Err(ClickError::NoScreen);
         }
-        self.d26.ensure(&self.reg26.enchantments);
+        self.d26.ensure(self.mv(), &self.reg26.enchantments);
         let ok = self
-            .screen_action_26_1(|sim| sim.loom_button(index))
+            .screen_action_modern(|sim| sim.loom_button(index))
             .map_err(|_| ClickError::Unpredictable)?;
         Ok(ok.then(|| Outgoing::ButtonClick {
             window_id: self.open_id(),
@@ -1374,13 +1390,13 @@ impl Inventory {
     ///
     /// # Errors
     /// [`ClickError::NoScreen`] when no villager screen is open.
-    #[cfg(feature = "v26_1")]
-    pub fn select_trade_26_1(&mut self, index: i32) -> Result<Outgoing, ClickError> {
+    #[cfg(modern)]
+    pub fn select_trade_modern(&mut self, index: i32) -> Result<Outgoing, ClickError> {
         if self.kind_26() != crate::sim26::Kind::Merchant {
             return Err(ClickError::NoScreen);
         }
         if self
-            .screen_action_26_1(|sim| sim.select_trade(index))
+            .screen_action_modern(|sim| sim.select_trade(index))
             .is_err()
         {
             self.s26[1].trade_hint = index;
@@ -1389,37 +1405,37 @@ impl Inventory {
     }
 
     /// 26.1: keeps an `update_recipes` body for later parsing.
-    #[cfg(feature = "v26_1")]
-    pub(crate) fn set_recipes_raw_26_1(&mut self, body: bytes::Bytes) {
+    #[cfg(modern)]
+    pub(crate) fn set_recipes_raw_modern(&mut self, body: bytes::Bytes) {
         self.recipes_raw = Some(body);
     }
 
-    #[cfg(feature = "v26_1")]
-    pub(crate) fn take_recipes_raw_26_1(&mut self) -> Option<bytes::Bytes> {
+    #[cfg(modern)]
+    pub(crate) fn take_recipes_raw_modern(&mut self) -> Option<bytes::Bytes> {
         self.recipes_raw.take()
     }
 
     /// 26.1: the packets the creative inventory screen sent in answer to server packets since
     /// the last call (vanilla echoes every window 0 slot the server sets while the screen is
     /// open); send them right away.
-    #[cfg(feature = "v26_1")]
-    pub fn take_creative_echo_26_1(&mut self) -> Vec<CreativePacket> {
+    #[cfg(modern)]
+    pub fn take_creative_echo_modern(&mut self) -> Vec<CreativePacket> {
         std::mem::take(&mut self.creative_echo)
     }
 
     /// Whether the 26.1 creative inventory screen is open (window 0 opened in creative mode):
     /// clicks then return [`Outgoing::Creative`].
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     #[must_use]
-    pub fn creative_screen_26_1(&self) -> bool {
+    pub fn creative_screen_modern(&self) -> bool {
         self.creative_screen
     }
 
     /// `InventoryMenu.broadcastChanges` with the creative listener: every slot that differs
     /// from the last broadcast is sent.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     fn creative_broadcast(&mut self, out: &mut Vec<CreativePacket>) {
-        let lay = Layout::new(Version::V26_1, Screen::Player);
+        let lay = Layout::new(self.version, Screen::Player);
         if self.creative_last.is_empty() {
             // allocated on the first broadcast: a bot that never opens it pays nothing
             self.creative_last = vec![None; 46];
@@ -1446,14 +1462,14 @@ impl Inventory {
     /// inventory tab): Q / drops are the screen's own; everything else runs window 0's click
     /// and broadcasts. Refused as unpredictable when ghast cannot simulate it (the stacks it
     /// sends would be wrong).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     fn creative_click(&mut self, slot: i16, button: u8, mode: u8) -> Result<Outgoing, ClickError> {
         let mode = if slot == OUTSIDE && mode == 0 {
             4
         } else {
             mode
         };
-        let lay = Layout::new(Version::V26_1, Screen::Player);
+        let lay = Layout::new(self.version, Screen::Player);
         let mut out = Vec::new();
         let idx = usize::try_from(slot).ok();
         if mode == 4 && self.drop_throttle >= 1280 {
@@ -1471,7 +1487,7 @@ impl Inventory {
                 let n = if button == 0 {
                     1
                 } else {
-                    crate::v26_1::max_stack_size(&st)
+                    crate::item26::max_stack_size(self.mv(), &st)
                 };
                 let dropped = if l == Loc::CraftResult {
                     self.m.at_mut(l).take()
@@ -1529,6 +1545,7 @@ impl Inventory {
                 w: &self.w26,
                 d: &self.d26,
                 reg: &self.reg26,
+                mv: self.mv(),
                 swings: 0,
                 xp_spent: 0,
             };
@@ -1550,8 +1567,8 @@ impl Inventory {
 
     /// 26.1: the player's experience level (the anvil's result can only be taken with enough);
     /// set from the `experience` packet by [`Inventory::apply_raw_v26_1`].
-    #[cfg(feature = "v26_1")]
-    pub fn set_experience_level_26_1(&mut self, level: i32) {
+    #[cfg(modern)]
+    pub fn set_experience_level_modern(&mut self, level: i32) {
         self.w26.xp_level = Some(level);
     }
 
@@ -1559,8 +1576,8 @@ impl Inventory {
     /// and stonecutter slot rules read (`(set name, item ids)`, e.g.
     /// `("minecraft:furnace_input", …)`) and the stonecutter recipes' inputs (`None` when one
     /// names a tag: shift-clicks into the stonecutter are then not predicted).
-    #[cfg(feature = "v26_1")]
-    pub fn on_recipes_26_1<'a>(
+    #[cfg(modern)]
+    pub fn on_recipes_modern<'a>(
         &mut self,
         sets: impl IntoIterator<Item = (&'a str, &'a [i32])>,
         stonecutter_inputs: Option<Vec<i32>>,
@@ -1598,11 +1615,11 @@ impl Inventory {
         });
     }
 
-    /// 26.1 `open_screen`: the menu registry id (`minecraft:menu`) and the title. Menus the
+    /// Modern `open_screen`: the menu registry id (`minecraft:menu`) and the title. Menus the
     /// client has no screen for are ignored.
-    #[cfg(feature = "v26_1")]
-    pub fn on_open_screen_26_1(&mut self, id: i32, menu: i32, title: ByteString) {
-        self.on_open_window(id, crate::v26_1::window_kind(menu), title);
+    #[cfg(modern)]
+    pub fn on_open_screen_modern(&mut self, id: i32, menu: i32, title: ByteString) {
+        self.on_open_window(id, crate::item26::window_kind(self.mv(), menu), title);
         if let ScreenState::Window(w) = &mut self.screen
             && w.id == id
         {
@@ -1617,8 +1634,8 @@ impl Inventory {
     /// counts, the loom's patterns, the trade, the stonecutter input). `old` is the container
     /// before the packet; the packet's slots are replayed one by one from it.
     /// Whether the open 26.1 menu reacts to server slot packets (container caps, result hooks).
-    #[cfg(feature = "v26_1")]
-    fn hooks_26_1(&self) -> bool {
+    #[cfg(modern)]
+    fn hooks_modern(&self) -> bool {
         use crate::sim26::Kind;
         matches!(
             self.kind_26(),
@@ -1633,12 +1650,12 @@ impl Inventory {
         )
     }
 
-    #[cfg(feature = "v26_1")]
-    fn inbound_26_1(&mut self, old: Vec<Option<Stack>>, slots: std::ops::Range<usize>) {
+    #[cfg(modern)]
+    fn inbound_modern(&mut self, old: Vec<Option<Stack>>, slots: std::ops::Range<usize>) {
         use crate::sim26::Kind;
         let kind = self.kind_26();
         if matches!(kind, Kind::Anvil | Kind::Grindstone | Kind::Loom) {
-            self.d26.ensure(&self.reg26.enchantments);
+            self.d26.ensure(self.mv(), &self.reg26.enchantments);
         }
         let new = std::mem::replace(&mut self.m.container, old);
         let mut scr = self.s26[1].clone();
@@ -1652,6 +1669,7 @@ impl Inventory {
                 w: &self.w26,
                 d: &self.d26,
                 reg: &self.reg26,
+                mv: self.mv(),
                 swings: 0,
                 xp_spent: 0,
             };
@@ -1732,8 +1750,8 @@ impl Inventory {
         }
         self.screen = ScreenState::Inventory;
         self.flags.opened = true;
-        #[cfg(feature = "v26_1")]
-        if self.version == Version::V26_1 && self.w26.creative {
+        #[cfg(modern)]
+        if self.version.is_modern() && self.w26.creative {
             // the creative screen adds its listener: one broadcast
             self.creative_screen = true;
             let mut out = Vec::new();
@@ -1764,14 +1782,14 @@ impl Inventory {
 
     /// The client side of closing the current screen handler (`closeScreen` + `close`).
     fn close_screen(&mut self) {
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         {
             self.creative_screen = false;
         }
         // 26.1: only the server empties the cursor (`removed` checks for a ServerPlayer); the
         // client's player inventory menu keeps its own, so closing window 0 keeps the cursor,
         // and closing a container returns to window 0's (empty) one.
-        let keep_cursor = self.version == Version::V26_1 && self.screen == ScreenState::Inventory;
+        let keep_cursor = self.version.is_modern() && self.screen == ScreenState::Inventory;
         if !keep_cursor && self.m.cursor.take().is_some() {
             self.events.cursor_changed = true;
         }
@@ -1793,7 +1811,7 @@ impl Inventory {
                 self.m.container.clear();
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
-                #[cfg(feature = "v26_1")]
+                #[cfg(modern)]
                 {
                     self.s26[1] = Default::default();
                 }
@@ -1906,6 +1924,11 @@ impl Inventory {
             Version::V1_12 => self.window_items_as::<V112, _>(window_id, items),
             Version::V1_16_5 => self.window_items_as::<V1165, _>(window_id, items),
             Version::V26_1 => self.window_items_as::<V261, _>(window_id, items),
+            #[cfg(feature = "v26_2")]
+            Version::V26_2 => self.window_items_as::<V262, _>(window_id, items),
+            // no inventory exists for a disabled version
+            #[cfg(not(feature = "v26_2"))]
+            Version::V26_2 => {}
         }
     }
 
@@ -1948,7 +1971,7 @@ impl Inventory {
         for (i, s) in items.enumerate() {
             let Some(l) = lay.loc(i) else { break };
             touched_grid |= is_grid(lay, l);
-            let clamps = if V == V261 {
+            let clamps = if V == V261 || V == V262 {
                 lay.clamps_26(l)
             } else {
                 lay.clamps(l)
@@ -2052,7 +2075,7 @@ impl Inventory {
     }
 
     /// 26.1: a container packet arrived while a click waits to settle: the server disagreed.
-    fn correction_26_1(&mut self, window_id: Option<i32>) {
+    fn correction_modern(&mut self, window_id: Option<i32>) {
         if let Some(p) = self.pending
             && window_id.is_none_or(|w| w == p.window_id || w == 0)
         {
@@ -2068,7 +2091,7 @@ impl Inventory {
     /// 26.1 `container_set_content` (vanilla `initializeContents`): window 0 or the open
     /// container's slots, its carried stack and its state id. Window 0's carried stack only
     /// shows while no container is open (the client keeps one per menu).
-    pub fn on_window_items_26_1(
+    pub fn on_window_items_modern(
         &mut self,
         window_id: i32,
         state_id: i32,
@@ -2079,18 +2102,18 @@ impl Inventory {
         if window_id != 0 && !current {
             return;
         }
-        self.correction_26_1(Some(window_id));
-        #[cfg(feature = "v26_1")]
-        let old = (window_id != 0 && self.hooks_26_1()).then(|| self.m.container.clone());
+        self.correction_modern(Some(window_id));
+        #[cfg(modern)]
+        let old = (window_id != 0 && self.hooks_modern()).then(|| self.m.container.clone());
         self.on_window_items(window_id, items);
         if window_id == 0 {
             self.state_player = state_id;
         } else {
             self.state_window = state_id;
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             if let Some(old) = old {
                 let n = old.len();
-                self.inbound_26_1(old, 0..n);
+                self.inbound_modern(old, 0..n);
             }
         }
         if current {
@@ -2100,7 +2123,7 @@ impl Inventory {
 
     /// 26.1 `container_set_slot`: window 0 slots always reach window 0 (any slot), the open
     /// container's only that container; the menu's state id follows.
-    pub fn on_set_slot_26_1(
+    pub fn on_set_slot_modern(
         &mut self,
         window_id: i32,
         state_id: i32,
@@ -2120,7 +2143,7 @@ impl Inventory {
         } else {
             self.state_window = state_id;
         }
-        self.correction_26_1(Some(window_id));
+        self.correction_modern(Some(window_id));
         let Some(l) = usize::try_from(slot).ok().and_then(|i| lay.loc(i)) else {
             return;
         };
@@ -2135,9 +2158,9 @@ impl Inventory {
             }
             _ => {}
         }
-        #[cfg(feature = "v26_1")]
-        let old =
-            (matches!(l, Loc::Container(_)) && self.hooks_26_1()).then(|| self.m.container.clone());
+        #[cfg(modern)]
+        let old = (matches!(l, Loc::Container(_)) && self.hooks_modern())
+            .then(|| self.m.container.clone());
         let s = self.m.at_mut(l);
         if *s != item {
             *s = item;
@@ -2146,14 +2169,14 @@ impl Inventory {
                 _ => self.events.player_changed = true,
             }
         }
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         if let (Loc::Container(k), Some(old)) = (l, old)
             && window_id != 0
         {
-            self.inbound_26_1(old, k..k + 1);
+            self.inbound_modern(old, k..k + 1);
         }
         // the creative screen broadcasts window 0 after every server slot
-        #[cfg(feature = "v26_1")]
+        #[cfg(modern)]
         if window_id == 0 && self.creative_screen {
             let mut out = std::mem::take(&mut self.creative_echo);
             self.creative_broadcast(&mut out);
@@ -2163,10 +2186,10 @@ impl Inventory {
 
     /// 26.1 `set_cursor_item`: the open menu's carried stack.
     pub fn on_set_cursor(&mut self, item: Option<Stack>) {
-        if self.version == Version::V26_1 {
-            self.correction_26_1(None);
+        if self.version.is_modern() {
+            self.correction_modern(None);
             // the creative screen keeps its own cursor
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             if self.creative_screen {
                 return;
             }
@@ -2181,7 +2204,7 @@ impl Inventory {
     /// 26.1 `set_player_inventory`: a `PlayerInventory` index (0..=40; the body armor and saddle
     /// slots 41 and 42 are not kept).
     pub fn on_set_player_inventory(&mut self, slot: i32, item: Option<Stack>) {
-        self.correction_26_1(None);
+        self.correction_modern(None);
         let item = self.normalize(item);
         let Some(k) = usize::try_from(slot).ok().filter(|&k| k < 41) else {
             return;
@@ -2213,7 +2236,7 @@ impl Inventory {
                 Some(p) => p.1 = value,
                 None => w.properties.push((property, value)),
             }
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             match w.menu {
                 // anvil: the cost data slot
                 8 if property == 0 => self.s26[1].anvil_cost = i32::from(value),
@@ -2288,5 +2311,134 @@ impl Inventory {
         {
             st.damage = 0;
         }
+    }
+}
+
+/// The 0.4.1 names of the modern methods (26.1 was the only modern version then); each one is
+/// the `_modern` method of the same name and works for every modern version.
+#[cfg(modern)]
+impl Inventory {
+    /// Alias of [`Inventory::set_registries_modern`].
+    pub fn set_registries_26_1(&mut self, reg: crate::item26::HashRegistries) {
+        self.set_registries_modern(reg);
+    }
+    /// Alias of [`Inventory::registries_modern`].
+    #[must_use]
+    pub fn registries_26_1(&self) -> &crate::item26::HashRegistries {
+        self.registries_modern()
+    }
+    /// Alias of [`Inventory::enchantment_name_modern`].
+    #[must_use]
+    pub fn enchantment_name_26_1(&self, id: i32) -> Option<&str> {
+        self.enchantment_name_modern(id)
+    }
+    /// Alias of [`Inventory::set_creative_modern`].
+    pub fn set_creative_26_1(&mut self, creative: bool) {
+        self.set_creative_modern(creative);
+    }
+    /// Alias of [`Inventory::on_update_tags_modern`].
+    pub fn on_update_tags_26_1(&mut self, body: bytes::Bytes) {
+        self.on_update_tags_modern(body);
+    }
+    /// Alias of [`Inventory::on_registry_data_modern`].
+    pub fn on_registry_data_26_1(&mut self, body: bytes::Bytes) {
+        self.on_registry_data_modern(body);
+    }
+    /// Alias of [`Inventory::on_mount_screen_modern`].
+    pub fn on_mount_screen_26_1(
+        &mut self,
+        window_id: i32,
+        columns: i32,
+        entity_type: i32,
+        can_saddle: bool,
+        can_body: bool,
+    ) {
+        self.on_mount_screen_modern(window_id, columns, entity_type, can_saddle, can_body);
+    }
+    /// Alias of [`Inventory::on_merchant_offers_modern`].
+    pub fn on_merchant_offers_26_1(&mut self, body: &bytes::Bytes) {
+        self.on_merchant_offers_modern(body);
+    }
+    /// Alias of [`Inventory::anvil_rename_modern`].
+    ///
+    /// # Errors
+    /// As [`Inventory::anvil_rename_modern`].
+    pub fn anvil_rename_26_1(&mut self, name: &str) -> Result<Option<Outgoing>, ClickError> {
+        self.anvil_rename_modern(name)
+    }
+    /// Alias of [`Inventory::trident_spin_attack_strength_modern`].
+    pub fn trident_spin_attack_strength_26_1(&mut self, stack: &Stack) -> Option<f32> {
+        self.trident_spin_attack_strength_modern(stack)
+    }
+    /// Alias of [`Inventory::select_loom_pattern_modern`].
+    ///
+    /// # Errors
+    /// As [`Inventory::select_loom_pattern_modern`].
+    pub fn select_loom_pattern_26_1(&mut self, index: i32) -> Result<Option<Outgoing>, ClickError> {
+        self.select_loom_pattern_modern(index)
+    }
+    /// Alias of [`Inventory::select_trade_modern`].
+    ///
+    /// # Errors
+    /// As [`Inventory::select_trade_modern`].
+    pub fn select_trade_26_1(&mut self, index: i32) -> Result<Outgoing, ClickError> {
+        self.select_trade_modern(index)
+    }
+    /// Alias of [`Inventory::take_creative_echo_modern`].
+    pub fn take_creative_echo_26_1(&mut self) -> Vec<CreativePacket> {
+        self.take_creative_echo_modern()
+    }
+    /// Alias of [`Inventory::creative_screen_modern`].
+    #[must_use]
+    pub fn creative_screen_26_1(&self) -> bool {
+        self.creative_screen_modern()
+    }
+    /// Alias of [`Inventory::set_experience_level_modern`].
+    pub fn set_experience_level_26_1(&mut self, level: i32) {
+        self.set_experience_level_modern(level);
+    }
+    /// Alias of [`Inventory::on_recipes_modern`].
+    pub fn on_recipes_26_1<'a>(
+        &mut self,
+        sets: impl IntoIterator<Item = (&'a str, &'a [i32])>,
+        stonecutter_inputs: Option<Vec<i32>>,
+    ) {
+        self.on_recipes_modern(sets, stonecutter_inputs);
+    }
+    /// Alias of [`Inventory::on_open_screen_modern`].
+    pub fn on_open_screen_26_1(&mut self, id: i32, menu: i32, title: ByteString) {
+        self.on_open_screen_modern(id, menu, title);
+    }
+}
+
+/// The 0.4.1 names of the modern slot packets (they exist in every build, like 0.4.1's).
+impl Inventory {
+    /// Alias of [`Inventory::on_window_items_modern`].
+    pub fn on_window_items_26_1(
+        &mut self,
+        window_id: i32,
+        state_id: i32,
+        items: impl IntoIterator<Item = Option<Stack>>,
+        carried: Option<Stack>,
+    ) {
+        self.on_window_items_modern(window_id, state_id, items, carried);
+    }
+    /// Alias of [`Inventory::on_set_slot_modern`].
+    pub fn on_set_slot_26_1(
+        &mut self,
+        window_id: i32,
+        state_id: i32,
+        slot: i16,
+        item: Option<Stack>,
+    ) {
+        self.on_set_slot_modern(window_id, state_id, slot, item);
+    }
+}
+
+impl Window {
+    /// Alias of [`Window::menu_modern`].
+    #[must_use]
+    pub fn menu_26_1(&self) -> Option<i32> {
+        self.menu_modern()
     }
 }

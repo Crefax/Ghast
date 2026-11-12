@@ -1,5 +1,5 @@
 //! Inventory and container windows for the ghast Minecraft Java Edition client library
-//! (1.8.9, 1.12.2, 1.16.5 and 26.1).
+//! (1.8.9, 1.12.2, 1.16.5, 26.1 and 26.2).
 //!
 //! [`Inventory`] holds what the vanilla client holds — the player inventory, the cursor stack
 //! and the open window — fed by the server's window packets, and turns click intents into
@@ -57,18 +57,24 @@
 #![warn(missing_docs, unnameable_types)]
 
 mod crafting;
-#[cfg(feature = "v26_1")]
+#[cfg(modern)]
 mod data26;
-#[cfg(feature = "v26_1")]
+#[cfg(modern)]
 mod ench_value;
 mod inventory;
 mod item;
+#[cfg(modern)]
+mod item26;
+#[cfg(modern)]
+pub mod modern;
 mod packets;
 mod rules;
 mod sim;
-#[cfg(feature = "v26_1")]
+#[cfg(modern)]
 mod sim26;
 mod stack;
+#[cfg(modern)]
+mod tables;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
 mod window;

@@ -175,16 +175,16 @@ impl Data26 {
     }
 
     /// Parses what is still raw (the first click in a menu that reads tags or enchantments).
-    pub(crate) fn ensure(&mut self, ench_names: &[String]) {
+    pub(crate) fn ensure(&mut self, mv: crate::tables::Mv, ench_names: &[String]) {
         if let Some(raw) = self.tags_raw.take() {
             self.tags = parse_tags(&raw);
         }
         if self.ench.is_none() || (self.ench_names.is_empty() && !ench_names.is_empty()) {
-            self.parse_enchantments(ench_names);
+            self.parse_enchantments(mv, ench_names);
         }
     }
 
-    fn parse_enchantments(&mut self, hash_names: &[String]) {
+    fn parse_enchantments(&mut self, mv: crate::tables::Mv, hash_names: &[String]) {
         let from_packet = self.ench_raw.take().and_then(|b| enchantment_specs(&b));
         let mut names: Vec<String> = match &from_packet {
             Some(v) => v.iter().map(|(n, _)| n.clone()).collect(),
@@ -194,7 +194,7 @@ impl Data26 {
             names = hash_names.to_vec();
         }
         let id_of = |n: &str| names.iter().position(|x| x == n).map(|i| i as i32);
-        let item_id = |n: &str| crate::v26_1::item_id(n);
+        let item_id = |n: &str| crate::item26::item_id(mv, n);
         let mut defs = Vec::with_capacity(names.len());
         for (i, name) in names.iter().enumerate() {
             let spec = from_packet

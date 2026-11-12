@@ -40,10 +40,16 @@ fn text_table(out: &mut String, konst: &str, doc: &str, names: &[&str]) {
         text.push_str(n);
         ends.push(text.len());
     }
+    // the component names are read at compile time (the kind <-> wire id maps of `tables.rs`)
+    let item = if konst == "COMPONENT_NAMES" {
+        "const"
+    } else {
+        "static"
+    };
     let _ = writeln!(
         out,
         "/// {doc} (text of [`{konst}_ENDS`]).\npub(crate) const {konst}_TEXT: &str = {text:?};\n\
-         /// End offset of each name in [`{konst}_TEXT`].\npub(crate) static {konst}_ENDS: [u32; {}] = {ends:?};\n",
+         /// End offset of each name in [`{konst}_TEXT`].\npub(crate) {item} {konst}_ENDS: [u32; {}] = {ends:?};\n",
         ends.len()
     );
 }

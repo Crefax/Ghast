@@ -16,12 +16,13 @@
 
 use bytes::{BufMut, Bytes, BytesMut};
 use ghast_protocol::codec::{McWrite, Reader};
-use ghast_protocol::types::slot::v775::ComponentPatch;
 
 use crate::data26::{Data26, Holders, Reg};
+use crate::item26::{self as v, Equip};
 use crate::sim::{Loc, Model, OUTSIDE, Unpredictable};
 use crate::stack::{ItemData, Stack};
-use crate::v26_1::{self as v, Equip, component as c};
+use crate::tables::Mv;
+use crate::tables::kind as c;
 
 type R<T> = Result<T, Unpredictable>;
 
@@ -436,8 +437,7 @@ pub(crate) struct Offer {
 }
 
 /// Parses a `merchant_offers` body: the container id and its offers.
-pub(crate) fn parse_offers(body: &Bytes) -> Option<(i32, Vec<Offer>)> {
-    use ghast_protocol::defs::p775::types::SlotComponent;
+pub(crate) fn parse_offers(mv: Mv, body: &Bytes) -> Option<(i32, Vec<Offer>)> {
     let mut r = Reader::new(body);
     let window = r.read_varint().ok()?;
     let cost = |r: &mut Reader<'_>| -> Option<Cost> {
@@ -449,7 +449,7 @@ pub(crate) fn parse_offers(body: &Bytes) -> Option<(i32, Vec<Offer>)> {
             let mut v = r.clone();
             let ty = v.read_varint().ok()?;
             let start = v.position();
-            SlotComponent::skip(r).ok()?;
+            mv.skip_component(r).ok()?;
             components.push((ty, body.slice(start..r.position())));
         }
         Some(Cost {
@@ -462,9 +462,7 @@ pub(crate) fn parse_offers(body: &Bytes) -> Option<(i32, Vec<Offer>)> {
     let mut offers = Vec::new();
     for _ in 0..n.max(0) {
         let cost_a = cost(&mut r)?;
-        let result = ghast_protocol::types::slot::v775::ItemStack::read(&mut r)
-            .ok()?
-            .map(Stack::from_v775);
+        let result = mv.read_stack(&mut r).ok()?.map(Stack::from_v775);
         let cost_b = if r.read_bool().ok()? {
             Some(cost(&mut r)?)
         } else {
@@ -502,6 +500,8 @@ pub(crate) struct Sim26<'a> {
     pub d: &'a Data26,
     /// Registry names (banner patterns).
     pub reg: &'a v::HashRegistries,
+    /// The version's tables.
+    pub mv: Mv,
     /// `ServerboundSwingPacket`s the click makes the client send first (each drop swings).
     pub swings: u8,
     /// Experience levels the click spent (taking an anvil result).
@@ -543,8 +543,8 @@ fn gcd(a: i64, b: i64) -> i64 {
 
 // ------------------------------------------------------------------ item helpers
 
-fn max_size(s: &Stack) -> i32 {
-    v::max_stack_size(s)
+fn max_size(mv: Mv, s: &Stack) -> i32 {
+    v::max_stack_size(mv, s)
 }
 
 /// `ItemStack.isSameItemSameComponents`.
@@ -552,12 +552,12 @@ fn same(a: &Stack, b: &Stack) -> bool {
     a.id == b.id && a.data_eq(b)
 }
 
-fn is_damaged(s: &Stack) -> bool {
-    v::is_damageable(s) && v::damage_value(s) > 0
+fn is_damaged(mv: Mv, s: &Stack) -> bool {
+    v::is_damageable(mv, s) && v::damage_value(mv, s) > 0
 }
 
-fn stackable(s: &Stack) -> bool {
-    max_size(s) > 1 && !is_damaged(s)
+fn stackable(mv: Mv, s: &Stack) -> bool {
+    max_size(mv, s) > 1 && !is_damaged(mv, s)
 }
 
 fn norm(s: Stack) -> Option<Stack> {
@@ -578,15 +578,17 @@ fn split(s: &mut Option<Stack>, n: i32) -> Option<Stack> {
 
 /// The equippable slot (`getEquipmentSlotForItem` ignores `allowed_entities`) and whether a
 /// player may wear it (`canBeEquippedBy`).
-fn equip(s: &Stack) -> R<(Equip, bool)> {
-    match v::patched(s, c::EQUIPPABLE) {
-        Some(Some(b)) => patched_equip(&b).ok_or(Unpredictable),
+fn equip(mv: Mv, s: &Stack) -> R<(Equip, bool)> {
+    match v::patched(mv, s, c::EQUIPPABLE) {
+        Some(Some(b)) => patched_equip(mv, &b).ok_or(Unpredictable),
         Some(None) => Ok((Equip::None, true)),
-        None => Ok(v::row(s.id).map_or((Equip::None, true), |d| (d.equip, !d.equip_restricted))),
+        None => {
+            Ok(v::row(mv, s.id).map_or((Equip::None, true), |d| (d.equip, !d.equip_restricted)))
+        }
     }
 }
 
-fn patched_equip(b: &Bytes) -> Option<(Equip, bool)> {
+fn patched_equip(mv: Mv, b: &Bytes) -> Option<(Equip, bool)> {
     let mut r = Reader::new(b);
     let slot = r.read_varint().ok()?;
     if r.read_varint().ok()? == 0 {
@@ -606,7 +608,7 @@ fn patched_equip(b: &Bytes) -> Option<(Equip, bool)> {
         if n == 0 {
             return None;
         }
-        let me = v::entity_type_id("player")?;
+        let me = v::entity_type_id(mv, "player")?;
         let mut found = false;
         for _ in 0..n - 1 {
             found |= r.read_varint().ok()? == me;
@@ -630,14 +632,14 @@ fn patched_equip(b: &Bytes) -> Option<(Equip, bool)> {
 }
 
 /// `isEquippableInSlot(stack, armor slot a)` for the player.
-fn wears(s: &Stack, a: u8) -> R<bool> {
-    let (e, player) = equip(s)?;
+fn wears(mv: Mv, s: &Stack, a: u8) -> R<bool> {
+    let (e, player) = equip(mv, s)?;
     Ok(player && e.armor_index() == Some(a))
 }
 
 /// `EnchantmentHelper.has(stack, PREVENT_ARMOR_CHANGE)`: the binding curse.
-fn bound(s: &Stack, curse: Option<i32>) -> R<bool> {
-    let Some(list) = v::enchantments(s, false) else {
+fn bound(mv: Mv, s: &Stack, curse: Option<i32>) -> R<bool> {
+    let Some(list) = v::enchantments(mv, s, false) else {
         return Ok(false);
     };
     if list.is_empty() {
@@ -648,31 +650,31 @@ fn bound(s: &Stack, curse: Option<i32>) -> R<bool> {
 }
 
 /// `EnchantmentHelper.hasAnyEnchantments`.
-fn enchanted(s: &Stack) -> bool {
-    v::enchantments(s, false).is_some_and(|l| !l.is_empty())
-        || v::enchantments(s, true).is_some_and(|l| !l.is_empty())
+fn enchanted(mv: Mv, s: &Stack) -> bool {
+    v::enchantments(mv, s, false).is_some_and(|l| !l.is_empty())
+        || v::enchantments(mv, s, true).is_some_and(|l| !l.is_empty())
 }
 
-fn has_component(s: &Stack, ty: i32, default: bool) -> bool {
-    match v::patched(s, ty) {
+fn has_component(mv: Mv, s: &Stack, ty: i32, default: bool) -> bool {
+    match v::patched(mv, s, ty) {
         Some(x) => x.is_some(),
         None => default,
     }
 }
 
-fn fact(id: i32, bit: u16) -> bool {
-    crate::v26_1::menu_facts(id) & bit != 0
+fn fact(mv: Mv, id: i32, bit: u16) -> bool {
+    v::menu_facts(mv, id) & bit != 0
 }
 
 // ------------------------------------------------------------------ bundles
 
 /// One `ItemStackTemplate` of a `bundle_contents` list.
-fn read_template(r: &mut Reader<'_>) -> Option<Stack> {
+fn read_template(mv: Mv, r: &mut Reader<'_>) -> Option<Stack> {
     let id = r.read_varint().ok()?;
     let count = r.read_varint().ok()?;
     let added = r.read_varint().ok()?;
     let removed = r.read_varint().ok()?;
-    let p = ComponentPatch::read(r, added, removed).ok()?;
+    let p = mv.read_patch(r, added, removed).ok()?;
     Some(Stack {
         id,
         count,
@@ -702,45 +704,45 @@ fn write_template(s: &Stack, w: &mut BytesMut) {
 }
 
 /// `bundle_contents` of a stack: `Ok(None)` when it has none (not a bundle).
-fn bundle_items(s: &Stack) -> R<Option<Vec<Stack>>> {
-    let bytes = match v::patched(s, c::BUNDLE_CONTENTS) {
+fn bundle_items(mv: Mv, s: &Stack) -> R<Option<Vec<Stack>>> {
+    let bytes = match v::patched(mv, s, c::BUNDLE_CONTENTS) {
         Some(Some(b)) => b,
         Some(None) => return Ok(None),
         None => {
-            return Ok(v::row(s.id).is_some_and(|d| d.bundle).then(Vec::new));
+            return Ok(v::row(mv, s.id).is_some_and(|d| d.bundle).then(Vec::new));
         }
     };
     let mut r = Reader::new(&bytes);
     let n = r.read_varint().map_err(|_| Unpredictable)?;
     let mut out = Vec::new();
     for _ in 0..n.max(0) {
-        out.push(read_template(&mut r).ok_or(Unpredictable)?);
+        out.push(read_template(mv, &mut r).ok_or(Unpredictable)?);
     }
     Ok(Some(out))
 }
 
 /// `BundleContents.getWeight(item)`.
-fn weight(s: &Stack, depth: u32) -> R<Frac> {
+fn weight(mv: Mv, s: &Stack, depth: u32) -> R<Frac> {
     if depth > 16 {
         return Err(Unpredictable);
     }
-    if let Some(items) = bundle_items(s)? {
-        return Ok(items_weight(&items, depth + 1)?.add(Frac::new(1, 16)));
+    if let Some(items) = bundle_items(mv, s)? {
+        return Ok(items_weight(mv, &items, depth + 1)?.add(Frac::new(1, 16)));
     }
-    let bees = match v::patched(s, c::BEES) {
+    let bees = match v::patched(mv, s, c::BEES) {
         Some(Some(b)) => Reader::new(&b).read_varint().map_err(|_| Unpredictable)? > 0,
         _ => false,
     };
     if bees {
         return Ok(Frac::ONE);
     }
-    Ok(Frac::new(1, i64::from(max_size(s).max(1))))
+    Ok(Frac::new(1, i64::from(max_size(mv, s).max(1))))
 }
 
-fn items_weight(items: &[Stack], depth: u32) -> R<Frac> {
+fn items_weight(mv: Mv, items: &[Stack], depth: u32) -> R<Frac> {
     let mut w = Frac::ZERO;
     for s in items {
-        w = w.add(weight(s, depth)?.mul(i64::from(s.count)));
+        w = w.add(weight(mv, s, depth)?.mul(i64::from(s.count)));
     }
     Ok(w)
 }
@@ -749,15 +751,16 @@ fn items_weight(items: &[Stack], depth: u32) -> R<Frac> {
 struct Bundle {
     items: Vec<Stack>,
     weight: Frac,
+    mv: Mv,
 }
 
 impl Bundle {
-    fn of(s: &Stack) -> R<Option<Bundle>> {
-        let Some(items) = bundle_items(s)? else {
+    fn of(mv: Mv, s: &Stack) -> R<Option<Bundle>> {
+        let Some(items) = bundle_items(mv, s)? else {
             return Ok(None);
         };
-        let weight = items_weight(&items, 0)?;
-        Ok(Some(Bundle { items, weight }))
+        let weight = items_weight(mv, &items, 0)?;
+        Ok(Some(Bundle { items, weight, mv }))
     }
 
     fn max_to_add(&self, w: Frac) -> i32 {
@@ -766,17 +769,18 @@ impl Bundle {
 
     /// `tryInsert`: moves what fits off `add`; returns the amount.
     fn try_insert(&mut self, add: &mut Option<Stack>) -> R<i32> {
+        let mv = self.mv;
         let Some(st) = add.as_ref() else { return Ok(0) };
-        if !fact(st.id, crate::v26_1::FITS_CONTAINER) {
+        if !fact(mv, st.id, v::FITS_CONTAINER) {
             return Ok(0);
         }
-        let w = weight(st, 0)?;
+        let w = weight(mv, st, 0)?;
         let n = st.count.min(self.max_to_add(w));
         if n == 0 {
             return Ok(0);
         }
         self.weight = self.weight.add(w.mul(i64::from(n)));
-        let idx = if stackable(st) {
+        let idx = if stackable(mv, st) {
             self.items.iter().position(|x| same(x, st))
         } else {
             None
@@ -798,26 +802,29 @@ impl Bundle {
 
     /// `removeOne` (no item selected: the first one).
     fn remove_one(&mut self) -> R<Option<Stack>> {
+        let mv = self.mv;
         if self.items.is_empty() {
             return Ok(None);
         }
         let s = self.items.remove(0);
-        self.weight = self.weight.sub(weight(&s, 0)?.mul(i64::from(s.count)));
+        self.weight = self.weight.sub(weight(mv, &s, 0)?.mul(i64::from(s.count)));
         Ok(Some(s))
     }
 
     /// The stack with this content (`set(BUNDLE_CONTENTS, …)`: an empty list is the default
     /// of a bundle item and leaves the patch).
     fn store(&self, s: &mut Stack) {
+        let mv = self.mv;
         let mut w = BytesMut::new();
         w.put_varint(self.items.len() as i32);
         for t in &self.items {
             write_template(t, &mut w);
         }
         let value = w.freeze();
-        let default_empty = v::row(s.id).is_some_and(|d| d.bundle);
+        let default_empty = v::row(mv, s.id).is_some_and(|d| d.bundle);
         let keep_default = default_empty && self.items.is_empty();
         set_component(
+            mv,
             s,
             c::BUNDLE_CONTENTS,
             if keep_default { None } else { Some(&value) },
@@ -827,7 +834,8 @@ impl Bundle {
 
 /// Replaces component `ty` in the stack's patch: `Some(value)` sets it, `None` drops the
 /// patch entry (the item default applies again).
-fn set_component(s: &mut Stack, ty: i32, value: Option<&[u8]>) {
+fn set_component(mv: Mv, s: &mut Stack, ty: i32, value: Option<&[u8]>) {
+    let ty = mv.wire(ty);
     let mut added: Vec<(i32, Bytes)> = Vec::new();
     let mut removed: Vec<i32> = Vec::new();
     if let Some(p) = s.components() {
@@ -842,7 +850,7 @@ fn set_component(s: &mut Stack, ty: i32, value: Option<&[u8]>) {
         added.push((ty, Bytes::copy_from_slice(v)));
     }
     let parts: Vec<(i32, &[u8])> = added.iter().map(|(t, b)| (*t, b.as_ref())).collect();
-    let p = ComponentPatch::from_parts(&parts, &removed);
+    let p = mv.patch_from_parts(&parts, &removed);
     s.data = if p.is_empty() {
         ItemData::None
     } else {
@@ -889,10 +897,11 @@ impl Sim26<'_> {
 
     /// `Slot.mayPlace`.
     fn may_place(&self, i: usize, s: &Stack) -> R<bool> {
+        let mv = self.mv;
         let id = s.id;
         Ok(match self.ty(i) {
             Ty::Inv | Ty::Grid | Ty::Plain | Ty::EnchantItem => true,
-            Ty::Armor(a) => wears(s, a)?,
+            Ty::Armor(a) => wears(mv, s, a)?,
             Ty::Result
             | Ty::Fixed
             | Ty::FurnaceResult
@@ -903,13 +912,13 @@ impl Sim26<'_> {
             | Ty::MapResult
             | Ty::TradeResult => false,
             Ty::CrafterGrid => self.s.crafter_locked & (1 << i) == 0,
-            Ty::Shulker => fact(id, v::FITS_CONTAINER),
-            Ty::FurnaceFuel => fact(id, v::FUEL) || is_item(s, "bucket"),
-            Ty::Potion => potion_slot(s),
-            Ty::BrewIngredient => fact(id, v::BREWING_INGREDIENT),
-            Ty::BrewFuel => fact(id, v::BREWING_FUEL),
-            Ty::Lapis => is_item(s, "lapis_lazuli"),
-            Ty::Payment => fact(id, v::BEACON_PAYMENT),
+            Ty::Shulker => fact(mv, id, v::FITS_CONTAINER),
+            Ty::FurnaceFuel => fact(mv, id, v::FUEL) || is_item(mv, s, "bucket"),
+            Ty::Potion => potion_slot(mv, s),
+            Ty::BrewIngredient => fact(mv, id, v::BREWING_INGREDIENT),
+            Ty::BrewFuel => fact(mv, id, v::BREWING_FUEL),
+            Ty::Lapis => is_item(mv, s, "lapis_lazuli"),
+            Ty::Payment => fact(mv, id, v::BEACON_PAYMENT),
             Ty::CombinerIn(k) => match self.kind {
                 Kind::Smithing => match k {
                     0 => has(&self.w.smithing_template, id),
@@ -918,13 +927,15 @@ impl Sim26<'_> {
                 },
                 _ => true,
             },
-            Ty::GrindIn => v::is_damageable(s) || enchanted(s),
+            Ty::GrindIn => v::is_damageable(mv, s) || enchanted(mv, s),
             Ty::CutterIn | Ty::TradeIn => true,
-            Ty::LoomBanner => fact(id, v::BANNER),
-            Ty::LoomDye => loom_dye(s),
-            Ty::LoomPattern => loom_pattern(s),
-            Ty::MapIn => has_component(s, c::MAP_ID, false),
-            Ty::MapExtra => is_item(s, "paper") || is_item(s, "map") || is_item(s, "glass_pane"),
+            Ty::LoomBanner => fact(mv, id, v::BANNER),
+            Ty::LoomDye => loom_dye(mv, s),
+            Ty::LoomPattern => loom_pattern(mv, s),
+            Ty::MapIn => has_component(mv, s, c::MAP_ID, false),
+            Ty::MapExtra => {
+                is_item(mv, s, "paper") || is_item(mv, s, "map") || is_item(mv, s, "glass_pane")
+            }
             Ty::MountSaddle => self.mount_equips(s, Equip::Saddle, self.s.mount_saddle)?,
             Ty::MountBody => self.mount_equips(s, Equip::Body, self.s.mount_body)?,
         })
@@ -933,20 +944,21 @@ impl Sim26<'_> {
     /// `isEquippableInSlot(stack, slot)` for the mount: the `equippable` slot, the slot usable
     /// and the mount allowed by `allowed_entities`.
     fn mount_equips(&self, s: &Stack, slot: Equip, usable: bool) -> R<bool> {
-        let (e, allowed) = match v::patched(s, c::EQUIPPABLE) {
+        let mv = self.mv;
+        let (e, allowed) = match v::patched(mv, s, c::EQUIPPABLE) {
             Some(Some(b)) => equip_allowed(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(false),
             None => {
-                let Some(d) = v::row(s.id) else {
+                let Some(d) = v::row(mv, s.id) else {
                     return Ok(false);
                 };
-                let allowed = if d.allowed().is_empty() {
+                let allowed = if d.allowed(mv).is_empty() {
                     None
                 } else {
                     Some(
-                        crate::data26::holders_from_names(d.allowed(), |n| {
+                        crate::data26::holders_from_names(d.allowed(mv), |n| {
                             let n = n.strip_prefix("minecraft:").unwrap_or(n);
-                            v::entity_type_id(n)
+                            v::entity_type_id(mv, n)
                         })
                         .ok_or(Unpredictable)?,
                     )
@@ -981,17 +993,19 @@ impl Sim26<'_> {
 
     /// `Slot.getMaxStackSize(stack)`.
     fn max_for(&self, i: usize, s: &Stack) -> i32 {
-        if self.ty(i) == Ty::FurnaceFuel && is_item(s, "bucket") {
+        let mv = self.mv;
+        if self.ty(i) == Ty::FurnaceFuel && is_item(mv, s, "bucket") {
             return 1;
         }
-        self.slot_max(i).min(max_size(s))
+        self.slot_max(i).min(max_size(mv, s))
     }
 
     /// `Slot.mayPickup`.
     fn may_pickup(&self, i: usize) -> R<bool> {
+        let mv = self.mv;
         Ok(match self.ty(i) {
             Ty::Armor(_) | Ty::MountSaddle | Ty::MountBody => match self.get(i) {
-                Some(s) if !self.w.creative => !bound(s, self.w.binding_curse)?,
+                Some(s) if !self.w.creative => !bound(mv, s, self.w.binding_curse)?,
                 _ => true,
             },
             Ty::Fixed => false,
@@ -1029,11 +1043,12 @@ impl Sim26<'_> {
     /// `Slot.set(stack)`: the container's `setItem` (with its cap and hooks), then
     /// `setChanged`.
     fn set(&mut self, i: usize, mut s: Option<Stack>) -> R<()> {
+        let mv = self.mv;
         let l = self.loc(i);
         if let Some(cap) = self.kind.cap(l)
             && let Some(st) = &mut s
         {
-            let max = cap.min(max_size(st));
+            let max = cap.min(max_size(mv, st));
             if st.count > max {
                 st.count = max;
             }
@@ -1255,12 +1270,13 @@ impl Sim26<'_> {
 
     /// `AnvilMenu.createResult`.
     pub(crate) fn anvil_create(&mut self) -> R<()> {
+        let mv = self.mv;
         self.s.anvil_only_renaming = false;
         self.s.anvil_cost = 1;
         let mut price: i64 = 0;
         let mut naming: i64 = 0;
         let input = match self.c(0).cloned() {
-            Some(i) if has_component(&i, ench_type(&i), true) => i,
+            Some(i) if has_component(mv, &i, ench_type(mv, &i), true) => i,
             _ => {
                 self.c_set_raw(2, None);
                 self.s.anvil_cost = 0;
@@ -1270,15 +1286,22 @@ impl Sim26<'_> {
         let creative = self.w.creative;
         let mut result = input.clone();
         let addition = self.c(1).cloned();
-        let mut ench = enchantments_of(&result);
-        let mut tax: i64 = i64::from(repair_cost(&input))
-            + addition.as_ref().map_or(0, |a| i64::from(repair_cost(a)));
+        let mut ench = enchantments_of(mv, &result);
+        let mut tax: i64 = i64::from(repair_cost(mv, &input))
+            + addition
+                .as_ref()
+                .map_or(0, |a| i64::from(repair_cost(mv, a)));
         self.s.anvil_repair_count = 0;
         if let Some(add) = &addition {
-            let using_book =
-                has_component(add, c::STORED_ENCHANTMENTS, is_item(add, "enchanted_book"));
-            if v::is_damageable(&result) && self.valid_repair(&input, add)? {
-                let quarter = |s: &Stack| v::damage_value(s).min(v::max_damage(s).unwrap_or(0) / 4);
+            let using_book = has_component(
+                mv,
+                add,
+                c::STORED_ENCHANTMENTS,
+                is_item(mv, add, "enchanted_book"),
+            );
+            if v::is_damageable(mv, &result) && self.valid_repair(&input, add)? {
+                let quarter =
+                    |s: &Stack| v::damage_value(mv, s).min(v::max_damage(mv, s).unwrap_or(0) / 4);
                 let mut amount = quarter(&result);
                 if amount <= 0 {
                     self.c_set_raw(2, None);
@@ -1287,32 +1310,32 @@ impl Sim26<'_> {
                 }
                 let mut count = 0;
                 while amount > 0 && count < add.count {
-                    let d = v::damage_value(&result) - amount;
-                    set_damage(&mut result, d);
+                    let d = v::damage_value(mv, &result) - amount;
+                    set_damage(mv, &mut result, d);
                     price += 1;
                     amount = quarter(&result);
                     count += 1;
                 }
                 self.s.anvil_repair_count = count;
             } else {
-                if !using_book && (result.id != add.id || !v::is_damageable(&result)) {
+                if !using_book && (result.id != add.id || !v::is_damageable(mv, &result)) {
                     self.c_set_raw(2, None);
                     self.s.anvil_cost = 0;
                     return Ok(());
                 }
-                if v::is_damageable(&result) && !using_book {
-                    let max = |s: &Stack| v::max_damage(s).unwrap_or(0);
-                    let r1 = max(&input) - v::damage_value(&input);
-                    let r2 = max(add) - v::damage_value(add);
+                if v::is_damageable(mv, &result) && !using_book {
+                    let max = |s: &Stack| v::max_damage(mv, s).unwrap_or(0);
+                    let r1 = max(&input) - v::damage_value(mv, &input);
+                    let r2 = max(add) - v::damage_value(mv, add);
                     let remaining = r1 + r2 + max(&result) * 12 / 100;
                     let rd = (max(&result) - remaining).max(0);
-                    if rd < v::damage_value(&result) {
-                        set_damage(&mut result, rd);
+                    if rd < v::damage_value(mv, &result) {
+                        set_damage(mv, &mut result, rd);
                         price += 2;
                     }
                 }
                 let (mut any_ok, mut any_bad) = (false, false);
-                for (e, lvl) in enchantments_of(add) {
+                for (e, lvl) in enchantments_of(mv, add) {
                     let current = ench.iter().find(|x| x.0 == e).map_or(0, |x| x.1);
                     let mut level = if current == lvl {
                         lvl + 1
@@ -1324,7 +1347,7 @@ impl Sim26<'_> {
                         .d
                         .contains(Reg::Item, &def.supported, input.id)
                         .ok_or(Unpredictable)?;
-                    if creative || is_item(&input, "enchanted_book") {
+                    if creative || is_item(mv, &input, "enchanted_book") {
                         ok = true;
                     }
                     for &(other, _) in &ench.clone() {
@@ -1361,21 +1384,21 @@ impl Sim26<'_> {
         }
         match self.s.anvil_name.clone() {
             Some(n) if !n.trim().is_empty() => {
-                if hover_name(&input).as_deref() != Some(n.as_str()) {
+                if hover_name(mv, &input).as_deref() != Some(n.as_str()) {
                     naming = 1;
                     price += 1;
                     let text = ghast_protocol::nbt::AnonNbt::from_tag(
                         &ghast_protocol::nbt::Tag::String(n.clone()),
                     )
                     .map_err(|_| Unpredictable)?;
-                    put(&mut result, c::CUSTOM_NAME, Some(text.as_bytes()))?;
+                    put(mv, &mut result, c::CUSTOM_NAME, Some(text.as_bytes()))?;
                 }
             }
             _ => {
-                if has_component(&input, c::CUSTOM_NAME, false) {
+                if has_component(mv, &input, c::CUSTOM_NAME, false) {
                     naming = 1;
                     price += 1;
-                    put(&mut result, c::CUSTOM_NAME, None)?;
+                    put(mv, &mut result, c::CUSTOM_NAME, None)?;
                 }
             }
         }
@@ -1397,16 +1420,16 @@ impl Sim26<'_> {
             result = None;
         }
         if let Some(r) = &mut result {
-            let mut base = repair_cost(r);
-            let add_cost = addition.as_ref().map_or(0, repair_cost);
+            let mut base = repair_cost(mv, r);
+            let add_cost = addition.as_ref().map_or(0, |s| repair_cost(mv, s));
             if base < add_cost {
                 base = add_cost;
             }
             if naming != price || naming == 0 {
                 base = (i64::from(base) * 2 + 1).min(i64::from(i32::MAX)) as i32;
             }
-            put_varint(r, c::REPAIR_COST, base)?;
-            set_enchantments(r, &ench)?;
+            put_varint(mv, r, c::REPAIR_COST, base)?;
+            set_enchantments(mv, r, &ench)?;
         }
         self.c_set_raw(2, result);
         Ok(())
@@ -1435,15 +1458,17 @@ impl Sim26<'_> {
 
     /// `ItemStack.isValidRepairItem`: the `repairable` component's items.
     fn valid_repair(&self, input: &Stack, add: &Stack) -> R<bool> {
-        let set = match v::patched(input, c::REPAIRABLE) {
+        let mv = self.mv;
+        let set = match v::patched(mv, input, c::REPAIRABLE) {
             Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(false),
             None => {
-                let spec = v::row(input.id).map_or("", |d| d.repairable());
+                let spec = v::row(mv, input.id).map_or("", |d| d.repairable(mv));
                 if spec.is_empty() {
                     return Ok(false);
                 }
-                crate::data26::holders_from_names(spec, v::item_id).ok_or(Unpredictable)?
+                crate::data26::holders_from_names(spec, |n| v::item_id(mv, n))
+                    .ok_or(Unpredictable)?
             }
         };
         self.d
@@ -1473,6 +1498,7 @@ impl Sim26<'_> {
 
     /// Grindstone `createResult` (`computeResult`).
     fn grind_result(&mut self) -> R<()> {
+        let mv = self.mv;
         let (a, b) = (self.c(0).cloned(), self.c(1).cloned());
         let result = match (&a, &b) {
             (None, None) => None,
@@ -1482,7 +1508,7 @@ impl Sim26<'_> {
                 None
             }
             (Some(x), None) | (None, Some(x)) => {
-                if enchanted(x) {
+                if enchanted(mv, x) {
                     Some(self.remove_non_curses(x.clone())?)
                 } else {
                     None
@@ -1495,30 +1521,31 @@ impl Sim26<'_> {
     }
 
     fn grind_merge(&self, input: &Stack, add: &Stack) -> R<Option<Stack>> {
+        let mv = self.mv;
         if input.id != add.id {
             return Ok(None);
         }
-        let max = |s: &Stack| v::max_damage(s).unwrap_or(0);
+        let max = |s: &Stack| v::max_damage(mv, s).unwrap_or(0);
         let durability = max(input).max(max(add));
-        let r1 = max(input) - v::damage_value(input);
-        let r2 = max(add) - v::damage_value(add);
+        let r1 = max(input) - v::damage_value(mv, input);
+        let r2 = max(add) - v::damage_value(mv, add);
         let remaining = r1 + r2 + durability * 5 / 100;
         let mut count = 1;
-        if !v::is_damageable(input) {
+        if !v::is_damageable(mv, input) {
             let same_stack = input.count == add.count && input.id == add.id && input.data_eq(add);
-            if max_size(input) < 2 || !same_stack {
+            if max_size(mv, input) < 2 || !same_stack {
                 return Ok(None);
             }
             count = 2;
         }
         let mut item = input.with_count(count);
-        if v::is_damageable(&item) {
-            put_varint(&mut item, c::MAX_DAMAGE, durability)?;
-            set_damage(&mut item, (durability - remaining).max(0));
+        if v::is_damageable(mv, &item) {
+            put_varint(mv, &mut item, c::MAX_DAMAGE, durability)?;
+            set_damage(mv, &mut item, (durability - remaining).max(0));
         }
         // mergeEnchantsFrom: non-curses upgraded, curses only when missing
-        let mut ench = enchantments_of(&item);
-        for (e, l) in enchantments_of(add) {
+        let mut ench = enchantments_of(mv, &item);
+        for (e, l) in enchantments_of(mv, add) {
             let have = ench.iter().find(|x| x.0 == e).map_or(0, |x| x.1);
             if (!self.is_curse(e)? || have == 0) && l > 0 {
                 match ench.iter_mut().find(|x| x.0 == e) {
@@ -1527,27 +1554,28 @@ impl Sim26<'_> {
                 }
             }
         }
-        set_enchantments(&mut item, &ench)?;
+        set_enchantments(mv, &mut item, &ench)?;
         Ok(Some(self.remove_non_curses(item)?))
     }
 
     /// `GrindstoneMenu.removeNonCursesFrom`.
     fn remove_non_curses(&self, mut item: Stack) -> R<Stack> {
+        let mv = self.mv;
         let mut kept = Vec::new();
-        for (e, l) in enchantments_of(&item) {
+        for (e, l) in enchantments_of(mv, &item) {
             if self.is_curse(e)? {
                 kept.push((e, l));
             }
         }
-        set_enchantments(&mut item, &kept)?;
-        if is_item(&item, "enchanted_book") && kept.is_empty() {
-            item = transmute(&item, v::item_id("book").ok_or(Unpredictable)?)?;
+        set_enchantments(mv, &mut item, &kept)?;
+        if is_item(mv, &item, "enchanted_book") && kept.is_empty() {
+            item = transmute(mv, &item, v::item_id(mv, "book").ok_or(Unpredictable)?)?;
         }
         let mut cost: i32 = 0;
         for _ in 0..kept.len() {
             cost = (i64::from(cost) * 2 + 1).min(i64::from(i32::MAX)) as i32;
         }
-        put_varint(&mut item, c::REPAIR_COST, cost)?;
+        put_varint(mv, &mut item, c::REPAIR_COST, cost)?;
         Ok(item)
     }
 
@@ -1563,6 +1591,7 @@ impl Sim26<'_> {
 
     /// Loom `slotsChanged`.
     fn loom_changed(&mut self) -> R<()> {
+        let mv = self.mv;
         let (Some(banner), Some(_)) = (self.c(0).cloned(), self.c(1).cloned()) else {
             self.c_set_raw(3, None);
             self.s.loom_patterns.clear();
@@ -1594,7 +1623,7 @@ impl Sim26<'_> {
         };
         match display {
             Some(p) => {
-                if banner_layers(&banner)?.0 >= 6 {
+                if banner_layers(mv, &banner)?.0 >= 6 {
                     self.s.loom_selected = -1;
                     self.c_set_raw(3, None);
                 } else {
@@ -1608,6 +1637,7 @@ impl Sim26<'_> {
 
     /// `LoomMenu.getSelectablePatterns(pattern slot)`.
     fn selectable_patterns(&self) -> R<Vec<i32>> {
+        let mv = self.mv;
         let Some(p) = self.c(2) else {
             return self
                 .d
@@ -1615,11 +1645,11 @@ impl Sim26<'_> {
                 .map(<[i32]>::to_vec)
                 .ok_or(Unpredictable);
         };
-        let set = match v::patched(p, c::PROVIDES_BANNER_PATTERNS) {
+        let set = match v::patched(mv, p, c::PROVIDES_BANNER_PATTERNS) {
             Some(Some(b)) => read_holders(&b).ok_or(Unpredictable)?,
             Some(None) => return Ok(Vec::new()),
             None => {
-                let spec = v::row(p.id).map_or("", |d| d.patterns());
+                let spec = v::row(mv, p.id).map_or("", |d| d.patterns(mv));
                 if spec.is_empty() {
                     return Ok(Vec::new());
                 }
@@ -1640,25 +1670,26 @@ impl Sim26<'_> {
 
     /// `LoomMenu.setupResultSlot(pattern)`.
     fn loom_setup(&mut self, pattern: i32) -> R<()> {
+        let mv = self.mv;
         let mut result = None;
         if let (Some(banner), Some(dye)) = (self.c(0).cloned(), self.c(1).cloned()) {
-            let color = match v::patched(&dye, c::DYE) {
+            let color = match v::patched(mv, &dye, c::DYE) {
                 Some(Some(b)) => Reader::new(&b).read_varint().ok(),
                 Some(None) => None,
-                None => v::row(dye.id)
+                None => v::row(mv, dye.id)
                     .map(|d| d.dye)
                     .filter(|&d| d != 255)
                     .map(i32::from),
             };
             if let Some(color) = color {
                 let mut r = banner.with_count(1);
-                let (n, rest) = banner_layers(&banner)?;
+                let (n, rest) = banner_layers(mv, &banner)?;
                 let mut w = BytesMut::new();
                 w.put_varint(n + 1);
                 w.put_slice(&rest);
                 w.put_varint(pattern + 1);
                 w.put_varint(color);
-                put(&mut r, c::BANNER_PATTERNS, Some(&w))?;
+                put(mv, &mut r, c::BANNER_PATTERNS, Some(&w))?;
                 result = Some(r);
             }
         }
@@ -1688,6 +1719,7 @@ impl Sim26<'_> {
 
     /// `MerchantContainer.updateSellItem`.
     fn trade_update(&mut self) -> R<()> {
+        let mv = self.mv;
         self.s.trade_active = None;
         let (a, b) = if self.c(0).is_none() {
             (self.c(1).cloned(), None)
@@ -1713,7 +1745,7 @@ impl Sim26<'_> {
                 let mut r = self.s.offers[i].result.clone();
                 if let Some(st) = &mut r {
                     // MerchantContainer.setItem: limitSize
-                    let max = 99.min(max_size(st));
+                    let max = 99.min(max_size(mv, st));
                     if st.count > max {
                         st.count = max;
                     }
@@ -1742,16 +1774,17 @@ impl Sim26<'_> {
 
     /// `MerchantOffer.satisfiedBy`.
     fn satisfied(&self, i: usize, a: Option<&Stack>, b: Option<&Stack>) -> R<bool> {
+        let mv = self.mv;
         let o = &self.s.offers[i];
         let Some(a) = a else { return Ok(false) };
-        if !cost_test(&o.cost_a, a)? || a.count < modified_cost(o)? {
+        if !cost_test(mv, &o.cost_a, a)? || a.count < modified_cost(mv, o)? {
             return Ok(false);
         }
         match &o.cost_b {
             None => Ok(b.is_none()),
             Some(cb) => match b {
                 None => Ok(false),
-                Some(b) => Ok(cost_test(cb, b)? && b.count >= cb.count),
+                Some(b) => Ok(cost_test(mv, cb, b)? && b.count >= cb.count),
             },
         }
     }
@@ -1778,11 +1811,12 @@ impl Sim26<'_> {
     }
 
     fn offer_take(&self, i: usize, a: &mut Option<Stack>, b: &mut Option<Stack>) -> R<bool> {
+        let mv = self.mv;
         if !self.satisfied(i, a.as_ref(), b.as_ref())? {
             return Ok(false);
         }
         let o = &self.s.offers[i];
-        let ca = modified_cost(o)?;
+        let ca = modified_cost(mv, o)?;
         let _ = split(a, ca);
         if let Some(cb) = &o.cost_b {
             let _ = split(b, cb.count);
@@ -1818,16 +1852,17 @@ impl Sim26<'_> {
 
     /// `MerchantMenu.moveFromInventoryToPaymentSlot`.
     fn move_to_payment(&mut self, k: usize, cost: &Cost) -> R<()> {
+        let mv = self.mv;
         for i in 3..39 {
             let Some(inv) = self.get(i).cloned() else {
                 continue;
             };
-            if !cost_test(cost, &inv)? {
+            if !cost_test(mv, cost, &inv)? {
                 continue;
             }
             let cur = self.c(k).cloned();
             if cur.as_ref().is_none_or(|c| same(&inv, c)) {
-                let max = max_size(&inv);
+                let max = max_size(mv, &inv);
                 let have = cur.as_ref().map_or(0, |c| c.count);
                 let mv = (max - have).min(inv.count);
                 let pay = inv.with_count(have + mv);
@@ -1850,6 +1885,7 @@ impl Sim26<'_> {
     /// and the items' crafting remainders replace them (the client has no recipes: vanilla's
     /// `defaultCraftingReminder`).
     fn craft_take(&mut self, i: usize) -> R<()> {
+        let mv = self.mv;
         let (grid, width): (Vec<Loc>, usize) = match self.loc(i) {
             Loc::CraftResult => ((0..4).map(Loc::Craft).collect(), 2),
             _ => ((1..10).map(Loc::Container).collect(), 3),
@@ -1877,7 +1913,7 @@ impl Sim26<'_> {
                 self.m
                     .at(grid[slot])
                     .as_ref()
-                    .and_then(|s| v::crafting_remainder(s.id))
+                    .and_then(|s| v::crafting_remainder(mv, s.id))
             })
             .collect();
         for y in 0..h {
@@ -1919,10 +1955,11 @@ impl Sim26<'_> {
 
     /// `Inventory.add(stack)` (`slot = -1`): what does not fit stays in `st`.
     fn inv_add(&mut self, st: &mut Option<Stack>) -> R<bool> {
+        let mv = self.mv;
         let Some(s) = st.as_ref() else {
             return Ok(false);
         };
-        if is_damaged(s) {
+        if is_damaged(mv, s) {
             if let Some(k) = (0..36).find(|&k| self.m.player[k].is_none()) {
                 self.m.player[k] = st.take();
                 return Ok(true);
@@ -1956,13 +1993,15 @@ impl Sim26<'_> {
     }
 
     fn has_room(&self, k: usize, s: &Stack) -> bool {
+        let mv = self.mv;
         self.m.player[k]
             .as_ref()
-            .is_some_and(|t| same(t, s) && stackable(t) && t.count < 99.min(max_size(t)))
+            .is_some_and(|t| same(t, s) && stackable(mv, t) && t.count < 99.min(max_size(mv, t)))
     }
 
     /// `addResource(stack)`: one round; returns the count left.
     fn add_resource(&mut self, st: &Option<Stack>) -> i32 {
+        let mv = self.mv;
         let Some(s) = st else { return 0 };
         let sel = usize::from(self.m.selected.min(8));
         let slot = if self.has_room(sel, s) {
@@ -1978,7 +2017,7 @@ impl Sim26<'_> {
         // an empty slot gets a zero-count copy first, whose components are EMPTY's: max 1
         let (cur, max) = match &self.m.player[k] {
             None => (0, 1),
-            Some(t) => (t.count, 99.min(max_size(t))),
+            Some(t) => (t.count, 99.min(max_size(mv, t))),
         };
         let add = count.min(max - cur);
         if add <= 0 {
@@ -1995,6 +2034,7 @@ impl Sim26<'_> {
 
     /// `AbstractContainerMenu.doClick(slot, button, input)`.
     pub(crate) fn click(&mut self, slot: i16, button: i8, mode: u8) -> R<()> {
+        let mv = self.mv;
         let carried_empty = self.m.cursor.is_none();
         if mode == 5 {
             return self.quick_craft(slot, button);
@@ -2047,7 +2087,7 @@ impl Sim26<'_> {
             3 if self.w.creative && carried_empty => {
                 let Some(i) = idx else { return Ok(()) };
                 if let Some(s) = self.get(i).cloned() {
-                    let max = max_size(&s);
+                    let max = max_size(mv, &s);
                     self.m.cursor = norm(s.with_count(max));
                 }
                 Ok(())
@@ -2089,6 +2129,7 @@ impl Sim26<'_> {
     }
 
     fn pickup(&mut self, i: usize, primary: bool) -> R<()> {
+        let mv = self.mv;
         if !self.click_override(i, primary)? {
             let clicked = self.get(i).cloned();
             let carried = self.m.cursor.clone();
@@ -2130,7 +2171,7 @@ impl Sim26<'_> {
                                         self.set(i, Some(ca))?;
                                     }
                                 } else if same(&cl, &ca) {
-                                    let room = max_size(&ca) - ca.count;
+                                    let room = max_size(mv, &ca) - ca.count;
                                     if let Some(t) = self.try_remove(i, cl.count, room)? {
                                         if let Some(c) = &mut self.m.cursor {
                                             c.count += t.count;
@@ -2149,16 +2190,17 @@ impl Sim26<'_> {
 
     /// `tryItemClickBehaviourOverride`: bundles.
     fn click_override(&mut self, i: usize, primary: bool) -> R<bool> {
+        let mv = self.mv;
         // the carried stack stacked on the slot (BundleItem.overrideStackedOnOther)
         if let Some(carried) = self.m.cursor.clone()
-            && is_bundle(&carried)
-            && let Some(mut b) = Bundle::of(&carried)?
+            && is_bundle(mv, &carried)
+            && let Some(mut b) = Bundle::of(mv, &carried)?
         {
             let other = self.get(i).cloned();
             if primary && other.is_some() {
                 let other = other.unwrap_or_else(|| carried.clone());
-                if fact(other.id, v::FITS_CONTAINER) {
-                    let max = b.max_to_add(weight(&other, 0)?);
+                if fact(mv, other.id, v::FITS_CONTAINER) {
+                    let max = b.max_to_add(weight(mv, &other, 0)?);
                     let mut taken = self.safe_take(i, other.count, max)?;
                     b.try_insert(&mut taken)?;
                 }
@@ -2187,10 +2229,10 @@ impl Sim26<'_> {
         let Some(clicked) = self.get(i).cloned() else {
             return Ok(false);
         };
-        if !is_bundle(&clicked) || (primary && self.m.cursor.is_none()) {
+        if !is_bundle(mv, &clicked) || (primary && self.m.cursor.is_none()) {
             return Ok(false);
         }
-        let Some(mut b) = Bundle::of(&clicked)? else {
+        let Some(mut b) = Bundle::of(mv, &clicked)? else {
             return Ok(false);
         };
         if primary && self.m.cursor.is_some() {
@@ -2283,6 +2325,7 @@ impl Sim26<'_> {
     }
 
     fn pickup_all(&mut self, i: usize, button: i8) -> R<()> {
+        let mv = self.mv;
         if self.m.cursor.is_none() {
             return Ok(());
         }
@@ -2300,20 +2343,20 @@ impl Sim26<'_> {
                 let Some(c) = self.m.cursor.clone() else {
                     break;
                 };
-                if c.count >= max_size(&c) {
+                if c.count >= max_size(mv, &c) {
                     break;
                 }
                 let Some(t) = self.get(x).cloned() else {
                     continue;
                 };
-                if !(same(&t, &c) && t.count <= max_size(&c)) {
+                if !(same(&t, &c) && t.count <= max_size(mv, &c)) {
                     continue;
                 }
                 if !self.may_pickup(x)? || !self.pick_all_ok(x) {
                     continue;
                 }
-                if pass != 0 || t.count != max_size(&t) {
-                    let room = max_size(&c) - c.count;
+                if pass != 0 || t.count != max_size(mv, &t) {
+                    let room = max_size(mv, &c) - c.count;
                     if let Some(r) = self.safe_take(x, t.count, room)?
                         && let Some(cur) = &mut self.m.cursor
                     {
@@ -2340,6 +2383,7 @@ impl Sim26<'_> {
     // ---------------------------------------------------------- QUICK_CRAFT
 
     fn quick_craft(&mut self, slot: i16, button: i8) -> R<()> {
+        let mv = self.mv;
         let b = button as u8;
         let expected = self.s.drag.status;
         let status = b & 3;
@@ -2406,11 +2450,11 @@ impl Sim26<'_> {
                             && (ty == 2 || c.count >= slots.len() as i32)
                         {
                             let carry = self.get(i).map_or(0, |s| s.count);
-                            let max = max_size(&source).min(self.max_for(i, &source));
+                            let max = max_size(mv, &source).min(self.max_for(i, &source));
                             let place = match ty {
                                 0 => source.count / slots.len() as i32,
                                 1 => 1,
-                                2 => max_size(&source),
+                                2 => max_size(mv, &source),
                                 _ => source.count,
                             };
                             let new = (place + carry).min(max);
@@ -2432,9 +2476,10 @@ impl Sim26<'_> {
 
     /// `canItemQuickReplace(slot, stack, true)`.
     fn quick_replace(&self, i: usize, s: &Stack) -> bool {
+        let mv = self.mv;
         match self.get(i) {
             None => true,
-            Some(t) => same(s, t) && t.count <= max_size(s),
+            Some(t) => same(s, t) && t.count <= max_size(mv, s),
         }
     }
 
@@ -2443,6 +2488,7 @@ impl Sim26<'_> {
     /// `moveItemStackTo(slot i's own stack, start, end, backwards)`; the source stack is
     /// changed in place (it is the slot's object in vanilla).
     fn move_to(&mut self, src: usize, start: usize, end: usize, back: bool) -> R<bool> {
+        let mv = self.mv;
         let order: Vec<usize> = if back {
             (start..end).rev().collect()
         } else {
@@ -2453,7 +2499,7 @@ impl Sim26<'_> {
         let Some(st) = self.m.at(src_loc).clone() else {
             return Ok(false);
         };
-        if stackable(&st) {
+        if stackable(mv, &st) {
             for &d in &order {
                 let Some(st) = self.m.at(src_loc).clone() else {
                     break;
@@ -2503,6 +2549,7 @@ impl Sim26<'_> {
 
     /// The menu's `quickMoveStack(slot)`: returns the clicked copy (or `None` = EMPTY).
     fn quick_move(&mut self, i: usize) -> R<Option<Stack>> {
+        let mv = self.mv;
         let Some(clicked) = self.get(i).cloned() else {
             return Ok(None);
         };
@@ -2510,7 +2557,7 @@ impl Sim26<'_> {
         let mut drop_rest = false;
         let ok = match self.kind {
             Kind::Player => {
-                let (e, _) = equip(&clicked)?;
+                let (e, _) = equip(mv, &clicked)?;
                 if i == 0 {
                     drop_rest = true;
                     self.move_to(i, 9, 45, true)?
@@ -2579,7 +2626,7 @@ impl Sim26<'_> {
                     };
                     if has(set, clicked.id) {
                         self.move_to(i, 0, 1, false)?
-                    } else if fact(clicked.id, v::FUEL) {
+                    } else if fact(mv, clicked.id, v::FUEL) {
                         self.move_to(i, 1, 2, false)?
                     } else if (3..30).contains(&i) {
                         self.move_to(i, 30, 39, false)?
@@ -2594,18 +2641,18 @@ impl Sim26<'_> {
             }
             Kind::Brewing => {
                 if i > 4 {
-                    if fact(clicked.id, v::BREWING_FUEL) {
+                    if fact(mv, clicked.id, v::BREWING_FUEL) {
                         if self.move_to(i, 4, 5, false)? {
                             false
-                        } else if fact(clicked.id, v::BREWING_INGREDIENT) {
+                        } else if fact(mv, clicked.id, v::BREWING_INGREDIENT) {
                             // `ingredientSlot.mayPlace(stack) && !moveItemStackTo(3, 4)`: EMPTY
                             self.move_to(i, 3, 4, false)?
                         } else {
                             true
                         }
-                    } else if fact(clicked.id, v::BREWING_INGREDIENT) {
+                    } else if fact(mv, clicked.id, v::BREWING_INGREDIENT) {
                         self.move_to(i, 3, 4, false)?
-                    } else if potion_slot(&clicked) {
+                    } else if potion_slot(mv, &clicked) {
                         self.move_to(i, 0, 3, false)?
                     } else if (5..32).contains(&i) {
                         self.move_to(i, 32, 41, false)?
@@ -2621,7 +2668,7 @@ impl Sim26<'_> {
             Kind::Enchanting => {
                 if i == 0 || i == 1 {
                     self.move_to(i, 2, 38, true)?
-                } else if is_item(&clicked, "lapis_lazuli") {
+                } else if is_item(mv, &clicked, "lapis_lazuli") {
                     self.move_to(i, 1, 2, true)?
                 } else {
                     if self.get(0).is_some() || !self.may_place(0, &clicked)? {
@@ -2704,11 +2751,11 @@ impl Sim26<'_> {
                 if i == 3 {
                     self.move_to(i, 4, 40, true)?
                 } else if i > 3 {
-                    if fact(clicked.id, v::BANNER) {
+                    if fact(mv, clicked.id, v::BANNER) {
                         self.move_to(i, 0, 1, false)?
-                    } else if loom_dye(&clicked) {
+                    } else if loom_dye(mv, &clicked) {
                         self.move_to(i, 1, 2, false)?
-                    } else if loom_pattern(&clicked) {
+                    } else if loom_pattern(mv, &clicked) {
                         self.move_to(i, 2, 3, false)?
                     } else if (4..31).contains(&i) {
                         self.move_to(i, 31, 40, false)?
@@ -2725,11 +2772,11 @@ impl Sim26<'_> {
                 if i == 2 {
                     self.move_to(i, 3, 39, true)?
                 } else if i != 1 && i != 0 {
-                    if has_component(&clicked, c::MAP_ID, false) {
+                    if has_component(mv, &clicked, c::MAP_ID, false) {
                         self.move_to(i, 0, 1, false)?
-                    } else if !is_item(&clicked, "paper")
-                        && !is_item(&clicked, "map")
-                        && !is_item(&clicked, "glass_pane")
+                    } else if !is_item(mv, &clicked, "paper")
+                        && !is_item(mv, &clicked, "map")
+                        && !is_item(mv, &clicked, "glass_pane")
                     {
                         if (3..30).contains(&i) {
                             self.move_to(i, 30, 39, false)?
@@ -2884,12 +2931,12 @@ fn equip_allowed(b: &Bytes) -> Option<(Equip, Option<Holders>)> {
 }
 
 /// `ItemCost.test`: the item and the predicate's components.
-fn cost_test(cost: &Cost, s: &Stack) -> R<bool> {
+fn cost_test(mv: Mv, cost: &Cost, s: &Stack) -> R<bool> {
     if s.id != cost.item {
         return Ok(false);
     }
     for (ty, want) in &cost.components {
-        let have = value(s, *ty)?;
+        let have = value(mv, s, mv.kind(*ty))?;
         if have.as_deref() != Some(want.as_ref()) {
             return Ok(false);
         }
@@ -2898,7 +2945,7 @@ fn cost_test(cost: &Cost, s: &Stack) -> R<bool> {
 }
 
 /// `MerchantOffer.getModifiedCostCount(costA)`.
-fn modified_cost(o: &Offer) -> R<i32> {
+fn modified_cost(mv: Mv, o: &Offer) -> R<i32> {
     let base = o.cost_a.count;
     let m = f32::from_bits(o.multiplier_bits);
     let demand_diff = ((base * o.demand) as f32 * m).floor().max(0.0) as i32;
@@ -2910,17 +2957,17 @@ fn modified_cost(o: &Offer) -> R<i32> {
             .iter()
             .map(|(t, b)| (*t, b.as_ref()))
             .collect();
-        st.data = ItemData::Components(Box::new(ComponentPatch::from_parts(&parts, &[])));
+        st.data = ItemData::Components(Box::new(mv.patch_from_parts(&parts, &[])));
     }
-    Ok((base + demand_diff + o.special).clamp(1, max_size(&st).max(1)))
+    Ok((base + demand_diff + o.special).clamp(1, max_size(mv, &st).max(1)))
 }
 
 /// The value of component `ty` (patch, else the item default for the types whose defaults are
 /// known): `Ok(None)` when absent.
-fn value(s: &Stack, ty: i32) -> R<Option<Bytes>> {
-    match v::patched(s, ty) {
+fn value(mv: Mv, s: &Stack, ty: i32) -> R<Option<Bytes>> {
+    match v::patched(mv, s, ty) {
         Some(x) => Ok(x),
-        None => default_value(s.id, ty)
+        None => default_value(mv, s.id, ty)
             .ok_or(Unpredictable)
             .map(|d| d.map(Bytes::from)),
     }
@@ -2928,8 +2975,8 @@ fn value(s: &Stack, ty: i32) -> R<Option<Bytes>> {
 
 /// The item default of component `ty` as wire bytes (`Some(None)`: the item has none; `None`:
 /// not known here).
-fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
-    let d = v::row(id)?;
+fn default_value(mv: Mv, id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
+    let d = v::row(mv, id)?;
     let varint = |v: i32| {
         let mut w = BytesMut::new();
         w.put_varint(v);
@@ -2937,10 +2984,10 @@ fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
     };
     Some(match ty {
         c::ENCHANTMENTS | c::REPAIR_COST => Some(vec![0]),
-        c::STORED_ENCHANTMENTS => (d.name() == "enchanted_book").then(|| vec![0]),
+        c::STORED_ENCHANTMENTS => (d.name(mv) == "enchanted_book").then(|| vec![0]),
         c::DAMAGE => d.damage.then(|| vec![0]),
         c::MAX_DAMAGE => (d.max_damage > 0).then(|| varint(i32::from(d.max_damage))),
-        c::BANNER_PATTERNS => (fact(id, v::BANNER) || d.name() == "shield").then(|| vec![0]),
+        c::BANNER_PATTERNS => (fact(mv, id, v::BANNER) || d.name(mv) == "shield").then(|| vec![0]),
         c::DYE => (d.dye != 255).then(|| varint(i32::from(d.dye))),
         c::CUSTOM_NAME => None,
         _ => return None,
@@ -2950,8 +2997,9 @@ fn default_value(id: i32, ty: i32) -> Option<Option<Vec<u8>>> {
 /// `ItemStack.set(ty, value)` / `remove(ty)` with the patch normalised like
 /// `PatchedDataComponentMap`: a value equal to the item default leaves the patch, removing a
 /// component the item has by default marks it removed.
-fn put(s: &mut Stack, ty: i32, value: Option<&[u8]>) -> R<()> {
-    let def = default_value(s.id, ty).ok_or(Unpredictable)?;
+fn put(mv: Mv, s: &mut Stack, ty: i32, value: Option<&[u8]>) -> R<()> {
+    let def = default_value(mv, s.id, ty).ok_or(Unpredictable)?;
+    let ty = mv.wire(ty);
     let mut added: Vec<(i32, Bytes)> = Vec::new();
     let mut removed: Vec<i32> = Vec::new();
     if let Some(p) = s.components() {
@@ -2969,7 +3017,7 @@ fn put(s: &mut Stack, ty: i32, value: Option<&[u8]>) -> R<()> {
         (None, None) => {}
     }
     let parts: Vec<(i32, &[u8])> = added.iter().map(|(t, b)| (*t, b.as_ref())).collect();
-    let p = ComponentPatch::from_parts(&parts, &removed);
+    let p = mv.patch_from_parts(&parts, &removed);
     s.data = if p.is_empty() {
         ItemData::None
     } else {
@@ -2978,29 +3026,29 @@ fn put(s: &mut Stack, ty: i32, value: Option<&[u8]>) -> R<()> {
     Ok(())
 }
 
-fn put_varint(s: &mut Stack, ty: i32, v: i32) -> R<()> {
+fn put_varint(mv: Mv, s: &mut Stack, ty: i32, v: i32) -> R<()> {
     let mut w = BytesMut::new();
     w.put_varint(v);
-    put(s, ty, Some(&w))
+    put(mv, s, ty, Some(&w))
 }
 
 /// `setDamageValue`: clamped to `0..=max_damage`.
-fn set_damage(s: &mut Stack, d: i32) {
-    let d = d.clamp(0, v::max_damage(s).unwrap_or(0));
-    let _ = put_varint(s, c::DAMAGE, d);
+fn set_damage(mv: Mv, s: &mut Stack, d: i32) {
+    let d = d.clamp(0, v::max_damage(mv, s).unwrap_or(0));
+    let _ = put_varint(mv, s, c::DAMAGE, d);
 }
 
 /// `repair_cost` (default 0).
-fn repair_cost(s: &Stack) -> i32 {
-    match v::patched(s, c::REPAIR_COST) {
+fn repair_cost(mv: Mv, s: &Stack) -> i32 {
+    match v::patched(mv, s, c::REPAIR_COST) {
         Some(Some(b)) => Reader::new(&b).read_varint().unwrap_or(0),
         _ => 0,
     }
 }
 
 /// `EnchantmentHelper.getComponentType`: stored enchantments on an enchanted book.
-fn ench_type(s: &Stack) -> i32 {
-    if is_item(s, "enchanted_book") {
+fn ench_type(mv: Mv, s: &Stack) -> i32 {
+    if is_item(mv, s, "enchanted_book") {
         c::STORED_ENCHANTMENTS
     } else {
         c::ENCHANTMENTS
@@ -3008,12 +3056,12 @@ fn ench_type(s: &Stack) -> i32 {
 }
 
 /// `getEnchantmentsForCrafting`.
-fn enchantments_of(s: &Stack) -> Vec<(i32, i32)> {
-    v::enchantments(s, ench_type(s) == c::STORED_ENCHANTMENTS).unwrap_or_default()
+fn enchantments_of(mv: Mv, s: &Stack) -> Vec<(i32, i32)> {
+    v::enchantments(mv, s, ench_type(mv, s) == c::STORED_ENCHANTMENTS).unwrap_or_default()
 }
 
 /// `EnchantmentHelper.setEnchantments` (written in registry id order).
-fn set_enchantments(s: &mut Stack, e: &[(i32, i32)]) -> R<()> {
+fn set_enchantments(mv: Mv, s: &mut Stack, e: &[(i32, i32)]) -> R<()> {
     let mut e: Vec<(i32, i32)> = e.iter().copied().filter(|x| x.1 > 0).collect();
     e.sort_unstable();
     let mut w = BytesMut::new();
@@ -3022,34 +3070,36 @@ fn set_enchantments(s: &mut Stack, e: &[(i32, i32)]) -> R<()> {
         w.put_varint(id);
         w.put_varint(l);
     }
-    let ty = ench_type(s);
-    put(s, ty, Some(&w))
+    let ty = ench_type(mv, s);
+    put(mv, s, ty, Some(&w))
 }
 
 /// `transmuteCopy(item)`: the patch onto another item (entries equal to its defaults leave).
-fn transmute(s: &Stack, item: i32) -> R<Stack> {
+fn transmute(mv: Mv, s: &Stack, item: i32) -> R<Stack> {
     let mut out = Stack::new(item, s.count, 0);
     if let Some(p) = s.components() {
         for (t, b) in p.iter() {
-            let def = default_value(item, t);
+            let t = mv.kind(t);
+            let def = default_value(mv, item, t);
             if def
                 .as_ref()
                 .is_some_and(|d| d.as_deref() == Some(b.as_ref()))
             {
                 continue;
             }
-            put_raw(&mut out, t, Some(&b));
+            put_raw(mv, &mut out, t, Some(&b));
         }
-        for t in p.removed() {
-            if default_value(item, t).is_none_or(|d| d.is_some()) {
-                put_raw(&mut out, t, None);
+        for t in p.removed().map(|t| mv.kind(t)) {
+            if default_value(mv, item, t).is_none_or(|d| d.is_some()) {
+                put_raw(mv, &mut out, t, None);
             }
         }
     }
     Ok(out)
 }
 
-fn put_raw(s: &mut Stack, ty: i32, value: Option<&[u8]>) {
+fn put_raw(mv: Mv, s: &mut Stack, ty: i32, value: Option<&[u8]>) {
+    let ty = mv.wire(ty);
     let mut added: Vec<(i32, Bytes)> = Vec::new();
     let mut removed: Vec<i32> = Vec::new();
     if let Some(p) = s.components() {
@@ -3061,12 +3111,12 @@ fn put_raw(s: &mut Stack, ty: i32, value: Option<&[u8]>) {
         None => removed.push(ty),
     }
     let parts: Vec<(i32, &[u8])> = added.iter().map(|(t, b)| (*t, b.as_ref())).collect();
-    s.data = ItemData::Components(Box::new(ComponentPatch::from_parts(&parts, &removed)));
+    s.data = ItemData::Components(Box::new(mv.patch_from_parts(&parts, &removed)));
 }
 
 /// The plain text of the `custom_name` (`getHoverName().getString()` when the stack is named).
-fn hover_name(s: &Stack) -> Option<String> {
-    let b = v::patched(s, c::CUSTOM_NAME)??;
+fn hover_name(mv: Mv, s: &Stack) -> Option<String> {
+    let b = v::patched(mv, s, c::CUSTOM_NAME)??;
     let n = ghast_protocol::nbt::AnonNbt::read(&mut Reader::new(&b)).ok()?;
     Some(ghast_protocol::chat::nbt_to_plain_text(&n))
 }
@@ -3087,39 +3137,44 @@ fn read_holders(b: &Bytes) -> Option<Holders> {
 }
 
 /// `banner_patterns`: the layer count and the layers' bytes.
-fn banner_layers(s: &Stack) -> R<(i32, Bytes)> {
-    let b = value(s, c::BANNER_PATTERNS)?.unwrap_or_else(|| Bytes::from_static(&[0]));
+fn banner_layers(mv: Mv, s: &Stack) -> R<(i32, Bytes)> {
+    let b = value(mv, s, c::BANNER_PATTERNS)?.unwrap_or_else(|| Bytes::from_static(&[0]));
     let mut r = Reader::new(&b);
     let n = r.read_varint().map_err(|_| Unpredictable)?;
     Ok((n, b.slice(r.position()..)))
 }
 
 /// A `BundleItem` (only those override clicks; any item's `bundle_contents` counts for weights).
-fn is_bundle(s: &Stack) -> bool {
-    v::row(s.id).is_some_and(|d| d.bundle)
+fn is_bundle(mv: Mv, s: &Stack) -> bool {
+    v::row(mv, s.id).is_some_and(|d| d.bundle)
 }
 
-fn is_item(s: &Stack, name: &str) -> bool {
-    v::row(s.id).is_some_and(|d| d.name() == name)
+fn is_item(mv: Mv, s: &Stack, name: &str) -> bool {
+    v::row(mv, s.id).is_some_and(|d| d.name(mv) == name)
 }
 
 /// Brewing `PotionSlot.mayPlaceItem`.
-fn potion_slot(s: &Stack) -> bool {
-    is_item(s, "potion")
-        || is_item(s, "splash_potion")
-        || is_item(s, "lingering_potion")
-        || is_item(s, "glass_bottle")
+fn potion_slot(mv: Mv, s: &Stack) -> bool {
+    is_item(mv, s, "potion")
+        || is_item(mv, s, "splash_potion")
+        || is_item(mv, s, "lingering_potion")
+        || is_item(mv, s, "glass_bottle")
 }
 
 /// Loom `isDyeItem`: the tag and a `dye` component.
-fn loom_dye(s: &Stack) -> bool {
-    fact(s.id, v::LOOM_DYE_TAG) && has_component(s, c::DYE, fact(s.id, v::HAS_DYE))
+fn loom_dye(mv: Mv, s: &Stack) -> bool {
+    fact(mv, s.id, v::LOOM_DYE_TAG) && has_component(mv, s, c::DYE, fact(mv, s.id, v::HAS_DYE))
 }
 
 /// Loom `isPatternItem`: the tag and a `provides_banner_patterns` component.
-fn loom_pattern(s: &Stack) -> bool {
-    fact(s.id, v::LOOM_PATTERN_TAG)
-        && has_component(s, c::PROVIDES_BANNER_PATTERNS, fact(s.id, v::HAS_PATTERNS))
+fn loom_pattern(mv: Mv, s: &Stack) -> bool {
+    fact(mv, s.id, v::LOOM_PATTERN_TAG)
+        && has_component(
+            mv,
+            s,
+            c::PROVIDES_BANNER_PATTERNS,
+            fact(mv, s.id, v::HAS_PATTERNS),
+        )
 }
 
 /// The order `Int2ObjectOpenHashMap` (fastutil, default capacity) iterates keys inserted in

@@ -156,7 +156,7 @@ impl WindowKind {
             WindowKind::Furnace => 3,
             WindowKind::BrewingStand => match version {
                 Version::V1_8 => 4,
-                Version::V1_12 | Version::V1_16_5 | Version::V26_1 => 5,
+                Version::V1_12 | Version::V1_16_5 | Version::V26_1 | Version::V26_2 => 5,
             },
             WindowKind::Enchanting => 2,
             WindowKind::Anvil => 3,
@@ -168,7 +168,7 @@ impl WindowKind {
             WindowKind::Loom => 4,
             // 1.20+: template, base, addition, result
             WindowKind::Smithing => match version {
-                Version::V26_1 => 4,
+                Version::V26_1 | Version::V26_2 => 4,
                 _ => 3,
             },
             WindowKind::Cartography => 3,

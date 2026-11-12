@@ -22,7 +22,7 @@ pub enum ItemData {
     /// 26.1 data component patch (added / removed against the item's defaults) exactly as
     /// received; components are decoded only when asked for. Boxed so that a [`Stack`] stays
     /// small for the versions without components.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     Components(Box<ghast_protocol::types::slot::v775::ComponentPatch>),
 }
 
@@ -123,7 +123,7 @@ impl Stack {
     }
 
     /// The 26.1 component patch, if the stack changes any component.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     #[must_use]
     pub fn components(&self) -> Option<&ghast_protocol::types::slot::v775::ComponentPatch> {
         match &self.data {
@@ -164,7 +164,7 @@ impl Stack {
     }
 
     /// Converts a 26.1 wire stack (an empty patch becomes [`ItemData::None`]).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     #[must_use]
     pub fn from_v775(s: ghast_protocol::types::slot::v775::ItemStack) -> Stack {
         Stack {
@@ -180,7 +180,7 @@ impl Stack {
     }
 
     /// The 26.1 wire form (any NBT is dropped: 26.1 has none).
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     #[must_use]
     pub fn to_v775(&self) -> ghast_protocol::types::slot::v775::ItemStack {
         ghast_protocol::types::slot::v775::ItemStack {
@@ -229,9 +229,9 @@ impl Stack {
         match (&self.data, &other.data) {
             (ItemData::None, ItemData::None) => true,
             (ItemData::Nbt(a), ItemData::Nbt(b)) => nbt_eq(Some(a), Some(b)),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             (ItemData::Components(a), ItemData::Components(b)) => a.same_components(b),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             (ItemData::Components(c), ItemData::None)
             | (ItemData::None, ItemData::Components(c)) => c.is_empty(),
             _ => false,

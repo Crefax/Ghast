@@ -15,9 +15,8 @@ use bytes::Bytes;
 use ghast_protocol::codec::Reader;
 use ghast_protocol::nbt::AnonNbt;
 
-use ghast_protocol::types::slot::v775::ComponentPatch;
-
-use super::{anon_hash, component as c, generated, nth, ops, typed_nbt_hash};
+use super::{anon_hash, component as c, ops, typed_nbt_hash};
+use crate::tables::{Mv, Names};
 
 /// Names of the registries a click hash needs: the configuration phase's `registry_data` keys
 /// in order (data-driven registries such as enchantments, damage types, entity variants).
@@ -581,6 +580,7 @@ const AXOLOTL: &[(i32, &str)] = &[
 ];
 
 /// The schema of a component type (`None`: not covered).
+/// The schema of component kind `ty`.
 fn schema(ty: i32) -> Option<S> {
     use Def::{Default as D, Optional as O, Required as R};
     Some(match ty {
@@ -838,7 +838,7 @@ fn schema(ty: i32) -> Option<S> {
             Field("hit_sound", SOUND, O),
         ]),
         c::BUNDLE_CONTENTS | c::CHARGED_PROJECTILES => S::List(&S::Template),
-        c::USE_REMAINDER => S::Template,
+        c::USE_REMAINDER | c::SULFUR_CUBE_CONTENT => S::Template,
         c::ENTITY_DATA => S::TypedNbt(Reg::EntityType),
         c::BLOCK_ENTITY_DATA => S::TypedNbt(Reg::BlockEntityType),
         c::BEES => S::List(&S::Rec(&[
@@ -862,49 +862,26 @@ fn schema(ty: i32) -> Option<S> {
     })
 }
 
-fn component_name(t: i32) -> Option<&'static str> {
-    nth(
-        generated::COMPONENT_NAMES_TEXT,
-        &generated::COMPONENT_NAMES_ENDS,
-        usize::try_from(t).ok()?,
-    )
+fn component_name(mv: Mv, t: i32) -> Option<&'static str> {
+    mv.name(Names::Component, usize::try_from(t).ok()?)
 }
 
-fn name_of(reg: Reg, id: i32, regs: &HashRegistries) -> Option<&str> {
+fn name_of(reg: Reg, id: i32, mv: Mv, regs: &HashRegistries) -> Option<&str> {
     let i = usize::try_from(id).ok()?;
-    match reg {
-        Reg::Item => super::item_name(id),
-        Reg::ComponentType => nth(
-            generated::COMPONENT_NAMES_TEXT,
-            &generated::COMPONENT_NAMES_ENDS,
-            i,
-        ),
-        Reg::Potion => nth(generated::POTIONS_TEXT, &generated::POTIONS_ENDS, i),
-        Reg::Attribute => nth(generated::ATTRIBUTES_TEXT, &generated::ATTRIBUTES_ENDS, i),
-        Reg::SoundEvent => nth(
-            generated::SOUND_EVENTS_TEXT,
-            &generated::SOUND_EVENTS_ENDS,
-            i,
-        ),
-        Reg::VillagerType => nth(
-            generated::VILLAGER_TYPES_TEXT,
-            &generated::VILLAGER_TYPES_ENDS,
-            i,
-        ),
-        Reg::MobEffect => nth(generated::MOB_EFFECTS_TEXT, &generated::MOB_EFFECTS_ENDS, i),
-        Reg::EntityType => nth(
-            generated::ENTITY_TYPES_TEXT,
-            &generated::ENTITY_TYPES_ENDS,
-            i,
-        ),
-        Reg::BlockEntityType => nth(
-            generated::BLOCK_ENTITY_TYPES_TEXT,
-            &generated::BLOCK_ENTITY_TYPES_ENDS,
-            i,
-        ),
-        Reg::Block => ghast_data::v26_1::Block::from_id(u16::try_from(i).ok()?).map(|b| b.name()),
-        Reg::Data(r) => regs.names(r)?.get(i).map(String::as_str),
-    }
+    let table = match reg {
+        Reg::Item => return super::item_name(mv, id),
+        Reg::Block => return mv.block_name(u16::try_from(i).ok()?),
+        Reg::Data(r) => return regs.names(r)?.get(i).map(String::as_str),
+        Reg::ComponentType => Names::Component,
+        Reg::Potion => Names::Potion,
+        Reg::Attribute => Names::Attribute,
+        Reg::SoundEvent => Names::SoundEvent,
+        Reg::VillagerType => Names::VillagerType,
+        Reg::MobEffect => Names::MobEffect,
+        Reg::EntityType => Names::EntityType,
+        Reg::BlockEntityType => Names::BlockEntityType,
+    };
+    mv.name(table, i)
 }
 
 /// Static registries' names come without a namespace from the generated tables.
@@ -915,7 +892,7 @@ fn ident(reg: Reg, name: &str) -> String {
     }
 }
 
-fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
+fn read(s: &S, r: &mut Reader<'_>, mv: Mv, regs: &HashRegistries) -> Option<V> {
     Some(match *s {
         S::VarInt => V::Int(r.read_varint().ok()?),
         S::UByte => V::Byte(r.read_varint().ok()? as i8),
@@ -930,12 +907,12 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
         S::HolderOr(reg, inline) => {
             let id = r.read_varint().ok()?;
             if id == 0 {
-                read(inline, r, regs)?
+                read(inline, r, mv, regs)?
             } else {
-                V::Str(ident(reg, name_of(reg, id - 1, regs)?))
+                V::Str(ident(reg, name_of(reg, id - 1, mv, regs)?))
             }
         }
-        S::Ref(inner) => read(inner, r, regs)?,
+        S::Ref(inner) => read(inner, r, mv, regs)?,
         S::Uuid => {
             let (hi, lo) = (r.read_i64().ok()?, r.read_i64().ok()?);
             V::IntList(vec![
@@ -981,15 +958,15 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
         S::BoolEnum(f, t) => V::Str(if r.read_bool().ok()? { t } else { f }.to_string()),
         S::Either(left, right) => {
             if r.read_bool().ok()? {
-                read(left, r, regs)?
+                read(left, r, mv, regs)?
             } else {
-                read(right, r, regs)?
+                read(right, r, mv, regs)?
             }
         }
         S::Merge(parts) => {
             let mut all = Vec::new();
             for p in parts {
-                let V::Map(m) = read(p, r, regs)? else {
+                let V::Map(m) = read(p, r, mv, regs)? else {
                     return None;
                 };
                 all.extend(m);
@@ -1000,17 +977,17 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let n = r.read_varint().ok()?;
             let mut v = Vec::new();
             for _ in 0..n.max(0) {
-                v.push(read(e, r, regs)?);
+                v.push(read(e, r, mv, regs)?);
             }
             if v.len() == 1 { v.pop()? } else { V::List(v) }
         }
         S::ExactComponents => {
             let n = r.read_varint().ok()?;
-            let patch = ComponentPatch::read(r, n, 0).ok()?;
+            let patch = mv.read_patch(r, n, 0).ok()?;
             let mut m = Vec::new();
             for (t, value) in patch.iter() {
-                let name = component_name(t)?;
-                let h = component_hash(t, &value, regs)?;
+                let name = component_name(mv, t)?;
+                let h = component_hash(t, &value, mv, regs)?;
                 m.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
             }
             V::Map(m)
@@ -1025,13 +1002,13 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
         S::Dispatch(types) => {
             let id = r.read_varint().ok()?;
             let (name, rec) = types.get(usize::try_from(id).ok()?)?;
-            let V::Map(mut m) = read(rec, r, regs)? else {
+            let V::Map(mut m) = read(rec, r, mv, regs)? else {
                 return None;
             };
             m.push((V::Str("type".into()), V::Str((*name).to_string())));
             V::Map(m)
         }
-        S::Template => template(r, regs)?,
+        S::Template => template(r, mv, regs)?,
         S::Container => {
             let n = r.read_varint().ok()?;
             let mut v = Vec::new();
@@ -1039,7 +1016,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
                 if r.read_bool().ok()? {
                     v.push(V::Map(vec![
                         (V::Str("slot".into()), V::Int(i)),
-                        (V::Str("item".into()), template(r, regs)?),
+                        (V::Str("item".into()), template(r, mv, regs)?),
                     ]));
                 }
             }
@@ -1053,7 +1030,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let mut v = Vec::with_capacity(4);
             for _ in 0..n {
                 let id = r.read_varint().ok()?;
-                v.push(V::Str(ident(Reg::Item, name_of(Reg::Item, id, regs)?)));
+                v.push(V::Str(ident(Reg::Item, name_of(Reg::Item, id, mv, regs)?)));
             }
             while v.len() < 4 {
                 v.push(V::Str("minecraft:brick".into()));
@@ -1062,7 +1039,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
         }
         S::TypedNbt(reg) => {
             let id = r.read_varint().ok()?;
-            let name = ident(reg, name_of(reg, id, regs)?);
+            let name = ident(reg, name_of(reg, id, mv, regs)?);
             V::Hash(typed_nbt_hash(&AnonNbt::read(r).ok()?, &name)?)
         }
         S::Int => V::Int(r.read_i32().ok()?),
@@ -1072,7 +1049,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             if id == 0 {
                 return None;
             }
-            V::Str(ident(reg, name_of(reg, id - 1, regs)?))
+            V::Str(ident(reg, name_of(reg, id - 1, mv, regs)?))
         }
         S::AttrDisplay => match r.read_varint().ok()? {
             0 => V::Omit,
@@ -1096,7 +1073,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let id = r.read_varint().ok()?;
             V::Str(names.iter().find(|(i, _)| *i == id)?.1.to_string())
         }
-        S::Reg(reg) => V::Str(ident(reg, name_of(reg, r.read_varint().ok()?, regs)?)),
+        S::Reg(reg) => V::Str(ident(reg, name_of(reg, r.read_varint().ok()?, mv, regs)?)),
         S::HolderSet(reg) => {
             let n = r.read_varint().ok()?;
             if n == 0 {
@@ -1107,7 +1084,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
                 for _ in 0..n - 1 {
                     v.push(V::Str(ident(
                         reg,
-                        name_of(reg, r.read_varint().ok()?, regs)?,
+                        name_of(reg, r.read_varint().ok()?, mv, regs)?,
                     )));
                 }
                 if v.len() == 1 { v.pop()? } else { V::List(v) }
@@ -1117,7 +1094,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let n = r.read_varint().ok()?;
             let mut v = Vec::new();
             for _ in 0..n.max(0) {
-                v.push(read(e, r, regs)?);
+                v.push(read(e, r, mv, regs)?);
             }
             V::List(v)
         }
@@ -1125,7 +1102,7 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
             let n = r.read_varint().ok()?;
             let mut v = Vec::new();
             for _ in 0..n.max(0) {
-                v.push((read(k, r, regs)?, read(val, r, regs)?));
+                v.push((read(k, r, mv, regs)?, read(val, r, mv, regs)?));
             }
             V::Map(v)
         }
@@ -1137,9 +1114,9 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
                         if !r.read_bool().ok()? {
                             continue;
                         }
-                        read(fs, r, regs)?
+                        read(fs, r, mv, regs)?
                     }
-                    _ => read(fs, r, regs)?,
+                    _ => read(fs, r, mv, regs)?,
                 };
                 if v == V::Omit {
                     continue;
@@ -1157,27 +1134,27 @@ fn read(s: &S, r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
 }
 
 /// `ItemStackTemplate.STREAM_CODEC` read, `ItemStackTemplate.CODEC` (its map form) written.
-fn template(r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
+fn template(r: &mut Reader<'_>, mv: Mv, regs: &HashRegistries) -> Option<V> {
     let item = r.read_varint().ok()?;
     let count = r.read_varint().ok()?;
     let added = r.read_varint().ok()?;
     let removed = r.read_varint().ok()?;
-    let patch = ComponentPatch::read(r, added, removed).ok()?;
+    let patch = mv.read_patch(r, added, removed).ok()?;
     let mut m = vec![(
         V::Str("id".into()),
-        V::Str(ident(Reg::Item, name_of(Reg::Item, item, regs)?)),
+        V::Str(ident(Reg::Item, name_of(Reg::Item, item, mv, regs)?)),
     )];
     if count != 1 {
         m.push((V::Str("count".into()), V::Int(count)));
     }
     let mut comps = Vec::new();
     for (t, value) in patch.iter() {
-        let name = component_name(t)?;
-        let h = component_hash(t, &value, regs)?;
+        let name = component_name(mv, t)?;
+        let h = component_hash(t, &value, mv, regs)?;
         comps.push((V::Str(format!("minecraft:{name}")), V::Hash(h as u32)));
     }
     for t in patch.removed() {
-        let name = component_name(t)?;
+        let name = component_name(mv, t)?;
         comps.push((V::Str(format!("!minecraft:{name}")), V::Map(Vec::new())));
     }
     if !comps.is_empty() {
@@ -1189,10 +1166,10 @@ fn template(r: &mut Reader<'_>, regs: &HashRegistries) -> Option<V> {
 /// The `HashOps` hash of one component value as it appears on the wire (`None`: the type is
 /// not covered, or a registry name it needs is unknown).
 #[must_use]
-pub fn component_hash(ty: i32, value: &Bytes, regs: &HashRegistries) -> Option<i32> {
-    let s = schema(ty)?;
+pub(crate) fn component_hash(ty: i32, value: &Bytes, mv: Mv, regs: &HashRegistries) -> Option<i32> {
+    let s = schema(mv.kind(ty))?;
     let mut r = Reader::new(value);
-    let v = read(&s, &mut r, regs)?;
+    let v = read(&s, &mut r, mv, regs)?;
     // the whole value must have been understood
     if r.remaining() != 0 {
         return None;
@@ -1202,6 +1179,6 @@ pub fn component_hash(ty: i32, value: &Bytes, regs: &HashRegistries) -> Option<i
 
 /// Whether ghast can hash component `ty` at all (registry names permitting).
 #[must_use]
-pub fn hash_covers(ty: i32) -> bool {
-    schema(ty).is_some()
+pub(crate) fn hash_covers(mv: Mv, ty: i32) -> bool {
+    schema(mv.kind(ty)).is_some()
 }

@@ -1,6 +1,6 @@
 [package]
 name = "ghast-inventory"
-description = "Inventory and container windows for the ghast Minecraft Java Edition client library: vanilla client-side click prediction, the window confirm protocol, hashed 26.1 clicks and lazy NBT / data-component item stacks (1.8.9, 1.12.2, 1.16.5 and 26.1)"
+description = "Inventory and container windows for the ghast Minecraft Java Edition client library: vanilla client-side click prediction, the window confirm protocol, hashed 26.1 clicks and lazy NBT / data-component item stacks (1.8.9, 1.12.2, 1.16.5, 26.1 and 26.2)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,13 +14,15 @@ readme = "README.md"
 documentation = "https://docs.rs/ghast-inventory"
 
 [features]
-default = ["v1_8", "v1_12", "v1_16_5", "v26_1"]
+default = ["v1_8", "v1_12", "v1_16_5", "v26_1", "v26_2"]
 # Per-version item rules, packets and recipes.
 v1_8 = ["ghast-protocol/v1_8", "ghast-data/v1_8"]
 v1_12 = ["ghast-protocol/v1_12_2", "ghast-data/v1_12"]
 v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 # 26.1: data components (lazy), hashed click stacks, item defaults from Mojang's reports.
 v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
+# 26.2: the same modern inventory over the 26.2 tables.
+v26_2 = ["ghast-protocol/v26_2", "ghast-data/v26_2"]
 
 [dependencies]
 ghast-protocol = { path = "../ghast-protocol", version = "0.4.1", default-features = false }

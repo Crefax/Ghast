@@ -30,7 +30,7 @@ pub enum ItemText {
     /// 1.16.5: a JSON text component.
     Json(String),
     /// 26.1: an NBT text component.
-    #[cfg(feature = "v26_1")]
+    #[cfg(modern)]
     Nbt(ghast_protocol::nbt::AnonNbt),
 }
 
@@ -42,7 +42,7 @@ impl ItemText {
         match self {
             ItemText::Legacy(s) => ghast_protocol::chat::strip_formatting(s),
             ItemText::Json(s) => s.clone(),
-            #[cfg(feature = "v26_1")]
+            #[cfg(modern)]
             ItemText::Nbt(n) => ghast_protocol::chat::nbt_to_plain_text(n),
         }
     }
@@ -150,8 +150,11 @@ impl Stack {
     #[must_use]
     pub fn max_damage(&self, v: Version) -> Option<i32> {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::max_damage(self),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::max_damage(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+            ),
             _ => v.max_durability(self.id),
         }
     }
@@ -176,8 +179,11 @@ impl Stack {
                 }
             }
             Version::V1_16_5 => self.nbt_int("Damage"),
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::damage_value(self),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::damage_value(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+            ),
             #[allow(unreachable_patterns)]
             _ => 0,
         }
@@ -187,8 +193,11 @@ impl Stack {
     #[must_use]
     pub fn unbreakable(&self, v: Version) -> bool {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::unbreakable(self),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::unbreakable(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+            ),
             _ => self.nbt_bool("Unbreakable"),
         }
     }
@@ -197,10 +206,13 @@ impl Stack {
     #[must_use]
     pub fn custom_name(&self, v: Version) -> Option<ItemText> {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => {
-                crate::v26_1::text(self, crate::v26_1::component::CUSTOM_NAME).map(ItemText::Nbt)
-            }
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::text(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+                crate::tables::kind::CUSTOM_NAME,
+            )
+            .map(ItemText::Nbt),
             _ => match last(&display(self)?, "Name")? {
                 Tag::String(n) => Some(legacy_text(v, n.clone())),
                 _ => None,
@@ -212,11 +224,14 @@ impl Stack {
     #[must_use]
     pub fn lore(&self, v: Version) -> Vec<ItemText> {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::lore(self)
-                .into_iter()
-                .map(ItemText::Nbt)
-                .collect(),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::lore(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+            )
+            .into_iter()
+            .map(ItemText::Nbt)
+            .collect(),
             _ => {
                 let Some(d) = display(self) else {
                     return Vec::new();
@@ -249,15 +264,19 @@ impl Stack {
 
     fn enchants(&self, v: Version, stored: bool) -> Vec<Enchantment> {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::enchantments(self, stored)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(id, level)| Enchantment {
-                    id: EnchantmentId::Registry(id),
-                    level,
-                })
-                .collect(),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::enchantments(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+                stored,
+            )
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, level)| Enchantment {
+                id: EnchantmentId::Registry(id),
+                level,
+            })
+            .collect(),
             _ => nbt_enchantments(self, v, stored),
         }
     }
@@ -267,8 +286,12 @@ impl Stack {
     #[must_use]
     pub fn potion(&self, v: Version) -> Option<String> {
         match v {
-            #[cfg(feature = "v26_1")]
-            Version::V26_1 => crate::v26_1::potion(self).map(str::to_string),
+            #[cfg(modern)]
+            Version::V26_1 | Version::V26_2 => crate::item26::potion(
+                crate::tables::Mv::of(v).unwrap_or(crate::tables::Mv::ANY),
+                self,
+            )
+            .map(str::to_string),
             Version::V1_12 | Version::V1_16_5 => match last(&root(self)?, "Potion")? {
                 Tag::String(p) => Some(p.clone()),
                 _ => None,
