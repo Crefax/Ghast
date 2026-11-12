@@ -88,6 +88,12 @@ fn nether_26_1() {
     check("nether.jsonl.gz");
 }
 
+/// The world border: set, moved and lerping (the collision size lags the lerp by a tick).
+#[test]
+fn border_26_1() {
+    check("border.jsonl.gz");
+}
+
 /// The player's pose dimensions (`Avatar.POSES`) against the oracle's entity size dump.
 #[test]
 fn player_pose_dimensions_26_1() {

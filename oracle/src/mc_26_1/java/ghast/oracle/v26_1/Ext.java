@@ -52,6 +52,8 @@ final class Ext {
         int riptide;
         /** It rains (the server's start-raining and rain-level game events at setup). */
         boolean raining;
+        /** The case changes the world border (the level's border then ticks after the entities). */
+        boolean border;
         /** Dimension type of the level ({@code the_nether}); null: the overworld. */
         String dimension;
         /**
@@ -95,6 +97,15 @@ final class Ext {
 
     /** Remove entities packet. */
     record Remove(int id) implements Scenario.VersionEvent {}
+
+    /** Set-border-center packet. */
+    record BorderCenter(double x, double z) implements Scenario.VersionEvent {}
+
+    /** Set-border-size packet (a static border). */
+    record BorderSize(double size) implements Scenario.VersionEvent {}
+
+    /** Set-border-lerp-size packet: from, to, over {@code ticks} game ticks. */
+    record BorderLerp(double from, double to, long ticks) implements Scenario.VersionEvent {}
 
     /** An add-entity packet: {@code type} (registry name without namespace) at a position, no motion. */
     record Spawn(int id, String type, double x, double y, double z, float yaw) implements Scenario.VersionEvent {}
@@ -222,7 +233,12 @@ final class Ext {
         }
     }
 
+    /** {@code ClientLevel.tick}'s border step (after the entities in {@code Minecraft.tick}). */
     static void afterEntities(Harness.Run run) {
+        Setup s = of(run.sc);
+        if (s != null && s.border) {
+            run.level.getWorldBorder().tick();
+        }
     }
 
     /** The {@code entities} of a tick record: every other ticking entity in tick order (cases with entities). */
@@ -269,6 +285,21 @@ final class Ext {
             equip(run, q.slot(), q.item(), q.damage());
         } else if (e instanceof Firework f) {
             firework(run, f.id());
+        } else if (e instanceof BorderCenter c) {
+            net.minecraft.world.level.border.WorldBorder wb = new net.minecraft.world.level.border.WorldBorder();
+            wb.setCenter(c.x(), c.z());
+            Harness.listener.handleSetBorderCenter(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundSetBorderCenterPacket(wb)));
+        } else if (e instanceof BorderSize z) {
+            net.minecraft.world.level.border.WorldBorder wb = new net.minecraft.world.level.border.WorldBorder();
+            wb.setSize(z.size());
+            Harness.listener.handleSetBorderSize(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundSetBorderSizePacket(wb)));
+        } else if (e instanceof BorderLerp b) {
+            net.minecraft.world.level.border.WorldBorder wb = new net.minecraft.world.level.border.WorldBorder();
+            wb.lerpSizeBetween(b.from(), b.to(), b.ticks(), 0L);
+            Harness.listener.handleSetBorderLerpSize(Harness.roundTrip(net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundSetBorderLerpSizePacket(wb)));
         } else if (e instanceof Spawn sp) {
             spawn(sp);
         } else if (e instanceof Move m) {
@@ -371,6 +402,9 @@ final class Ext {
         if (s.dimension != null) {
             j.field("dimension", s.dimension);
         }
+        if (s.border) {
+            j.field("border", true);
+        }
         if (s.entities != null) {
             j.key("entities").beginArray();
             for (Spawn sp : s.entities) {
@@ -393,6 +427,12 @@ final class Ext {
             }
         } else if (e instanceof Firework f) {
             j.field("type", "firework").field("id", f.id());
+        } else if (e instanceof BorderCenter c) {
+            j.field("type", "border_center").fieldF64("x", c.x()).fieldF64("z", c.z());
+        } else if (e instanceof BorderSize z) {
+            j.field("type", "border_size").fieldF64("size", z.size());
+        } else if (e instanceof BorderLerp b) {
+            j.field("type", "border_lerp").fieldF64("from", b.from()).fieldF64("to", b.to()).field("ticks", b.ticks());
         } else if (e instanceof Spawn sp) {
             spawnJson(j.field("type", "spawn"), sp);
         } else if (e instanceof Move m) {
@@ -435,6 +475,7 @@ final class Ext {
         st.leftHanded = x.has("left_handed") && x.get("left_handed").getAsBoolean();
         st.riptide = x.has("riptide") ? x.get("riptide").getAsInt() : 0;
         st.raining = x.has("raining") && x.get("raining").getAsBoolean();
+        st.border = x.has("border") && x.get("border").getAsBoolean();
         if (x.has("dimension")) {
             st.dimension = x.get("dimension").getAsString();
         }
@@ -456,6 +497,9 @@ final class Ext {
             case "firework" -> new Firework(ev.get("id").getAsInt());
             case "remove_entity" -> new Remove(ev.get("id").getAsInt());
             case "spawn" -> readSpawn(ev);
+            case "border_center" -> new BorderCenter(ScenarioReader.f64(ev.get("x")), ScenarioReader.f64(ev.get("z")));
+            case "border_size" -> new BorderSize(ScenarioReader.f64(ev.get("size")));
+            case "border_lerp" -> new BorderLerp(ScenarioReader.f64(ev.get("from")), ScenarioReader.f64(ev.get("to")), ev.get("ticks").getAsLong());
             case "entity_move" -> {
                 com.google.gson.JsonArray p = ev.getAsJsonArray("pos");
                 yield new Move(ev.get("id").getAsInt(), ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)), ScenarioReader.f64(p.get(2)),

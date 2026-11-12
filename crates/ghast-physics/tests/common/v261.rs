@@ -559,7 +559,13 @@ fn aabb_of(v: &Value) -> ghast_physics::math::Aabb {
 /// Replays one 26.1 case.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
-    let world = world_of(&case.header);
+    let mut world = world_of(&case.header);
+    let moving_border = case.header["setup"]
+        .get("ext")
+        .and_then(|e| e.get("border"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut border = modern::BorderState::new();
     let t0 = &case.ticks[0];
     let mut p = player_of(&case.header, t0);
     let mut x = ext_of(&case.header, t0);
@@ -715,9 +721,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     "remove_entity" => x.remove_rocket(i(&e["id"])),
                     // Other entities: their boxes come with the tick record.
                     "spawn" | "entity_move" => {}
+                    "border_center" => border.set_center(f64_of(&e["x"]), f64_of(&e["z"])),
+                    "border_size" => border.set_size(f64_of(&e["size"])),
+                    "border_lerp" => border.lerp_size(
+                        f64_of(&e["from"]),
+                        f64_of(&e["to"]),
+                        e["ticks"].as_i64().unwrap(),
+                    ),
                     other => panic!("unknown event {other}"),
                 }
             }
+        }
+        if moving_border {
+            world.set_border(border.collision_border());
         }
         let (keys, use_down) = keys_of(input["keys"].as_str().unwrap());
         // Mouse turning happens before the key handling: a release launches along the new look.
@@ -799,6 +815,9 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         }
         if use_key.using {
             use_key.held += 1;
+        }
+        if moving_border {
+            border.tick();
         }
         if let Some(l) = rec.get("client_loaded")
             && l.as_bool() != Some(gate.is_loaded())

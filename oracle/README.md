@@ -1040,6 +1040,20 @@ place in the level's own `getEntities` order around the player). Quirks:
 the bottom and the top of the world. Fuzz (`ExtCases.netherFuzz`, cases `…_x_ne`): the
 `withExtras` case in the nether with still and flowing lava pools around the spawn.
 
+**`border`** (4 cases + 100 fuzz): real `set_border_center`, `set_border_size` and
+`set_border_lerp_size` packets (events `border_center {x, z}`, `border_size {size}`,
+`border_lerp {from, to, ticks}`, built from a server `WorldBorder`); cases with `setup.ext.border`
+also run `ClientLevel.tick`'s border step after the entities. Cases: shrinking and growing around
+the player, static changes, a player outside a growing border. Fuzz (`ExtCases.borderFuzz`, cases
+`…_x_wb`): the `withExtras` case with a small border near the spawn, lerps of 0-120 ticks, size and
+centre changes. Quirks:
+
+- A moving border's collision uses its size before the last tick's step (`getMinX(0.0F)` lerps
+  from the previous size).
+- 26.1 clamps each bound to ±29,999,984 on both sides; a border whose block-rounded inside is
+  thinner than `1e-7` (both bounds clamped together) collides as `Shapes.INFINITY`: an entity inside
+  it is never stopped, but every "does the box fit" test fails.
+
 ### 26.1.1 and 26.1.2 (same protocol 775): one physics row
 
 `versions/26.1.1.properties` and `versions/26.1.2.properties` run the 26.1 harness on those jars.
@@ -1251,6 +1265,23 @@ real `ClientPacketListener`; then `Harness.Run.step` ticks the level (`ClientLev
   (item entities), and `tab` = `[profile k, name, game mode id (-1 none), latency, has display name]`.
 - Items get no-gravity metadata at spawn and never a velocity, so the client's own item physics leaves
   them where the packets put them. No collidable entities (boats, minecarts, shulkers) are spawned.
+
+## `biome_climate.jsonl.gz` (26.1): biome precipitation, temperature and zoom
+
+`BiomeClimateDump` (`biome-climate`), from the client's synced `minecraft:worldgen/biome` registry:
+
+- `biome` line (one per registry entry): `index`, `name`, `has_precipitation`, `temperature` (base,
+  f32 bits hex), `modifier` (`none` / `frozen`), `samples` = 40 × `[x, y, z, sea_level,
+  temperature hex, precipitation]` with `Biome.getHeightAdjustedTemperature(pos, sea_level)` and
+  `Biome.getPrecipitationAt(pos, sea_level)` (`none` / `rain` / `snow`); x, z far (±3·10⁷), mid
+  (±5000) and near (±300), sea level 63 or random.
+- `zoom` line (16 seeds, the first 0): `seed` (decimal string), `samples` = 200 × `[x, y, z, qx, qy,
+  qz]`: the noise cell (quart position) a real `BiomeManager(source, seed).getBiome(pos)` asks its
+  source for.
+
+Not covered: the client's own biome lookup on a loaded column (quart y clamped to the dimension,
+section index, cell index `y << 4 | z << 2 | x` within the section), `Level.isRainingAt`'s sky and
+height-map checks.
 
 ## Crosshair pick (1.8.9, 1.12.2): `picks.jsonl.gz`
 

@@ -44,7 +44,7 @@ final class ExtCases {
     private static final int FF = 0x80;
 
     /** Mechanics with a golden file {@code <name>.jsonl.gz}: hand-written cases + the golden fuzz cases. */
-    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether"};
+    static final String[] MECHANICS = {"elytra", "riptide", "entities", "nether", "border"};
 
     static List<Scenario> scenarios(String mechanic) {
         return switch (mechanic) {
@@ -52,6 +52,7 @@ final class ExtCases {
             case "riptide" -> riptide();
             case "entities" -> entities();
             case "nether" -> nether();
+            case "border" -> border();
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -62,6 +63,7 @@ final class ExtCases {
             case "riptide" -> riptideFuzz(seed, index, ticks);
             case "entities" -> entitiesFuzz(seed, index, ticks);
             case "nether" -> netherFuzz(seed, index, ticks);
+            case "border" -> borderFuzz(seed, index, ticks);
             default -> throw new IllegalArgumentException("mechanic " + mechanic);
         };
     }
@@ -611,6 +613,64 @@ final class ExtCases {
             sc.fill(cx - r, y, cz - r, cx + r, y + x.range(0, 2), cz + r, s(level == 0 ? "lava" : "lava[level=" + level + "]"), 0);
         }
         sc.description += ", nether";
+        return sc;
+    }
+
+    // ---- the world border: set, moved and lerping (ticked after the entities) -----------------------
+
+    private static Scenario border(Scenario sc, Scenario.Event... setup) {
+        Ext.setup(sc).border = true;
+        for (Scenario.Event e : setup) {
+            addEvent(sc, 0, e);
+        }
+        return sc;
+    }
+
+    static List<Scenario> border() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(border(flat("border_shrinking").spawn(0.5, 64, 0.5, 90, 0).run(80, FORWARD), new Ext.BorderCenter(0.5, 0.5),
+                new Ext.BorderLerp(20, 2, 60)).desc("walk against a border that shrinks from 20 to 2 over 60 ticks around the player"));
+        l.add(border(flat("border_growing").spawn(0.5, 64, 0.5, 0, 0).run(60, FORWARD | SPRINT), new Ext.BorderCenter(0.5, 3.5),
+                new Ext.BorderLerp(3, 30, 40)).desc("sprint against a growing border"));
+        Scenario set = border(flat("border_static_changes").spawn(0.5, 64, 0.5, -90, 0).run(60, FORWARD | JUMP), new Ext.BorderCenter(5, 0),
+                new Ext.BorderSize(6));
+        addEvent(set, 20, new Ext.BorderSize(12));
+        addEvent(set, 35, new Ext.BorderCenter(-2, 0));
+        addEvent(set, 45, new Ext.BorderLerp(12, 12, 10));
+        l.add(set.desc("static border sizes and centres sent during the case"));
+        Scenario outside = border(flat("border_outside").spawn(0.5, 64, 0.5, 90, 0).run(40, FORWARD), new Ext.BorderCenter(10, 0),
+                new Ext.BorderLerp(4, 30, 30));
+        l.add(outside.desc("a player outside the border while it grows over it"));
+        return l;
+    }
+
+    /**
+     * Randomized border cases: the {@code withExtras} case with a small border around the spawn (centre
+     * within a few blocks, size 2-40), lerps (shrinking, growing, 0-120 ticks), static size and centre
+     * changes during the case. Cases get an {@code _wb} suffix.
+     */
+    static Scenario borderFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_wb");
+        copy(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x626f72646572L);
+        Ext.setup(sc).border = true;
+        double cx = sc.x + (x.nextDouble() - 0.5) * 8, cz = sc.z + (x.nextDouble() - 0.5) * 8;
+        double size = 2 + x.nextDouble() * 38;
+        addEvent(sc, 0, new Ext.BorderCenter(cx, cz));
+        addEvent(sc, 0, x.chance(0.5) ? new Ext.BorderSize(size) : new Ext.BorderLerp(size, 2 + x.nextDouble() * 38, x.range(0, 120)));
+        for (int t = 1; t < sc.ticks.size(); t++) {
+            double r = x.nextDouble();
+            if (r < 0.02) {
+                addEvent(sc, t, new Ext.BorderLerp(2 + x.nextDouble() * 38, 2 + x.nextDouble() * 38, x.range(0, 120)));
+            } else if (r < 0.03) {
+                addEvent(sc, t, new Ext.BorderSize(2 + x.nextDouble() * 38));
+            } else if (r < 0.04) {
+                addEvent(sc, t, new Ext.BorderCenter(sc.x + (x.nextDouble() - 0.5) * 8, sc.z + (x.nextDouble() - 0.5) * 8));
+            }
+        }
+        sc.description += ", world border";
         return sc;
     }
 

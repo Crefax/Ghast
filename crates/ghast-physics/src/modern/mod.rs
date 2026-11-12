@@ -23,6 +23,7 @@
 //! `suffocating_large_shapes_stay_in_their_cube`).
 
 mod attr;
+mod border;
 pub(crate) mod collide;
 mod entity;
 mod ext;
@@ -38,6 +39,7 @@ pub use attr::{
     Attribute, MAX_MODIFIERS, Modifier, ModifierId, SPRINT_AMOUNT, identifier_hash,
     java_string_hash, sprinting_id,
 };
+pub use border::BorderState;
 pub use entity::{PushKind, Pusher, Surroundings, collides_26_1, push_by, push_kind_26_1};
 pub use ext::{MAX_ROCKETS, PlayerExt};
 pub use load::LoadGate;

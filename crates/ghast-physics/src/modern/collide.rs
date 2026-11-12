@@ -37,35 +37,53 @@ pub(crate) struct Border {
     max_x: f64,
     min_z: f64,
     max_z: f64,
+    /// The block-rounded inside is thinner than `1e-7` (a clamped border): `Shapes.box` gives the
+    /// empty shape, so the border shape is `Shapes.INFINITY`.
+    full: bool,
 }
+
+/// The `Shapes.INFINITY` grid.
+const INFINITE_POINTS: [f64; 2] = [f64::NEG_INFINITY, f64::INFINITY];
 
 /// Cells of the 3 x 1 x 3 border grid minus the centre column.
 const BORDER_CELLS: [u64; 1] = [0b1_1110_1111];
 
 impl Border {
     pub(crate) fn new(b: &WorldBorder) -> Border {
+        // 26.x clamps each bound to [-29,999,984, 29,999,984] on both sides (`Mth.clamp`); the
+        // shared `WorldBorder` accessors clamp one side only, as the older versions do.
+        let max = 29_999_984.0;
+        let c = |v: f64| super::math::clamp(v, -max, max);
+        let (west, east) = (c(b.center_x - b.size / 2.0), c(b.center_x + b.size / 2.0));
+        let (north, south) = (c(b.center_z - b.size / 2.0), c(b.center_z + b.size / 2.0));
         Border {
-            xs: [
-                f64::NEG_INFINITY,
-                b.west().floor(),
-                b.east().ceil(),
-                f64::INFINITY,
-            ],
+            xs: [f64::NEG_INFINITY, west.floor(), east.ceil(), f64::INFINITY],
             ys: [f64::NEG_INFINITY, f64::INFINITY],
             zs: [
                 f64::NEG_INFINITY,
-                b.north().floor(),
-                b.south().ceil(),
+                north.floor(),
+                south.ceil(),
                 f64::INFINITY,
             ],
-            min_x: b.west(),
-            max_x: b.east(),
-            min_z: b.north(),
-            max_z: b.south(),
+            min_x: west,
+            max_x: east,
+            min_z: north,
+            max_z: south,
+            full: east.ceil() - west.floor() < EPSILON || south.ceil() - north.floor() < EPSILON,
         }
     }
 
     pub(crate) fn shape(&self) -> VoxelShape<'_> {
+        if self.full {
+            return VoxelShape {
+                axes: [
+                    Points::Explicit(&INFINITE_POINTS),
+                    Points::Explicit(&INFINITE_POINTS),
+                    Points::Explicit(&INFINITE_POINTS),
+                ],
+                cells: &[1],
+            };
+        }
         VoxelShape {
             axes: [
                 Points::Explicit(&self.xs),

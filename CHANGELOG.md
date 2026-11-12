@@ -137,6 +137,9 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - **26.1 nether movement** proven against the real client (oracle `nether`,
   `tests/golden/26.1/nether.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): fast lava flow
   (`LevelInfo::fast_lava`) and the 0-255 build height.
+- **26.1 world border, moving and set**, proven against the real client (oracle `border`,
+  `tests/golden/26.1/border.jsonl.gz`; 1 M cached fuzz ticks, 0 diffs): `modern::BorderState`
+  (the client's tick-based lerp; `collision_border` lags it by a tick as vanilla's collision does).
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 
@@ -151,8 +154,18 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   or rain launches the player like the real client (oracle-proven `modern::riptide`, along the
   tick's look); a riptide trident has no use state out of water and rain; the rain comes from the
   weather game events, the spin pose from the server's living entity flags. 11 oracle riptide cases
-  replay through the engine; `lab/riptide.sh`. Not known: biome precipitation (every biome counts
-  as rainy), touching an entity while spinning.
+  replay through the engine; `lab/riptide.sh`. Rain counts only where the biome rains (see the
+  biome climate entry). Not known: touching an entity while spinning.
+- **26.1 biome climate** (`ghast_world::climate`, oracle `biome-climate`,
+  `tests/golden/26.1/biome_climate.jsonl.gz`): `Biome.getPrecipitationAt` with the height-adjusted
+  temperature (the fixed-seed temperature noises, the frozen-ocean modifier, the snow line), the
+  vanilla climate of every 26.1 biome, and `BiomeManager`'s zoom (`zoom_cell`); all positions and
+  zoomed cells identical to the real classes. The 26.1 `World` keeps each biome registry entry's
+  climate (from its data, or vanilla's for known-pack entries), the spawn info's hashed seed and sea
+  level, and answers `biome_at`, `biome_climate`, `precipitation_at`; `World::set_biomes` turns
+  biome keeping on or off at run time. The client keeps biomes once a riptide trident is held
+  (columns loaded before that count as raining until resent); `WorldConfig::biomes` keeps them from
+  the start.
 - **26.1 inventory routing** for every predicted menu: configuration registry and tag bodies to the
   inventory (kept raw until a screen needs them), mount screens with the entity's type and saddle /
   body slots (from a minimal mount lookup that works without entity tracking),
@@ -166,6 +179,8 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Changed (behaviour)
 
+- 26.1 world border collision: each bound is clamped to ±29,999,984 on both sides, and a border
+  clamped to a sliver collides as `Shapes.INFINITY` (it blocked movement before).
 - 26.1 `start_configuration` now follows `handleConfigurationStart`: a pending chat
   acknowledgement is sent before `configuration_acknowledged`, and the level (world columns,
   tracked entities) is dropped right away instead of at the next join.
