@@ -158,6 +158,13 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   its own tick (rotation-only movement packet, no `vehicle_move`), then its seat.
 - The plain 26.1 tick (`modern::tick`) compiles to the code it had in 0.4.0 again: the extensions
   are a compile-time type (instructions per tick at or below 0.4.0's in the tick benchmarks).
+- `ghast-entity` 26.1 `Tracker::{tick_seq, tick_order}`: the client's entity tick order
+  (`ClientLevel.tickingEntities`, also the insertion order `getEntities` lists within a section):
+  entities enter when they spawn into, move into or have their column loaded, leave when removed or
+  unloaded; the local player first at login / dimension change, last at a same-dimension respawn.
+  Checked against the real client's tick list in `entity_tracking.jsonl.gz` (new `tick_order`
+  field): 3,362 of 3,456 ticks equal; the rest differ because the tracker does not place passengers
+  on their vehicles.
 - `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
   `tests/golden/<mc>/`).
 

@@ -263,6 +263,10 @@ pub struct Tracker {
     /// tick list is keyed by id, so `isTickingEntity` says yes for any entity with that id until
     /// a real one with it starts ticking.
     ghosts: Fast<i32, ()>,
+    /// The client's tick list (`EntityTickList`, a linked map by id): each member's insertion
+    /// number. Re-adding an id that is still a member keeps its place.
+    order: Fast<i32, u64>,
+    next_seq: u64,
 }
 
 impl Deref for Tracker {
@@ -458,6 +462,94 @@ impl Tracker {
             wanted,
             chunks: Fast::default(),
             ghosts: Fast::default(),
+            order: Fast::default(),
+            next_seq: 0,
+        }
+    }
+
+    /// `EntityTickList.add`: an id that is already a member keeps its place.
+    fn start_ticking(&mut self, id: i32) {
+        let next = &mut self.next_seq;
+        self.order.entry(id).or_insert_with(|| {
+            *next += 1;
+            *next
+        });
+    }
+
+    /// The entity's place in the client's tick list (`ClientLevel.tickingEntities`, the order
+    /// `tickEntities` runs them in and, within a chunk section, the order `getEntities` lists
+    /// them in): a number that grows with each entity that starts ticking; `None` while it does
+    /// not tick. Entities start ticking when they spawn into a loaded chunk column, when their
+    /// column loads, or when they move into a loaded column; they stop when removed or when their
+    /// column unloads, and re-enter at the end. The local player (its id from the login packet)
+    /// enters first at login and at a dimension change, and last at a respawn in the same
+    /// dimension. Several entities entering at the same moment for a column load or a move are
+    /// ordered by id (vanilla's order there follows its section storage).
+    #[must_use]
+    pub fn tick_seq(&self, id: i32) -> Option<u64> {
+        self.order.get(&id).copied().filter(|_| self.member(id))
+    }
+
+    /// Still in the level (removed entities leave the tick list; [`Tracker::tick`] purges them).
+    fn member(&self, id: i32) -> bool {
+        Some(id) == self.store.self_id
+            || self.store.map.contains_key(&id)
+            || self.ghosts.contains_key(&id)
+    }
+
+    /// The ids of the ticking entities (the local player included) in the client's tick order
+    /// (see [`Tracker::tick_seq`]).
+    #[must_use]
+    pub fn tick_order(&self) -> Vec<i32> {
+        let mut v: Vec<(u64, i32)> = self
+            .order
+            .iter()
+            .filter(|&(&id, _)| self.member(id))
+            .map(|(&id, &q)| (q, id))
+            .collect();
+        v.sort_unstable();
+        v.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// The chunk that decides an entity's tick list membership: a passenger sits where its root
+    /// vehicle puts it (`positionRider`; the tracker keeps a passenger's own last packet position).
+    fn member_chunk(&self, e: &Entity) -> u64 {
+        let mut root = e;
+        for _ in 0..16 {
+            match root.vehicle.and_then(|v| self.store.map.get(&v)) {
+                Some(v) => root = v,
+                None => break,
+            }
+        }
+        chunk_of(root.pos)
+    }
+
+    /// Re-checks tick list membership after positions changed (a move into or out of a loaded
+    /// column), entering newcomers in id order.
+    fn refresh_order(&mut self) {
+        let me = self.store.self_id;
+        let (map, ghosts) = (&self.store.map, &self.ghosts);
+        self.order
+            .retain(|id, _| Some(*id) == me || map.contains_key(id) || ghosts.contains_key(id));
+        let mut enter: Vec<i32> = Vec::new();
+        let mut leave: Vec<i32> = Vec::new();
+        for e in self.store.map.values() {
+            let ticks = Some(e.id) == me
+                || e.is_player()
+                || self.chunks.contains_key(&self.member_chunk(e))
+                || self.ghosts.contains_key(&e.id);
+            match (ticks, self.order.contains_key(&e.id)) {
+                (true, false) => enter.push(e.id),
+                (false, true) => leave.push(e.id),
+                _ => {}
+            }
+        }
+        for id in leave {
+            self.order.remove(&id);
+        }
+        enter.sort_unstable();
+        for id in enter {
+            self.start_ticking(id);
         }
     }
 
@@ -488,7 +580,19 @@ impl Tracker {
     /// while chunks are already loaded): its entities tick again.
     pub fn mark_column_loaded(&mut self, x: i32, z: i32) {
         let k = chunk_key(x, z);
-        self.chunks.insert(k, ());
+        if self.chunks.insert(k, ()).is_none() {
+            let mut ids: Vec<i32> = self
+                .store
+                .map
+                .values()
+                .filter(|e| self.member_chunk(e) == k)
+                .map(|e| e.id)
+                .collect();
+            ids.sort_unstable();
+            for id in ids {
+                self.start_ticking(id);
+            }
+        }
         if !self.ghosts.is_empty() {
             // startTicking: the column's entities take their ids' tick list slots.
             for e in self.store.map.values() {
@@ -501,7 +605,23 @@ impl Tracker {
 
     /// A chunk column was unloaded (`unload_chunk`): its entities stop ticking.
     pub fn mark_column_unloaded(&mut self, x: i32, z: i32) {
-        self.chunks.remove(&chunk_key(x, z));
+        let k = chunk_key(x, z);
+        self.chunks.remove(&k);
+        self.column_unloaded(k);
+    }
+
+    fn column_unloaded(&mut self, k: u64) {
+        let me = self.store.self_id;
+        let leave: Vec<i32> = self
+            .store
+            .map
+            .values()
+            .filter(|e| Some(e.id) != me && !e.is_player() && self.member_chunk(e) == k)
+            .map(|e| e.id)
+            .collect();
+        for id in leave {
+            self.order.remove(&id);
+        }
     }
 
     /// `ClientLevel.isTickingEntity`: players always tick, other entities while their chunk
@@ -541,6 +661,7 @@ impl Tracker {
     /// (`[min_x, min_y, min_z, max_x, max_y, max_z]`) is free (`Level.noCollision`: blocks,
     /// collidable entities, world border).
     pub fn tick_with(&mut self, mut no_collision: impl FnMut(&Entity, [f64; 6]) -> bool) {
+        self.refresh_order();
         let me = self.store.self_id;
         let chunks = &self.chunks;
         // Vehicles whose first passenger is a mob (their body control skips the idle turn).
@@ -591,6 +712,8 @@ impl Tracker {
         for id in discard {
             self.store.remove(id);
         }
+        // Moves made by the tick (interpolation, passengers placed on their vehicles).
+        self.refresh_order();
     }
 
     /// Applies one clientbound play packet.
@@ -609,6 +732,43 @@ impl Tracker {
         if !self.wants(packet_id) {
             return Ok(Applied::NotEntityPacket);
         }
+        // A packet that moves one entity: its tick list membership follows the move at once
+        // (the entity section changes in setPos), in packet order.
+        let mover = matches!(
+            packet_id,
+            id::REL_ENTITY_MOVE
+                | id::ENTITY_MOVE_LOOK
+                | id::SYNC_ENTITY_POSITION
+                | id::ENTITY_TELEPORT
+                | id::ENTITY_LOOK
+                | id::ENTITY_VELOCITY
+                | id::ENTITY_METADATA
+        )
+        .then(|| Reader::new(body).read_varint().ok())
+        .flatten();
+        let out = self.apply_inner(packet_id, body);
+        if let Some(eid) = mover {
+            self.refresh_one(eid);
+        }
+        out
+    }
+
+    /// Tick list membership of one entity after it moved.
+    fn refresh_one(&mut self, id: i32) {
+        let Some(e) = self.store.map.get(&id) else {
+            return;
+        };
+        if Some(id) == self.store.self_id || e.is_player() || self.ghosts.contains_key(&id) {
+            return;
+        }
+        if self.chunks.contains_key(&self.member_chunk(e)) {
+            self.start_ticking(id);
+        } else {
+            self.order.remove(&id);
+        }
+    }
+
+    fn apply_inner(&mut self, packet_id: i32, body: &Bytes) -> Result<Applied, DecodeError> {
         let r = &mut Reader::new(body);
         let ticking = (&self.chunks, &self.ghosts);
         let s = &mut self.store;
@@ -659,15 +819,29 @@ impl Tracker {
                 known
             }
             id::SPAWN_ENTITY => {
+                let eid = r.clone().read_varint()?;
+                let old = s.map.get(&eid).map(|e| e.uuid);
                 let (applied, slot) = spawn(s, r, &self.chunks)?;
+                let now = self.store.map.get(&eid).map(|e| e.uuid);
                 match slot {
                     TickSlot::Ghost(id) => {
+                        // A refused spawn: its id's slot (kept if already a member).
                         self.ghosts.insert(id, ());
+                        self.start_ticking(id);
                     }
-                    TickSlot::Taken(id) if !self.ghosts.is_empty() => {
-                        self.ghosts.remove(&id);
+                    TickSlot::Taken(id) => {
+                        // A new entity enters at the end (one over a known id removes the old
+                        // one first); a ghost's slot keeps its place.
+                        if self.ghosts.remove(&id).is_none() {
+                            self.order.remove(&id);
+                        }
+                        self.start_ticking(id);
                     }
-                    _ => {}
+                    TickSlot::None => {
+                        if old.is_some() && now != old {
+                            self.order.remove(&eid);
+                        }
+                    }
                 }
                 return Ok(applied);
             }
@@ -813,6 +987,7 @@ impl Tracker {
             id::UNLOAD_CHUNK => {
                 let k = r.read_i64()? as u64;
                 self.chunks.remove(&k);
+                self.column_unloaded(k);
                 return Ok(Applied::Ignored);
             }
             id::LOGIN => {
@@ -821,6 +996,8 @@ impl Tracker {
                 s.set_self(p.entity_id);
                 self.chunks.clear();
                 self.ghosts.clear();
+                self.order.clear();
+                self.start_ticking(p.entity_id);
                 self.dimension = p.world_state.name.to_string();
                 true
             }
@@ -835,11 +1012,19 @@ impl Tracker {
                         me.meta.clear();
                     }
                 }
+                let me = s.self_id;
                 if *p.world_state.name != *self.dimension {
                     s.clear();
                     self.chunks.clear();
                     self.ghosts.clear();
+                    self.order.clear();
                     self.dimension = p.world_state.name.to_string();
+                } else if let Some(me) = me {
+                    // The new player object is added after the others.
+                    self.order.remove(&me);
+                }
+                if let Some(me) = me {
+                    self.start_ticking(me);
                 }
                 true
             }

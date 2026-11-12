@@ -679,6 +679,16 @@ final class EntityTrackDump {
             j.beginArray().value(p[0]).value(p[1]).endArray();
         }
         j.endArray();
+        // The client's tick list (ClientLevel.tickingEntities: a linked map by id) in its order.
+        Object list = Reflect.get(net.minecraft.client.multiplayer.ClientLevel.class, c.run.level, "tickingEntities");
+        @SuppressWarnings("unchecked")
+        it.unimi.dsi.fastutil.ints.Int2ObjectMap<Entity> active = (it.unimi.dsi.fastutil.ints.Int2ObjectMap<Entity>)
+                Reflect.get(net.minecraft.world.level.entity.EntityTickList.class, list, "active");
+        j.key("tick_order").beginArray();
+        for (int id : active.keySet()) {
+            j.value(id);
+        }
+        j.endArray();
         j.key("entities").beginArray();
         for (Entity e : entities(c)) {
             j.beginObject().field("id", e.getId()).field("type", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath());

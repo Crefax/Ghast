@@ -109,6 +109,9 @@ fn no_collision(
     }
 }
 
+static ORDER_MISS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ORDER_SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 struct Case {
     tracker: Tracker,
     name: String,
@@ -125,6 +128,19 @@ fn check(t: &Tracker, tick: &Value, label: &str) -> usize {
         .map(|e| e["id"].as_i64().unwrap() as i32)
         .collect();
     assert_eq!(ids, want_ids, "{label}: entity ids");
+    if let Some(order) = tick.get("tick_order").and_then(Value::as_array) {
+        let want: Vec<i32> = order.iter().map(|v| v.as_i64().unwrap() as i32).collect();
+        if t.tick_order() != want {
+            ORDER_MISS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if std::env::var("ORDER_DEBUG").is_ok() {
+                eprintln!(
+                    "{label}: tick order ours {:?} real {want:?}",
+                    t.tick_order()
+                );
+            }
+        }
+        ORDER_SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     for (e, w) in got.iter().zip(want) {
         let l = format!("{label} entity {} {}", e.id(), w["type"].as_str().unwrap());
         if let Ok(d) = std::env::var("ORACLE_DEBUG")
@@ -331,4 +347,15 @@ fn entity_tracking_matches_the_real_client() {
         path.display()
     );
     assert!(ticks > 100);
+    let (miss, seen) = (
+        ORDER_MISS.load(std::sync::atomic::Ordering::Relaxed),
+        ORDER_SEEN.load(std::sync::atomic::Ordering::Relaxed),
+    );
+    eprintln!(
+        "tick order: {} of {seen} ticks equal to the real client's",
+        seen - miss
+    );
+    // Known gap (a ratchet, not a proof): the tracker does not place passengers on their
+    // vehicles, so a passenger's column (and the order after it dismounts) can differ.
+    assert!(miss <= 94, "tick order: {miss} ticks differ (was 94)");
 }
