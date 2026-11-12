@@ -18,7 +18,7 @@ macro_rules! common_api {
             /// Looks an item up by registry name.
             #[must_use]
             pub fn from_name(name: &str) -> Option<Item> {
-                lookup_name(&g::items::ITEM_NAMES, name).map(Item)
+                lookup_name(g::items::ITEM_NAMES_TEXT, &g::items::ITEM_NAMES, name).map(Item)
             }
 
             /// Item id.
@@ -58,8 +58,12 @@ macro_rules! common_api {
         /// Entity type by minecraft-data name (1.8 uses legacy names such as `"PigZombie"`).
         #[must_use]
         pub fn entity_by_name(name: &str) -> Option<&'static EntityInfo> {
-            lookup_name(&g::entities::ENTITY_NAMES, name)
-                .map(|i| &g::entities::ENTITIES[i as usize])
+            lookup_name(
+                g::entities::ENTITY_NAMES_TEXT,
+                &g::entities::ENTITY_NAMES,
+                name,
+            )
+            .map(|i| &g::entities::ENTITIES[i as usize])
         }
 
         /// Vanilla entity sizes measured by the oracle, sorted by name.
@@ -95,7 +99,7 @@ macro_rules! common_api {
         /// Biome by name.
         #[must_use]
         pub fn biome_by_name(name: &str) -> Option<&'static BiomeInfo> {
-            lookup_name(&g::biomes::BIOME_NAMES, name).and_then(biome)
+            lookup_name(g::biomes::BIOME_NAMES_TEXT, &g::biomes::BIOME_NAMES, name).and_then(biome)
         }
 
         /// All enchantments by id.
@@ -113,7 +117,12 @@ macro_rules! common_api {
         /// Enchantment by name.
         #[must_use]
         pub fn enchantment_by_name(name: &str) -> Option<&'static EnchantmentInfo> {
-            lookup_name(&g::enchantments::ENCHANTMENT_NAMES, name).and_then(enchantment)
+            lookup_name(
+                g::enchantments::ENCHANTMENT_NAMES_TEXT,
+                &g::enchantments::ENCHANTMENT_NAMES,
+                name,
+            )
+            .and_then(enchantment)
         }
 
         /// All foods, sorted by item id.
@@ -143,7 +152,12 @@ macro_rules! common_api {
         /// Status effect by name (`"Speed"`).
         #[must_use]
         pub fn effect_by_name(name: &str) -> Option<&'static EffectInfo> {
-            lookup_name(&g::effects::EFFECT_NAMES, name).and_then(effect)
+            lookup_name(
+                g::effects::EFFECT_NAMES_TEXT,
+                &g::effects::EFFECT_NAMES,
+                name,
+            )
+            .and_then(effect)
         }
 
         /// Tool speed multiplier of `tool` (item id) against `material`; `1.0` when the tool gives no

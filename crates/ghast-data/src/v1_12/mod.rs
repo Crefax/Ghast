@@ -172,7 +172,7 @@ impl Block {
     /// Looks a block up by registry name (`"stone"`, no namespace; minecraft-data names).
     #[must_use]
     pub fn from_name(name: &str) -> Option<Block> {
-        lookup_name(&g::blocks::BLOCK_NAMES, name).map(Block)
+        lookup_name(g::blocks::BLOCK_NAMES_TEXT, &g::blocks::BLOCK_NAMES, name).map(Block)
     }
 
     /// Registry id.

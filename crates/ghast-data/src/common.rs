@@ -764,11 +764,25 @@ pub struct EffectInfo {
 
 /// Binary search in a name-sorted `(name, id)` index.
 #[cfg_attr(not(any(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
-pub(crate) fn lookup_name<T: Copy>(index: &[(&'static str, T)], name: &str) -> Option<T> {
-    index
-        .binary_search_by(|(n, _)| (*n).cmp(name))
-        .ok()
-        .map(|i| index[i].1)
+pub(crate) fn lookup_name<T: Copy>(text: &str, index: &[(u32, T)], name: &str) -> Option<T> {
+    // `index` holds each name's end offset in `text` (names sorted, concatenated): plain data
+    let (text, name) = (text.as_bytes(), name.as_bytes());
+    let (mut lo, mut hi) = (0, index.len());
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let start = if mid == 0 {
+            0
+        } else {
+            index[mid - 1].0 as usize
+        };
+        let n = text.get(start..index[mid].0 as usize)?;
+        match n.cmp(name) {
+            std::cmp::Ordering::Less => lo = mid + 1,
+            std::cmp::Ordering::Greater => hi = mid,
+            std::cmp::Ordering::Equal => return Some(index[mid].1),
+        }
+    }
+    None
 }
 
 /// Binary search in an id-sorted slice by a key function.

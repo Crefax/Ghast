@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 
 use serde_json::Value;
 
-use crate::emit::{camel_ident, f32l, f64l, header, lit, name_index, upper_ident};
+use crate::emit::{camel_ident, f32l, f64l, header, lit, name_index, name_index_lit, upper_ident};
 use crate::generate::oracle_lines;
 use crate::model::{self, Block, Paths};
 
@@ -732,15 +732,18 @@ pub fn generate(
         );
     }
     out.push_str("        }\n    }\n}\n\n");
-    let _ = writeln!(
-        out,
-        "pub(crate) static PROPERTY_NAMES: [(&str, Property); {}] = [",
-        prop_names.len()
+    let mut sorted: Vec<&str> = prop_names.iter().copied().collect();
+    sorted.sort();
+    name_index_lit(
+        &mut out,
+        "pub(crate) static PROPERTY_NAMES",
+        "Property",
+        sorted
+            .into_iter()
+            .map(|n| (n.to_string(), format!("Property::{}", camel_ident(n))))
+            .collect(),
     );
-    for n in &prop_names {
-        let _ = writeln!(out, "    ({}, Property::{}),", lit(n), camel_ident(n));
-    }
-    out.push_str("];\n\n");
+    out.push('\n');
     let _ = writeln!(
         out,
         "pub(crate) static PROPERTY_DEFS: [PropertyDef; {}] = [",

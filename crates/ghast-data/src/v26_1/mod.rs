@@ -35,10 +35,11 @@ impl Property {
     /// Looks a property up by name (`"facing"`).
     #[must_use]
     pub fn from_name(name: &str) -> Option<Property> {
-        g::blocks::PROPERTY_NAMES
-            .binary_search_by(|e| e.0.cmp(name))
-            .ok()
-            .map(|i| g::blocks::PROPERTY_NAMES[i].1)
+        crate::common::lookup_name(
+            g::blocks::PROPERTY_NAMES_TEXT,
+            &g::blocks::PROPERTY_NAMES,
+            name,
+        )
     }
 }
 
@@ -302,7 +303,7 @@ impl Block {
     /// Looks a block up by registry name (`"oak_stairs"`, no namespace).
     #[must_use]
     pub fn from_name(name: &str) -> Option<Block> {
-        lookup_name(&g::blocks::BLOCK_NAMES, name).map(Block)
+        lookup_name(g::blocks::BLOCK_NAMES_TEXT, &g::blocks::BLOCK_NAMES, name).map(Block)
     }
 
     /// Registry id.

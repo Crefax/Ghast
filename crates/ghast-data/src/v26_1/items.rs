@@ -144,7 +144,7 @@ impl Item {
     /// Looks an item up by registry name (`"diamond_pickaxe"`, no namespace).
     #[must_use]
     pub fn from_name(name: &str) -> Option<Item> {
-        crate::common::lookup_name(&g::items::ITEM_NAMES, name).map(Item)
+        crate::common::lookup_name(g::items::ITEM_NAMES_TEXT, &g::items::ITEM_NAMES, name).map(Item)
     }
 
     /// Registry id.

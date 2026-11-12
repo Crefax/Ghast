@@ -206,7 +206,12 @@ pub fn entity(id: u16) -> Option<&'static EntityInfo> {
 /// Entity type by registry path (`"zombie"`).
 #[must_use]
 pub fn entity_by_name(name: &str) -> Option<&'static EntityInfo> {
-    lookup_name(&g::entities::ENTITY_NAMES, name).map(|i| &g::entities::ENTITIES[usize::from(i)])
+    lookup_name(
+        g::entities::ENTITY_NAMES_TEXT,
+        &g::entities::ENTITY_NAMES,
+        name,
+    )
+    .map(|i| &g::entities::ENTITIES[usize::from(i)])
 }
 
 /// The client facts of type `id` (O(1)).

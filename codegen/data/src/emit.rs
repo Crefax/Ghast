@@ -88,9 +88,33 @@ pub fn num_table(out: &mut String, vis_name: &str, ty: &str, values: &[u32], per
 pub fn name_index(out: &mut String, vis_name: &str, id_ty: &str, mut pairs: Vec<(String, u32)>) {
     pairs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     pairs.dedup_by(|b, a| a.0 == b.0); // keep the first (lowest id) of duplicate names
-    let _ = writeln!(out, "{vis_name}: [(&str, {id_ty}); {}] = [", pairs.len());
-    for (n, id) in pairs {
-        let _ = writeln!(out, "    ({}, {id}),", lit(&n));
+    name_index_lit(
+        out,
+        vis_name,
+        id_ty,
+        pairs
+            .into_iter()
+            .map(|(n, id)| (n, id.to_string()))
+            .collect(),
+    );
+}
+
+/// A name -> value index without pointers: `{vis_name}: [(u32, ty); n]` holds each name's end
+/// offset in `{name}_TEXT` (the names, sorted, concatenated) and its value, so the table is
+/// plain read-only data (no load-time relocations). `pairs` must be sorted by name, without
+/// duplicates; values are Rust expressions of type `ty`.
+pub fn name_index_lit(out: &mut String, vis_name: &str, ty: &str, pairs: Vec<(String, String)>) {
+    debug_assert!(
+        pairs.windows(2).all(|w| w[0].0 < w[1].0),
+        "{vis_name}: unsorted"
+    );
+    let mut text = String::new();
+    let _ = writeln!(out, "{vis_name}: [(u32, {ty}); {}] = [", pairs.len());
+    for (n, v) in &pairs {
+        text.push_str(n);
+        let _ = writeln!(out, "    ({}, {v}),", text.len());
     }
     out.push_str("];\n");
+    let text_name = vis_name.replacen("static ", "const ", 1);
+    let _ = writeln!(out, "{text_name}_TEXT: &str = {};", lit(&text));
 }
