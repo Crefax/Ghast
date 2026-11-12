@@ -161,6 +161,10 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   components (`ghast_inventory::v26_1::item_use`: duration, `use_effects`, `food`); the server's
   entity event 9 completes a use (the client never does it itself); clicks that drop a stack
   send their swings first.
+- **Minecarts** (26.1): seated by the server's `set_passengers`; the cart moves as the server
+  says, the player sits on it (`vehicle()` reports it with `controlled: false`). Living mounts
+  (horses, pigs, striders, camels …) are not simulated yet: the client keeps its 0.4.0 walking
+  physics while on one.
 - **Boats** (26.1): boarded when the server's `set_passengers` names the player (right-click a
   boat with the crosshair on it, or `/ride`); `TickContext::vehicle` / `is_riding`. While riding,
   the movement keys paddle (the client moves the boat, as vanilla); sneak to get off. The own
@@ -449,6 +453,7 @@ Native 26.1 connections (no ViaVersion); Grim's profile shows the bot as `Versio
 | `lab/entities.sh` horse / villager: sneak-click a tamed horse (saddle out and back), trade with a villager (select trade, take the result) | horse screen 2 clicks, merchant screen 1 click, all confirmed as predicted, 0 flags |
 | `lab/entities.sh` teams: two bots walk through each other, without a team, then in a `collisionRule never` team | without: pushed apart; with: pass straight through (x unchanged); 0 flags both ways |
 | `lab/entities.sh` boat: board an oak boat (right click with tracking, `/ride` without), paddle straight, left, right against the pool's edge, then from the ice strip onto grass, sneak off | 3 runs, boarded and dismounted each, 0 flags |
+| `lab/entities.sh` cart: seated by `/ride`, the cart runs ~35 blocks along powered rails, sneak off; tracking on and off | 0 flags both |
 | `lab/entities.sh` border: walk into a 24-wide border, keep walking while it shrinks to 10 | stops at the edge (rounded out to whole blocks, as vanilla), the shrinking border passes, border damage kills, respawn, stops at the new edge, 0 flags |
 | `creative_probe` (creative screen: clone, place, Q, drop outside, ctrl+Q) | 6 clicks accepted, 0 corrections, 0 flags |
 

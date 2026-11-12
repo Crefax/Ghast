@@ -12,6 +12,7 @@
 #           (0 flags both ways; with the team they pass straight)
 #   boat    board an oak boat on the water strip (tracking on: right click; off: `ride`), paddle
 #           straight / left / right onto land, sneak off (0 flags; Grim checks vehicle moves)
+#   cart    ride a minecart along powered rails (seated by `ride`), sneak off (0 flags)
 #   ./entities.sh [phase ...]   (default: crowd horse villager border)
 # Starts the 26.1 lab if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example entity_probe
@@ -138,6 +139,29 @@ for phase in "${phases[@]}"; do
         echo "boat on $where, tracking $tracking: ${f:-0 Grim flags}"
         [ -z "$f" ] || { echo "FAIL: flags in the boat"; fail=1; }
       done ;;
+    cart)
+      # Ride a minecart the server moves along powered rails (seated by `ride`; tracking on and
+      # off), sneak to get off.
+      for tracking in on off; do
+        clean
+        con "fill -12 3 -15 -12 3 20 minecraft:grass_block" "fill -12 4 -15 -12 4 20 minecraft:air" "setblock -12 4 -15 minecraft:stone" \
+            "fill -12 4 -14 -12 4 20 minecraft:rail[shape=north_south]"
+        for z in -14 -8 -2 4 10; do
+          con "setblock -12 4 $z minecraft:powered_rail[shape=north_south]"
+        done
+        con "summon minecart -11.5 4.1 -13.5"
+        since=$(date +%H:%M:%S)
+        # Seated first, then the rails are powered (the cart starts off the stone behind it).
+        ( sleep 4; con "tp $BOT -10.5 4 -13.5 0 30"; sleep 3; con "ride $BOT mount @e[type=minecart,limit=1]"
+          sleep 2; for z in -14 -8 -2 4 10; do con "setblock -12 3 $z minecraft:redstone_block"; done ) &
+        args=(); [ "$tracking" = on ] && args=(--entities)
+        probe boat 40 "${args[@]}" || { echo "FAIL: cart (tracking $tracking)"; fail=1; }
+        wait
+        f=$(flags_since "$since")
+        echo "cart, tracking $tracking: ${f:-0 Grim flags}"
+        [ -z "$f" ] || { echo "FAIL: flags in the cart"; fail=1; }
+      done
+      con "fill -12 3 -15 -12 3 20 minecraft:grass_block" "fill -12 4 -15 -12 4 20 minecraft:air" ;;
     *) echo "unknown phase $phase" >&2; exit 2 ;;
   esac
 done

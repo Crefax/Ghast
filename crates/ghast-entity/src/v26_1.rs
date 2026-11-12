@@ -267,6 +267,9 @@ pub struct Tracker {
     /// number. Re-adding an id that is still a member keeps its place.
     order: Fast<i32, u64>,
     next_seq: u64,
+    /// An entity [`Tracker::tick_early`] already ticked this client tick (the next
+    /// [`Tracker::tick_with`] skips it once).
+    early: Option<i32>,
 }
 
 impl Deref for Tracker {
@@ -464,6 +467,7 @@ impl Tracker {
             ghosts: Fast::default(),
             order: Fast::default(),
             next_seq: 0,
+            early: None,
         }
     }
 
@@ -662,6 +666,7 @@ impl Tracker {
     /// collidable entities, world border).
     pub fn tick_with(&mut self, mut no_collision: impl FnMut(&Entity, [f64; 6]) -> bool) {
         self.refresh_order();
+        let early = self.early.take();
         let me = self.store.self_id;
         let chunks = &self.chunks;
         // Vehicles whose first passenger is a mob (their body control skips the idle turn).
@@ -681,7 +686,7 @@ impl Tracker {
         let mut discard: Vec<i32> = Vec::new();
         let players = &self.store.players;
         for e in self.store.map.values_mut() {
-            if e.m.flag(st::SETTLED) || Some(e.id) == me {
+            if e.m.flag(st::SETTLED) || Some(e.id) == me || Some(e.id) == early {
                 continue;
             }
             if !e.is_player() && !chunks.contains_key(&chunk_of(e.pos)) {
@@ -714,6 +719,23 @@ impl Tracker {
         }
         // Moves made by the tick (interpolation, passengers placed on their vehicles).
         self.refresh_order();
+    }
+
+    /// Ticks entity `id` now, ahead of the rest of this client tick (a vehicle ticks before
+    /// its passenger: the local player riding a vehicle the server moves reads where the vehicle
+    /// is after its tick). The next [`Tracker::tick_with`] skips it once. Returns its position
+    /// after the tick (`None`: not tracked).
+    pub fn tick_early(
+        &mut self,
+        id: i32,
+        mut no_collision: impl FnMut(&Entity, [f64; 6]) -> bool,
+    ) -> Option<[f64; 3]> {
+        let e = self.store.map.get_mut(&id)?;
+        if !e.m.flag(st::SETTLED) && (e.is_player() || self.chunks.contains_key(&chunk_of(e.pos))) {
+            tick_entity(e, false, &mut no_collision);
+        }
+        self.early = Some(id);
+        Some(e.pos)
     }
 
     /// Applies one clientbound play packet.

@@ -188,7 +188,7 @@ impl Probe {
         if t % 20 == 0 {
             if let Some(v) = ctx.vehicle() {
                 log::info!(
-                    "boat at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
+                    "vehicle at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
                     v.pos.x,
                     v.pos.y,
                     v.pos.z,

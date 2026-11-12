@@ -3753,6 +3753,25 @@ mod tests {
         assert!(cases >= 11 && fuzz >= 5, "{cases} {fuzz}");
     }
 
+    /// 26.1 minecarts through the engine (`tests/golden/26.1/minecarts.jsonl.gz`): seated from
+    /// `set_passengers`, the cart's position after its own client tick (interpolating the
+    /// server's teleports), the passenger's tick on it; with and without entity tracking.
+    #[test]
+    #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]
+    fn minecarts_match_the_oracle_26_1() {
+        let hand = [
+            "cart_idle_keys",
+            "cart_moved_by_server",
+            "cart_into_wall",
+            "cart_through_water",
+            "cart_dismount",
+        ];
+        let (cases, fuzz) = ext_replay_26_1_with("minecarts.jsonl.gz", &hand, true);
+        assert!(cases >= 5 && fuzz >= 5, "{cases} {fuzz}");
+        let (cases, fuzz) = ext_replay_26_1_with("minecarts.jsonl.gz", &hand, false);
+        assert!(cases >= 5 && fuzz >= 5, "{cases} {fuzz}");
+    }
+
     /// Replays the hand-written cases `hand` and the fuzz cases whose events it drives (entities,
     /// border, own velocity) of a 26.1 oracle file through the engine; returns (cases, fuzz).
     #[cfg(all(feature = "v26_1", feature = "v1_8", feature = "v1_16_5"))]

@@ -206,6 +206,14 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `TickContext::vehicle` / `is_riding`, `Vehicle`, `Outbound::VehicleMove` / `SteerBoat`. 12
   hand-written and 100 fuzz cases of `tests/golden/26.1/boats.jsonl.gz` replay through the
   engine (72 of them also without entity tracking).
+- **26.1 minecarts in the client** (oracle-proven `modern::tick_passenger`): `set_passengers`
+  naming the player on a minecart seats it; each tick the cart ticks first (its interpolation
+  of the server's moves, `Tracker::tick_early`), then the passenger on its seat, sending
+  `player_input` and the look as vanilla. Without entity tracking a small tracker of the
+  vehicles only (boats and minecarts) keeps the cart's position; it replaces the boats'
+  spawn-position bookkeeping. Riding anything else (living mounts) keeps the walking player
+  of 0.4.0 (no mount physics before 0.4.2). 5 hand-written and 100 fuzz cases of
+  `tests/golden/26.1/minecarts.jsonl.gz` replay through the engine, with and without tracking.
 - **26.1 entity collision and pushing in the client** (with `Interests::ENTITIES` only): the
   player collides with boats, rafts and living shulkers (`modern::tick_in`, boxes in
   `getEntities` section order), and after its tick the tracked mobs and boats push it
