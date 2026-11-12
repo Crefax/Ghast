@@ -481,7 +481,7 @@ pub fn stack_text<'a>(
         .collect();
     let mut j = serde_json::json!({
         "id": it.map_or_else(|| format!("#{}", st.id()), |i| format!("minecraft:{}", i.name())),
-        "name": it.map_or("", |i| i.data().display_name),
+        "name": it.map_or("", |i| i.display_name()),
         "count": st.count(),
         "standIn": stand_in,
         "drawn": [did, dmeta],
@@ -515,7 +515,7 @@ pub fn entity_text(e: &ghast_entity::Entity) -> Option<serde_json::Value> {
         let (_, stand_in) = item_drawn(st.id, 0);
         j["item"] = serde_json::json!({
             "id": it.map_or_else(|| format!("#{}", st.id), |i| format!("minecraft:{}", i.name())),
-            "name": it.map_or("", |i| i.data().display_name),
+            "name": it.map_or("", |i| i.display_name()),
             "count": st.count,
             "standIn": stand_in,
         });

@@ -41,7 +41,7 @@ pub mod dashcam;
 pub mod entities;
 pub mod feed;
 pub mod hub;
-#[cfg(feature = "v26_1")]
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
 mod legacy_table;
 pub mod protocol;
 pub mod record;
@@ -52,6 +52,8 @@ pub mod stream;
 pub mod tiles;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
+#[cfg(feature = "v26_2")]
+pub mod v26_2;
 mod watch;
 mod window;
 
@@ -88,6 +90,8 @@ pub(crate) fn modern_map(v: ghast_client::GameVersion) -> Option<&'static Modern
     match v {
         #[cfg(feature = "v26_1")]
         ghast_client::GameVersion::V26_1 => Some(&v26_1::MAP),
+        #[cfg(feature = "v26_2")]
+        ghast_client::GameVersion::V26_2 => Some(&v26_2::MAP),
         _ => None,
     }
 }

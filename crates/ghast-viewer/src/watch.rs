@@ -208,8 +208,8 @@ impl BotView for View<'_, '_> {
     fn build_height(&self) -> Option<(i32, i32)> {
         self.0.world().build_height()
     }
-    #[cfg(feature = "v26_1")]
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
     fn enchantment_name(&self, id: i32) -> Option<&str> {
-        self.0.inventory().enchantment_name_26_1(id)
+        self.0.inventory().enchantment_name_modern(id)
     }
 }

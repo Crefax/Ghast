@@ -15,6 +15,7 @@ use ghast_entity::v26_1 as ent;
 /// The inventory version of this mapping.
 const INV: ghast_inventory::Version = ghast_inventory::Version::V26_1;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "modern_map.rs"]
 mod imp;
 
