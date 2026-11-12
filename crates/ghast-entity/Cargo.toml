@@ -22,8 +22,8 @@ v1_16_5 = ["ghast-protocol/v1_16_5", "ghast-data/v1_16_5"]
 v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.0", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.1", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.1", default-features = false }
 bytes = { workspace = true }
 uuid = { workspace = true }
 

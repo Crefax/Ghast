@@ -17,8 +17,8 @@ Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | | ghast | |
 |---|---|---|
 | Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 12.72 million ticks | positions, velocities, flags and packets compared by their bits |
-| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use) | **0 diffs** over 4.20 million ticks | 26.1.1 and 26.1.2 give identical records |
-| Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version | incl. crafting results |
+| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 11.20 million ticks | 26.1.1 and 26.1.2 give identical records |
+| Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 on 26.1 (every menu, byte-identical packets) | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
 
@@ -98,15 +98,15 @@ protocol are served by the same code.
 
 | | 1.8.9 | 1.12.2 | 1.16.5 | 26.1 |
 |---|---|---|---|---|
-| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes | offline and compression lab-tested; online mode not tested yet |
-| configuration state (known packs, registries, resource packs, cookies, reconfiguration) | – | – | – | yes (reconfiguration not tested live) |
-| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (unsigned chat and commands; signed chat not yet) |
+| login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes | offline and compression lab-tested; online mode lab-tested against a local stand-in of the account services (not with a real account) |
+| configuration state (known packs, registries, resource packs, cookies, reconfiguration) | – | – | – | yes (reconfiguration lab-tested through a Velocity proxy) |
+| keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (signed chat and commands oracle-verified; server transfers) |
 | chunks and block changes | yes | yes | yes | yes |
-| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block) |
+| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block, elytra and rockets, riptide, entity pushes, boats, minecarts; living mounts not yet) |
 | crosshair raytrace, dig / place / use items | oracle-verified rays | oracle-verified rays | oracle-verified rays | oracle-verified rays |
 | block breaking time (per tick progress, finish tick) | oracle-verified | oracle-verified | oracle-verified | oracle-verified |
-| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | windows, hashed clicks and their results (lab probe: 30 clicks accepted, 0 differences) |
-| entities: tracking, crosshair, attack / interact | yes | yes | yes | not yet |
+| inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | oracle-verified (every menu, creative screen, anvil / grindstone / loom / trades) |
+| entities: tracking, crosshair, attack / interact | yes | yes | yes | yes (tracking oracle-verified; collisions and pushes with entity tracking on) |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
 | path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags |
 | bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | live view (1.8.9 assets, look-alikes for newer blocks); recordings untested |

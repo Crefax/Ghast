@@ -6,7 +6,7 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## 0.4.1 — unreleased
+## 0.4.1 — 2026-11-12
 
 ### Added
 
@@ -83,7 +83,7 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   screen sends (`Outgoing::Creative(Vec<CreativePacket>)`: `set_creative_mode_slot` for the
   slots that differ from the last broadcast, drops as slot -1 with the arm swing; echoes of
   server slots from `take_creative_echo_26_1`; the drop spam throttle), proven against the
-  real screen (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, 19 381 packets).
+  real screen (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, 19 259 packets).
 - Oracle dumps `clicks` and `creative-clicks` (26.1) and `examples/gen_menus_26_1.rs` (the
   menus' item facts from the click vectors).
 - **Path finding on 26.1** (`ghast-pathfinder` feature `v26_1`, default on, forwarded by
@@ -156,8 +156,6 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `minecarts`, `tests/golden/26.1/minecarts.jsonl.gz`, 105 cases; 1 M cached fuzz ticks, 0 diffs):
   `modern::Seat` + `modern::tick_passenger` — the passenger's tick given the vehicle's position after
   its own tick (rotation-only movement packet, no `vehicle_move`), then its seat.
-- The plain 26.1 tick (`modern::tick`) compiles to the code it had in 0.4.0 again: the extensions
-  are a compile-time type (instructions per tick at or below 0.4.0's in the tick benchmarks).
 - `ghast-entity` 26.1 `Tracker::{tick_seq, tick_order}`: the client's entity tick order
   (`ClientLevel.tickingEntities`, also the insertion order `getEntities` lists within a section):
   entities enter when they spawn into, move into or have their column loaded, leave when removed or
@@ -167,16 +165,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   on their vehicles. The full membership re-check runs only after packets were applied or when
   an entity's interpolation moved it into another column; `Tracker::tick_early` ticks an entity
   ahead of the rest (a vehicle before its passenger, entities that tick before the player).
-- `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
-  `tests/golden/<mc>/`).
-
 - **26.1 elytra in the client**: `TickContext::is_gliding` / `start_gliding`; the client glides
   with the oracle-proven `modern::PlayerExt` (glide start on a jump press in the air with a glider
   equipped, `START_FALL_FLYING`), applies its own shared flags from the server's entity data and
   the boost of firework rockets attached to it (decoded without entity tracking, only for our own
   id and rockets), and swings when a rocket is used while gliding. `EntityAction::StartFallFlying`.
   13 oracle elytra cases replay through the engine packet for packet; `lab/elytra.sh`.
-
 - **26.1 riptide in the client**: releasing a riptide trident after at least 10 ticks in water
   or rain launches the player like the real client (oracle-proven `modern::riptide`, along the
   tick's look); a riptide trident has no use state out of water and rain; the rain comes from the
@@ -232,22 +226,12 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   modelled: an open or scaled shulker's box (the closed shell is used), the happy ghast; tick
   order of passengers (the tracker does not place them on their vehicles).
 
-### Fixed
-
-- 26.1: the player kept still in a column that is not loaded; since the level-load gate the
-  real client ticks it there too (the blocks read as void air).
-- 26.1: `use_item` carried the previous tick's look instead of the rotation of the tick's
-  movement packet (what the real client sends); Grim flags it as BadPacketsJ when an item is used
-  while turning. 1.8.9 / 1.12.2 / 1.16.5 use packets carry no rotation.
-
 ### Changed (behaviour)
 
 - 26.1 world border collision follows the real client: the border's lerp advances once per
   client tick after the entities (`modern::BorderState` in the 26.1 `World`), and collision reads
   the size from before the last step; it used to move with wall-clock time. Oracle `border` and
   `nether` cases (4 + 43 fuzz each) replay through the engine.
-- 26.1 world border collision: each bound is clamped to ±29,999,984 on both sides, and a border
-  clamped to a sliver collides as `Shapes.INFINITY` (it blocked movement before).
 - 26.1 `start_configuration` now follows `handleConfigurationStart`: a pending chat
   acknowledgement is sent before `configuration_acknowledged`, and the level (world columns,
   tracked entities) is dropped right away instead of at the next join.
@@ -264,9 +248,38 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - 26.1 clicks: the changed slots are written in the real client's map order and each hashed
   stack's components in type id order (both are maps the server compares by content); bundle
   clicks, crafting results and the other menus above are predicted instead of sent
-  unpredicted; a 26.1 smithing table has 4 slots (template, base, addition, result), not 3;
-  crafting grids, the crafter and result slots no longer cap stacks at 99 when the server
-  sets them.
+  unpredicted.
+- The plain 26.1 tick (`modern::tick`) compiles to the code it had in 0.4.0 again: the extensions
+  are a compile-time type (instructions per tick at or below 0.4.0's in the tick benchmarks).
+
+### Fixed
+
+- 26.1: the player kept still in a column that is not loaded; since the level-load gate the
+  real client ticks it there too (the blocks read as void air).
+- 26.1: `use_item` carried the previous tick's look instead of the rotation of the tick's
+  movement packet (what the real client sends); Grim flags it as BadPacketsJ when an item is used
+  while turning. 1.8.9 / 1.12.2 / 1.16.5 use packets carry no rotation.
+- 26.1 world border collision: each bound is clamped to ±29,999,984 on both sides, and a border
+  clamped to a sliver collides as `Shapes.INFINITY` (it blocked movement before).
+- 26.1: a smithing table has 4 slots (template, base, addition, result), not 3; crafting grids,
+  the crafter and result slots no longer cap stacks at 99 when the server sets them.
+- `oracle/run.sh golden --out DIR` now writes into `DIR` (it used to ignore the flag and overwrite
+  `tests/golden/<mc>/`).
+
+### Known approximations
+
+- Team collision rules: unit-tested against the decompiled predicate and lab-tested, not
+  oracle-proven. Other players' teams need `Interests::PLAYER_LIST`.
+- Shulkers collide as a closed shell (an open lid or a scaled shulker is not modelled); the
+  happy ghast does not collide.
+- Living mounts (horses, pigs, striders, camels …) are not simulated: the client keeps its walking
+  physics while on one (0.4.2).
+- The tick order of passengers (the tracker does not place them on their vehicles).
+- Biome lookup inside a loaded column and sky light for rain are not oracle-proven (the climate,
+  temperature noise and zoom are).
+- Incoming signed chat messages are not verified; the online-mode path is tested against a local
+  stand-in of the account services, not real accounts.
+- 26.1 riptide: touching an entity while spinning is not modelled.
 
 ### Memory
 
@@ -284,20 +297,6 @@ load-time relocations, the idle heap keeps less. Resident shared code is higher 
 with every version compiled in: the code of this release's mechanics); it is file-backed and
 shared between processes running the same binary, and a single-version build avoids it. A
 non-PIE build (README) lowers private memory further (about 1.4 MB).
-
-### Known approximations
-
-- Team collision rules: unit-tested against the decompiled predicate and lab-tested, not
-  oracle-proven. Other players' teams need `Interests::PLAYER_LIST`.
-- Shulkers collide as a closed shell (an open lid or a scaled shulker is not modelled); the
-  happy ghast does not collide.
-- Living mounts (horses, pigs, striders, camels …) are not simulated: the client keeps its walking
-  physics while on one (0.4.2).
-- The tick order of passengers (the tracker does not place them on their vehicles).
-- Biome lookup inside a loaded column and sky light for rain are not oracle-proven (the climate,
-  temperature noise and zoom are).
-- Incoming signed chat messages are not verified; the online-mode path is tested against a local
-  stand-in of the account services, not real accounts.
 
 ## 0.4.0 — 2026-11-11
 

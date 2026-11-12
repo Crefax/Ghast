@@ -260,7 +260,7 @@ cargo test -p ghast-inventory
 - `tests/oracle_clicks_26_1.rs` `golden_26_1_creative_screen_matches_the_real_client`
   (`tests/golden/26.1/clicks_creative_seed1.jsonl.gz`, oracle `creative-clicks`: the real
   `CreativeModeInventoryScreen.slotClicked` with its listener, random earlier broadcasts,
-  server slots in between): 1000 cases, 7756 events, 19 381 packets, all byte-identical, 0
+  server slots in between): 1000 cases, 7544 events, 19 259 packets, all byte-identical, 0
   differences.
 - `tests/v26_1.rs` `menus_session_replays` (`fixtures/menus_26_1_2.bin.zz`): `examples/live_clicks_26_1.rs`
   with `MENUS=1` on a vanilla 26.1.2 server (2026-11-12): drags, bundles, a crafting table

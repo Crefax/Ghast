@@ -37,13 +37,13 @@ pathfinder = ["dep:ghast-pathfinder", "ghast-ext?/pathfinder"]
 viewer = ["dep:ghast-viewer"]
 
 [dependencies]
-ghast-client = { path = "../ghast-client", version = "0.4.0", default-features = false }
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.0", default-features = false, features = ["tokio"] }
-ghast-auth = { path = "../ghast-auth", version = "0.4.0" }
-ghast-data = { path = "../ghast-data", version = "0.4.0", default-features = false }
-ghast-ext = { path = "../ghast-ext", version = "0.4.0", optional = true, default-features = false }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.4.0", optional = true, default-features = false, features = ["client"] }
-ghast-viewer = { path = "../ghast-viewer", version = "0.4.0", optional = true, default-features = false, features = ["download"] }
+ghast-client = { path = "../ghast-client", version = "0.4.1", default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.1", default-features = false, features = ["tokio"] }
+ghast-auth = { path = "../ghast-auth", version = "0.4.1" }
+ghast-data = { path = "../ghast-data", version = "0.4.1", default-features = false }
+ghast-ext = { path = "../ghast-ext", version = "0.4.1", optional = true, default-features = false }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.4.1", optional = true, default-features = false, features = ["client"] }
+ghast-viewer = { path = "../ghast-viewer", version = "0.4.1", optional = true, default-features = false, features = ["download"] }
 
 [dev-dependencies]
 log = { workspace = true }
