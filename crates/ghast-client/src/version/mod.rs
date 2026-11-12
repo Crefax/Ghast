@@ -25,7 +25,7 @@ mod v1_16_5;
 #[cfg(feature = "v1_8")]
 mod v1_8;
 #[cfg(feature = "v26_1")]
-mod v26_1;
+pub(crate) mod v26_1;
 
 pub use caps::{Capabilities, DataSet, ItemModel, PhysicsRules};
 #[cfg(feature = "v1_8")]
