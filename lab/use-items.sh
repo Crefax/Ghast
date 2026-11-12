@@ -2,7 +2,7 @@
 # Item use while walking (the movement slowdown from the item's use effects): the use_item
 # example holds the right button with a golden apple (eaten), a shield (blocking) and a bow
 # with arrows (drawn, released after 40 ticks) in turn, walking forward meanwhile.
-#   ./use-items.sh [1.8|1.12|1.16|26.1, default 26.1] [minutes per item, default 0.6]
+#   ./use-items.sh [1.8|1.12|1.16|26.1|26.2, default 26.1] [minutes per item, default 0.6]
 # Passes when Grim flagged nothing (NoSlow catches a wrong speed multiplier).
 # Starts the lab if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example use_item
@@ -10,7 +10,6 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 lab_select "${1:-26.1}"
 mins=${2:-0.6}
-case "$VER" in 1.8) GAME=1.8.9 ;; 1.12) GAME=1.12.2 ;; 1.16) GAME=1.16.5 ;; 26.1) GAME=26.1 ;; esac
 BOT=${BOT:-GhastBot2}
 bin="$here/../target/release/examples/use_item"
 [ -x "$bin" ] || { echo "build it first: cargo build -p ghast --release --example use_item" >&2; exit 2; }

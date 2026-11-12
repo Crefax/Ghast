@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# 26.1 riptide under Grim: the use_item example holds a riptide III trident (look at the sky, hold
+# 26.x riptide under Grim: the use_item example holds a riptide III trident (look at the sky, hold
 # 40 ticks, release, repeat) standing in the test pad's water strip, then on grass in the rain.
 # Passes when it launched in both (a fast climb in the bot's log) and Grim flagged nothing.
 #   ./riptide.sh [minutes per phase, default 0.6]
-# Starts the 26.1 lab if it is not running and stops it again in that case.
+# Starts the 26.1 lab (LAB_VER=26.2: the 26.2 one) if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example use_item
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
-lab_select 26.1
+lab_select "${LAB_VER:-26.1}"   # LAB_VER=26.2 for the 26.2 lab
 mins=${1:-0.6}
 BOT=${BOT:-GhastBot11}
 bin="$here/../target/release/examples/use_item"
@@ -29,7 +29,7 @@ for phase in water rain; do
     fi
     "$here/console.sh" "$VER" "clear $BOT" "give $BOT trident[enchantments={riptide:3}]" >/dev/null ) &
   rc=0
-  timeout -s TERM 120 "$bin" --host 127.0.0.1 --port "$PORT" --username "$BOT" --version 26.1 \
+  timeout -s TERM 120 "$bin" --host 127.0.0.1 --port "$PORT" --username "$BOT" --version "$GAME" \
     --minutes "$mins" -v 2> "$log" || rc=$?
   wait
   uses=$(grep -ac 'using_item true' "$log" || true)
@@ -43,5 +43,5 @@ sleep 1
 flags=$("$here/alerts.sh" "$VER" --count --since "$since")
 if [ "$started" = 1 ]; then "$here/stop.sh" "$VER"; fi
 [ -z "$flags" ] || { echo "FAIL: Grim flags:"; echo "$flags"; fail=1; }
-[ "$fail" = 0 ] && echo "PASS: riptide in water and in rain on 26.1, 0 Grim flags"
+[ "$fail" = 0 ] && echo "PASS: riptide in water and in rain on $GAME, 0 Grim flags"
 exit "$fail"

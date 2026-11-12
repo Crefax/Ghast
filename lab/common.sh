@@ -14,7 +14,8 @@ GRIM_JAR=grimac-bukkit-2.3.73.jar
 GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/1FIGlM6Q/grimac-bukkit-2.3.73.jar
 GRIM_SHA=a095331a8ba47286b27bdb9b51f0d35ae4a227632a2c50b25cedba85439f1810
 
-# lab_select <1.8|1.12|1.16|26.1>: sets VER, DIR, PORT, PAPER_JAR, PAPER_URL, PAPER_SHA, JAVA, GRIM_*
+# lab_select <1.8|1.12|1.16|26.1|26.2>: sets VER, GAME (the client's version name), DIR, PORT, PAPER_JAR,
+# PAPER_URL, PAPER_SHA, JAVA, GRIM_*
 lab_select() {
   case "${1:-}" in
     1.8|1.8.8|1.8.9|18)
@@ -40,10 +41,23 @@ lab_select() {
       GRIM_JAR=grimac-bukkit-2.3.74.jar
       GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/baDrVvfo/grimac-bukkit-2.3.74.jar
       GRIM_SHA=3ac71c0b6ef8ab586c1dd3ab4c0b3254394ef39d048e4985efb2898b9fef628c ;;
-    *) echo "usage: $(basename "$0") <1.8|1.12|1.16|26.1> ..." >&2; exit 2 ;;
+    26.2|262)
+      # Protocol 776 (26.2): Paper 26.2 build 135 (stable), Java 25; Grim 2.3.74 lists 26.2.
+      VER=26.2; PORT=25634; JAVA_MAJOR=25; JAVA_FLAGS=""
+      PAPER_JAR=paper-26.2-135.jar
+      PAPER_SHA=ef3dbc68b013deafdbbee3bebf1ba351671ebcda94a8f136809b7532d5ba2fe1
+      GRIM_JAR=grimac-bukkit-2.3.74.jar
+      GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/baDrVvfo/grimac-bukkit-2.3.74.jar
+      GRIM_SHA=3ac71c0b6ef8ab586c1dd3ab4c0b3254394ef39d048e4985efb2898b9fef628c ;;
+    *) echo "usage: $(basename "$0") <1.8|1.12|1.16|26.1|26.2> ..." >&2; exit 2 ;;
   esac
   PAPER_URL="https://fill-data.papermc.io/v1/objects/$PAPER_SHA/$PAPER_JAR"
   DIR="$SERVERS/$VER"
+  case "$VER" in 1.8) GAME=1.8.9 ;; 1.12) GAME=1.12.2 ;; 1.16) GAME=1.16.5 ;; *) GAME=$VER ;; esac
+}
+
+is_modern() { # the selected lab runs a 26.x server
+  case "$VER" in 26.*) return 0 ;; *) return 1 ;; esac
 }
 
 java_home() { # java_home <major>: prints a Temurin home for that major, downloading it on first use

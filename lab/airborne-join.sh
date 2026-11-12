@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Regression check: joining with the saved position floating above the ground.
-#   ./airborne-join.sh <1.8|1.12|1.16|26.1> [runs, default 5]
+#   ./airborne-join.sh <1.8|1.12|1.16|26.1|26.2> [runs, default 5]
 # Each run uses a fresh offline name: it logs in, stands on a block placed at (21, 4, 21), logs
 # out, the block is removed while it is offline, and it logs in again 1 block above the grass
 # (the bot then falls on its first ticks). Passes when Grim flagged nothing during all runs.
-# On 26.1 this covers the level-load gate (player_loaded only once the player's column and its
+# On 26.x this covers the level-load gate (player_loaded only once the player's column and its
 # eight neighbours are loaded, a tick later; earlier gates drew Simulation + GroundSpoof here).
 # Starts the lab if it is not running and stops it again in that case.
 # Needs the afk example: cargo build -p ghast --release --example afk
@@ -12,9 +12,6 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 lab_select "${1:-}"
 runs=${2:-5}
-case "$VER" in
-  1.8) GAME=1.8.9 ;; 1.12) GAME=1.12.2 ;; 1.16) GAME=1.16.5 ;; 26.1) GAME=26.1 ;;
-esac
 afk="$here/../target/release/examples/afk"
 [ -x "$afk" ] || { echo "build the afk example first: cargo build -p ghast --release --example afk" >&2; exit 2; }
 started=0

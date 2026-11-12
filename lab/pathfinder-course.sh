@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live check of ghast-pathfinder's gap jumps and maze solving on the local 1.8, 1.12, 1.16 or 26.1
+# Live check of ghast-pathfinder's gap jumps and maze solving on the local 1.8, 1.12, 1.16, 26.1 or 26.2
 # lab:
 #   ./pathfinder-course.sh 1.8 build    build the course (below) and summon the armor stand
 #   ./pathfinder-course.sh 1.8 tp NAME  teleport NAME to the corridor start (62.5 4 0.5)
@@ -22,8 +22,8 @@ case "$VER" in
   1.8) STAND=ArmorStand ;;
   1.12) STAND=armor_stand ;;
   1.16) STAND=armor_stand; GRASS=minecraft:grass_block ;;
-  26.1) STAND=armor_stand; GRASS=minecraft:grass_block ;;
-  *) echo "only the 1.8, 1.12, 1.16 and 26.1 labs (their block and entity names)" >&2; exit 2 ;;
+  26.1|26.2) STAND=armor_stand; GRASS=minecraft:grass_block ;;
+  *) echo "only the 1.8, 1.12, 1.16, 26.1 and 26.2 labs (their block and entity names)" >&2; exit 2 ;;
 esac
 console() { CMD_GAP=${CMD_GAP:-0.02} "$here/console.sh" "$VER" | grep -vE 'blocks? (filled|placed)|filled [0-9]+ blocks|No blocks were filled' || true; }
 
@@ -94,7 +94,7 @@ PY
 
 case "$cmd" in
   build)
-    if [ "$VER" = 26.1 ] || [ "$VER" = 1.16 ]; then
+    if is_modern || [ "$VER" = 1.16 ]; then
       # 26.x keeps no spawn chunks loaded (and 1.16 not all of the course): force-load the
       # course area, give it a moment.
       echo "forceload add 16 -16 127 95" | console
@@ -103,7 +103,7 @@ case "$cmd" in
     course minecraft:stone | console ;;
   clear)
     course minecraft:air | console
-    { [ "$VER" = 26.1 ] || [ "$VER" = 1.16 ]; } && echo "forceload remove all" | console ;;
+    { is_modern || [ "$VER" = 1.16 ]; } && echo "forceload remove all" | console ;;
   tp) printf 'tp %s 62.5 4 0.5\n' "${2:?name}" | console ;;
   follow)
     # Maze cells (feet blocks): x = 21 + 2i, z = 61 + 2j; one waypoint hangs 5 blocks up in
@@ -113,5 +113,5 @@ case "$cmd" in
       printf 'tp @e[type=%s] %s.5 %s %s.5\n' "$STAND" "$1" "$2" "$3" | console
       sleep "${FOLLOW_GAP:-15}"
     done ;;
-  *) echo "usage: $0 1.8|1.12|1.16|26.1 build|tp NAME|follow|clear" >&2; exit 2 ;;
+  *) echo "usage: $0 1.8|1.12|1.16|26.1|26.2 build|tp NAME|follow|clear" >&2; exit 2 ;;
 esac

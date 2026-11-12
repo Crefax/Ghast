@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a local lab server (idempotent): ./start.sh <1.8|1.12|1.16|26.1>
+# Start a local lab server (idempotent): ./start.sh <1.8|1.12|1.16|26.1|26.2>
 # First run downloads Paper + GrimAC into lab/servers/ (git-ignored), builds the lab /fly plugin,
 # writes eula/ops/properties, starts the server in the background and waits for "Done".
 set -euo pipefail

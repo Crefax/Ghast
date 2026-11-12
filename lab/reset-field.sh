@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.12|1.16|26.1> [--tp] [--fly]
+# Re-apply world rules and rebuild the test pad: ./reset-field.sh <1.8|1.12|1.16|26.1|26.2> [--tp] [--fly]
 #   --tp   teleport $LAB_BOT (default GhastBot) to the spawn pad 0.5 4 0.5
 #   --fly  /fly $LAB_BOT on
 # Superflat: bedrock y0, dirt y1-2, grass y3; players stand at y=4. Pad x -16..47, z -16..47 (spawn chunks).
@@ -12,7 +12,7 @@ lab_select "${1:-}"; shift || true
 tp=0; fly=0
 for a in "$@"; do case "$a" in --tp) tp=1 ;; --fly) fly=1 ;; *) echo "unknown arg $a" >&2; exit 2 ;; esac; done
 base=$'gamerule doDaylightCycle false\ngamerule doMobSpawning false\ngamerule doFireTick false\ngamerule mobGriefing false\ngamerule keepInventory true\ngamerule logAdminCommands false\ngamerule randomTickSpeed 0'
-if [ "$VER" = 26.1 ]; then
+if is_modern; then
   # 26.x: registry game rules with snake_case names; no always-loaded spawn chunks (force-load the pad).
   grass=minecraft:grass_block; slime=minecraft:slime_block; item=item; slab="minecraft:smooth_stone_slab[type=bottom]"; fence=minecraft:oak_fence; water=minecraft:water
   base=$'forceload add -16 -16 47 47\ngamerule advance_time false\ngamerule spawn_mobs false\ngamerule fire_spread_radius_around_player 0\ngamerule mob_griefing false\ngamerule keep_inventory true\ngamerule log_admin_commands false\ngamerule random_tick_speed 0'

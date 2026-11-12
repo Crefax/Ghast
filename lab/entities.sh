@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 26.1 entity checks under Grim, with summoned NoAI mobs (the lab spawns none by itself):
+# 26.x entity checks under Grim, with summoned NoAI mobs (the lab spawns none by itself):
 #   crowd   walk through a corridor of NoAI cows into an oak boat, entity tracking ON (must be 0
 #           flags), then the same with tracking OFF (reported: the client then neither collides
 #           with nor is pushed by them)
@@ -14,11 +14,11 @@
 #           straight / left / right onto land, sneak off (0 flags; Grim checks vehicle moves)
 #   cart    ride a minecart along powered rails (seated by `ride`), sneak off (0 flags)
 #   ./entities.sh [phase ...]   (default: crowd horse villager border)
-# Starts the 26.1 lab if it is not running and stops it again in that case.
+# Starts the 26.1 lab (LAB_VER=26.2: the 26.2 one) if it is not running and stops it again in that case.
 # Needs: cargo build -p ghast --release --example entity_probe
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
-lab_select 26.1
+lab_select "${LAB_VER:-26.1}"   # LAB_VER=26.2 for the 26.2 lab
 BOT=${BOT:-GhastBot11}
 bin="$here/../target/release/examples/entity_probe"
 [ -x "$bin" ] || { echo "build it first: cargo build -p ghast --release --example entity_probe" >&2; exit 2; }
@@ -36,7 +36,7 @@ probe() {
   local log="$DIR/logs/entities-$mode$*.log"; log=${log// /}
   local rc=0
   GHAST_PROBE=$mode timeout -s TERM $((secs + 60)) "$bin" --host 127.0.0.1 --port "$PORT" \
-    --username "$BOT" --version 26.1 --minutes "$(awk "BEGIN{print $secs/60}")" "$@" -v > "$log.out" 2> "$log" || rc=$?
+    --username "$BOT" --version "$GAME" --minutes "$(awk "BEGIN{print $secs/60}")" "$@" -v > "$log.out" 2> "$log" || rc=$?
   cat "$log.out"
   return $rc
 }
