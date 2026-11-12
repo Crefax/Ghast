@@ -1,5 +1,5 @@
 //! Replays the 26.1 click vectors of the oracle (`oracle/run.sh clicks` with `MC=26.1`,
-//! `oracle/src/mc_26_1/…/ClickDump.java`): the real client's `handleContainerInput` on every
+//! `oracle/src/modern/…/ClickDump.java`): the real client's `handleContainerInput` on every
 //! menu type a server opens, filled through real `container_set_content` packets, with every
 //! `ContainerInput` (drags included), survival and creative mode.
 //!

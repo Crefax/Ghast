@@ -245,7 +245,7 @@ cargo test -p ghast-inventory
   refused (taking a stale result: the oracle emulates the server's result only once per case,
   so most grid changes leave a stale result there).
 - `tests/oracle_clicks_26_1.rs`: replays the 26.1 click vectors (oracle `clicks` with `MC=26.1`,
-  `oracle/src/mc_26_1/…/ClickDump.java`: the real client's `handleContainerInput` on all 25
+  `oracle/src/modern/…/ClickDump.java`: the real client's `handleContainerInput` on all 25
   menus and window 0, contents through real `container_set_content` packets, recipes through a
   real `update_recipes`, survival and creative, every click mode incl. valid and broken drags).
   For every click ghast predicts, the encoded `container_click` body must equal the client's
