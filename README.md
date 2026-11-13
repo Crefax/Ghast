@@ -20,7 +20,7 @@ Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 11.20 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 on 26.1 (every menu, byte-identical packets) | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
-| Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the three documented Grim-vs-vanilla corner cases |
+| Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the three documented Grim-vs-vanilla corner cases (the third: a 26.2 idle fall onto slime whose landing moves less than the position threshold, Simulation ≈ 0.0417; the real client sends the same packets) |
 
 All measurements are dated and described with their method in the crate READMEs and
 `lab/README.md`.

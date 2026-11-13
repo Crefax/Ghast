@@ -386,13 +386,18 @@ sent bookkeeping): (1) disappears on both labs (16 min, 0 setbacks); (2) remains
 also works on 26.1 / 26.2 (a status-only movement packet whose feet height changed gets the
 position).
 
-(3) **26.2, idle drop of 20 blocks onto slime**: Grim 2.3.74 and 2.3.75 (alpha e457d55) flag
-Simulation 0.0417 at the tail of the bounce, on every drop. The tick before, the player rests
-6.2e-5 above the slime without a position change and sends `flying(on_ground)`; then it bounces.
-The oracle scenario `slime_drop_20_long` proves ghast's packets equal the real 26.2 client's on
-every tick (engine replay `restitution_drops_through_the_engine`). Lab drops of 8, 12 and 30
-blocks onto slime and of 6 blocks onto a bed draw no flag. `force_step_position` cannot help (there is no moved
-position to send); avoid long idle falls onto slime on Grim servers.
+(3) **26.2, an idle fall onto slime whose landing move is below the position threshold** (in the
+lab: exactly 20 blocks): Grim 2.3.74 and 2.3.75 (alpha e457d55) flag Simulation ≈ 0.0417 at the
+tail of the bounce, on every such drop. The player rests 6.2e-5 above the slime, the next tick's
+landing moves only that far, so the client sends `flying(on_ground = true)` without a position,
+then bounces. The real 26.2 client sends the same packets: oracle scenario `slime_drop_20_long`
+(`tests/golden/26.2/scenarios.jsonl.gz`), replayed through the engine packet for packet
+(`restitution_drops_through_the_engine`). The other heights of the 6 – 30 block sweep and the bed
+drop have no such tick and draw no flag. No client-side option fixes it: `force_step_position`
+covers case (1) on every version (a moved position under the threshold), but here the position
+did not change. Practical advice: behaviours should not stand still through a long slime bounce
+tail; any input (or a different height) avoids it. `lab/slime-drops.sh 26.2` runs the sweep and
+reports this case as the expected flag.
 
 ## Recording (`Client::record(path)`, 1.8.9 and 1.16.5)
 
