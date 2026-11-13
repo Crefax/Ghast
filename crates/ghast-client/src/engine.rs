@@ -2269,6 +2269,9 @@ impl TickContext<'_> {
 
     /// The block the crosshair is on as the server judges it (from the sent pose): `None` when
     /// nothing is in reach or an entity is in front of it.
+    ///
+    /// **Entities count only with [`Interests::ENTITIES`]:** without entity tracking this is a
+    /// block pick that looks through players and mobs (and nothing pushes the bot).
     #[must_use]
     pub fn target(&self) -> Option<BlockHit> {
         self.sent_crosshair().0

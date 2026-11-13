@@ -45,6 +45,10 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
 
 ### Changed
 
+- Docs: the `hands` module docs describe the one state machine with its 1.8 and 1.9+ rules
+  (they still said 1.9+ was not modelled); `set_buttons`, `target()` and the client README's
+  digging section say plainly that without `Interests::ENTITIES` the crosshair looks through
+  players and mobs and nothing pushes the bot.
 - A configuration-state dialog that no behaviour answers is logged as a warning (a server
   waiting for the answer would otherwise stall the login without a word); other configuration
   packets the client does not handle are logged at debug level.

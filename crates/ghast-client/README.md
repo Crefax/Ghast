@@ -45,7 +45,8 @@ Examples (facade crate): `cargo run -p ghast --release --example afk -- --host â
 | `engine` | the deterministic core (no I/O, no clock): state, `Behavior`, `TickContext`, the tick |
 | `sim` | per version: the `ghast-world` chunk store + the mover (`ghast-physics` per version); `WorldView` for behaviours |
 | `movement` | vanilla movement-packet choice (`MovementSender`) and a stand-still mover (no longer used by the client; kept for tools) |
-| `hands` | dig / place / use state machine, vanilla 1.8 `World.rayTrace` crosshair |
+| `hands` | dig / place / use / attack state machine for every version (1.8 and 1.9+ rules), crosshair input |
+| `dialog` | server dialogs (26.1+): decoded model, answers as the vanilla client sends them |
 | `record` | movement recorder in the oracle's replay format (`Client::record`) |
 | `rotation` | whole-mouse-count rotation (sensitivity GCD, Java float maths) |
 | `interest` | `Interests`: optional packet groups a behaviour opts into |
@@ -303,6 +304,12 @@ strider / soul speed from the armour NBT) and spectator mode (1.16). Haste / min
 
 ## Hands: dig, place, use (phase 3 groundwork)
 
+> **Entities are invisible without `Interests::ENTITIES`.** The crosshair (`set_buttons`,
+> `target()`, `dig`, `place`) is then a block pick: a player or mob standing in front of the
+> block does not stop the dig and cannot be attacked or used, and nothing pushes the bot. Ask
+> for the interest whenever other entities can be near (keep it and stop pushes with
+> `Client::entity_push(false)` if needed, a non-vanilla opt-in).
+
 `hands.rs` ports 1.8.9 `MinecraftClient.tick` key processing and
 `ClientPlayerInteractionManager` (verified against recorded lab packet traces); it runs after the behaviour and the held-slot sync
 and before the movement step, so its packets precede the tick's movement packet.
@@ -364,6 +371,26 @@ and dimension (it replays the session's join / respawn packets); switching off d
 - Entity boxes come from ghast-entity (minecraft-data sizes, server positions; vanilla picks
   the interpolated position). Entity interactions that vanilla handles client-side (villager
   trading, armor stands) are not predicted.
+
+## Dialogs (26.1+, opt-in `Interests::DIALOGS`)
+
+`show_dialog` / `clear_dialog` in the configuration and the play state (`ghast_client::dialog`;
+its module docs list what the vanilla client does). In play the dialog arrives in
+`ctx.events().dialogs` / `ctx.dialog()` and `ctx.answer_dialog(&DialogAnswer::button(i)
+.with_value(key, value))` sends what vanilla sends for that button: `custom_click_action` (inputs
+added to the payload in vanilla's order), the command as an unsigned `chat_command` when vanilla
+would send it without asking (`verifyCommand` on the server's command tree; otherwise held, or
+sent with `confirm_commands(true)`), nothing for client-only actions. During configuration the
+client asks `Behavior::configuration_dialog` and sends its answer at once (commands do nothing
+there, as in vanilla). Without the interest, a configuration dialog is logged as a warning.
+Checked byte for byte against answers written by the vanilla client classes
+(`tests/golden/26.2/dialog_answers.txt`, `oracle/dialogs/`) and through the whole client
+against replayed vanilla 26.1.2 / 26.2 server sessions (`tests/dialogs.rs`).
+
+Also for behaviours: `ctx.send_raw(id, body)` / `ctx.send_packet(&p)` (a serverbound play packet
+of the session's version, in call order with the other actions; protocol correctness is the
+caller's job), `TickView::outbound()` (the tick's packets as written) and
+`prediction_sequence()` (26.1+: the last block-prediction sequence number sent).
 
 ## Inventory (ghast-inventory)
 

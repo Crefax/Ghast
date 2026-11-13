@@ -14,9 +14,10 @@
 //! - Packets nobody needs are dropped before they are decoded; a behaviour opts into more
 //!   with [`Behavior::interests`].
 //!
-//! Supported versions: 1.8.9 (protocol 47), 1.12.2 (340), 1.16.5 (754) and 26.1 – 26.1.2 (775),
-//! one cargo feature each (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`; default: all). What a version
-//! can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
+//! Supported versions: 1.8.9 (protocol 47), 1.12.2 (340), 1.16.5 (754), 26.1 – 26.1.2 (775) and
+//! 26.2 (776), one cargo feature each (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`; default:
+//! all). What a version can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
+//! Server dialogs (26.1+) are in [`dialog`].
 //!
 //! ```no_run
 //! use ghast_client::{Account, Behavior, Client, GameVersion, Interests, TickContext};

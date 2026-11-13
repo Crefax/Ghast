@@ -1,17 +1,26 @@
-//! The mouse buttons in the world: digging, placing and using items, ported from 1.8.9
-//! `MinecraftClient.tick` (`doAttack`, `doUse`, `handleBlockBreaking`) and
-//! `ClientPlayerInteractionManager` (`attackBlock`, `updateBlockBreakingProgress`,
-//! `cancelBlockBreaking`, `onRightClick`, `interactItem`, `stopUsingItem`), verified against recorded
-//! lab packet traces.
+//! The mouse buttons in the world: digging, placing, using items and hitting or using
+//! entities, as vanilla's key handling does it (`MinecraftClient.tick`: `doAttack`, `doUse`,
+//! `handleBlockBreaking`; `ClientPlayerInteractionManager`: `attackBlock`,
+//! `updateBlockBreakingProgress`, `cancelBlockBreaking`, `interactBlock`, `interactItem`,
+//! `attackEntity`, `stopUsingItem`). The 1.8.9 rules were checked against recorded lab packet
+//! traces; the modern dig timing and the 26.x packets against the oracle and vanilla captures.
 //!
 //! The hands run once per tick after the behaviour and before the movement step (vanilla's
 //! key processing comes after the tick-start event and before the player's update), so their
 //! packets precede this tick's movement packet and the server judges them with the previous
 //! tick's pose.
 //!
-//! Version-specific facts (block hardness, tool groups, selection boxes, the held stack) come
-//! from the [`BlockQuery`] answers and [`HeldItem`]; the state machine is the 1.8 one for both
-//! supported versions (1.9+ attack cooldowns and off-hand are not modelled yet).
+//! One state machine serves every version; the version's capability row picks the rules.
+//! 1.8: the swing comes before the dig or attack, the right button uses the held stack only.
+//! 1.9+ (1.12.2, 1.16.5, 26.x): the dig or attack comes before the swing, the attack strength
+//! (cooldown) is tracked, the right button tries the main hand and then the off hand, and item
+//! uses count their ticks and are released like vanilla's. Version-specific facts (block
+//! hardness, tool groups, selection boxes, the held stack, destroy-progress formulas) come
+//! from the [`BlockQuery`] answers and [`HeldItem`].
+//!
+//! **Entities are seen only with [`Interests::ENTITIES`](crate::Interests::ENTITIES).** Without
+//! entity tracking the crosshair is a block pick: a player or mob between the eyes and the
+//! block neither stops the dig nor can be attacked or used, and nothing pushes the player.
 
 use ghast_data::DigMaterial;
 use ghast_protocol::BlockPos;
