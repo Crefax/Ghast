@@ -300,6 +300,7 @@ pub(crate) struct DialogRegistry(pub(crate) Vec<(String, Option<Tag>)>);
 
 impl DialogRegistry {
     /// The registry of a `registry_data` packet's entries.
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
     pub(crate) fn new(entries: impl Iterator<Item = (String, Option<AnonNbt>)>) -> Self {
         DialogRegistry(
             entries
@@ -944,6 +945,7 @@ fn java_order(t: Tag) -> Tag {
 }
 
 /// The `custom_click_action` body: the id, then the payload tag length-prefixed.
+#[cfg_attr(not(ghast_modern), allow(dead_code))]
 pub(crate) fn custom_click_body(
     id: &str,
     payload: Option<&AnonNbt>,
@@ -965,6 +967,7 @@ pub(crate) fn payload_nbt(payload: Option<&Tag>) -> Option<AnonNbt> {
 // ---- decoding ----
 
 /// A dialog sent inline.
+#[cfg_attr(not(ghast_modern), allow(dead_code))]
 pub(crate) fn decode(nbt: &AnonNbt, registry: Option<&Arc<DialogRegistry>>) -> Dialog {
     let tag = nbt.parse().ok().flatten();
     let mut d = match &tag {
@@ -976,6 +979,7 @@ pub(crate) fn decode(nbt: &AnonNbt, registry: Option<&Arc<DialogRegistry>>) -> D
 }
 
 /// Registry entry `id` (play `show_dialog` by reference).
+#[cfg_attr(not(ghast_modern), allow(dead_code))]
 pub(crate) fn decode_reference(id: i32, registry: Option<&Arc<DialogRegistry>>) -> Dialog {
     match (registry, usize::try_from(id)) {
         (Some(r), Ok(i)) if i < r.0.len() => from_registry(r, i),

@@ -1157,6 +1157,7 @@ impl<S: Sim> Engine<S> {
 
     /// One client tick at `now` (dialog commands never parse: no command tree).
     #[cfg(test)]
+    #[allow(dead_code, reason = "the engine tests need every version feature")]
     pub(crate) fn tick<B: Behavior>(&mut self, b: &mut B, now: Instant) {
         self.tick_with(b, now, &|_| crate::dialog::CommandCheck::ParseErrors);
     }
