@@ -484,7 +484,8 @@ pub(crate) struct SimOptions {
 }
 
 /// Grim compatibility (**not vanilla**): when to send the position on a tick whose move stayed
-/// under vanilla's 0.03-block resend threshold. See `crates/ghast-physics/GRIM_NOTES.md`.
+/// under vanilla's 0.03-block resend threshold (every version; on 26.x also bounce landings on
+/// slime and beds). See `crates/ghast-physics/GRIM_NOTES.md`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ForceStepPosition {

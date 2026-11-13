@@ -68,6 +68,9 @@ pub(crate) struct ModernSim {
     parked: Option<Parked>,
     /// The answer to a server packet that goes out at once (`move_vehicle`).
     reply: Option<Outbound>,
+    /// Grim compatibility (not vanilla, off by default): send the position on a tick whose
+    /// feet height changed although the move stayed under the resend threshold.
+    force_step: ForceStepPosition,
     /// 26.2+: a movement attribute of `ext` (friction / air drag modifier, bounciness) is not
     /// at its default, so the extended tick runs (the plain tick reads the defaults).
     movement_attributes: bool,
@@ -954,6 +957,7 @@ impl ModernSim {
             vehicles: None,
             parked: None,
             reply: None,
+            force_step: ForceStepPosition::Off,
             movement_attributes: false,
             filter_dirty: false,
             session: SessionPackets::default(),
@@ -980,9 +984,7 @@ impl ModernSim {
         if let Some(n) = &opts.profile_name {
             s.profile_name = n.as_str().into();
         }
-        if opts.force_step_position != ForceStepPosition::Off {
-            log::warn!("force_step_position has no effect on {}", super::GAME);
-        }
+        s.force_step = opts.force_step_position;
         s
     }
 
@@ -1955,9 +1957,61 @@ impl Sim for ModernSim {
             // rocket): the plain tick, which is tick_ext with a default state, folded.
             modern::tick::<Rules, _>(p, &input, &view, &mut self.packets);
         }
+        if self.force_step != ForceStepPosition::Off {
+            force_modern_position(&mut self.packets, &mut self.player, self.force_step);
+        }
         push_packets(&self.packets, entity_id, out);
         sync_pose_26(pose, &self.player);
     }
+}
+
+/// Grim compatibility (see [`ForceStepPosition`]): the tick's movement packet carries no
+/// position although the feet height changed since the last sent position (a landing, a bounce
+/// or a step-up under the resend threshold): it gets the position, and the sent bookkeeping
+/// follows.
+#[cold]
+#[inline(never)]
+fn force_modern_position(
+    packets: &mut ghast_physics::Packets,
+    p: &mut modern::PlayerState,
+    mode: ForceStepPosition,
+) {
+    use ghast_physics::Packet as P;
+    let cur = p.pos;
+    if cur[1] == p.sent.pos[1] {
+        return;
+    }
+    let Some(&P::Move {
+        pos: None,
+        look,
+        on_ground,
+        horizontal_collision,
+    }) = packets
+        .as_slice()
+        .iter()
+        .rev()
+        .find(|q| matches!(q, P::Move { .. }))
+    else {
+        return;
+    };
+    if mode == ForceStepPosition::StepUpOnly && !(on_ground && cur[1] > p.sent.pos[1]) {
+        return;
+    }
+    let mut out = ghast_physics::Packets::new();
+    for q in packets.as_slice() {
+        out.push(match *q {
+            P::Move { pos: None, .. } => P::Move {
+                pos: Some(cur),
+                look,
+                on_ground,
+                horizontal_collision,
+            },
+            other => other,
+        });
+    }
+    *packets = out;
+    p.sent.pos = cur;
+    p.sent.position_reminder = 0;
 }
 
 fn sync_pose_26(pose: &mut Pose, p: &modern::PlayerState) {
@@ -2036,6 +2090,39 @@ pub(super) fn entity_ids_for_test() -> ([i32; 7], [i32; 2], [i32; 2], i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Grim compatibility: a status-only move whose feet height differs from the sent one gets
+    /// the position (and the sent bookkeeping follows); off, or with the same height, nothing
+    /// changes.
+    #[test]
+    fn forced_step_position() {
+        use ghast_physics::Packet as P;
+        let status = P::Move {
+            pos: None,
+            look: None,
+            on_ground: true,
+            horizontal_collision: false,
+        };
+        let mut p = modern::PlayerState::new([0.5, 4.0, 0.5], 0.0, 0.0);
+        p.sent.pos = [0.5, 4.000_061_962_301_82, 0.5];
+        let mut packets = ghast_physics::Packets::new();
+        packets.push(status);
+        force_modern_position(&mut packets, &mut p, ForceStepPosition::Always);
+        assert_eq!(
+            packets.as_slice(),
+            [P::Move {
+                pos: Some([0.5, 4.0, 0.5]),
+                look: None,
+                on_ground: true,
+                horizontal_collision: false,
+            }]
+        );
+        assert_eq!(p.sent.pos, [0.5, 4.0, 0.5]);
+        let mut packets = ghast_physics::Packets::new();
+        packets.push(status);
+        force_modern_position(&mut packets, &mut p, ForceStepPosition::Always);
+        assert_eq!(packets.as_slice(), [status]);
+    }
 
     /// The engine's teleport path (`ModernSim::teleport`, fed from the decoded `Teleport`) lands
     /// exactly where `modern::PlayerState::apply_teleport` does — the function the oracle's
