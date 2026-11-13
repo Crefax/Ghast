@@ -397,6 +397,8 @@ pub(crate) struct Core {
     origin: Instant,
     /// Entities push the player ([`TickContext::set_entity_push`]).
     entity_push: bool,
+    /// The switch as the sim has it.
+    entity_push_sim: bool,
     /// The dialog open now (26.1+ `show_dialog`).
     dialog: Option<Arc<crate::dialog::Dialog>>,
     /// The wire's block-prediction sequence after the last packets written (1.19+).
@@ -479,6 +481,7 @@ impl Core {
             near_loaded: 0,
             origin: Instant::now(),
             entity_push,
+            entity_push_sim: entity_push,
             dialog: None,
             sequence: None,
             #[cfg(test)]
@@ -1323,7 +1326,10 @@ impl<S: Sim> Engine<S> {
 
         let c = &mut self.core;
         // The behaviour may have switched entity pushes for this tick's entity ticks.
-        self.sim.set_entity_push(c.entity_push);
+        if c.entity_push != c.entity_push_sim {
+            c.entity_push_sim = c.entity_push;
+            self.sim.set_entity_push(c.entity_push);
+        }
         // ClientPlayerInteractionManager.tick (syncSelectedSlot) runs before the key
         // processing: a held slot the server changed is echoed before any click.
         if c.held_slot != c.sent_slot {
