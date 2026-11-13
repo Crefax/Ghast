@@ -1085,7 +1085,7 @@ fn ext_replay(file: &str, hand: &[&str]) -> (usize, usize) {
 }
 
 /// [`ext_replay`] with or without entity tracking.
-fn ext_replay_with(file: &str, hand: &[&str], tracking: bool) -> (usize, usize) {
+pub(super) fn ext_replay_with(file: &str, hand: &[&str], tracking: bool) -> (usize, usize) {
     use golden::{ext_of, player_of};
     use proto::play::clientbound as cb;
     use serde_json::Value;

@@ -26,3 +26,19 @@ pub(super) fn enchantments_patch(body: &[u8]) -> ghast_protocol::types::slot::v7
 #[allow(clippy::duplicate_mod)]
 #[path = "engine_modern_tests.rs"]
 mod replays;
+
+/// The idle slime and bed drops of the 26.2 lab (6 – 30 blocks, the bounce tail to its end,
+/// incl. the 20-block drop's sub-threshold landing that sends only `flying(on_ground)`) through
+/// the whole engine: every packet equals the real 26.2 client's.
+#[test]
+fn restitution_drops_through_the_engine() {
+    let mut hand: Vec<String> = (6..=30)
+        .step_by(2)
+        .map(|h| format!("slime_drop_{h}_long"))
+        .collect();
+    hand.push("slime_drop_20_drift".into());
+    hand.push("bed_drop_20_long".into());
+    let hand: Vec<&str> = hand.iter().map(String::as_str).collect();
+    let (cases, _) = replays::ext_replay_with("scenarios.jsonl.gz", &hand, false);
+    assert_eq!(cases, hand.len());
+}
