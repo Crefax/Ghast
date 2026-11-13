@@ -26,7 +26,6 @@ rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 authors = ["Crefax"]
 repository = "https://github.com/Crefax/Ghast"
-homepage = "https://github.com/Crefax/Ghast"
 
 # Shared dependency versions: crates use `foo = { workspace = true }`.
 [workspace.dependencies]

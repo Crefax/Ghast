@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["minecraft", "physics", "movement", "bot", "deterministic"]
 categories = ["game-development", "simulation"]
 documentation = "https://docs.rs/ghast-physics"

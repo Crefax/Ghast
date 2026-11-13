@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["minecraft", "blocks", "items", "game-data", "bot"]
 categories = ["game-development", "data-structures"]
 documentation = "https://docs.rs/ghast-data"

@@ -966,182 +966,6 @@ pub(super) fn rel_flags(flags: i8) -> [bool; 5] {
     ]
 }
 
-/// Chunk packets for tests.
-#[cfg(test)]
-#[allow(unused_imports, dead_code)] // each helper is used by the tests of its version
-pub(crate) mod test_chunks {
-    use bytes::{BufMut, Bytes, BytesMut};
-    use ghast_protocol::RawPacket;
-
-    #[cfg(feature = "v1_8")]
-    /// A 1.8 ground-up chunk with one section (y 48–63) whose top layer (y = 63) is stone.
-    pub(crate) fn v1_8(x: i32, z: i32) -> RawPacket {
-        let mut d = BytesMut::with_capacity(12_544);
-        for i in 0..4096 {
-            // Index = y << 8 | z << 4 | x; local y 15 is the top layer. Stone = 1 << 4.
-            d.put_u16_le(if i >> 8 == 15 { 1 << 4 } else { 0 });
-        }
-        d.put_bytes(0, 2048); // block light
-        d.put_bytes(0xff, 2048); // sky light
-        d.put_bytes(1, 256); // biomes
-        RawPacket::from_packet(&ghast_protocol::v1_8::play::clientbound::MapChunk {
-            x,
-            z,
-            ground_up: true,
-            bit_map: 1 << 3,
-            chunk_data: d.freeze(),
-        })
-        .unwrap()
-    }
-
-    #[cfg(feature = "v1_12_2")]
-    /// A 1.12.2 ground-up chunk with one section (y 48–63) whose top layer (y = 63) is stone.
-    pub(crate) fn v1_12_2(x: i32, z: i32) -> RawPacket {
-        let mut d = BytesMut::new();
-        d.put_u8(4); // bits per block: linear palette
-        d.put_u8(2); // palette length (VarInt)
-        d.put_u8(0); // air
-        d.put_u8(1 << 4); // stone (one byte VarInt: 16)
-        d.put_u8(0x80); // data length 256 (VarInt)
-        d.put_u8(0x02);
-        for w in 0..256 {
-            // 16 values of 4 bits per word; words 240.. hold y = 15 (index >> 8 == 15).
-            d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
-        }
-        d.put_bytes(0, 2048); // block light
-        d.put_bytes(0xff, 2048); // sky light
-        d.put_bytes(1, 256); // biomes
-        RawPacket::from_packet(&ghast_protocol::v1_12_2::play::clientbound::MapChunk {
-            x,
-            z,
-            ground_up: true,
-            bit_map: 1 << 3,
-            chunk_data: d.freeze(),
-            block_entities: Vec::new(),
-        })
-        .unwrap()
-    }
-
-    #[cfg(feature = "v26_1")]
-    /// A 26.1 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
-    pub(crate) fn v26_1(x: i32, z: i32) -> RawPacket {
-        v26_1_sections(x, z, 24, 7)
-    }
-
-    #[cfg(feature = "v26_1")]
-    /// A 26.1 column of `sections` sections with the stone layer at the top of section
-    /// `stone` (the nether: 16 sections, stone layer section 3).
-    pub(crate) fn v26_1_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
-        use ghast_protocol::McWrite;
-        let stone = ghast_data::v26_1::BlockState::parse("stone").unwrap().id();
-        let mut d = BytesMut::new();
-        for section in 0..sections {
-            if section == stone_at {
-                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
-                d.put_i16(256);
-                d.put_i16(0);
-                d.put_u8(4);
-                d.put_varint(2);
-                d.put_varint(0);
-                d.put_varint(i32::from(stone));
-                for w in 0..256 {
-                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
-                }
-            } else {
-                d.put_i16(0);
-                d.put_i16(0);
-                d.put_u8(0);
-                d.put_varint(0);
-            }
-            // Biomes: one value (registry id 0).
-            d.put_u8(0);
-            d.put_varint(0);
-        }
-        RawPacket::from_packet(&ghast_protocol::v26_1::play::clientbound::MapChunk {
-            x,
-            z,
-            heightmaps: Vec::new(),
-            chunk_data: d.freeze(),
-            block_entities: Vec::new(),
-            sky_light_mask: Vec::new(),
-            block_light_mask: Vec::new(),
-            empty_sky_light_mask: Vec::new(),
-            empty_block_light_mask: Vec::new(),
-            sky_light: Vec::new(),
-            block_light: Vec::new(),
-        })
-        .unwrap()
-    }
-
-    #[cfg(feature = "v26_2")]
-    /// A 26.2 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
-    pub(crate) fn v26_2(x: i32, z: i32) -> RawPacket {
-        v26_2_sections(x, z, 24, 7)
-    }
-
-    #[cfg(feature = "v26_2")]
-    /// A 26.2 column of `sections` sections with the stone layer at the top of section
-    /// `stone` (the nether: 16 sections, stone layer section 3).
-    pub(crate) fn v26_2_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
-        use ghast_protocol::McWrite;
-        let stone = ghast_data::v26_2::BlockState::parse("stone").unwrap().id();
-        let mut d = BytesMut::new();
-        for section in 0..sections {
-            if section == stone_at {
-                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
-                d.put_i16(256);
-                d.put_i16(0);
-                d.put_u8(4);
-                d.put_varint(2);
-                d.put_varint(0);
-                d.put_varint(i32::from(stone));
-                for w in 0..256 {
-                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
-                }
-            } else {
-                d.put_i16(0);
-                d.put_i16(0);
-                d.put_u8(0);
-                d.put_varint(0);
-            }
-            // Biomes: one value (registry id 0).
-            d.put_u8(0);
-            d.put_varint(0);
-        }
-        RawPacket::from_packet(&ghast_protocol::v26_2::play::clientbound::MapChunk {
-            x,
-            z,
-            heightmaps: Vec::new(),
-            chunk_data: d.freeze(),
-            block_entities: Vec::new(),
-            sky_light_mask: Vec::new(),
-            block_light_mask: Vec::new(),
-            empty_sky_light_mask: Vec::new(),
-            empty_block_light_mask: Vec::new(),
-            sky_light: Vec::new(),
-            block_light: Vec::new(),
-        })
-        .unwrap()
-    }
-
-    #[cfg(feature = "v1_16_5")]
-    /// A 1.16.5 full chunk without sections (all air).
-    pub(crate) fn v1_16_5(x: i32, z: i32) -> RawPacket {
-        RawPacket::from_packet(&ghast_protocol::v1_16_5::play::clientbound::MapChunk {
-            x,
-            z,
-            ground_up: true,
-            bit_map: 0,
-            heightmaps: ghast_protocol::nbt::RawNbt::from_bytes(Bytes::from_static(&[10, 0, 0, 0]))
-                .unwrap(),
-            biomes: Some(vec![1; 1024]),
-            chunk_data: Bytes::new(),
-            block_entities: Vec::new(),
-        })
-        .unwrap()
-    }
-}
-
 #[cfg(test)]
 impl WorldView for Box<dyn Sim> {
     fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
@@ -1352,6 +1176,182 @@ impl Sim for Box<dyn Sim> {
     }
     fn registry_data(&mut self, raw: &RawPacket) {
         (**self).registry_data(raw);
+    }
+}
+
+/// Chunk packets for tests.
+#[cfg(test)]
+#[allow(unused_imports, dead_code)] // each helper is used by the tests of its version
+pub(crate) mod test_chunks {
+    use bytes::{BufMut, Bytes, BytesMut};
+    use ghast_protocol::RawPacket;
+
+    #[cfg(feature = "v1_8")]
+    /// A 1.8 ground-up chunk with one section (y 48–63) whose top layer (y = 63) is stone.
+    pub(crate) fn v1_8(x: i32, z: i32) -> RawPacket {
+        let mut d = BytesMut::with_capacity(12_544);
+        for i in 0..4096 {
+            // Index = y << 8 | z << 4 | x; local y 15 is the top layer. Stone = 1 << 4.
+            d.put_u16_le(if i >> 8 == 15 { 1 << 4 } else { 0 });
+        }
+        d.put_bytes(0, 2048); // block light
+        d.put_bytes(0xff, 2048); // sky light
+        d.put_bytes(1, 256); // biomes
+        RawPacket::from_packet(&ghast_protocol::v1_8::play::clientbound::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 1 << 3,
+            chunk_data: d.freeze(),
+        })
+        .unwrap()
+    }
+
+    #[cfg(feature = "v1_12_2")]
+    /// A 1.12.2 ground-up chunk with one section (y 48–63) whose top layer (y = 63) is stone.
+    pub(crate) fn v1_12_2(x: i32, z: i32) -> RawPacket {
+        let mut d = BytesMut::new();
+        d.put_u8(4); // bits per block: linear palette
+        d.put_u8(2); // palette length (VarInt)
+        d.put_u8(0); // air
+        d.put_u8(1 << 4); // stone (one byte VarInt: 16)
+        d.put_u8(0x80); // data length 256 (VarInt)
+        d.put_u8(0x02);
+        for w in 0..256 {
+            // 16 values of 4 bits per word; words 240.. hold y = 15 (index >> 8 == 15).
+            d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+        }
+        d.put_bytes(0, 2048); // block light
+        d.put_bytes(0xff, 2048); // sky light
+        d.put_bytes(1, 256); // biomes
+        RawPacket::from_packet(&ghast_protocol::v1_12_2::play::clientbound::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 1 << 3,
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    #[cfg(feature = "v26_1")]
+    /// A 26.1 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
+    pub(crate) fn v26_1(x: i32, z: i32) -> RawPacket {
+        v26_1_sections(x, z, 24, 7)
+    }
+
+    #[cfg(feature = "v26_1")]
+    /// A 26.1 column of `sections` sections with the stone layer at the top of section
+    /// `stone` (the nether: 16 sections, stone layer section 3).
+    pub(crate) fn v26_1_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
+        use ghast_protocol::McWrite;
+        let stone = ghast_data::v26_1::BlockState::parse("stone").unwrap().id();
+        let mut d = BytesMut::new();
+        for section in 0..sections {
+            if section == stone_at {
+                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
+                d.put_i16(256);
+                d.put_i16(0);
+                d.put_u8(4);
+                d.put_varint(2);
+                d.put_varint(0);
+                d.put_varint(i32::from(stone));
+                for w in 0..256 {
+                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+                }
+            } else {
+                d.put_i16(0);
+                d.put_i16(0);
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            // Biomes: one value (registry id 0).
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        RawPacket::from_packet(&ghast_protocol::v26_1::play::clientbound::MapChunk {
+            x,
+            z,
+            heightmaps: Vec::new(),
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+            sky_light_mask: Vec::new(),
+            block_light_mask: Vec::new(),
+            empty_sky_light_mask: Vec::new(),
+            empty_block_light_mask: Vec::new(),
+            sky_light: Vec::new(),
+            block_light: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    #[cfg(feature = "v26_2")]
+    /// A 26.2 overworld chunk (y −64 … 319) whose layer y = 63 is stone, the rest air.
+    pub(crate) fn v26_2(x: i32, z: i32) -> RawPacket {
+        v26_2_sections(x, z, 24, 7)
+    }
+
+    #[cfg(feature = "v26_2")]
+    /// A 26.2 column of `sections` sections with the stone layer at the top of section
+    /// `stone` (the nether: 16 sections, stone layer section 3).
+    pub(crate) fn v26_2_sections(x: i32, z: i32, sections: usize, stone_at: usize) -> RawPacket {
+        use ghast_protocol::McWrite;
+        let stone = ghast_data::v26_2::BlockState::parse("stone").unwrap().id();
+        let mut d = BytesMut::new();
+        for section in 0..sections {
+            if section == stone_at {
+                // y 48 … 63: a 4-bit linear palette (air, stone), the top layer stone.
+                d.put_i16(256);
+                d.put_i16(0);
+                d.put_u8(4);
+                d.put_varint(2);
+                d.put_varint(0);
+                d.put_varint(i32::from(stone));
+                for w in 0..256 {
+                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+                }
+            } else {
+                d.put_i16(0);
+                d.put_i16(0);
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            // Biomes: one value (registry id 0).
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        RawPacket::from_packet(&ghast_protocol::v26_2::play::clientbound::MapChunk {
+            x,
+            z,
+            heightmaps: Vec::new(),
+            chunk_data: d.freeze(),
+            block_entities: Vec::new(),
+            sky_light_mask: Vec::new(),
+            block_light_mask: Vec::new(),
+            empty_sky_light_mask: Vec::new(),
+            empty_block_light_mask: Vec::new(),
+            sky_light: Vec::new(),
+            block_light: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    #[cfg(feature = "v1_16_5")]
+    /// A 1.16.5 full chunk without sections (all air).
+    pub(crate) fn v1_16_5(x: i32, z: i32) -> RawPacket {
+        RawPacket::from_packet(&ghast_protocol::v1_16_5::play::clientbound::MapChunk {
+            x,
+            z,
+            ground_up: true,
+            bit_map: 0,
+            heightmaps: ghast_protocol::nbt::RawNbt::from_bytes(Bytes::from_static(&[10, 0, 0, 0]))
+                .unwrap(),
+            biomes: Some(vec![1; 1024]),
+            chunk_data: Bytes::new(),
+            block_entities: Vec::new(),
+        })
+        .unwrap()
     }
 }
 

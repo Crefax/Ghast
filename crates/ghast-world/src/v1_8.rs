@@ -352,21 +352,21 @@ impl World {
         };
         let len = data.len();
         let mut k = 0usize;
-        for j in 0..SECTIONS {
+        for (j, section) in col.sections.iter_mut().enumerate() {
             if mask & (1 << j) == 0 {
                 continue;
             }
             let start = k * BLOCK_BYTES;
             let count = (len.saturating_sub(start) / 2).min(SECTION_VOLUME);
             let mut states = [0u16; SECTION_VOLUME];
-            if let Some(old) = &col.sections[j] {
+            if let Some(old) = section {
                 old.for_each(|i, s| states[i] = s);
             }
             let bytes = &data[start.min(len)..];
             for (s, pair) in states[..count].iter_mut().zip(bytes.as_chunks::<2>().0) {
                 *s = BlockState::from_raw_vanilla(u16::from_le_bytes(*pair)).raw();
             }
-            col.sections[j] = self.builder.build(&states);
+            *section = self.builder.build(&states);
             if count < SECTION_VOLUME {
                 return;
             }

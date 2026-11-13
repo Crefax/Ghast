@@ -1077,8 +1077,8 @@ impl Feed {
                     let equip_changed = (0..5).any(|i| e.equipment(i) != k.equip[i].as_ref());
                     if equip_changed || e.metadata() != &k.meta {
                         k.meta = e.metadata().clone();
-                        for i in 0..5 {
-                            k.equip[i] = e.equipment(i).cloned();
+                        for (i, slot) in k.equip.iter_mut().enumerate() {
+                            *slot = e.equipment(i).cloned();
                         }
                         let variant = variant_of(e);
                         if variant != k.variant {

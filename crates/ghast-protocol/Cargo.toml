@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["minecraft", "protocol", "packets", "nbt", "bot"]
 categories = ["network-programming", "encoding", "game-development"]
 readme = "README.md"

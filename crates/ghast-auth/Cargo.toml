@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-homepage.workspace = true
 keywords = ["minecraft", "socks5", "authentication", "bot"]
 categories = ["authentication", "network-programming"]
 documentation = "https://docs.rs/ghast-auth"
