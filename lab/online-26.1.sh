@@ -7,13 +7,13 @@
 #   ./online-26.1.sh
 # Runs the bot twice: signed (must pass: no kick, chat logged as secure, 0 Grim flags) and with
 # --unsigned (control: the server must refuse its chat). Everything lives in the git-ignored
-# lab/servers/online-26.1/; the server and the stand-in are stopped by PID at the end.
+# lab/servers/online-<26.1|26.2>/ (LAB_VER=26.2); the server and the stand-in are stopped by PID at the end.
 # Needs: cargo build -p ghast --release --features microsoft --example online_chat
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
-lab_select 26.1
+lab_select "${LAB_VER:-26.1}"   # LAB_VER=26.2: Paper 26.2
 LAB26="$DIR"
-D="$SERVERS/online-26.1"
+D="$SERVERS/online-$VER"
 PORT=25627; SVC=25700
 BOT=${BOT:-GhastBot}
 HEAP=${ONLINE_HEAP:-640M}
@@ -39,8 +39,8 @@ fi
 echo "eula=true" > "$D/eula.txt"
 sed -e "s/^server-port=.*/server-port=$PORT/" -e "s/^online-mode=.*/online-mode=true/" \
     -e "s/^enforce-secure-profile=.*/enforce-secure-profile=true/" \
-    -e "s/^motd=.*/motd=ghast lab 26.1.2 online mode (local account stand-in)/" \
-    "$here/templates/server-26.1.properties" > "$D/server.properties"
+    -e "s/^motd=.*/motd=ghast lab $GAME online mode (local account stand-in)/" \
+    "$here/templates/server-$VER.properties" > "$D/server.properties"
 # The bot's profile id (online_chat: offline-style UUID of "lab:<name>"), opped for /say.
 printf '[{"uuid":"%s","name":"%s","level":4,"bypassesPlayerLimit":false}]\n' "$(offline_uuid "lab:$BOT")" "$BOT" > "$D/ops.json"
 
@@ -73,7 +73,7 @@ echo "online-mode lab up: 127.0.0.1:$PORT (services 127.0.0.1:$SVC), $(free -m |
 run_bot() { # run_bot <tag> [extra args]
   local tag=$1; shift
   local log="$D/bot-$tag.log" rc=0
-  timeout -s TERM 120 "$bin" --host 127.0.0.1 --port "$PORT" --username "$BOT" --version 26.1 \
+  timeout -s TERM 120 "$bin" --host 127.0.0.1 --port "$PORT" --username "$BOT" --version "$GAME" \
     --session-base "http://127.0.0.1:$SVC" --minutes 0.7 "$@" 2> "$log" || rc=$?
   grep -aE 'chat:|sending:|session|kicked|ERROR|WARN' "$log" | sed "s/^/  [$tag] /" || true
   return "$rc"

@@ -6,16 +6,16 @@
 # (different dimension_type registry data, so the bot must re-sync the registries on every switch).
 # Passes when every switch completed, Grim flagged nothing on either backend and the bot's resident
 # memory did not grow from the second join to the last one (more than 15 %).
-# Everything lives in lab/servers/proxy-26.1/ (git-ignored); the three servers are started for the
+# Everything lives in lab/servers/proxy-<26.1|26.2>/ (git-ignored; LAB_VER=26.2 for the 26.2 set); the three servers are started for the
 # run and stopped again by PID. Needs ~1.6 GB free memory and no other lab running.
 # Env: SWITCH_HEAP (backend heap, default 512M), BOT (default GhastBot6), KEEP=1 (leave them running).
 # Needs the example: cargo build -p ghast --release --example server_switch
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; . "$here/common.sh"
 switches=${1:-10}
-lab_select 26.1   # Paper 26.1.2 + Grim 2.3.74, Java 25
+lab_select "${LAB_VER:-26.1}"   # Paper 26.1.2 (LAB_VER=26.2: Paper 26.2) + Grim 2.3.74, Java 25
 LAB26="$DIR"
-P="$SERVERS/proxy-26.1"
+P="$SERVERS/proxy-$VER"
 VEL_JAR=velocity-3.5.1-615.jar
 VEL_SHA=b4e3164df5377346854dc6cb9e6a78022b1946ff69e89676313f5f6f1c6f0fb3
 VEL_URL="https://fill-data.papermc.io/v1/objects/$VEL_SHA/$VEL_JAR"
@@ -60,7 +60,7 @@ backend() { # backend <name> <port> <tall 0|1>
       -e "s/^motd=.*/motd=ghast lab proxy backend $1/" \
       -e "s/^view-distance=.*/view-distance=6/" -e "s/^simulation-distance=.*/simulation-distance=6/" \
       -e "s|^generator-settings=.*|generator-settings={\"layers\":[$layers,{\"block\":\"minecraft:dirt\",\"height\":2},{\"block\":\"minecraft:grass_block\",\"height\":1}],\"biome\":\"minecraft:plains\",\"features\":false,\"lakes\":false}|" \
-      "$here/templates/server-26.1.properties" > "$d/server.properties"
+      "$here/templates/server-$VER.properties" > "$d/server.properties"
   { printf '['; local sep= n
     for n in $LAB_OPS; do printf '%s{"uuid":"%s","name":"%s","level":4,"bypassesPlayerLimit":false}' "$sep" "$(offline_uuid "$n")" "$n"; sep=,; done
     printf ']\n'; } > "$d/ops.json"
@@ -84,7 +84,9 @@ PY
     if [ ! -f "$pack/pack.mcmeta" ]; then
       mkdir -p "$pack/data/minecraft/dimension_type"
       local tmp; tmp=$(mktemp -d)
-      (cd "$tmp" && "$(dirname "$JAVA")/jar" xf "$LAB26/versions/26.1.2/paper-26.1.2.jar" data/minecraft/dimension_type/overworld.json)
+      local vjar; vjar=$(ls "$LAB26"/versions/*/paper-*.jar | head -1)
+      (cd "$tmp" && "$(dirname "$JAVA")/jar" xf "$vjar" data/minecraft/dimension_type/overworld.json version.json)
+      fmt=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pack_version"]["data_major"])' "$tmp/version.json")
       python3 - "$tmp/data/minecraft/dimension_type/overworld.json" "$pack/data/minecraft/dimension_type/overworld.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -92,7 +94,7 @@ d["min_y"], d["height"], d["logical_height"] = -128, 512, 512
 json.dump(d, open(sys.argv[2], "w"), indent=2)
 PY
       rm -rf "$tmp"
-      printf '{"pack":{"description":"ghast lab: taller overworld","min_format":101,"max_format":[101,1]}}\n' > "$pack/pack.mcmeta"
+      printf '{"pack":{"description":"ghast lab: taller overworld","min_format":%s,"max_format":[%s,1]}}\n' "$fmt" "$fmt" > "$pack/pack.mcmeta"
     fi
   fi
 }
@@ -176,7 +178,7 @@ echo "proxy 127.0.0.1:$VEL_PORT -> a :$A_PORT (y -64..319), b :$B_PORT (y -128..
 out="$P/server_switch.log"
 set +e
 timeout -s TERM $((switches * 30 + 120)) "$bin" --host 127.0.0.1 --port "$VEL_PORT" --username "$BOT" \
-  --version 26.1 --switches "$switches" --servers a,b 2> "$out"
+  --version "$GAME" --switches "$switches" --servers a,b 2> "$out"
 rc=$?
 set -e
 grep -aE 'switch [0-9]+: on|summary|session|kicked|ERROR|WARN' "$out" || true
