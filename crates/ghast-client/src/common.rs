@@ -394,6 +394,10 @@ pub enum ConfigInbound {
     /// The server sends the client to another server (`host:port`): the session ends with
     /// [`crate::SessionEnd::Transferred`] (followed with [`crate::Client::follow_transfers`]).
     Transfer(String),
+    /// The server shows a dialog (26.1+, see [`crate::dialog`]).
+    ShowDialog(Box<crate::dialog::Dialog>),
+    /// The server closes the open dialog.
+    ClearDialog,
 }
 
 /// Configuration-state packets the client writes (1.20.2+).
@@ -426,6 +430,13 @@ pub enum ConfigOutbound {
     Brand(String),
     /// Client settings.
     Settings(ClientSettings),
+    /// A dialog button's custom action (26.1+, see [`Outbound::CustomClickAction`]).
+    CustomClickAction {
+        /// Action id.
+        id: String,
+        /// Payload tag.
+        payload: Option<ghast_protocol::nbt::AnonNbt>,
+    },
 }
 
 /// Static information from the join game packet.
@@ -596,6 +607,11 @@ pub enum Inbound {
         /// Pitch is relative.
         relative_pitch: bool,
     },
+    /// The server shows a dialog (26.1+ `show_dialog`, only with
+    /// [`crate::Interests::DIALOGS`]).
+    ShowDialog(std::sync::Arc<crate::dialog::Dialog>),
+    /// The server closes the open dialog (`clear_dialog`).
+    ClearDialog,
 }
 
 /// One entry of a 1.20.5+ attributes packet.
@@ -1023,4 +1039,15 @@ pub enum Outbound {
         /// Right paddle.
         right: bool,
     },
+    /// `custom_click_action` (26.1+): a dialog button's custom action, with its payload tag
+    /// (written as vanilla does: the tag length-prefixed, `TAG_End` for none).
+    CustomClickAction {
+        /// Action id.
+        id: String,
+        /// Payload tag.
+        payload: Option<ghast_protocol::nbt::AnonNbt>,
+    },
+    /// A dialog's command as vanilla sends it (`sendUnattendedCommand` after its checks): an
+    /// unsigned `chat_command` (without the `/`).
+    DialogCommand(String),
 }

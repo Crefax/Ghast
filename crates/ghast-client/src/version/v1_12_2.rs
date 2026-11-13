@@ -465,7 +465,9 @@ impl ClientVersion for V1_12_2 {
             | Outbound::CookieResponse { .. }
             | Outbound::LookAnswer { .. }
             | Outbound::VehicleMove { .. }
-            | Outbound::SteerBoat { .. } => Ok(()),
+            | Outbound::SteerBoat { .. }
+            | Outbound::CustomClickAction { .. }
+            | Outbound::DialogCommand(_) => Ok(()),
         }
     }
 

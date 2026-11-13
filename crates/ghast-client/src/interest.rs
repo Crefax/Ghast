@@ -33,6 +33,11 @@ impl Interests {
     /// [`crate::TickEvents::block_updates`]. The world applies them either way; this only
     /// collects them for the behaviour.
     pub const BLOCK_UPDATES: Interests = Interests(1 << 3);
+    /// Server dialogs (26.1+ `show_dialog` / `clear_dialog`, see [`crate::dialog`]):
+    /// [`crate::TickEvents::dialogs`], [`crate::TickContext::dialog`] and the answers, and in the
+    /// configuration state [`crate::Behavior::configuration_dialog`]. Without it play-state
+    /// dialogs are dropped undecoded and a configuration-state dialog is only logged.
+    pub const DIALOGS: Interests = Interests(1 << 5);
 
     /// Whether every group in `other` is in `self`.
     #[must_use]

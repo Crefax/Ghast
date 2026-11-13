@@ -112,6 +112,19 @@ pub trait Behavior {
     fn stop(&mut self, reason: &str) {
         let _ = reason;
     }
+
+    /// 26.1+: a dialog the server shows during the configuration state, before the player is in
+    /// the world (behaviours do not tick there). Called only with [`Interests::DIALOGS`]; the
+    /// client sends the returned answer at once, as vanilla would for that button (see
+    /// [`crate::dialog`]); `None` leaves the dialog open. A dialog the answer opens is offered
+    /// next. Play-state dialogs come through [`TickContext::dialog`] instead. Default: `None`.
+    fn configuration_dialog(
+        &mut self,
+        dialog: &crate::dialog::Dialog,
+    ) -> Option<crate::dialog::DialogAnswer> {
+        let _ = dialog;
+        None
+    }
 }
 
 /// A boxed behaviour is a behaviour (a runner can pick one from its config at run time).
@@ -139,6 +152,12 @@ impl<B: Behavior + ?Sized> Behavior for Box<B> {
     }
     fn stop(&mut self, reason: &str) {
         (**self).stop(reason);
+    }
+    fn configuration_dialog(
+        &mut self,
+        dialog: &crate::dialog::Dialog,
+    ) -> Option<crate::dialog::DialogAnswer> {
+        (**self).configuration_dialog(dialog)
     }
 }
 
@@ -262,6 +281,9 @@ pub struct TickEvents {
     pub raw: Vec<RawInbound>,
     /// Raw packets dropped because more than 4096 piled up between two behaviour ticks.
     pub raw_dropped: usize,
+    /// Dialogs shown and closed by the server, in arrival order (26.1+, only with
+    /// [`Interests::DIALOGS`]; [`TickContext::dialog`] is the one open now).
+    pub dialogs: Vec<crate::dialog::DialogEvent>,
 }
 
 impl TickEvents {
@@ -280,6 +302,7 @@ impl TickEvents {
         self.block_updates_dropped = 0;
         self.raw.clear();
         self.raw_dropped = 0;
+        self.dialogs.clear();
     }
 }
 
@@ -374,6 +397,8 @@ pub(crate) struct Core {
     origin: Instant,
     /// Entities push the player ([`TickContext::set_entity_push`]).
     entity_push: bool,
+    /// The dialog open now (26.1+ `show_dialog`).
+    dialog: Option<Arc<crate::dialog::Dialog>>,
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
@@ -452,6 +477,7 @@ impl Core {
             near_loaded: 0,
             origin: Instant::now(),
             entity_push,
+            dialog: None,
             #[cfg(test)]
             forced_look: None,
         }
@@ -816,6 +842,8 @@ impl<S: Sim> Engine<S> {
                 c.dimension = j.dimension;
                 c.joined = true;
                 c.pending.joined = true;
+                // The level's loading screen replaces any dialog.
+                c.dialog = None;
                 c.health = Health::default();
                 c.abilities = Abilities::default();
                 c.reset_player("join game");
@@ -1039,6 +1067,7 @@ impl<S: Sim> Engine<S> {
             Inbound::StartConfiguration => {
                 // Vanilla drops the level and the player until the next join.
                 c.joined = false;
+                c.dialog = None;
                 c.reset_player("reconfiguration");
                 sim.drop_level();
             }
@@ -1084,6 +1113,16 @@ impl<S: Sim> Engine<S> {
                 c.sent.yaw = c.pose.yaw;
                 c.sent.pitch = c.pose.pitch;
             }
+            Inbound::ShowDialog(d) => {
+                log::debug!("[{}] t{} dialog \"{}\"", c.opts.name, c.tick, d.title);
+                c.dialog = Some(d.clone());
+                c.pending.dialogs.push(crate::dialog::DialogEvent::Shown(d));
+            }
+            Inbound::ClearDialog => {
+                if c.dialog.take().is_some() {
+                    c.pending.dialogs.push(crate::dialog::DialogEvent::Cleared);
+                }
+            }
             Inbound::Disconnect(_) | Inbound::SetCompression(_) => {}
         }
     }
@@ -1108,8 +1147,20 @@ impl<S: Sim> Engine<S> {
         }
     }
 
-    /// One client tick at `now`.
+    /// One client tick at `now` (dialog commands never parse: no command tree).
+    #[cfg(test)]
     pub(crate) fn tick<B: Behavior>(&mut self, b: &mut B, now: Instant) {
+        self.tick_with(b, now, &|_| crate::dialog::CommandCheck::ParseErrors);
+    }
+
+    /// One client tick at `now`; `commands` checks a dialog's command like vanilla's
+    /// `verifyCommand` (the wire layer's command tree).
+    pub(crate) fn tick_with<B: Behavior>(
+        &mut self,
+        b: &mut B,
+        now: Instant,
+        commands: &dyn Fn(&str) -> crate::dialog::CommandCheck,
+    ) {
         let c = &mut self.core;
         c.tick += 1;
         // Per-tick packet-order guard and click timeout of the inventory.
@@ -1240,6 +1291,7 @@ impl<S: Sim> Engine<S> {
                     world: &self.sim,
                     held,
                     crosshair: std::cell::OnceCell::new(),
+                    commands,
                 };
                 if !started {
                     b.start(&mut ctx);
@@ -1713,6 +1765,8 @@ pub struct TickContext<'a> {
     /// The sent-pose crosshair, picked on the first ask: nothing a behaviour does during its
     /// tick changes the sent pose, the game mode or the world.
     crosshair: std::cell::OnceCell<(Option<BlockHit>, Option<hands::EntityHit>)>,
+    /// Vanilla's check of a dialog command (`verifyCommand`).
+    commands: &'a dyn Fn(&str) -> crate::dialog::CommandCheck,
 }
 
 impl std::fmt::Debug for TickContext<'_> {
@@ -2047,6 +2101,74 @@ impl TickContext<'_> {
     #[must_use]
     pub fn entity_push(&self) -> bool {
         self.core.entity_push
+    }
+
+    /// The dialog the server has open now (26.1+, only with [`Interests::DIALOGS`]; see
+    /// [`crate::dialog`]).
+    #[must_use]
+    pub fn dialog(&self) -> Option<&crate::dialog::Dialog> {
+        self.core.dialog.as_deref()
+    }
+
+    /// Answers the open dialog the way vanilla does for that button (or Escape): the packets
+    /// vanilla sends are written now, in call order with the other actions (`chat_command`
+    /// for a command that needs no confirmation, `custom_click_action` for a custom action;
+    /// client-only actions send nothing), and the dialog closes, stays or is replaced as its
+    /// `after_action` and the action say.
+    pub fn answer_dialog(
+        &mut self,
+        answer: &crate::dialog::DialogAnswer,
+    ) -> Result<crate::dialog::DialogOutcome, crate::dialog::DialogRefused> {
+        use crate::dialog::{CommandCheck, DialogOutcome, DialogRefused, DialogSent, Effect, Next};
+        let d = self.core.dialog.clone().ok_or(DialogRefused::NoDialog)?;
+        let (effect, mut next) = crate::dialog::resolve(&d, answer)?;
+        let sent = match effect {
+            Effect::Nothing => DialogSent::Nothing,
+            Effect::Custom { id, payload } => {
+                self.core.out.push(Outbound::CustomClickAction {
+                    id: id.clone(),
+                    payload: crate::dialog::payload_nbt(payload.as_ref()),
+                });
+                DialogSent::Custom(id)
+            }
+            Effect::Command(command) => match ((self.commands)(&command), answer.confirms()) {
+                (CommandCheck::NoIssues, _)
+                | (CommandCheck::ParseErrors | CommandCheck::PermissionsRequired, true) => {
+                    self.core.out.push(Outbound::DialogCommand(command.clone()));
+                    DialogSent::Command(command)
+                }
+                (CommandCheck::SignatureRequired, true) => {
+                    // "Suggest command": the player sends it from the chat line.
+                    self.core.out.push(Outbound::Chat(format!("/{command}")));
+                    DialogSent::Command(command)
+                }
+                (check, _) => {
+                    // The confirmation screen returns to the dialog when cancelled.
+                    next = Next::Stay;
+                    DialogSent::CommandHeld { command, check }
+                }
+            },
+        };
+        let (open, waiting) = match next {
+            Next::Stay => (Some(d.clone()), false),
+            Next::Closed => (None, false),
+            Next::Waiting => (None, true),
+            Next::Open(n) => (Some(n), false),
+        };
+        if let Some(n) = &open
+            && !Arc::ptr_eq(n, &d)
+        {
+            self.core
+                .pending
+                .dialogs
+                .push(crate::dialog::DialogEvent::Shown(n.clone()));
+        }
+        self.core.dialog = open.clone();
+        Ok(DialogOutcome {
+            sent,
+            open,
+            waiting,
+        })
     }
 
     /// The buttons held.
@@ -2569,6 +2691,8 @@ mod tests {
                 Outbound::LookAnswer { .. } => "C05",
                 Outbound::VehicleMove { .. } => "vehicle_move",
                 Outbound::SteerBoat { .. } => "steer_boat",
+                Outbound::CustomClickAction { .. } => "custom_click_action",
+                Outbound::DialogCommand(_) => "chat_command",
             })
             .collect();
         out.clear();

@@ -71,6 +71,8 @@ pub struct Wire {
     op_level: u8,
     /// The play login's `onlineMode` (26.2+; `None`: the version decides by encryption).
     online_mode: Option<bool>,
+    /// The `minecraft:dialog` registry of the last configuration (play `show_dialog` by id).
+    dialogs: Option<std::sync::Arc<crate::dialog::DialogRegistry>>,
 }
 
 /// `LocalChatSession` + its message encoder.
@@ -250,17 +252,7 @@ impl Wire {
         timestamp: i64,
         salt: i64,
     ) -> Result<(), EncodeError> {
-        if self.commands.is_none()
-            && let Some(raw) = self.commands_raw.as_deref().and_then(inflate)
-        {
-            match raw.decode_as::<cb::DeclareCommands>() {
-                Ok(p) => self.commands = command_tree(&p),
-                Err(e) => log::warn!("bad declare_commands packet: {e}"),
-            }
-            if self.commands.is_some() {
-                self.commands_raw = None;
-            }
-        }
+        self.parse_commands();
         let signable = self
             .commands
             .as_ref()
@@ -296,6 +288,31 @@ impl Wire {
             acknowledged: Bytes::copy_from_slice(&bits),
             checksum,
         })
+    }
+
+    /// Parses the kept `declare_commands` packet into the tree, once it is needed.
+    fn parse_commands(&mut self) {
+        if self.commands.is_none()
+            && let Some(raw) = self.commands_raw.as_deref().and_then(inflate)
+        {
+            match raw.decode_as::<cb::DeclareCommands>() {
+                Ok(p) => self.commands = command_tree(&p),
+                Err(e) => log::warn!("bad declare_commands packet: {e}"),
+            }
+            if self.commands.is_some() {
+                self.commands_raw = None;
+            }
+        }
+    }
+
+    /// `verifyCommand` of a dialog command (no tree: nothing parses).
+    fn check_command(&mut self, command: &str) -> crate::dialog::CommandCheck {
+        self.parse_commands();
+        self.commands
+            .as_ref()
+            .map_or(crate::dialog::CommandCheck::ParseErrors, |t| {
+                t.check(command, self.op_level)
+            })
     }
 
     fn new_level(&mut self, dimension: &str) {
@@ -606,7 +623,21 @@ impl ClientVersion for Marker {
                 let p: cc::Transfer = raw.decode_as()?;
                 ConfigInbound::Transfer(format!("{}:{}", p.host, p.port))
             }
-            _ => return Ok(None),
+            // The configuration codec sends the dialog inline.
+            cc::id::SHOW_DIALOG => ConfigInbound::ShowDialog(Box::new(crate::dialog::decode(
+                &raw.decode_as::<cc::ShowDialog>()?.dialog,
+                wire.dialogs.as_ref(),
+            ))),
+            cc::id::CLEAR_DIALOG => ConfigInbound::ClearDialog,
+            id => {
+                use ghast_protocol::PacketSet;
+                log::debug!(
+                    "configuration packet {} (0x{id:02x}, {} B) not handled",
+                    cc::ClientboundConfigurationPacket::name_of(id).unwrap_or("?"),
+                    raw.body.len()
+                );
+                return Ok(None);
+            }
         }))
     }
 
@@ -662,6 +693,10 @@ impl ClientVersion for Marker {
                 enable_server_listing: true,
                 particle_status: cs::SettingsParticleStatus::ALL,
             }),
+            ConfigOutbound::CustomClickAction { id, payload } => enc.write_raw(&RawPacket {
+                id: cs::id::CUSTOM_CLICK_ACTION,
+                body: crate::dialog::custom_click_body(id, payload.as_ref())?,
+            }),
         }
     }
 
@@ -714,6 +749,14 @@ impl ClientVersion for Marker {
         if &*p.id == "minecraft:chat_type" {
             wire.chat_types = p.entries.iter().map(|e| e.key.to_string()).collect();
         }
+        // Dialogs shown by registry id in play (entries of known packs come without data).
+        if &*p.id == "minecraft:dialog" {
+            wire.dialogs = Some(std::sync::Arc::new(crate::dialog::DialogRegistry::new(
+                p.entries
+                    .iter()
+                    .map(|e| (e.key.to_string(), e.value.clone())),
+            )));
+        }
         // Every data-driven registry's names (click hashes of components that name entries).
         wire.hash_registries
             .add(&p.id, p.entries.iter().map(|e| &*e.key));
@@ -734,6 +777,10 @@ impl ClientVersion for Marker {
             enc.write_packet(&sb::MessageAcknowledgement { count })?;
         }
         Ok(())
+    }
+
+    fn check_command(wire: &mut Wire, command: &str) -> crate::dialog::CommandCheck {
+        wire.check_command(command)
     }
 
     fn write_wire_replies(enc: &mut FrameEncoder, wire: &mut Wire) -> Result<(), EncodeError> {
@@ -795,6 +842,10 @@ impl ClientVersion for Marker {
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::SYSTEM_CHAT);
             f.insert(cb::id::PROFILELESS_CHAT);
+        }
+        if interests.contains(Interests::DIALOGS) {
+            f.insert(cb::id::SHOW_DIALOG);
+            f.insert(cb::id::CLEAR_DIALOG);
         }
         f
     }
@@ -1065,6 +1116,17 @@ impl ClientVersion for Marker {
                     port: u16::try_from(p.port).unwrap_or(25565),
                 }
             }
+            cb::id::SHOW_DIALOG => {
+                use ghast_protocol::types::Holder;
+                let reg = wire.dialogs.as_ref();
+                Inbound::ShowDialog(std::sync::Arc::new(
+                    match raw.decode_as::<cb::ShowDialog>()?.dialog {
+                        Holder::Inline(n) => crate::dialog::decode(&n, reg),
+                        Holder::Id(id) => crate::dialog::decode_reference(id, reg),
+                    },
+                ))
+            }
+            cb::id::CLEAR_DIALOG => Inbound::ClearDialog,
             cb::id::DECLARE_COMMANDS => {
                 // Kept raw: parsed only when a command is sent.
                 wire.commands_raw = Some(deflate(raw));
@@ -1260,6 +1322,14 @@ impl ClientVersion for Marker {
                 })
             }
             Outbound::Pong(id) => enc.write_packet(&sb::Pong { id: *id }),
+            Outbound::CustomClickAction { id, payload } => enc.write_raw(&RawPacket {
+                id: sb::id::CUSTOM_CLICK_ACTION,
+                body: crate::dialog::custom_click_body(id, payload.as_ref())?,
+            }),
+            // sendUnattendedCommand: always the unsigned packet.
+            Outbound::DialogCommand(command) => enc.write_packet(&sb::ChatCommand {
+                command: ByteString::from(command.as_str()),
+            }),
             Outbound::Chat(text) => match text.strip_prefix('/') {
                 Some(command) => wire.write_command(enc, command),
                 None => wire.write_chat(enc, text),
@@ -1456,6 +1526,8 @@ fn command_tree(p: &cb::DeclareCommands) -> Option<crate::version::commands::Com
             reader,
             children: node.children.iter().filter_map(|&c| index(c)).collect(),
             redirect: node.redirect_node.and_then(index),
+            executable: node.flags.has_command != 0,
+            restricted: node.flags.allows_restricted != 0,
         });
     }
     Some(CommandTree::new(nodes, index(p.root_index)?))

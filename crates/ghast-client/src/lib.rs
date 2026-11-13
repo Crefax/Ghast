@@ -63,6 +63,7 @@
 
 mod client;
 pub mod common;
+pub mod dialog;
 mod engine;
 #[cfg(all(
     test,

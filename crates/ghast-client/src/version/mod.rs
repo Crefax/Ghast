@@ -341,6 +341,13 @@ pub trait ClientVersion: Version + sealed::Sealed {
         Ok(())
     }
 
+    /// `ClientPacketListener.verifyCommand` for a dialog command (versions without dialogs:
+    /// never asked).
+    fn check_command(wire: &mut Self::Wire, command: &str) -> crate::dialog::CommandCheck {
+        let _ = (wire, command);
+        crate::dialog::CommandCheck::ParseErrors
+    }
+
     /// The play-state packet filter for the given interests: everything the core needs plus
     /// what the interests ask for. Everything else is dropped before it is decoded.
     fn play_filter(interests: Interests) -> PacketFilter;

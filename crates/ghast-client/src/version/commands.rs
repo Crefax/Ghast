@@ -53,6 +53,10 @@ pub(crate) struct Node {
     pub(crate) reader: Reader,
     pub(crate) children: Box<[u32]>,
     pub(crate) redirect: Option<u32>,
+    /// The node runs a command (`FLAG_EXECUTABLE`).
+    pub(crate) executable: bool,
+    /// Usable only with the permission the server grants (`FLAG_RESTRICTED`).
+    pub(crate) restricted: bool,
 }
 
 /// A parsed command tree (only what the signing decision needs).
@@ -79,6 +83,7 @@ impl CommandTree {
         let cx = Cx {
             input: command,
             allow_selectors,
+            allow_restricted: true,
         };
         let best = self.parse_nodes(&cx, self.root, 0, Vec::new(), true);
         best.args
@@ -91,6 +96,37 @@ impl CommandTree {
                 )
             })
             .collect()
+    }
+
+    /// `ClientPacketListener.verifyCommand` (dialog commands): the line must parse with the
+    /// player's permissions plus the restricted nodes (`isValidCommand`: all read, no errors, an
+    /// executable last node), have no signable argument, and parse without any permission
+    /// (no restricted nodes, no entity selectors). `op_level`: the player's permission level.
+    pub(crate) fn check(&self, command: &str, op_level: u8) -> crate::dialog::CommandCheck {
+        use crate::dialog::CommandCheck;
+        let valid = |allow_selectors: bool, allow_restricted: bool| {
+            let cx = Cx {
+                input: command,
+                allow_selectors,
+                allow_restricted,
+            };
+            let p = self.parse_nodes(&cx, self.root, 0, Vec::new(), true);
+            p.consumed == command.len()
+                && p.errors == 0
+                && self
+                    .nodes
+                    .get(p.last as usize)
+                    .is_some_and(|n| n.executable)
+        };
+        if !valid(op_level >= 2, true) {
+            CommandCheck::ParseErrors
+        } else if !self.signable_arguments(command, op_level >= 2).is_empty() {
+            CommandCheck::SignatureRequired
+        } else if !valid(false, false) {
+            CommandCheck::PermissionsRequired
+        } else {
+            CommandCheck::NoIssues
+        }
     }
 
     /// `CommandDispatcher.parseNodes` from `node` at `cursor`; `args` are the arguments
@@ -127,6 +163,10 @@ impl CommandTree {
                 .filter(|&c| self.nodes[c as usize].kind == 2)
                 .collect(),
         };
+        // `child.canUse(source)`: restricted nodes need the permission.
+        let candidates = candidates
+            .into_iter()
+            .filter(|&c| cx.allow_restricted || !self.nodes[c as usize].restricted);
         for child in candidates {
             let c = &self.nodes[child as usize];
             let end = if c.kind == 1 {
@@ -140,6 +180,7 @@ impl CommandTree {
                     args: args.clone(),
                     consumed: cursor,
                     errors: 1,
+                    last: node,
                 });
                 continue;
             };
@@ -166,6 +207,7 @@ impl CommandTree {
                     args: next,
                     consumed: end,
                     errors: 0,
+                    last: child,
                 }
             };
             potentials.push(parse);
@@ -176,6 +218,7 @@ impl CommandTree {
             args,
             consumed: cursor,
             errors: 1,
+            last: node,
         })
     }
 }
@@ -193,6 +236,8 @@ struct Parse {
     args: Vec<Arg>,
     consumed: usize,
     errors: u32,
+    /// The node the parse ended at (`getLastChild().getNode()`).
+    last: u32,
 }
 
 /// Brigadier's `isAllowedInUnquotedString`.
@@ -256,6 +301,9 @@ fn balanced(b: &[u8], at: usize) -> Option<usize> {
 struct Cx<'a> {
     input: &'a str,
     allow_selectors: bool,
+    /// Restricted nodes can be used (the player's suggestion provider; not the dialog check's
+    /// permission-free one).
+    allow_restricted: bool,
 }
 
 /// `EntitySelectorParser.parse` + the argument's checks; the end of the selector or name.
@@ -427,9 +475,60 @@ mod tests {
             &Cx {
                 input: s,
                 allow_selectors: true,
+                allow_restricted: true,
             },
             0,
         )
+    }
+
+    /// `verifyCommand`'s four outcomes on a small tree.
+    #[test]
+    fn dialog_command_check() {
+        use crate::dialog::CommandCheck as C;
+        let node = |kind, name: &str, reader, children: &[u32], executable, restricted| Node {
+            kind,
+            name: name.into(),
+            reader,
+            children: children.into(),
+            redirect: None,
+            executable,
+            restricted,
+        };
+        let entity = Reader::Entity {
+            single: false,
+            players: false,
+        };
+        let t = CommandTree::new(
+            vec![
+                node(0, "", Reader::Balanced, &[1, 3, 5, 7], false, false),
+                node(1, "login", Reader::Balanced, &[2], false, false),
+                node(2, "password", Reader::Greedy, &[], true, false),
+                node(1, "say", Reader::Balanced, &[4], false, false),
+                node(2, "message", Reader::Message, &[], true, false),
+                node(1, "op", Reader::Balanced, &[6], false, true),
+                node(2, "target", Reader::Word, &[], true, false),
+                node(1, "tp", Reader::Balanced, &[8], false, false),
+                node(2, "targets", entity, &[], true, false),
+            ],
+            0,
+        );
+        assert_eq!(t.check("login abc def", 0), C::NoIssues);
+        assert_eq!(t.check("login", 0), C::ParseErrors, "not executable");
+        assert_eq!(t.check("logout", 0), C::ParseErrors);
+        assert_eq!(
+            t.check("login abc ", 0),
+            C::NoIssues,
+            "greedy reads the space"
+        );
+        assert_eq!(t.check("say hi there", 0), C::SignatureRequired);
+        assert_eq!(t.check("op bob", 0), C::PermissionsRequired);
+        assert_eq!(t.check("tp Steve", 0), C::NoIssues);
+        assert_eq!(
+            t.check("tp @p", 2),
+            C::PermissionsRequired,
+            "selectors need level 2"
+        );
+        assert_eq!(t.check("tp @p", 0), C::ParseErrors);
     }
 
     #[test]

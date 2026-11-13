@@ -477,8 +477,9 @@ where
     let login = async {
         let stream = client.connector.connect(&address).await?;
         let (mut rd, mut wr) = stream.into_split();
-        login::<V, _, _>(
+        login::<V, _, _, B>(
             client,
+            &mut *behavior,
             &mut rd,
             &mut wr,
             &mut dec,
@@ -596,8 +597,9 @@ enum ConfigEnd {
 /// Handshake and login (and on 1.20.2+ the configuration state). Returns once the
 /// connection is in the play state.
 #[allow(clippy::too_many_arguments)] // the session's connection state, borrowed piecewise
-async fn login<V, R, W>(
+async fn login<V, R, W, B>(
     client: &Client,
+    behavior: &mut B,
     rd: &mut R,
     wr: &mut W,
     dec: &mut FrameDecoder,
@@ -611,6 +613,7 @@ where
     V: ClientVersion,
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    B: Behavior,
 {
     if transfer {
         V::write_transfer_handshake(enc, &address.host(), address.port())?;
@@ -694,8 +697,10 @@ where
                         let settings = ConfigOutbound::Settings(client.settings.clone());
                         V::write_configuration(enc, &settings, wire)?;
                         flush(wr, enc).await?;
-                        return configure::<V, _, _>(client, rd, wr, dec, enc, wire, registries)
-                            .await;
+                        return configure::<V, _, _, B>(
+                            client, behavior, rd, wr, dec, enc, wire, registries,
+                        )
+                        .await;
                     }
                     return Ok(ConfigEnd::Play);
                 }
@@ -718,8 +723,10 @@ const VANILLA_PACKS: &[&str] = &[
 
 /// The configuration state (1.20.2+), until the server finishes it. Registry data is collected
 /// into `registries` (raw) for the world.
-async fn configure<V, R, W>(
+#[allow(clippy::too_many_arguments)] // the session's connection state, borrowed piecewise
+async fn configure<V, R, W, B>(
     client: &Client,
+    behavior: &mut B,
     rd: &mut R,
     wr: &mut W,
     dec: &mut FrameDecoder,
@@ -731,6 +738,7 @@ where
     V: ClientVersion,
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
+    B: Behavior,
 {
     let family = V::GAME.protocol_info().game_versions;
     loop {
@@ -790,6 +798,11 @@ where
                         port: port.parse().unwrap_or(25565),
                     });
                 }
+                ConfigInbound::ShowDialog(d) => {
+                    configuration_dialog(client.account.name(), behavior, *d)
+                }
+                // A dialog left open closes; nothing is sent.
+                ConfigInbound::ClearDialog => continue,
             };
             for o in &reply {
                 V::write_configuration(enc, o, wire)?;
@@ -800,6 +813,70 @@ where
             return Err(ClientError::LoginClosed);
         }
     }
+}
+
+/// A dialog shown during the configuration state: the behaviour's answers
+/// ([`Behavior::configuration_dialog`]) as the packets vanilla sends there. Commands do nothing
+/// in this state (vanilla logs them); a dialog an answer opens is offered again (at most 16 in a
+/// row).
+fn configuration_dialog<B: Behavior>(
+    name: &str,
+    behavior: &mut B,
+    dialog: crate::dialog::Dialog,
+) -> Vec<ConfigOutbound> {
+    use crate::dialog::{Effect, Next};
+    let mut out = Vec::new();
+    if !behavior.interests().contains(Interests::DIALOGS) {
+        log::warn!(
+            "[{name}] the server shows a dialog during configuration ({:?}, \"{}\"); no behaviour \
+             answers dialogs (Interests::DIALOGS), so the server may wait for an answer",
+            dialog.kind,
+            dialog.title
+        );
+        return out;
+    }
+    log::info!("[{name}] configuration dialog \"{}\"", dialog.title);
+    let mut current = dialog;
+    for _ in 0..16 {
+        let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            behavior.configuration_dialog(&current)
+        }));
+        let answer = match answer {
+            Ok(Some(a)) => a,
+            Ok(None) => break,
+            Err(_) => {
+                log::error!(
+                    "[{name}] behaviour {} panicked in configuration_dialog",
+                    behavior.name()
+                );
+                break;
+            }
+        };
+        let (effect, next) = match crate::dialog::resolve(&current, &answer) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("[{name}] configuration dialog answer refused: {e}");
+                break;
+            }
+        };
+        match effect {
+            Effect::Nothing => {}
+            Effect::Custom { id, payload } => out.push(ConfigOutbound::CustomClickAction {
+                id,
+                payload: crate::dialog::payload_nbt(payload.as_ref()),
+            }),
+            Effect::Command(c) => {
+                // ClientConfigurationPacketListenerImpl: the dialog stays open.
+                log::warn!("[{name}] commands are not supported in configuration phase: {c:?}");
+                break;
+            }
+        }
+        match next {
+            Next::Open(d) => current = (*d).clone(),
+            _ => break,
+        }
+    }
+    out
 }
 
 /// Answers an encryption request; returns the shared secret to enable.
@@ -1184,7 +1261,10 @@ where
     /// Play → configuration → play (1.20.2+ `start_configuration`): acknowledges, runs the
     /// configuration state (no ticks meanwhile, like vanilla without a level) and resumes play;
     /// the server then sends a new join game.
-    async fn reconfigure_if_asked(&mut self) -> Result<Option<SessionEnd>, ClientError> {
+    async fn reconfigure_if_asked<B: Behavior>(
+        &mut self,
+        behavior: &mut B,
+    ) -> Result<Option<SessionEnd>, ClientError> {
         if !self.reconfigure {
             return Ok(None);
         }
@@ -1197,8 +1277,9 @@ where
         let play_filter = *self.dec.filter();
         self.dec.set_filter(PacketFilter::all());
         let mut registries = Vec::new();
-        let end = configure::<V, _, _>(
+        let end = configure::<V, _, _, B>(
             self.client,
+            behavior,
             &mut self.rd,
             &mut self.wr,
             &mut self.dec,
@@ -1263,7 +1344,7 @@ where
         if let Some(end) = self.drain_inbound()? {
             return Ok(end);
         }
-        if let Some(end) = self.reconfigure_if_asked().await? {
+        if let Some(end) = self.reconfigure_if_asked(behavior).await? {
             return Ok(end);
         }
         self.encode_outbound()?;
@@ -1309,7 +1390,7 @@ where
                         let raw = self.raw_ids.clone();
                         self.set_filter(self.interests, &raw);
                     }
-                    if let Some(end) = self.reconfigure_if_asked().await? {
+                    if let Some(end) = self.reconfigure_if_asked(behavior).await? {
                         return Ok(end);
                     }
                     // Replies (keep-alive, teleport, confirms) go out right away, like
@@ -1331,7 +1412,7 @@ where
                                 if let Some(end) = self.drain_inbound()? {
                                     return Ok(end);
                                 }
-                                if let Some(end) = self.reconfigure_if_asked().await? {
+                                if let Some(end) = self.reconfigure_if_asked(behavior).await? {
                                     return Ok(end);
                                 }
                             }
@@ -1344,7 +1425,12 @@ where
                         return Err(ClientError::Timeout("no data from the server"));
                     }
                     self.maybe_refresh_keys();
-                    self.engine.tick(behavior, now);
+                    {
+                        // Dialog commands are checked against the server's command tree.
+                        let wire = std::cell::RefCell::new(&mut self.wire);
+                        let check = |c: &str| V::check_command(&mut wire.borrow_mut(), c);
+                        self.engine.tick_with(behavior, now, &check);
+                    }
                     self.encode_outbound()?;
                     flush(&mut self.wr, &mut self.enc).await?;
                     if let Some(reason) = self.engine.quit_requested() {

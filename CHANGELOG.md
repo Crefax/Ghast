@@ -18,6 +18,26 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
   entities no longer push the player. Off is not vanilla: a vanilla client always applies these
   pushes. On 1.8.9, 1.12.2 and 1.16.5 the client never pushes the player, so the switch does
   nothing there.
+- **Server dialogs (26.1, 26.2)** in `ghast-client`, opt-in with `Interests::DIALOGS`: module
+  `dialog` (the decoded `Dialog` with its body, inputs, buttons and actions; `DialogAnswer`,
+  `InputValue`, `DialogOutcome`, `DialogSent`, `CommandCheck`, `DialogRefused`, `DialogEvent`).
+  In play: `TickEvents::dialogs`, `TickContext::dialog` and `TickContext::answer_dialog`; in the
+  configuration state: `Behavior::configuration_dialog` (default `None`). An answer sends what
+  the vanilla client sends for that button or Escape: `custom_click_action` (with the inputs
+  added to the payload in vanilla's order), the command as an unsigned `chat_command` when
+  vanilla would send it without asking (checked against the server's command tree; otherwise
+  held, or sent with `DialogAnswer::confirm_commands`), nothing for client-only actions; a
+  `show_dialog` action opens the next dialog. Checked byte for byte against answers written by
+  the vanilla client classes (`tests/golden/26.2/dialog_answers.txt`, generator in
+  `oracle/dialogs/`) and through the whole client against replayed vanilla server sessions.
+- `common::{Inbound, ConfigInbound}::{ShowDialog, ClearDialog}`,
+  `common::{Outbound, ConfigOutbound}::CustomClickAction` and `common::Outbound::DialogCommand`.
+
+### Changed
+
+- A configuration-state dialog that no behaviour answers is logged as a warning (a server
+  waiting for the answer would otherwise stall the login without a word); other configuration
+  packets the client does not handle are logged at debug level.
 
 ## 0.4.2 — 2026-11-13
 
