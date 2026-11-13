@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run --release --example afk_viewer -- <host:port> <name> [viewer port] [minutes]
-//!     [--record <dir>] [--token <token>] [--version 1.8.9|26.1]
+//!     [--record <dir>] [--token <token>] [--version 1.8.9|26.1|26.2]
 //! ```
 //!
 //! Then open `http://127.0.0.1:<viewer port>/` (third person: `?mode=tp`). Recordings made with
@@ -53,7 +53,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let version = match flag(&mut args, "--version").as_deref() {
         None | Some("1.8.9") => GameVersion::V1_8_9,
         Some("26.1") => GameVersion::V26_1,
-        Some(v) => return Err(format!("version {v}: 1.8.9 or 26.1").into()),
+        Some("26.2") => GameVersion::V26_2,
+        Some(v) => return Err(format!("version {v}: 1.8.9, 26.1 or 26.2").into()),
     };
     let addr = args
         .first()
