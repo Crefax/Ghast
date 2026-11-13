@@ -1050,4 +1050,6 @@ pub enum Outbound {
     /// A dialog's command as vanilla sends it (`sendUnattendedCommand` after its checks): an
     /// unsigned `chat_command` (without the `/`).
     DialogCommand(String),
+    /// A packet the behaviour built itself ([`crate::TickContext::send_raw`]), written as given.
+    Raw(ghast_protocol::RawPacket),
 }

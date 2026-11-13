@@ -296,6 +296,7 @@ impl ClientVersion for V1_8 {
 
     fn write_play(enc: &mut FrameEncoder, out: &Outbound, (): &mut ()) -> Result<(), EncodeError> {
         match out {
+            Outbound::Raw(p) => enc.write_raw(p),
             Outbound::KeepAlive(id) => enc.write_packet(&sb::KeepAlive {
                 // 1.8 keep-alive ids are VarInts; the value came from one.
                 keep_alive_id: *id as i32,

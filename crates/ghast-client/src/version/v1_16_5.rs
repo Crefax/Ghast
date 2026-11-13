@@ -320,6 +320,7 @@ impl ClientVersion for V1_16_5 {
 
     fn write_play(enc: &mut FrameEncoder, out: &Outbound, (): &mut ()) -> Result<(), EncodeError> {
         match out {
+            Outbound::Raw(p) => enc.write_raw(p),
             Outbound::KeepAlive(id) => enc.write_packet(&sb::KeepAlive { keep_alive_id: *id }),
             Outbound::TeleportConfirm(teleport_id) => enc.write_packet(&sb::TeleportConfirm {
                 teleport_id: *teleport_id,

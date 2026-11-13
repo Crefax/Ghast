@@ -1322,6 +1322,7 @@ impl ClientVersion for Marker {
                 })
             }
             Outbound::Pong(id) => enc.write_packet(&sb::Pong { id: *id }),
+            Outbound::Raw(p) => enc.write_raw(p),
             Outbound::CustomClickAction { id, payload } => enc.write_raw(&RawPacket {
                 id: sb::id::CUSTOM_CLICK_ACTION,
                 body: crate::dialog::custom_click_body(id, payload.as_ref())?,

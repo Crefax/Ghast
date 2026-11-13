@@ -1950,6 +1950,41 @@ impl TickContext<'_> {
         self.core.out.push(Outbound::Swing);
     }
 
+    /// Escape hatch: queues a serverbound play packet the behaviour encoded itself (`id` and
+    /// `body` of this session's protocol version, see [`TickContext::version`]), written as
+    /// given in call order with the other actions, before this tick's movement packet.
+    /// **You are responsible for protocol correctness**: the client does not look at it, so a
+    /// packet that changes state it models (movement, held slot, windows, digging) makes the
+    /// client and the server disagree.
+    pub fn send_raw(&mut self, id: i32, body: impl Into<bytes::Bytes>) {
+        self.core
+            .out
+            .push(Outbound::Raw(ghast_protocol::RawPacket::new(
+                id,
+                body.into(),
+            )));
+    }
+
+    /// [`TickContext::send_raw`] with a generated packet type (e.g. from
+    /// `ghast::protocol::v26_2::play::serverbound`); it must belong to this session's version.
+    /// Refused (nothing queued) unless it is a serverbound play packet.
+    pub fn send_packet<P: ghast_protocol::Packet>(
+        &mut self,
+        packet: &P,
+    ) -> Result<(), ghast_protocol::EncodeError> {
+        if P::STATE != ghast_protocol::State::Play
+            || P::DIRECTION != ghast_protocol::Direction::Serverbound
+        {
+            return Err(ghast_protocol::EncodeError::Invalid(
+                "not a serverbound play packet",
+            ));
+        }
+        let mut body = bytes::BytesMut::new();
+        packet.encode(&mut body)?;
+        self.send_raw(P::ID, body.freeze());
+        Ok(())
+    }
+
     /// Ends the session after this tick's packets are written.
     pub fn disconnect(&mut self, reason: impl Into<String>) {
         self.core.quit = Some(reason.into());
@@ -2693,6 +2728,7 @@ mod tests {
                 Outbound::SteerBoat { .. } => "steer_boat",
                 Outbound::CustomClickAction { .. } => "custom_click_action",
                 Outbound::DialogCommand(_) => "chat_command",
+                Outbound::Raw(_) => "raw",
             })
             .collect();
         out.clear();
@@ -2881,6 +2917,57 @@ mod tests {
             e.tick(&mut b, t0);
             let n = names(e.outbound());
             assert_eq!(n.len(), 1, "one movement packet per tick: {n:?}");
+        }
+    }
+
+    /// Raw packets go out in call order with the other actions, before the movement packet,
+    /// and the wire writes them as given (the same frame as the typed packet).
+    #[test]
+    fn raw_packets_keep_the_call_order() {
+        use crate::version::ClientVersion;
+        for v in [GameVersion::V1_8_9, GameVersion::V26_1] {
+            let mut e = engine(v);
+            join(&mut e);
+            let t0 = Instant::now();
+            e.note_inbound(t0);
+            let mut refused = None;
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                if ctx.tick() == 3 {
+                    ctx.swing();
+                    ctx.send_raw(0x7f, vec![1, 2, 3]);
+                    ctx.send_packet(&ghast_protocol::v26_1::play::serverbound::ArmAnimation {
+                        hand: ghast_protocol::v26_1::play::serverbound::ArmAnimationHand::OFF_HAND,
+                    })
+                    .unwrap();
+                    refused = Some(ctx.send_packet(
+                        &ghast_protocol::v26_1::play::clientbound::KeepAlive { keep_alive_id: 1 },
+                    ));
+                    ctx.chat("after");
+                }
+            });
+            for _ in 0..2 {
+                e.tick(&mut b, t0);
+            }
+            e.outbound().clear();
+            e.tick(&mut b, t0);
+            let out = e.outbound().clone();
+            let n = names(e.outbound());
+            assert_eq!(n[..4], ["swing", "raw", "raw", "chat"], "{v:?} {n:?}");
+            let movement = n.iter().position(|x| {
+                x.starts_with('C') || x.contains("position") || *x == "flying" || *x == "look"
+            });
+            assert!(movement.is_none_or(|m| m > 3), "{v:?} {n:?}");
+            assert!(refused.unwrap().is_err());
+            // The wire writes the raw packet as the typed one.
+            let typed = ghast_protocol::v26_1::play::serverbound::ArmAnimation {
+                hand: ghast_protocol::v26_1::play::serverbound::ArmAnimationHand::OFF_HAND,
+            };
+            let mut want = ghast_protocol::FrameEncoder::new();
+            want.write_packet(&typed).unwrap();
+            let mut got = ghast_protocol::FrameEncoder::new();
+            let mut wire = crate::version::Wire26_1::default();
+            crate::version::V26_1::write_play(&mut got, &out[2], &mut wire).unwrap();
+            assert_eq!(got.take(), want.take());
         }
     }
 

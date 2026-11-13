@@ -30,6 +30,11 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
   `show_dialog` action opens the next dialog. Checked byte for byte against answers written by
   the vanilla client classes (`tests/golden/26.2/dialog_answers.txt`, generator in
   `oracle/dialogs/`) and through the whole client against replayed vanilla server sessions.
+- **Raw serverbound packets** from a behaviour (every version): `TickContext::send_raw(id, body)`
+  and `TickContext::send_packet(&packet)` (a generated serverbound play packet of the session's
+  version; others are refused) queue a packet in call order with the other actions, before the
+  tick's movement packet. An escape hatch: the client does not look at these packets, so their
+  protocol correctness is the caller's job. `common::Outbound::Raw`.
 - `common::{Inbound, ConfigInbound}::{ShowDialog, ClearDialog}`,
   `common::{Outbound, ConfigOutbound}::CustomClickAction` and `common::Outbound::DialogCommand`.
 
