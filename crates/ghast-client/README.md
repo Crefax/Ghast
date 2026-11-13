@@ -518,6 +518,7 @@ Every script the 26.1 lab passes, on 26.2 (`LAB_VER=26.2` / `<script> 26.2`):
 | `online-26.1.sh` with `LAB_VER=26.2` (online mode, signed chat) | PASS (signed chat secure, unsigned control refused), 0 flags |
 | idle drops onto slime (8, 12, 30 blocks) and a bed (6) | 0 flags |
 | idle drop onto slime from 20 blocks | Grim Simulation 0.0417 every time: corner case (3) above, vanilla-exact |
+| `dialog` example (0.4.3 dev, 2026-11-13), dialogs shown with the vanilla `/dialog show` / `/dialog clear` | `run_command` and `dynamic/run_command` sent (`/me says $(msg)` with a typed input ran on the server); `/me` without `--confirm` held as SignatureRequired by the server's command tree, the dialog left open; `dynamic/custom` sent and accepted (no disconnect); `after_action: none` kept the dialog open until `/dialog clear`. A configuration-state dialog cannot be shown with vanilla commands (fake-server test only) |
 
 ## Live results: 26.1 (local WSL lab, Paper 26.1.2 build 74 + Grim 2.3.74, 2026-11-11)
 

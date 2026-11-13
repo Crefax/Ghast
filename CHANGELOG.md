@@ -40,6 +40,8 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
   `TickContext::prediction_sequence` / `TickView::prediction_sequence` (26.1+: the
   block-prediction sequence number of the last predicting packet written, the number
   `block_changed_ack` answers with; `None` before 1.19). Nothing is copied or kept for them.
+- Example `dialog` (the facade's examples): prints every dialog and answers it with a chosen
+  button and typed input values.
 - `common::{Inbound, ConfigInbound}::{ShowDialog, ClearDialog}`,
   `common::{Outbound, ConfigOutbound}::CustomClickAction` and `common::Outbound::DialogCommand`.
 
