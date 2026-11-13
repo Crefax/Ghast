@@ -179,7 +179,7 @@ impl Behavior for Answerer {
     }
 
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
-        let events = ctx.events().dialogs.clone();
+        let events = ctx.dialog_events().to_vec();
         for ev in events {
             match ev {
                 DialogEvent::Shown(d) => {

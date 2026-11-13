@@ -376,7 +376,7 @@ and dimension (it replays the session's join / respawn packets); switching off d
 
 `show_dialog` / `clear_dialog` in the configuration and the play state (`ghast_client::dialog`;
 its module docs list what the vanilla client does). In play the dialog arrives in
-`ctx.events().dialogs` / `ctx.dialog()` and `ctx.answer_dialog(&DialogAnswer::button(i)
+`ctx.dialog_events()` / `ctx.dialog()` and `ctx.answer_dialog(&DialogAnswer::button(i)
 .with_value(key, value))` sends what vanilla sends for that button: `custom_click_action` (inputs
 added to the payload in vanilla's order), the command as an unsigned `chat_command` when vanilla
 would send it without asking (`verifyCommand` on the server's command tree; otherwise held, or

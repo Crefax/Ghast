@@ -2,7 +2,7 @@
 //! vanilla client sends for them.
 //!
 //! Opt in with [`Interests::DIALOGS`](crate::Interests::DIALOGS). In the play state the shown
-//! dialog arrives as [`TickEvents::dialogs`](crate::TickEvents::dialogs) and
+//! dialog arrives as [`TickContext::dialog_events`](crate::TickContext::dialog_events) and
 //! [`TickContext::dialog`](crate::TickContext::dialog); the behaviour answers with
 //! [`TickContext::answer_dialog`](crate::TickContext::answer_dialog). In the configuration state
 //! (before the player is in the world, where behaviours do not tick) the client calls
@@ -310,7 +310,7 @@ impl DialogRegistry {
     }
 }
 
-/// A dialog event of the play state ([`TickEvents::dialogs`](crate::TickEvents::dialogs)).
+/// A dialog event of the play state ([`TickContext::dialog_events`](crate::TickContext::dialog_events)).
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum DialogEvent {

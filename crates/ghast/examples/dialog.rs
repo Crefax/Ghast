@@ -85,7 +85,7 @@ impl Behavior for Answers {
         for m in &ctx.events().chat {
             log::info!("chat: {}", m.plain());
         }
-        let events = ctx.events().dialogs.clone();
+        let events = ctx.dialog_events().to_vec();
         for ev in events {
             match ev {
                 DialogEvent::Shown(d) => {

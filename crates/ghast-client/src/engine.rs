@@ -281,9 +281,6 @@ pub struct TickEvents {
     pub raw: Vec<RawInbound>,
     /// Raw packets dropped because more than 4096 piled up between two behaviour ticks.
     pub raw_dropped: usize,
-    /// Dialogs shown and closed by the server, in arrival order (26.1+, only with
-    /// [`Interests::DIALOGS`]; [`TickContext::dialog`] is the one open now).
-    pub dialogs: Vec<crate::dialog::DialogEvent>,
 }
 
 impl TickEvents {
@@ -302,7 +299,6 @@ impl TickEvents {
         self.block_updates_dropped = 0;
         self.raw.clear();
         self.raw_dropped = 0;
-        self.dialogs.clear();
     }
 }
 
@@ -401,6 +397,10 @@ pub(crate) struct Core {
     entity_push_sim: bool,
     /// The dialog open now (26.1+ `show_dialog`).
     dialog: Option<Arc<crate::dialog::Dialog>>,
+    /// Dialog events since the behaviour's last tick, and those of its current tick (kept out
+    /// of [`TickEvents`]: almost always empty, they cost nothing per tick this way).
+    dialogs_pending: Vec<crate::dialog::DialogEvent>,
+    dialogs: Vec<crate::dialog::DialogEvent>,
     /// The wire's block-prediction sequence after the last packets written (1.19+).
     sequence: Option<i32>,
     /// Test hook: this tick's look, set instead of a rotation step.
@@ -483,6 +483,8 @@ impl Core {
             entity_push,
             entity_push_sim: entity_push,
             dialog: None,
+            dialogs_pending: Vec::new(),
+            dialogs: Vec::new(),
             sequence: None,
             #[cfg(test)]
             forced_look: None,
@@ -1127,11 +1129,11 @@ impl<S: Sim> Engine<S> {
             Inbound::ShowDialog(d) => {
                 log::debug!("[{}] t{} dialog \"{}\"", c.opts.name, c.tick, d.title);
                 c.dialog = Some(d.clone());
-                c.pending.dialogs.push(crate::dialog::DialogEvent::Shown(d));
+                c.dialogs_pending.push(crate::dialog::DialogEvent::Shown(d));
             }
             Inbound::ClearDialog => {
                 if c.dialog.take().is_some() {
-                    c.pending.dialogs.push(crate::dialog::DialogEvent::Cleared);
+                    c.dialogs_pending.push(crate::dialog::DialogEvent::Cleared);
                 }
             }
             Inbound::Disconnect(_) | Inbound::SetCompression(_) => {}
@@ -1276,6 +1278,10 @@ impl<S: Sim> Engine<S> {
         } else if !self.state.failed && !self.state.done {
             std::mem::swap(&mut c.pending, &mut c.current);
             c.pending.clear();
+            if !c.dialogs.is_empty() || !c.dialogs_pending.is_empty() {
+                c.dialogs.clear();
+                std::mem::swap(&mut c.dialogs, &mut c.dialogs_pending);
+            }
             c.current.inventory = c.inv.drain_events();
             c.current.block_updates_dropped =
                 self.sim.drain_block_updates(&mut c.current.block_updates);
@@ -2177,6 +2183,14 @@ impl TickContext<'_> {
         self.core.dialog.as_deref()
     }
 
+    /// Dialogs the server showed and closed since the behaviour's previous tick, in arrival
+    /// order (26.1+, only with [`Interests::DIALOGS`]; [`TickContext::dialog`] is the one open
+    /// now). Like [`TickContext::events`], kept while the behaviour is on hold.
+    #[must_use]
+    pub fn dialog_events(&self) -> &[crate::dialog::DialogEvent] {
+        &self.core.dialogs
+    }
+
     /// Answers the open dialog the way vanilla does for that button (or Escape): the packets
     /// vanilla sends are written now, in call order with the other actions (`chat_command`
     /// for a command that needs no confirmation, `custom_click_action` for a custom action;
@@ -2226,8 +2240,7 @@ impl TickContext<'_> {
             && !Arc::ptr_eq(n, &d)
         {
             self.core
-                .pending
-                .dialogs
+                .dialogs_pending
                 .push(crate::dialog::DialogEvent::Shown(n.clone()));
         }
         self.core.dialog = open.clone();

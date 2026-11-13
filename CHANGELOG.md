@@ -21,7 +21,7 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
 - **Server dialogs (26.1, 26.2)** in `ghast-client`, opt-in with `Interests::DIALOGS`: module
   `dialog` (the decoded `Dialog` with its body, inputs, buttons and actions; `DialogAnswer`,
   `InputValue`, `DialogOutcome`, `DialogSent`, `CommandCheck`, `DialogRefused`, `DialogEvent`).
-  In play: `TickEvents::dialogs`, `TickContext::dialog` and `TickContext::answer_dialog`; in the
+  In play: `TickContext::dialog_events`, `TickContext::dialog` and `TickContext::answer_dialog`; in the
   configuration state: `Behavior::configuration_dialog` (default `None`). An answer sends what
   the vanilla client sends for that button or Escape: `custom_click_action` (with the inputs
   added to the payload in vanilla's order), the command as an unsigned `chat_command` when
