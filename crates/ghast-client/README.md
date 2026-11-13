@@ -2,8 +2,9 @@
 
 Headless Minecraft Java Edition client for the ghast library: connection, login, the fixed
 50 ms tick loop and a version-agnostic bot API. Supports **1.8.9** (protocol 47),
-**1.12.2** (protocol 340), **1.16.5** (protocol 754) and **26.1 – 26.1.2** (protocol 775). Each
-version is a cargo feature (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`; default: all) and builds
+**1.12.2** (protocol 340), **1.16.5** (protocol 754), **26.1 – 26.1.2** (protocol 775) and **26.2**
+(protocol 776). Each version is a cargo feature (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`;
+default: all) and builds
 alone; what a version can do is its `version::Capabilities` row (`GameVersion::caps()`), which
 the core reads instead of comparing version numbers.
 
@@ -94,6 +95,33 @@ writes the first rejected bodies there for a bug report; a behaviour
 panic is caught, the behaviour is stopped and the player keeps standing; sessions share no
 state, the session future is `Send` for `Send` behaviours, so many bots can run on one
 multi-threaded runtime or one bot per process on a `current_thread` runtime (examples).
+
+## Modern versions: one implementation, one row per version
+
+The modern client (26.1 and later) is written once: `src/version/modern.rs` (the wire layer:
+login, configuration, play packets, chat signing, command trees) and `src/sim/modern.rs` (world,
+movement, vehicles, entities, digging) are mounted once per version by a small row module
+(`version/v26_x.rs`, `sim/v26_x.rs`) that names the version's protocol, data, world, entity,
+inventory and physics modules and its few true facts (entity data indices, effect ids, the team
+packet layout, the play login's online-mode flag). Each version gets its own monomorphised copy:
+no run-time version branches. Ids that versions renumber (entity types, attributes, items,
+command parsers) are resolved by name. The engine replays of the oracle goldens
+(`src/engine_modern_tests.rs`) run for every modern version. Adding a version: see
+CONTRIBUTING.md ("Adding a modern version").
+
+## 26.2 (protocol 776)
+
+26.2 is the 26.1 row with its own modules. True deltas: the play login's `onlineMode` decides
+whether a chat session starts (26.1: an encrypted connection); the team parameter order
+(display name, prefix, suffix, visibility, collision rule, optional colour, options); 40
+renumbered attributes, three of them new for movement (`bounciness`, `friction_modifier`,
+`air_drag_modifier`: fed to the physics, the extended tick runs while any is not at its
+default); collision restitution in the physics (`V26_2`: slime and bed bounces, signed zeros).
+The login's session id is telemetry in the vanilla client and is not used; `spectator_action` is
+never sent. Proven: every 26.1 engine replay also runs on `tests/golden/26.2/` (joins, teleports,
+elytra, riptide, entities, border, nether, boats, minecarts, item use, entity pick,
+`player_loaded`, signed chat, login encryption) plus the idle slime / bed drop scenarios
+(8500 ticks to the end of the bounce tail), packet for packet.
 
 ## 26.1 (protocol 775)
 
@@ -205,8 +233,8 @@ Read from the decompiled 26.1 client (`Minecraft.tick`, `LocalPlayer.tick` / `se
   `chat_message`, `chat_command` / `chat_command_signed` (which arguments are signed, the
   signatures, the bytes) and acknowledgements, byte-identical; `net_crypto.jsonl.gz` — session
   hash, the `hello` packet, the key packet both ways, AES/CFB8 both directions.
-- **Not yet on 26.1**: incoming signed messages are not verified (a message vanilla would
-  reject as invalid still enters the last-seen list), movement recording, the Grim step compatibility,
+- **Not yet on 26.x**: incoming signed messages are not verified (a message vanilla would
+  reject as invalid still enters the last-seen list), movement recording,
   `WorldView::column` (the 26.1 column type differs). Not verifiable without a real account:
   the real services' responses (`player/certificates` format and key sizes as documented,
   `join` errors) — the lab uses a local stand-in that follows authlib's parsing.
@@ -354,7 +382,17 @@ of the exact recordings: ghast == vanilla, states and packets): (1) a landing st
 vanilla sends only `look` / `flying` with on-ground true (both versions); (2) 1.16.5 walking on
 slime (on-ground alternates every tick; GroundSpoof). With `force_step_position(true)` the client
 sends the position on ticks whose feet height changed under the threshold (and updates its
-sent bookkeeping): (1) disappears on both labs (16 min, 0 setbacks); (2) remains.
+sent bookkeeping): (1) disappears on both labs (16 min, 0 setbacks); (2) remains. The option
+also works on 26.1 / 26.2 (a status-only movement packet whose feet height changed gets the
+position).
+
+(3) **26.2, idle drop of 20 blocks onto slime**: Grim 2.3.74 and 2.3.75 (alpha e457d55) flag
+Simulation 0.0417 at the tail of the bounce, on every drop. The tick before, the player rests
+6.2e-5 above the slime without a position change and sends `flying(on_ground)`; then it bounces.
+The oracle scenario `slime_drop_20_long` proves ghast's packets equal the real 26.2 client's on
+every tick (engine replay `restitution_drops_through_the_engine`). Lab drops of 8, 12 and 30
+blocks onto slime and of 6 blocks onto a bed draw no flag. `force_step_position` cannot help (there is no moved
+position to send); avoid long idle falls onto slime on Grim servers.
 
 ## Recording (`Client::record(path)`, 1.8.9 and 1.16.5)
 
@@ -428,6 +466,26 @@ cargo test -p ghast-client
   entity moves, 4 entity velocities; time and keep-alive): client thread CPU from
   `/proc/thread-self/stat`. WSL2 desktop, 2026-11-03: 50 ms CPU in 20 s = **0.25 % of one
   core** at ~900 inbound packets/s.
+
+## Live results: 26.2 (local WSL lab, Paper 26.2 build 135 + Grim 2.3.74, 2026-11-12/13)
+
+Every script the 26.1 lab passes, on 26.2 (`LAB_VER=26.2` / `<script> 26.2`):
+
+| run | result |
+|---|---|
+| AFK 1 min and 5 min | 0 flags (5 min: CPU 0.41 % of a core, RSS 8.3 MB with every version compiled in) |
+| `movement_course` 3 min, `dig_place`, `attack` | 0 flags |
+| `airborne-join.sh 26.2 3` | 0 flags |
+| `use-items.sh 26.2` (golden apple, shield, bow while walking) | 0 flags |
+| `elytra.sh`, `riptide.sh` (water and rain) | 0 flags |
+| `entities.sh` crowd, boat, teams (collisionRule never: the 26.2 team layout), horse, villager, border, cart | all PASS, 0 flags |
+| `inventory_probe` (chest + clicks of every mode) | PASS, 0 flags |
+| pathfinder lab course (corridor, maze, follow) | 0 failed legs, 0 setbacks, 0 flags |
+| `transfer.sh` (2 transfers) | PASS, 0 flags |
+| `proxy-switch.sh 4` (Velocity 3.5.1, two 26.2 backends, different heights) | 4/4, 0 flags, RSS growth 0 % |
+| `online-26.1.sh` with `LAB_VER=26.2` (online mode, signed chat) | PASS (signed chat secure, unsigned control refused), 0 flags |
+| idle drops onto slime (8, 12, 30 blocks) and a bed (6) | 0 flags |
+| idle drop onto slime from 20 blocks | Grim Simulation 0.0417 every time: corner case (3) above, vanilla-exact |
 
 ## Live results: 26.1 (local WSL lab, Paper 26.1.2 build 74 + Grim 2.3.74, 2026-11-11)
 

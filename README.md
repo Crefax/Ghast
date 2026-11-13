@@ -20,7 +20,7 @@ Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 11.20 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 on 26.1 (every menu, byte-identical packets) | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
-| Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the two documented Grim-vs-vanilla corner cases |
+| Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the three documented Grim-vs-vanilla corner cases |
 
 All measurements are dated and described with their method in the crate READMEs and
 `lab/README.md`.
@@ -87,7 +87,7 @@ planned paths with the async helpers).
 | 1.12.2 | 340 | oracle-verified, lab-tested (Paper 1.12.2 + Grim) |
 | 1.16.4 – 1.16.5 | 754 | oracle-verified, lab-tested (Paper 1.16.5 + Grim) |
 | 26.1, 26.1.1, 26.1.2 | 775 | oracle-verified (physics, crosshair, block breaking), lab-tested (Paper 26.1.2 + Grim 2.3.74) |
-| 26.2 | 776 | protocol, data, world and inventory only so far (features `v26_2`; checked against a vanilla 26.2 server and the 26.2 jar); the client does not connect with it yet |
+| 26.2 | 776 | oracle-verified (physics incl. collision restitution, crosshair, block breaking, clicks), lab-tested (Paper 26.2 + Grim 2.3.74) |
 
 *Oracle-verified*: the behaviour is replayed against the real client code of that version
 (26.1, 26.1.1 and 26.1.2 share one protocol number and give identical oracle records, so they
@@ -97,7 +97,7 @@ protocol are served by the same code.
 
 ## Features per version
 
-| | 1.8.9 | 1.12.2 | 1.16.5 | 26.1 |
+| | 1.8.9 | 1.12.2 | 1.16.5 | 26.1 and 26.2 |
 |---|---|---|---|---|
 | login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes | offline and compression lab-tested; online mode lab-tested against a local stand-in of the account services (not with a real account) |
 | configuration state (known packs, registries, resource packs, cookies, reconfiguration) | – | – | – | yes (reconfiguration lab-tested through a Velocity proxy) |
@@ -125,7 +125,7 @@ each one builds alone, so a bot that only ever joins one server version can drop
 
 | feature | |
 |---|---|
-| `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` | the game versions (default: all) |
+| `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2` | the game versions (default: all) |
 | `libdeflate` | packet compression with libdeflate (C, faster; default). Without it: pure Rust (flate2 + zlib-rs) |
 | `display-names` | English display names of blocks, items, entities, … in `ghast::data` (default). Registry names are always there; off saves ~120–200 KB |
 | `microsoft` | online-mode servers (Microsoft accounts) |
@@ -138,7 +138,8 @@ ghast = { version = "0.4", default-features = false, features = ["v1_8", "libdef
 A `GameVersion` whose feature is off still exists; running it returns
 `ClientError::VersionNotEnabled`. The `afk` example, stripped, release profile below
 (2026-11-11): 5.3 MB with every version; 1.9 MB with 1.8.9 only, 1.9 MB 1.12.2, 2.6 MB 1.16.5,
-3.3 MB 26.1.
+3.3 MB 26.1. 2026-11-13 (0.4.2 work): 7.9 MB with every version, 4.2 MB 26.1 only, 4.0 MB 26.2
+only (each modern version is its own compiled copy of the modern client).
 
 ### Recommended release profile
 

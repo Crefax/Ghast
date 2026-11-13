@@ -27,8 +27,8 @@ read Java 21 direct buffers on x86_64 (every connection is reset with "Unable to
 1.8 survival join spawns are fuzzed by up to 5 blocks (hard-coded in 1.8); use `reset-field.sh 1.8 --tp`.
 
 ```
-./start.sh 1.8|1.12|1.16     # idempotent; first run downloads + creates the world (restarts once to move the spawn chunks)
-./stop.sh 1.8|1.12|1.16|all  # console "stop" (saves), SIGTERM/SIGKILL fallback
+./start.sh 1.8|1.12|1.16|26.1|26.2   # idempotent; first run downloads + creates the world (restarts once to move the spawn chunks)
+./stop.sh 1.8|1.12|1.16|26.1|26.2|all  # console "stop" (saves), SIGTERM/SIGKILL fallback
 ./console.sh 1.8 "list" "tp GhastBot 0.5 4 0.5"   # prints the log lines produced; no args = one command per stdin line
 ./alerts.sh 1.8              # follow Grim flags/setbacks/kicks; --all = all such lines in latest.log; --count = flags per player+check
 ./reset-field.sh 1.8 [--tp] [--fly]   # rules (time 6000, clear weather, no ticks) + rebuild the test pad
@@ -41,16 +41,22 @@ LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build inst
 ./online-26.1.sh             # 26.1 online mode + signed chat against a local account stand-in (own server, see below)
 ```
 
+**26.x labs**: `26.1` is Paper 26.1.2 build 74 on `127.0.0.1:25626`, `26.2` is Paper 26.2 build 135
+(sha256-pinned) on `127.0.0.1:25634`, both with Grim 2.3.74 and Java 25, the same pad. The
+26.x-only scripts (`elytra.sh`, `riptide.sh`, `entities.sh`, `transfer.sh`, `proxy-switch.sh`,
+`online-26.1.sh`) run on 26.1 by default and on 26.2 with `LAB_VER=26.2`; the others take the
+version as their first argument.
+
 Server sets with their own directories (each counts as the one lab set that may run; the scripts
 refuse to start while another lab JVM runs and stop their servers by PID at the end):
 
-- `proxy-switch.sh` — `servers/proxy-26.1/`: Velocity 3.5.1 build 615 (sha256-pinned) on
+- `proxy-switch.sh` — `servers/proxy-26.1/` (`LAB_VER=26.2`: `servers/proxy-26.2/`, Paper 26.2 backends): Velocity 3.5.1 build 615 (sha256-pinned) on
   `127.0.0.1:25629`, modern forwarding, backends `a` (`:25631`, vanilla overworld y -64..319) and
   `b` (`:25632`, a data pack overworld y -128..383, so the registries differ between them), both
   Paper 26.1.2 + Grim 2.3.74, `SWITCH_HEAP` (default 512M) each. The `server_switch` example walks,
   sends `/server a|b`, logs each backend's floor and its resident memory. PASS = every switch done,
   0 Grim flags on both backends, memory not growing by more than 15 % from the 2nd join to the last.
-- `online-26.1.sh` — `servers/online-26.1/` on `127.0.0.1:25627`: Paper 26.1.2 + Grim with
+- `online-26.1.sh` — `servers/online-26.1/` (`LAB_VER=26.2`: `servers/online-26.2/`) on `127.0.0.1:25627`: Paper 26.1.2 + Grim with
   `online-mode=true` and `enforce-secure-profile=true`; its account services are
   `fake-session-server.py` on `127.0.0.1:25700` (authlib's `-Dminecraft.api.session.host`,
   `services.host`, `profiles.host`; needs the Python `cryptography` module). The stand-in accepts

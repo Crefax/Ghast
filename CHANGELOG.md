@@ -71,6 +71,26 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `window_kind`, `item_use`, `component_hash`, `hash_covers`, `packet_ids`, …). The 0.4.1
   `_26_1` methods and `v26_1` functions stay and are aliases.
 
+- **Minecraft 26.2 in the client** (`ghast-client`, `ghast`): `GameVersion::V26_2` (`"26.2"`,
+  `"776"`), feature `v26_2` (on by default, forwarded by the facade, `ghast-ext`,
+  `ghast-pathfinder` and `ghast-viewer`), capability row = 26.1's with the `V26_2` physics and
+  the 26.2 data. The modern client is now written once and compiled per version (a small row
+  module per version; no run-time version branches), and ids that versions renumber are
+  resolved by name. 26.2 deltas: the play login's `onlineMode` decides whether a chat session
+  starts; the new team parameter order; the movement attributes `bounciness`,
+  `friction_modifier`, `air_drag_modifier`. Every 26.1 engine replay of the oracle goldens also
+  runs on 26.2 (joins, teleports, elytra, riptide, entities, border, nether, boats, minecarts,
+  item use, entity pick, `player_loaded`, signed chat, login encryption), plus the idle slime /
+  bed drop scenarios, packet for packet. Lab: every 26.1 lab script passes on a Paper 26.2 +
+  Grim 2.3.74 lab with 0 flags (one documented Grim corner case, below).
+- `ghast-pathfinder`: `Version::V26_2` (its jump table measured with the 26.2 physics);
+  `ghast-viewer`: draws 26.2 sessions (module `v26_2`, feature `v26_2`); `ghast-ext`: 26.2 block,
+  item and entity names.
+- `Client::force_step_position` (Grim compatibility, off by default) now also works on 26.1
+  and 26.2.
+- Lab: a 26.2 lab (Paper 26.2 build 135, Grim 2.3.74, `127.0.0.1:25634`); the 26.x scripts take
+  `LAB_VER=26.2` (proxy switch, online mode, entities, elytra, riptide, transfers).
+
 ### Fixed
 
 - `ghast-physics` modern core (26.1 and 26.2): a boat pushes the player only when its push query
@@ -88,6 +108,14 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - `ghast-physics`: `ModernMemoryWorld` decodes block states when they are stored, not on every
   read (a second modern row stopped the decode function pointer from being folded; the plain
   26.1 tick on the memory world is now about 1 % cheaper than in 0.4.1).
+
+### Known Grim corner case (26.2)
+
+- An idle 20-block drop onto slime: Grim 2.3.74 (and the 2.3.75 alpha) flag Simulation 0.0417 at
+  the tail of the bounce, where the vanilla client rests 6.2e-5 above the slime and sends only
+  `flying(on_ground)` for a tick. ghast's packets equal the real 26.2 client's on every tick of
+  that drop (oracle scenario `slime_drop_20_long`, replayed through the engine); other drop
+  heights and beds draw no flag. See `crates/ghast-client/README.md`.
 
 ### Known approximations
 
