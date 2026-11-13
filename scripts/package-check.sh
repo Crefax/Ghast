@@ -25,7 +25,15 @@ if ! cargo package --workspace --exclude ghast-codegen-data --exclude ghast-code
 fi
 grep -E 'Packaged|Verifying' "$log" || true
 rm -f "$log"
-for f in target/package/*.crate; do
+# The packages land in the actual target directory (CARGO_TARGET_DIR, a config, or ./target).
+target_dir=$(cargo metadata --no-deps --format-version 1 |
+  sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+shopt -s nullglob
+crates=("${target_dir:-target}"/package/*.crate)
+if [ ${#crates[@]} -eq 0 ]; then
+  echo "no packages in ${target_dir:-target}/package"; status=1
+fi
+for f in "${crates[@]}"; do
   s=$(stat -c %s "$f")
   awk -v s="$s" -v n="$(basename "$f")" 'BEGIN { printf "%8.1f KiB  %s\n", s / 1024, n }'
   if [ "$s" -gt 10485760 ]; then echo "  over the 10 MB crates.io limit"; status=1; fi

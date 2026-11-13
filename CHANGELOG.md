@@ -53,6 +53,11 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
   waiting for the answer would otherwise stall the login without a word); other configuration
   packets the client does not handle are logged at debug level.
 
+### Fixed
+
+- `scripts/package-check.sh` reads the packages from the actual target directory
+  (`CARGO_TARGET_DIR` or a cargo config), not always `target/`.
+
 ## 0.4.2 — 2026-11-13
 
 Minecraft **26.2 (protocol 776)**; 26.2 is the only game version with protocol 776 so far. Additive
