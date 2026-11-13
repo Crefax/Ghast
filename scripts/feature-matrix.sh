@@ -24,9 +24,9 @@ check() { # check <label> <cargo check args...>
 crates=(
   "ghast-protocol:v1_8 v1_12_2 v1_16_5 v26_1 v26_2::"
   "ghast-data:v1_8 v1_12 v1_16_5 v26_1 v26_2::"
-  "ghast-physics:v1_8 v1_12 v1_16_5 v26_1::"
+  "ghast-physics:v1_8 v1_12 v1_16_5 v26_1 v26_2::"
   "ghast-world:v1_8 v1_12 v1_16_5 v26_1 v26_2::"
-  "ghast-entity:v1_8 v1_12 v1_16_5 v26_1::all"
+  "ghast-entity:v1_8 v1_12 v1_16_5 v26_1 v26_2::all"
   "ghast-inventory:v1_8 v1_12 v1_16_5 v26_1 v26_2::all"
   "ghast-auth:::"
   "ghast-client:v1_8 v1_12_2 v1_16_5 v26_1 v26_2::all"
@@ -61,7 +61,7 @@ if [ -z "${PACKAGES:-}" ]; then
   check "ghast-pathfinder --features client (no version)" \
     -p ghast-pathfinder --no-default-features --features client
   # The facade's optional crates with one version each.
-  for v in v1_8 v26_1; do
+  for v in v1_8 v26_1 v26_2; do
     check "ghast --features $v,ext,pathfinder,viewer" \
       -p ghast --no-default-features --features "$v,ext,pathfinder,viewer"
   done
