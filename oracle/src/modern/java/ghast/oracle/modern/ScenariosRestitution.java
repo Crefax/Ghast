@@ -28,6 +28,24 @@ final class ScenariosRestitution {
         return new Scenario(name).fill(-16, 63, -16, 16, 63, 16, s("stone"), 0);
     }
 
+    /** Superflat floor, a 9 x 9 patch of {@code floor} at y 3 (a bed: its foot at (28, 4, 18)), idle drop. */
+    private static Scenario superflatBounce(String name, String floor, int drop, double vx, double vz) {
+        Scenario sc = new Scenario(name).fill(12, 0, 2, 44, 2, 34, s("stone"), 0).fill(12, 3, 2, 44, 3, 34, s("grass_block"), 0);
+        double feet;
+        if (floor.startsWith("white_bed")) {
+            sc.block(28, 4, 18, s(floor), 0);
+            feet = 4 + 0.5625;
+        } else {
+            sc.fill(24, 3, 14, 32, 3, 22, s(floor), 0);
+            feet = 4;
+        }
+        sc.spawn(28.5, feet + drop, 18.5, 0, 0);
+        if (vx != 0 || vz != 0) {
+            sc.velocity(vx, 0, vz);
+        }
+        return sc.run(drop > 20 ? 700 : 500, 0);
+    }
+
     private static Scenario attr(Scenario sc, String attribute, double base) {
         sc.attributeBases.put("minecraft:" + attribute, base);
         return sc;
@@ -79,6 +97,20 @@ final class ScenariosRestitution {
                 .block(0, 64, 1, s("white_bed[facing=south,part=head]"), 0)
                 .desc("fall 12 blocks onto a bed (restitution 0.75), bounce out sideways")
                 .spawn(0.5, 77, 0.5, 0, 0).run(30, 0).run(20, FORWARD | LEFT));
+
+        // Long idle bounces on a superflat floor (stone y 0-2, grass y 3, the lab's layout) until the
+        // bounce dies out: the tail lands with moves below the position-packet threshold, which decides
+        // whether a tick sends a position or only the on-ground flag. Slime drops of 6-30 blocks, the
+        // 20-block drop with a tiny horizontal drift, and a 20-block drop onto a bed.
+        for (int drop = 6; drop <= 30; drop += 2) {
+            l.add(superflatBounce("slime_drop_" + drop + "_long", "slime_block", drop, 0, 0)
+                    .desc("idle drop of " + drop + " blocks onto a slime floor (superflat), bouncing until it dies out"));
+        }
+        l.add(superflatBounce("slime_drop_20_drift", "slime_block", 20, 0.003, 0.002)
+                .desc("idle drop of 20 blocks onto a slime floor with a tiny horizontal drift (0.003, 0.002)"));
+        l.add(superflatBounce("bed_drop_20_long", "white_bed[facing=south,part=foot]", 20, 0, 0)
+                .block(28, 4, 19, s("white_bed[facing=south,part=head]"), 0)
+                .desc("idle drop of 20 blocks onto a bed (superflat), bouncing until it dies out"));
 
         // ---- friction_modifier / air_drag_modifier -----------------------------------------------------
         l.add(attr(flat("friction_modifier_high"), "friction_modifier", 2.0)

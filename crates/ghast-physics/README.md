@@ -197,9 +197,15 @@ plain `tick` uses their defaults, which give the 26.1 arithmetic bit for bit.
 Verification: `tests/golden_26_2.rs` (all 26.2 movement goldens, incl. `fuzz_restitution_seed1`
 and 20 restitution scenarios) and the large-fuzz test over `oracle/cache/26.2/` (16.2 M ticks at
 0 diffs: plain 4.2 M, edges, extras, restitution and each extension mechanic 1 M, plus 1 M of
-the entities fuzz around a player scaled up to 16; 26.1 has the same scaled run). Not modelled:
-vanilla's process-wide fluid shape cache (`FlowingFluid.getShape` keeps the height of the first
-block it was built for; ghast computes it per query, like a fresh client). `tests/family_26_2_on_26_1.rs` (ignored) replays 26.2 vectors on
+the entities fuzz around a player scaled up to 16; 26.1 has the same scaled run). Known
+approximation: vanilla's process-wide fluid shape cache (`FlowingFluid.getShape` keeps the height
+of the first block it was built for, so a long-lived client may clip a water source as a full
+block). ghast behaves as a freshly started client and computes the height per query; this
+affects the fall-distance raycast (`fall_distance`) and, in a real long-lived client, whether a
+use-item fluid ray (bucket, bottle, lily pad, boat item, spawn egg) grazing the top ninth of a
+source cell hits. Idle slime and bed drops (`slime_drop_*_long` 6–30 blocks, a drift case,
+`bed_drop_20_long`) are proven to the end of the bounce tail, including the landing ticks whose
+move is below the position threshold (the real client then sends only the on-ground flag). `tests/family_26_2_on_26_1.rs` (ignored) replays 26.2 vectors on
 the 26.1 tables by state name, the measurement that put 26.2 into the 26.1 family.
 
 Instructions per plain tick (hardware counter, 40,000 ticks, memory world; walk / busy / swim):

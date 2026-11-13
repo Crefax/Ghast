@@ -1206,10 +1206,13 @@ What 26.2 changed in the game, and where the vectors cover it:
 - **New blocks** (sulfur, potent sulfur, sulfur spike and the sulfur / cinnabar stone families: 28
   blocks, 2,493 states) and the sulfur cube; the shapes and properties of all 29,873 earlier states
   are unchanged.
-- Vectors: `scenarios.jsonl.gz` adds 20 cases (`ScenariosRestitution`: bounciness against walls,
+- Vectors: `scenarios.jsonl.gz` adds 35 cases (`ScenariosRestitution`: bounciness against walls,
   floors, ceilings, while sneaking, on honey, with slow falling; slime ceiling, low drops, sneaking
-  landings, slime with bounciness, a high bed drop; friction and air drag modifiers; the new
-  blocks). `fuzz_restitution_seed1.jsonl.gz` (`Fuzz.withRestitution`, cases `…_x_r`, 100 × 60): the
+  landings, slime with bounciness, a high bed drop; idle drops of 6–30 blocks onto a superflat
+  slime floor until the bounce dies out (500 / 700 ticks), one with a tiny horizontal drift, and a
+  20-block bed drop; friction and air drag modifiers; the new blocks). In the 20-block slime drop
+  the landing at tick 286 moves 6.2e-5 (below the position threshold): the real client sends only
+  `flying` with on_ground true, then a position at the bounce. `fuzz_restitution_seed1.jsonl.gz` (`Fuzz.withRestitution`, cases `…_x_r`, 100 × 60): the
   extras case plus the three attributes (bases, modifiers, packets during the case), the new and
   the bouncing blocks around the spawn, ceilings and drops. `entity_sizes.jsonl.gz`: cube mobs have
   a baby form in 26.2 and still their sizes (both are dumped).

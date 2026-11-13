@@ -89,14 +89,20 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   read (a second modern row stopped the decode function pointer from being folded; the plain
   26.1 tick on the memory world is now about 1 % cheaper than in 0.4.1).
 
-### Known gaps
+### Known approximations
 
-- Vanilla's `FlowingFluid.getShape` caches one shape per fluid state for the whole process,
-  with the height of the first block it was built for (a water source first clipped under water
-  keeps a full-block shape). Only fluid ray clips read it (the fall-distance raycast of
-  `Entity.move`). `ghast-physics` computes the height per query, like a fresh client; the oracle
-  now starts every case with empty caches (three 26.2 cached teleport cases had picked up a
-  full-block source shape from earlier cases in the same JVM).
+- **Fluid shape cache: ghast behaves as a freshly started client.** Vanilla's
+  `FlowingFluid.getShape` caches one shape per fluid state for the whole process, built with the
+  height of the first block it was asked about (water sources have amount 8, so a source first
+  clipped with water above keeps a full-block shape for every later source). Only ray clips
+  with a fluid mode read it: on the client the fall-distance raycast of `Entity.move` (the client
+  `fallDistance`) and the item-use ray of buckets, bottles, lily pads and other place-on-water
+  items, boat items and spawn eggs. In a long-lived real client whose cache is "sticky", such a
+  ray grazing the top ninth of a water source cell hits where a fresh client misses, which can
+  change the item-use outcome (swing packet, predicted block and held item) and the fall
+  distance. `ghast-physics` computes the fluid height per query; the oracle starts every case
+  with empty caches (three 26.2 cached teleport cases had picked up a full-block source shape
+  from earlier cases in the same JVM).
 
 ## 0.4.1 — 2026-11-12
 
