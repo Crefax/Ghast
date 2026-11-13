@@ -60,6 +60,21 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
 - `scripts/package-check.sh` reads the packages from the actual target directory
   (`CARGO_TARGET_DIR` or a cargo config), not always `target/`.
 
+### Known limitations
+
+- A dialog shown in the **configuration state** is covered only by the fake-server test (vanilla
+  commands cannot show one there); play-state dialogs were also checked live on a Paper 26.2
+  lab.
+- The **command check** (whether vanilla would send a dialog's command without asking) is
+  modelled on the server's command tree and unit-tested, but not checked against vanilla's
+  Brigadier with oracle vectors.
+- Not modelled: a vanilla player's movement keys and buttons are up while a dialog screen is
+  open (ghast leaves that to the behaviour); the multi-line input's line limit; server links in
+  a `server_links` dialog; `#tag` dialog lists.
+- The generated `ghast_protocol::v26_1` / `v26_2` `CustomClickAction` packet types keep
+  minecraft-data's layout, which is not the wire layout; the client writes the packet itself.
+  Fixing the generated type is a breaking change and waits for 0.5.0.
+
 ## 0.4.2 — 2026-11-13
 
 Minecraft **26.2 (protocol 776)**; 26.2 is the only game version with protocol 776 so far. Additive
