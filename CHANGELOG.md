@@ -8,6 +8,9 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ## 0.4.2 — unreleased
 
+Minecraft **26.2 (protocol 776)**; 26.2 is the only game version with protocol 776 so far. Additive
+only: every 0.4.1 API stays.
+
 ### Added
 
 - **Minecraft 26.2 protocol (776)** in `ghast-protocol`: module `v26_2`, feature `v26_2` (on by
@@ -37,7 +40,8 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   block probes confirmed by the server).
 - **26.2 movement** in `ghast-physics`: rule set `modern::V26_2` (feature `v26_2`, on by
   default) over `ghast_data::v26_2`, bit-exact against the vanilla 26.2 oracle (all 26.2 movement
-  goldens; 16.2 M cached fuzz ticks at 0 diffs). 26.2 is the 26.1 row plus one structural
+  goldens; 16.2 M cached fuzz ticks at 0 diffs, incl. 1.0 M of restitution fuzz; 3200 golden
+  crosshair rays identical). 26.2 is the 26.1 row plus one structural
   change behind the new defaulted `Rules::RESTITUTION`: `Entity.restituteMovementAfterCollisions`
   (colliding axes reflected by the `bounciness` attribute, landing on slime (1) / beds (0.75,
   ×0.8 for a boat), gravity and drag compensation, no bounce when sneaking or on honey) and the
@@ -45,20 +49,23 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   (`PlayerExt::attributes`, `get_mut(name)`; read by the extended ticks), `MemoryWorld262`,
   `memory_world_26_2`, per-field `Rules` methods (`friction`, `speed_factor`, `jump_factor`,
   `block_flags`, `offset`, `block_name`; defaulted from `Rules::block`), `pick::v26_2`.
-- **Oracle**: one shared modern harness (`oracle/src/modern`) compiled per version with a small
-  per-version shim (`Compat`); `tests/golden/26.2/` (29 files, incl. `fuzz_restitution_seed1` and
-  20 restitution scenarios).
+- **Oracle**: one shared modern harness (`oracle/src/modern`, formerly `oracle/src/mc_26_1`)
+  compiled per version with a small per-version shim (`Compat`); the 26.1 goldens it produces are
+  content-identical to 0.4.1's (the 26.1 `entities` golden gains one case,
+  `push_large_scale_section_reach`, for the boat-push fix below). `tests/golden/26.2/` (29 files, incl. `fuzz_restitution_seed1`;
+  `scenarios` has 108 scenarios, among them 20 restitution and movement-attribute scenarios and
+  15 idle drops onto slime (6 – 30 blocks) and a bed).
 - **26.2 entity tracking** in `ghast-entity`: `v26_2::Tracker` (feature `v26_2`, on by default),
   the 26.1 tracker source compiled a second time over `ghast_protocol::v26_2` /
   `ghast_data::v26_2` (26.2 entity ids, the sulfur cube, sizes, `SCALE_ATTRIBUTE` = 30, the 776
   slot codec); same API as `v26_1`. Replays `tests/golden/26.2/entity_tracking.jsonl.gz` with
-  every field equal (like 26.1, the tick order differs only around riding entities) and the
-  vanilla 26.2 capture.
+  every field equal (1728 ticks, 7266 packets, 305,600 fields; like 26.1, the tick order differs
+  only around riding entities: 3306 of 3456 ticks equal) and the vanilla 26.2 capture.
 - **26.2 inventory** in `ghast-inventory` (`Version::V26_2`, feature `v26_2`, on by default):
   click prediction for every menu, creative screen, hashed click stacks (incl. the new
   `sulfur_cube_content`), item facts from the 26.2 reports. Proven like 26.1: the 26.2 click
-  vectors (23,963 clicks) and creative vectors (19,259 packets) byte-identical, 0 differences;
-  the real client's hashes of 4,000 stacks (108 of 111 component kinds) exact. One modern
+  vectors (23,963 golden and 237,292 cached clicks) and creative vectors (19,259 packets)
+  byte-identical, 0 differences; the real client's hashes of 4,000 stacks (108 of 111 component kinds) exact. One modern
   implementation over per-version tables: components are handled as canonical kinds mapped to
   each version's wire ids at compile time.
 - `ghast-inventory` version-neutral modern API (dispatches on the inventory's version):
@@ -70,7 +77,6 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `Version`: `item_name`, `item_id`, `defaults`, `component_id`, `component_name`, `menu_name`,
   `window_kind`, `item_use`, `component_hash`, `hash_covers`, `packet_ids`, …). The 0.4.1
   `_26_1` methods and `v26_1` functions stay and are aliases.
-
 - **Minecraft 26.2 in the client** (`ghast-client`, `ghast`): `GameVersion::V26_2` (`"26.2"`,
   `"776"`), feature `v26_2` (on by default, forwarded by the facade, `ghast-ext`,
   `ghast-pathfinder` and `ghast-viewer`), capability row = 26.1's with the `V26_2` physics and
@@ -82,7 +88,7 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   runs on 26.2 (joins, teleports, elytra, riptide, entities, border, nether, boats, minecarts,
   item use, entity pick, `player_loaded`, signed chat, login encryption), plus the idle slime /
   bed drop scenarios, packet for packet. Lab: every 26.1 lab script passes on a Paper 26.2 +
-  Grim 2.3.74 lab with 0 flags (one documented Grim corner case, below).
+  Grim 2.3.74 lab with 0 flags (one new documented Grim corner case, below).
 - `ghast-pathfinder`: `Version::V26_2` (its jump table measured with the 26.2 physics);
   `ghast-viewer`: draws 26.2 sessions (module `v26_2`, feature `v26_2`); `ghast-ext`: 26.2 block,
   item and entity names.
@@ -91,31 +97,40 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 - Lab: a 26.2 lab (Paper 26.2 build 135, Grim 2.3.74, `127.0.0.1:25634`); the 26.x scripts take
   `LAB_VER=26.2` (proxy switch, online mode, entities, elytra, riptide, transfers).
 
+### Changed
+
+- **Build cost of every version.** The modern client, physics, inventory and tracker are one
+  source compiled once per modern version, so the default (every-version) build carries two
+  modern copies. Stripped `afk` example, release profile, x86-64, 2026-11-13: every version
+  7.94 MB (0.4.1: 6.25 MB), 26.1 only 4.16 MB (0.4.1: 4.13 MB), 26.2 only 4.00 MB. Idle AFK bot
+  (RSS / private dirty): every-version build 8.56 / 2.26 MB on 26.1 (0.4.1: 8.08 / 2.21 MB; the
+  difference is file-backed code pages) and 8.98 / 2.28 MB on 26.2; single-version builds
+  6.66 / 1.85 MB (26.1) and 6.50 / 1.68 MB (26.2). A bot that joins one server version should
+  build only that version (`default-features = false, features = ["v26_2", …]`; see the README's
+  Cargo features).
+- `ghast_protocol::defs::p776` is `#[doc(hidden)]`: its shared definitions are not a stability
+  promise; name 26.2 packets through `ghast_protocol::v26_2`. Switch enums and id newtypes of
+  definition modules newer than the last published protocol (775) are `#[non_exhaustive]` (id
+  newtypes gain `new()`).
+- `ghast-physics`: `ModernMemoryWorld` decodes block states when they are stored, not on every
+  read (a second modern row stopped the decode function pointer from being folded; the plain
+  26.1 tick on the memory world is now about 1 % cheaper than in 0.4.1).
+
 ### Fixed
+
+Both are behaviour corrections of the modern core, so they change **26.1** as well as 26.2; all
+26.1 goldens and the 12.2 M cached 26.1 fuzz ticks still replay with 0 diffs.
 
 - `ghast-physics` modern core (26.1 and 26.2): a boat pushes the player only when its push query
   reaches the player's entity section (`Level.getEntities` visits the sections of the query box
   grown by 2 blocks horizontally and 4 downwards); a scaled-up player overlapping a boat far from
   its own section is not pushed. Mob pushes are unaffected (the client tests the local player's
   box directly). New `modern::section_query_reaches` for callers filtering entity collision boxes.
-- `ghast-physics` modern core: a zero movement input still adds `Vec3.ZERO` to the velocity
-  (`moveRelative`), which turns `-0.0` into `+0.0` as vanilla does. No 26.1 vector could show it:
-  26.1 never leaves a signed zero in a horizontal velocity before an input-less tick (its
-  collisions zero the axis with `0.0`); 26.2's restitution does.
-
-### Changed
-
-- `ghast-physics`: `ModernMemoryWorld` decodes block states when they are stored, not on every
-  read (a second modern row stopped the decode function pointer from being folded; the plain
-  26.1 tick on the memory world is now about 1 % cheaper than in 0.4.1).
-
-### Known Grim corner case (26.2)
-
-- An idle 20-block drop onto slime: Grim 2.3.74 (and the 2.3.75 alpha) flag Simulation 0.0417 at
-  the tail of the bounce, where the vanilla client rests 6.2e-5 above the slime and sends only
-  `flying(on_ground)` for a tick. ghast's packets equal the real 26.2 client's on every tick of
-  that drop (oracle scenario `slime_drop_20_long`, replayed through the engine); other drop
-  heights and beds draw no flag. See `crates/ghast-client/README.md`.
+  Oracle case `push_large_scale_section_reach` (26.1 and 26.2 `entities` goldens).
+- `ghast-physics` modern core (26.1 and 26.2): a zero movement input still adds `Vec3.ZERO` to
+  the velocity (`moveRelative`), which turns `-0.0` into `+0.0` as vanilla does. No 26.1 vector
+  could show it: 26.1 never leaves a signed zero in a horizontal velocity before an input-less
+  tick (its collisions zero the axis with `0.0`); 26.2's restitution does.
 
 ### Known approximations
 
@@ -131,6 +146,22 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   distance. `ghast-physics` computes the fluid height per query; the oracle starts every case
   with empty caches (three 26.2 cached teleport cases had picked up a full-block source shape
   from earlier cases in the same JVM).
+
+### Known Grim corner cases
+
+Three situations in which Grim flags movement that the oracle proves identical to the real
+client's (details in `crates/ghast-client/README.md`):
+
+1. A landing step-up onto a 1/8-higher block (soul sand → grass) whose move stays under the
+   position resend threshold (found on the 1.8.9 and 1.16.5 labs;
+   `Client::force_step_position(true)`, now also on 26.1 / 26.2, avoids it).
+2. 1.16.5 walking on slime (on-ground alternates every tick; GroundSpoof).
+3. **New, 26.2:** an idle 20-block drop onto slime. Grim 2.3.74 (and the 2.3.75 alpha) flag
+   Simulation 0.0417 at the tail of the bounce, where the vanilla client rests 6.2e-5 above the
+   slime and sends only `flying(on_ground)` for a tick. ghast's packets equal the real 26.2
+   client's on every tick of that drop (oracle scenario `slime_drop_20_long`, replayed through
+   the engine); other drop heights (6 – 30 blocks) and beds draw no flag.
+   `force_step_position` cannot help (the position did not change).
 
 ## 0.4.1 — 2026-11-12
 

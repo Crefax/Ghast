@@ -3,8 +3,8 @@
 A headless Minecraft: Java Edition client / bot library in Rust.
 
 - **Old and popular versions first, current ones too:** 1.8.9 (protocol 47), 1.12.2 (protocol
-  340), 1.16.5 (protocol 754) and 26.1 – 26.1.2 (protocol 775), in one workspace with a
-  version-agnostic bot API on top. A bot written once runs on all of them.
+  340), 1.16.5 (protocol 754), 26.1 – 26.1.2 (protocol 775) and 26.2 (protocol 776), in one
+  workspace with a version-agnostic bot API on top. A bot written once runs on all of them.
 - **Vanilla-exact physics, proven:** player movement is compared bit for bit with the real
   vanilla client code, run headless as an *oracle*. Not "close enough".
 - **Light:** packets a bot does not ask for are dropped before they are decoded; one bot is one
@@ -17,8 +17,9 @@ Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md f
 | | ghast | |
 |---|---|---|
 | Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 12.72 million ticks | positions, velocities, flags and packets compared by their bits |
-| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 11.20 million ticks | 26.1.1 and 26.1.2 give identical records |
-| Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 on 26.1 (every menu, byte-identical packets) | incl. crafting results |
+| Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 12.20 million ticks | 26.1.1 and 26.1.2 give identical records |
+| Player physics vs the vanilla 26.2 client (the same mechanics plus collision restitution: slime, beds, `bounciness`, friction and air-drag attributes) | **0 diffs** over 16.20 million ticks | |
+| Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 each on 26.1 and 26.2 (every menu, byte-identical packets) | incl. crafting results |
 | Protocol codecs | byte-exact against node-minecraft-protocol | both directions, every packet of every version round-trips |
 | Lab sessions against Paper + [Grim](https://github.com/GrimAnticheat/Grim) anticheat (30 min mixed walk / sprint / jump / dig / place / clicks, per version) | **0 Grim flags** | see `crates/ghast-client/README.md` for the three documented Grim-vs-vanilla corner cases (the third: a 26.2 idle fall onto slime whose landing moves less than the position threshold, Simulation ≈ 0.0417; the real client sends the same packets) |
 
@@ -173,7 +174,8 @@ the same for `aarch64-unknown-linux-gnu` (also through `lab/build-pi.sh` with
 **Only the versions you use.** Code for every version and mechanic is resident in each process
 (file-backed, shared between processes running the same binary). A single-version build is
 smaller: idle AFK RSS 2026-11-12 with every version 8.0 MB on 26.1 / 7.0 MB on 1.8.9; 26.1 only
-6.4 MB, 1.8.9 only 5.0 MB (private dirty 1.8 / 1.6 MB).
+6.4 MB, 1.8.9 only 5.0 MB (private dirty 1.8 / 1.6 MB). 2026-11-13 (0.4.2, two modern copies):
+every version 8.6 MB on 26.1 / 9.0 MB on 26.2; 26.1 only 6.7 MB, 26.2 only 6.5 MB.
 
 ## Migrating from 0.3
 
@@ -181,8 +183,8 @@ smaller: idle AFK RSS 2026-11-12 with every version 8.0 MB on 26.1 / 7.0 MB on 1
 [CHANGELOG.md](CHANGELOG.md#040--2026-11-11)):
 
 1. **Features.** Every version is a feature (default: all). With `default-features = false`,
-   add the versions you use (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`) and `display-names` if you
-   read English display names from `ghast::data`.
+   add the versions you use (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`; `v26_2` since 0.4.2) and
+   `display-names` if you read English display names from `ghast::data`.
 2. **Inventory stacks.** `Stack` fields are private: `stack.id` → `stack.id()`, `stack.count`
    → `stack.count()`, `stack.damage` → `stack.damage()`, `stack.nbt` → `stack.nbt()`; build with
    `Stack::new(id, count, damage).with_nbt(nbt)`.
