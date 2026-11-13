@@ -27,17 +27,17 @@ v26_2 = ["ghast-client/v26_2", "ghast-data/v26_2", "ghast-pathfinder?/v26_2"]
 
 [dependencies]
 # Versions come from this crate's version features (default: all).
-ghast-client = { path = "../ghast-client", version = "0.4.1", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.4.1", default-features = false }
-ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.4.1", optional = true, default-features = false, features = ["client"] }
+ghast-client = { path = "../ghast-client", version = "0.4.2", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.2", default-features = false }
+ghast-pathfinder = { path = "../ghast-pathfinder", version = "0.4.2", optional = true, default-features = false, features = ["client"] }
 log = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-ghast-client = { path = "../ghast-client", version = "0.4.1" }
+ghast-client = { path = "../ghast-client", version = "0.4.2" }
 bytes = { workspace = true }
-ghast-auth = { path = "../ghast-auth", version = "0.4.1" }
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.1" }
+ghast-auth = { path = "../ghast-auth", version = "0.4.2" }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.2" }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread"] }
 
 # The tests run every version with the path finder; the lab course drives `goto`.
