@@ -107,7 +107,7 @@ impl Probe {
         let ents = ctx.entities()?;
         let eyes = ctx.eyes(ctx.pose());
         ents.iter()
-            .filter(|e| ghast::entity::v26_1::entity_type(e).is_some_and(|t| t.name == name))
+            .filter(|e| type_name(ctx, e) == Some(name))
             .filter_map(|e| Some((e.id(), e.bounding_box()?)))
             .min_by(|a, b| {
                 let d = |b: &[f64; 6]| {
@@ -208,8 +208,7 @@ impl Probe {
         let ents = ctx.entities()?;
         ents.iter()
             .filter(|e| {
-                ghast::entity::v26_1::entity_type(e)
-                    .is_some_and(|t| t.name.ends_with("_boat") || t.name.ends_with("_raft"))
+                type_name(ctx, e).is_some_and(|t| t.ends_with("_boat") || t.ends_with("_raft"))
             })
             .filter_map(|e| Some((e.id(), e.bounding_box()?)))
             .next()
@@ -385,7 +384,7 @@ impl Behavior for Probe {
                         // Back: find the saddle in the player part and shift-click it.
                         let inv = ctx.inventory();
                         let n = inv.container_len();
-                        let id = ghast::inventory::v26_1::item_id("saddle");
+                        let id = ghast::inventory::modern::item_id(inv.version(), "saddle");
                         let saddle = (n..inv.slot_count())
                             .find(|&i| inv.slot(i).is_some_and(|s| Some(s.id()) == id));
                         match saddle {
@@ -486,4 +485,13 @@ fn main() {
         log::info!("session ended: {end:?}");
         std::process::exit(if probe.ok() { 0 } else { 1 });
     });
+}
+
+/// The registry name of a tracked entity's type in the session's version.
+fn type_name(ctx: &TickContext<'_>, e: &ghast::entity::Entity) -> Option<&'static str> {
+    match ctx.version() {
+        #[cfg(feature = "v26_2")]
+        ghast::GameVersion::V26_2 => ghast::entity::v26_2::entity_type(e).map(|t| t.name),
+        _ => ghast::entity::v26_1::entity_type(e).map(|t| t.name),
+    }
 }
