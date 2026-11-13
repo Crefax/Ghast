@@ -341,6 +341,13 @@ pub trait ClientVersion: Version + sealed::Sealed {
         Ok(())
     }
 
+    /// The block-prediction sequence number of the last predicting packet written (1.19+
+    /// `BlockStatePredictionHandler`; `None` on versions without one).
+    fn prediction_sequence(wire: &Self::Wire) -> Option<i32> {
+        let _ = wire;
+        None
+    }
+
     /// `ClientPacketListener.verifyCommand` for a dialog command (versions without dialogs:
     /// never asked).
     fn check_command(wire: &mut Self::Wire, command: &str) -> crate::dialog::CommandCheck {

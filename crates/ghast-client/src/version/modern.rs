@@ -783,6 +783,10 @@ impl ClientVersion for Marker {
         wire.check_command(command)
     }
 
+    fn prediction_sequence(wire: &Wire) -> Option<i32> {
+        Some(wire.sequence)
+    }
+
     fn write_wire_replies(enc: &mut FrameEncoder, wire: &mut Wire) -> Result<(), EncodeError> {
         if wire.seen.ack_due {
             wire.seen.ack_due = false;

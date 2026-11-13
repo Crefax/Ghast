@@ -399,6 +399,8 @@ pub(crate) struct Core {
     entity_push: bool,
     /// The dialog open now (26.1+ `show_dialog`).
     dialog: Option<Arc<crate::dialog::Dialog>>,
+    /// The wire's block-prediction sequence after the last packets written (1.19+).
+    sequence: Option<i32>,
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
@@ -478,6 +480,7 @@ impl Core {
             origin: Instant::now(),
             entity_push,
             dialog: None,
+            sequence: None,
             #[cfg(test)]
             forced_look: None,
         }
@@ -775,6 +778,11 @@ impl<S: Sim> Engine<S> {
     /// Time of the last inbound bytes.
     pub(crate) fn last_inbound(&self) -> Option<Instant> {
         self.core.last_inbound
+    }
+
+    /// The wire layer's prediction sequence after writing packets.
+    pub(crate) fn note_sequence(&mut self, sequence: Option<i32>) {
+        self.core.sequence = sequence;
     }
 
     /// The bot's name (for logs).
@@ -1646,6 +1654,23 @@ impl TickView<'_> {
     pub fn using_item(&self) -> bool {
         self.core.hands.using_item()
     }
+
+    /// The serverbound packets of this tick in write order (its actions, the movement
+    /// packet, `tick_end`), plus the answers to packets that arrived just before it; written
+    /// to the socket right after [`Behavior::after_tick`]. A dig shows as
+    /// [`Outbound::Dig`](crate::common::Outbound::Dig) with its status, block and face. The
+    /// wire layer adds per-protocol details when it writes them (sequence numbers:
+    /// [`TickView::prediction_sequence`]).
+    #[must_use]
+    pub fn outbound(&self) -> &[Outbound] {
+        &self.core.out
+    }
+
+    /// [`TickContext::prediction_sequence`] (before this tick's packets are written).
+    #[must_use]
+    pub fn prediction_sequence(&self) -> Option<i32> {
+        self.core.sequence
+    }
 }
 
 #[cfg(all(test, feature = "v1_8"))]
@@ -2329,6 +2354,16 @@ impl TickContext<'_> {
     #[must_use]
     pub fn using_item(&self) -> bool {
         self.core.hands.using_item()
+    }
+
+    /// 1.19+ (26.1, 26.2): the block-prediction sequence number of the last predicting packet
+    /// written so far (`block_dig` start / finish, `block_place`, `use_item` each take the
+    /// next one; it restarts at 0 in a new level), the number the server's
+    /// `block_changed_ack` answers with. `None` on 1.8.9 – 1.16.5. The packets this tick
+    /// writes are not counted yet ([`TickView::outbound`] lists them).
+    #[must_use]
+    pub fn prediction_sequence(&self) -> Option<i32> {
+        self.core.sequence
     }
 
     /// The vehicle the player rides (26.1 boats and rafts: boarded when the server's
@@ -3139,6 +3174,87 @@ mod tests {
             "falls into the hole: {:?}",
             e.core.pose.pos
         );
+    }
+
+    /// `TickView::outbound` lists the tick's packets (the left button's dig start among them,
+    /// ahead of the movement packet); `prediction_sequence` is what the wire reports, and the
+    /// modern wire counts the predicting packets.
+    #[test]
+    fn outbound_visible_to_the_behaviour() {
+        use crate::version::ClientVersion;
+        struct Watch {
+            seen: Vec<Vec<Outbound>>,
+            seq: Vec<Option<i32>>,
+        }
+        impl Behavior for Watch {
+            fn tick(&mut self, ctx: &mut TickContext<'_>) {
+                self.seq.push(ctx.prediction_sequence());
+                ctx.set_aim(90.0, 89.5);
+                let down = ctx.target().is_some_and(|t| t.face == crate::Face::Up);
+                ctx.set_buttons(Buttons {
+                    left: down,
+                    right: false,
+                });
+            }
+            fn after_tick(&mut self, view: &TickView<'_>) {
+                self.seen.push(view.outbound().to_vec());
+                assert_eq!(view.prediction_sequence(), *self.seq.last().unwrap());
+            }
+        }
+        let mut e = engine(GameVersion::V1_8_9);
+        join(&mut e);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut b = Watch {
+            seen: Vec::new(),
+            seq: Vec::new(),
+        };
+        for t in 0..20 {
+            e.note_sequence(Some(t));
+            e.tick(&mut b, t0);
+            assert_eq!(*e.outbound(), *b.seen.last().unwrap());
+            e.outbound().clear();
+        }
+        assert_eq!(b.seq.last(), Some(&Some(19)));
+        let dig = b
+            .seen
+            .iter()
+            .find(|o| o.iter().any(|p| matches!(p, Outbound::Dig { .. })))
+            .expect("a dig start");
+        assert!(matches!(
+            dig.iter()
+                .find(|p| matches!(p, Outbound::Dig { .. }))
+                .unwrap(),
+            Outbound::Dig {
+                status: crate::common::DigStatus::Start,
+                face: crate::Face::Up,
+                ..
+            }
+        ));
+        assert!(matches!(dig.last(), Some(Outbound::Move(_))));
+        // 26.1's wire: start and finish take a new number, abort does not.
+        let mut wire = crate::version::Wire26_1::default();
+        let mut enc = ghast_protocol::FrameEncoder::new();
+        let dig = |status| Outbound::Dig {
+            status,
+            pos: ghast_protocol::BlockPos::new(1, 2, 3),
+            face: crate::Face::Up,
+        };
+        use crate::common::DigStatus;
+        assert_eq!(crate::version::V26_1::prediction_sequence(&wire), Some(0));
+        for (s, want) in [
+            (DigStatus::Start, 1),
+            (DigStatus::Abort, 1),
+            (DigStatus::Start, 2),
+            (DigStatus::Finish, 3),
+        ] {
+            crate::version::V26_1::write_play(&mut enc, &dig(s), &mut wire).unwrap();
+            assert_eq!(
+                crate::version::V26_1::prediction_sequence(&wire),
+                Some(want)
+            );
+        }
+        assert_eq!(crate::version::V1_8::prediction_sequence(&()), None);
     }
 
     /// `dig_speed` is the left button's per-tick progress; `item_facts` the hands' facts.

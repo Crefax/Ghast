@@ -1143,6 +1143,8 @@ where
             }
         }
         out.clear();
+        self.engine
+            .note_sequence(V::prediction_sequence(&self.wire));
         res.map_err(ClientError::from)
     }
 

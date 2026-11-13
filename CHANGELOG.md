@@ -35,6 +35,11 @@ Additive only: every 0.4.2 API stays, and nothing changes unless a new option is
   version; others are refused) queue a packet in call order with the other actions, before the
   tick's movement packet. An escape hatch: the client does not look at these packets, so their
   protocol correctness is the caller's job. `common::Outbound::Raw`.
+- **What the client sent, for behaviours**: `TickView::outbound` (in `Behavior::after_tick`:
+  the tick's serverbound packets in write order, digs with their status, block and face) and
+  `TickContext::prediction_sequence` / `TickView::prediction_sequence` (26.1+: the
+  block-prediction sequence number of the last predicting packet written, the number
+  `block_changed_ack` answers with; `None` before 1.19). Nothing is copied or kept for them.
 - `common::{Inbound, ConfigInbound}::{ShowDialog, ClearDialog}`,
   `common::{Outbound, ConfigOutbound}::CustomClickAction` and `common::Outbound::DialogCommand`.
 
