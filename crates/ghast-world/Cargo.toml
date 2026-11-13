@@ -26,9 +26,9 @@ v26_2 = ["ghast-protocol/v26_2", "ghast-data/v26_2", "ghast-physics?/v26_1"]
 physics = ["dep:ghast-physics"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.2", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.4.2", default-features = false }
-ghast-physics = { path = "../ghast-physics", version = "0.4.2", optional = true, default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.3", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.3", default-features = false }
+ghast-physics = { path = "../ghast-physics", version = "0.4.3", optional = true, default-features = false }
 bytes = { workspace = true }
 thiserror = { workspace = true }
 

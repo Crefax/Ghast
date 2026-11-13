@@ -24,8 +24,8 @@ v26_1 = ["ghast-protocol/v26_1", "ghast-data/v26_1"]
 v26_2 = ["ghast-protocol/v26_2", "ghast-data/v26_2"]
 
 [dependencies]
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.2", default-features = false }
-ghast-data = { path = "../ghast-data", version = "0.4.2", default-features = false }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.3", default-features = false }
+ghast-data = { path = "../ghast-data", version = "0.4.3", default-features = false }
 bytes = { workspace = true }
 bytestring = { workspace = true }
 
@@ -36,7 +36,7 @@ criterion = { workspace = true }
 serde_json = { workspace = true }
 flate2 = { workspace = true }
 # examples/live_clicks.rs (lab test tool)
-ghast-protocol = { path = "../ghast-protocol", version = "0.4.2", default-features = false, features = ["tokio"] }
+ghast-protocol = { path = "../ghast-protocol", version = "0.4.3", default-features = false, features = ["tokio"] }
 tokio = { workspace = true, features = ["net", "io-util", "time", "macros", "rt"] }
 
 [[bench]]
