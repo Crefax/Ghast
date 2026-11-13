@@ -111,6 +111,7 @@ pub struct Client {
     record: Option<std::path::PathBuf>,
     force_step_position: crate::sim::ForceStepPosition,
     hold_turn_on_action: bool,
+    entity_push: bool,
     world_config: Option<ghast_world::WorldConfig>,
     accept_required_packs: bool,
     signed_chat: bool,
@@ -141,6 +142,7 @@ impl Client {
             record: None,
             force_step_position: crate::sim::ForceStepPosition::Off,
             hold_turn_on_action: true,
+            entity_push: true,
             world_config: None,
             accept_required_packs: true,
             signed_chat: true,
@@ -258,6 +260,18 @@ impl Client {
     #[must_use]
     pub fn hold_turn_on_action(mut self, on: bool) -> Self {
         self.hold_turn_on_action = on;
+        self
+    }
+
+    /// Whether other entities push the player (default on, like vanilla). Pushes happen only
+    /// with [`Interests::ENTITIES`] (26.1+: mobs, players and boats around the player push it
+    /// in the client's entity tick; 1.8.9 – 1.16.5 clients are never pushed by the client, so
+    /// the switch is a no-op there). **Off is not vanilla**: a vanilla client always applies
+    /// these pushes itself; off keeps entity tracking (crosshair, attack, interact) without
+    /// them. A behaviour can switch it at run time with [`TickContext::set_entity_push`](crate::TickContext::set_entity_push).
+    #[must_use]
+    pub fn entity_push(mut self, on: bool) -> Self {
+        self.entity_push = on;
         self
     }
 
@@ -504,6 +518,7 @@ where
         inventory: V::INVENTORY,
         hold_turn_on_action: client.hold_turn_on_action,
         accept_required_packs: client.accept_required_packs,
+        entity_push: client.entity_push,
     };
     let mut play = Play::<V, _, _> {
         rd,

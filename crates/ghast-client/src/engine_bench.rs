@@ -66,6 +66,7 @@ fn opts(caps_version: GameVersion) -> CoreOptions {
         silent_hold: Duration::from_secs(3600),
         hold_turn_on_action: true,
         accept_required_packs: true,
+        entity_push: true,
         inventory: match caps_version {
             GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
             GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,

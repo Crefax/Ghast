@@ -76,6 +76,8 @@ pub(crate) struct ModernSim {
     movement_attributes: bool,
     /// The packets the sim reads changed (boats appeared / are gone): rebuild the filter.
     filter_dirty: bool,
+    /// Entities push the player (vanilla; off only by the client's non-vanilla opt-in).
+    entity_push: bool,
 }
 
 /// A vehicle the player rides.
@@ -856,6 +858,9 @@ impl ModernSim {
     /// `AbstractBoat.tick`), each with its box after its own tick.
     #[inline(never)]
     fn push_player(&mut self, pose: &mut Pose, before: bool) {
+        if !self.entity_push {
+            return;
+        }
         let p = &self.player;
         let a = &mut self.around;
         a.pushers.clear();
@@ -962,6 +967,7 @@ impl ModernSim {
             filter_dirty: false,
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
+            entity_push: true,
         }
     }
 
@@ -1736,6 +1742,10 @@ impl Sim for ModernSim {
     fn tick_unloaded(&mut self) {
         // LoadGate::step before the gate: only the entity tick counter.
         self.player.age += 1;
+    }
+
+    fn set_entity_push(&mut self, on: bool) {
+        self.entity_push = on;
     }
 
     fn tick_entities(&mut self, pose: &mut Pose) {

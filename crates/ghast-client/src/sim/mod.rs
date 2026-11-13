@@ -420,6 +420,12 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn tick_entities(&mut self, pose: &mut Pose) {
         let _ = pose;
     }
+    /// Whether entities push the player (`LivingEntity.pushEntities` and the boat's push on
+    /// the client player; default on, as in vanilla). Versions whose client never pushes the
+    /// player ignore it.
+    fn set_entity_push(&mut self, on: bool) {
+        let _ = on;
+    }
     /// 1.21.4+ level-load gate: the server's `game_event` 13 (`LEVEL_CHUNKS_LOAD_START`).
     fn level_load_start(&mut self) {}
     /// 1.21.4+ level-load gate: the player is alive (`set_health` above 0).
@@ -1152,6 +1158,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn tick_entities(&mut self, pose: &mut Pose) {
         (**self).tick_entities(pose);
+    }
+    fn set_entity_push(&mut self, on: bool) {
+        (**self).set_entity_push(on);
     }
     fn level_load_start(&mut self) {
         (**self).level_load_start();

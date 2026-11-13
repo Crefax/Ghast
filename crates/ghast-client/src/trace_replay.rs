@@ -1121,6 +1121,7 @@ fn opts(sensitivity: f32) -> CoreOptions {
         inventory: ghast_inventory::Version::V1_8,
         hold_turn_on_action: true,
         accept_required_packs: true,
+        entity_push: true,
     }
 }
 

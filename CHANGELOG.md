@@ -6,6 +6,19 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.3 — unreleased
+
+Additive only: every 0.4.2 API stays, and nothing changes unless a new option is used.
+
+### Added
+
+- **Entity push switch** in `ghast-client`: `Client::entity_push(bool)` (default on, as in
+  vanilla) and, at run time from a behaviour, `TickContext::set_entity_push` /
+  `TickContext::entity_push`. Off keeps entity tracking (crosshair, attack, interact) but other
+  entities no longer push the player. Off is not vanilla: a vanilla client always applies these
+  pushes. On 1.8.9, 1.12.2 and 1.16.5 the client never pushes the player, so the switch does
+  nothing there.
+
 ## 0.4.2 — 2026-11-13
 
 Minecraft **26.2 (protocol 776)**; 26.2 is the only game version with protocol 776 so far. Additive

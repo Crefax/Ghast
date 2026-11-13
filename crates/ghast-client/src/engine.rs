@@ -299,6 +299,9 @@ pub(crate) struct CoreOptions {
     pub hold_turn_on_action: bool,
     /// Accept server resource packs the server requires (optional ones are declined).
     pub accept_required_packs: bool,
+    /// Entities push the player (vanilla: on; off is the non-vanilla opt-in of
+    /// [`crate::Client::entity_push`]).
+    pub entity_push: bool,
 }
 
 /// Client state shared by the connection and the behaviour context.
@@ -369,6 +372,8 @@ pub(crate) struct Core {
     near_loaded: u8,
     /// Time origin for nanosecond timestamps (chunk batch timing).
     origin: Instant,
+    /// Entities push the player ([`TickContext::set_entity_push`]).
+    entity_push: bool,
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
@@ -397,6 +402,7 @@ impl Core {
         // a version module exists only with its feature, which enables its inventory
         let inv = ghast_inventory::Inventory::new(opts.inventory)
             .expect("the version's feature enables its ghast-inventory feature");
+        let entity_push = opts.entity_push;
         Core {
             opts,
             tick: 0,
@@ -445,6 +451,7 @@ impl Core {
             load_wait: 0,
             near_loaded: 0,
             origin: Instant::now(),
+            entity_push,
             #[cfg(test)]
             forced_look: None,
         }
@@ -714,7 +721,8 @@ fn enchant_level(s: &ghast_inventory::Stack, id_1_8: i32, name: &str) -> u8 {
 }
 
 impl<S: Sim> Engine<S> {
-    pub(crate) fn new(opts: CoreOptions, sim: S) -> Self {
+    pub(crate) fn new(opts: CoreOptions, mut sim: S) -> Self {
+        sim.set_entity_push(opts.entity_push);
         Engine {
             core: Core::new(opts),
             sim,
@@ -1253,6 +1261,8 @@ impl<S: Sim> Engine<S> {
         }
 
         let c = &mut self.core;
+        // The behaviour may have switched entity pushes for this tick's entity ticks.
+        self.sim.set_entity_push(c.entity_push);
         // ClientPlayerInteractionManager.tick (syncSelectedSlot) runs before the key
         // processing: a held slot the server changed is echoed before any click.
         if c.held_slot != c.sent_slot {
@@ -2018,8 +2028,25 @@ impl TickContext<'_> {
     /// Mouse buttons from now on (kept until changed; released by a join, a respawn or an
     /// open window). Left held mines what the crosshair is on, right held uses / places
     /// (vanilla's key processing, after the behaviour and before the movement packet).
+    ///
+    /// **Entities are invisible without [`Interests::ENTITIES`]:** the crosshair then sees
+    /// blocks only (a player or mob in front of the block does not stop the dig and cannot be
+    /// attacked) and nothing pushes the bot. Ask for the interest when other entities matter.
     pub fn set_buttons(&mut self, buttons: Buttons) {
         self.core.buttons = buttons;
+    }
+
+    /// **Not vanilla when off**: whether other entities push the player from now on (default
+    /// on, see [`crate::Client::entity_push`]). Takes effect on this tick's entity ticks; a
+    /// no-op on versions whose client does not push the player (1.8.9, 1.12.2, 1.16.5).
+    pub fn set_entity_push(&mut self, on: bool) {
+        self.core.entity_push = on;
+    }
+
+    /// Whether other entities push the player ([`TickContext::set_entity_push`]).
+    #[must_use]
+    pub fn entity_push(&self) -> bool {
+        self.core.entity_push
     }
 
     /// The buttons held.
@@ -2439,6 +2466,7 @@ mod tests {
             silent_hold: Duration::from_millis(1500),
             hold_turn_on_action: true,
             accept_required_packs: true,
+            entity_push: true,
             inventory: match version {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
                 GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,

@@ -2017,3 +2017,63 @@ fn joins_match_the_oracle() {
     }
     assert_eq!(cases, 27);
 }
+
+/// The entity push switch (`Client::entity_push` / `TickContext::set_entity_push`): with it on
+/// (the default) a zombie standing in the player moves it; switched off, from the options or
+/// by the behaviour, the player moves exactly as with no zombie at all.
+#[test]
+fn entity_push_switch() {
+    use proto::play::clientbound::id;
+    let zombie = |eid: u8, x: f64, z: f64| {
+        let mut b = vec![eid];
+        b.extend((0x2000u128 + u128::from(eid)).to_be_bytes());
+        let ty = data::entity_by_name("zombie").unwrap().id;
+        b.extend([(ty & 0x7f) as u8 | 0x80, (ty >> 7) as u8]);
+        for v in [x, 64.0, z] {
+            b.extend(v.to_be_bytes());
+        }
+        b.extend([0, 0, 0, 0, 0]);
+        RawPacket {
+            id: id::SPAWN_ENTITY,
+            body: bytes::Bytes::from(b),
+        }
+    };
+    // (option, switch from the behaviour, zombie) -> the feet of 12 ticks, as bits.
+    let run = |option: bool, behaviour: Option<bool>, with_zombie: bool| {
+        let mut o = opts(GAME);
+        o.entity_push = option;
+        let sim: Box<dyn Sim> = Box::new(ModernSim::test_overworld());
+        let mut e = Engine::new(o, sim);
+        join(&mut e);
+        e.sim.set_entities(Some(ghast_entity::Config::default()));
+        if with_zombie {
+            e.sim.world_packet(&zombie(60, 8.7, 8.6)).unwrap();
+        }
+        let t0 = Instant::now();
+        let mut seen = Vec::new();
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            if let Some(on) = behaviour {
+                ctx.set_entity_push(on);
+                assert_eq!(ctx.entity_push(), on);
+            }
+        });
+        for _ in 0..12 {
+            e.note_inbound(t0);
+            e.tick(&mut b, t0);
+            let p = e.core.pose.pos;
+            seen.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+        }
+        seen
+    };
+    let alone = run(true, None, false);
+    let pushed = run(true, None, true);
+    assert_ne!(pushed, alone, "the zombie pushes the player by default");
+    assert_eq!(run(true, Some(true), true), pushed);
+    assert_eq!(run(false, None, true), alone, "the option off: no push");
+    assert_eq!(
+        run(true, Some(false), true),
+        alone,
+        "switched off by the behaviour"
+    );
+    assert_eq!(run(false, Some(true), true), pushed, "switched back on");
+}
