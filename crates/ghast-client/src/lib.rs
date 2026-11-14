@@ -17,7 +17,7 @@
 //! Supported versions: 1.8.9 (protocol 47), 1.12.2 (340), 1.16.5 (754), 26.1 – 26.1.2 (775) and
 //! 26.2 (776), one cargo feature each (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`; default:
 //! all). What a version can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
-//! Server dialogs (26.1+) are in [`dialog`].
+//! Server dialogs (26.1+) are in [`dialog`]. Many bots in one process: [`Swarm`].
 //!
 //! ```no_run
 //! use ghast_client::{Account, Behavior, Client, GameVersion, Interests, TickContext};
@@ -95,6 +95,7 @@ mod phys_golden;
 mod record;
 pub mod rotation;
 mod sim;
+pub mod swarm;
 #[cfg(all(test, feature = "v1_8"))]
 mod trace_replay;
 pub mod version;
@@ -116,6 +117,7 @@ pub use ghast_world as world;
 pub use hands::{BlockHit, Buttons};
 pub use interest::Interests;
 pub use sim::{ForceStepPosition, WorldView};
+pub use swarm::{BotContext, BotError, BotHandle, ShutdownReport, Swarm, SwarmBuilder};
 pub use version::GameVersion;
 
 /// Re-exports of the connection setup types from `ghast-auth`.

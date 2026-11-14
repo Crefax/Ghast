@@ -80,6 +80,48 @@ Other examples in `crates/ghast/examples/`: `chat`, `dig_place`, `use_item`, `at
 `inventory_probe`, `movement_course`, `soak`, and `goto` (`--features ext,pathfinder`: walks
 planned paths with the async helpers).
 
+## Running many bots
+
+One bot: run it on a `current_thread` tokio runtime, as the examples do. A multi-thread
+runtime gains nothing for a single bot and costs CPU in thread wake-ups.
+
+Many bots in one process: use `ghast::Swarm`. It starts a few worker threads (default: one per
+core), each with its own current-thread runtime, places every bot on the least-loaded worker
+and keeps it there. Bots stay independent sessions (any server, any version); a bot that
+panics or fails only ends itself. A join delay spaces out the logins.
+
+```rust,no_run
+use std::time::Duration;
+use ghast::{Account, Behavior, Client, GameVersion, Swarm, TickContext};
+
+struct Afk;
+impl Behavior for Afk {
+    fn tick(&mut self, ctx: &mut TickContext<'_>) {
+        if ctx.is_dead() { ctx.respawn(); }
+    }
+}
+
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let swarm = Swarm::builder().join_delay(Duration::from_millis(200)).build()?;
+let mut bots = Vec::new();
+for i in 0..100 {
+    let client = Client::new("localhost:25565".parse()?, GameVersion::V26_2,
+        Account::offline(&format!("Bot{i}"))?);
+    // The closure runs on the bot's worker thread; its future need not be `Send`.
+    bots.push(swarm.spawn(move |bot| async move {
+        client.run_until(&mut Afk, bot.stopped()).await
+    }));
+}
+// Every bot logs out; whatever has not ended after 10 s is aborted.
+swarm.shutdown(Duration::from_secs(10));
+for bot in bots { println!("{:?}", bot.join_blocking()); }
+# Ok(()) }
+```
+
+The `swarm` example runs N wandering bots: `cargo run -p ghast --release --example swarm --
+--count 50 --version 26.2`. Running each bot in its own process (strongest isolation) needs
+nothing from the library.
+
 ## Versions
 
 | game versions | protocol | status |

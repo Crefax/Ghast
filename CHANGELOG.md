@@ -6,6 +6,26 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.4 — unreleased
+
+Additive only: every 0.4.3 API stays; nothing changes for code that does not use the new type.
+
+### Added
+
+- **`Swarm`: many bots in one process** (`ghast-client`, re-exported by `ghast`). N worker
+  threads (default: available parallelism), each with its own current-thread tokio runtime and
+  `LocalSet`; `Swarm::spawn(|bot| async move { ... })` sends the closure to the least-loaded
+  worker (ties round-robin), where it runs, so the bot's future need not be `Send`. Builder:
+  worker count, join delay (minimum spacing between bot starts across the swarm), thread name
+  prefix, drop grace. `BotHandle`: `stop`, `join` (async, any runtime), `join_blocking`;
+  results are `Result<T, BotError>` (`Panicked`, `NotStarted`, `Aborted`): a panicking bot only
+  ends itself. `BotContext::stopped()` is the future for `Client::run_until`.
+  `Swarm::stop_all`, `Swarm::shutdown(grace)` (stop, wait, abort the rest, join the threads;
+  `ShutdownReport`), and a bounded `Drop`. Handles work after the swarm is dropped. Nothing in
+  `Client` or the tick loop changed; the only new dependency is tokio's `sync` feature.
+- `swarm` example: N wandering bots in one process (`--count`, `--workers`, `--join-delay-ms`).
+- README: "Running many bots".
+
 ## 0.4.3 — 2026-11-13
 
 Additive only: every 0.4.2 API stays, and nothing changes unless a new option is used.

@@ -30,6 +30,11 @@
 //! - `ext`: `ghast::ext`, sequential async helpers.
 //! - `pathfinder`: `ghast::pathfinder`; with `ext` also `Bot::goto` / `Bot::follow_path`.
 //! - `viewer`: `ghast::viewer`, the bot screen in the browser.
+//!
+//! ## Many bots
+//!
+//! One bot: a `current_thread` tokio runtime. Many bots in one process: [`Swarm`] (worker
+//! threads with one current-thread runtime each; bots are placed on the least-loaded one).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, unnameable_types)]

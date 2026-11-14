@@ -72,6 +72,9 @@ name = "use_item"
 name = "soak"
 
 [[example]]
+name = "swarm"
+
+[[example]]
 name = "attack"
 
 [[example]]
