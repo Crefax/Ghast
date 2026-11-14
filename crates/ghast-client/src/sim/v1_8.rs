@@ -109,6 +109,9 @@ impl Sim18 {
             s.world = ghast_world::v1_8::World::new(c);
             s.block_entities = c.block_entities;
         }
+        if opts.shared_chunks.is_some() {
+            log::debug!("shared chunks are not used on 1.8.9; every section stays owned");
+        }
         if let Some(p) = opts.record.as_deref() {
             match crate::record::Recorder::create(p) {
                 Ok(r) => s.rec = Some(r),

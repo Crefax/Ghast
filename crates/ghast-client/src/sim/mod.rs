@@ -484,6 +484,8 @@ pub(crate) struct SimOptions {
     pub entities: Option<ghast_entity::Config>,
     /// What the world keeps besides block states (default: nothing, see [`config`]).
     pub world: Option<WorldConfig>,
+    /// Share section storage through this store (modern versions; the others ignore it).
+    pub shared_chunks: Option<ghast_world::SharedChunks>,
     /// The player's scoreboard name (team membership for entity pushes, 26.1).
     #[cfg_attr(not(ghast_modern), allow(dead_code))]
     pub profile_name: Option<String>,

@@ -113,6 +113,7 @@ pub struct Client {
     hold_turn_on_action: bool,
     entity_push: bool,
     world_config: Option<ghast_world::WorldConfig>,
+    shared_chunks: Option<ghast_world::SharedChunks>,
     accept_required_packs: bool,
     signed_chat: bool,
     follow_transfers: bool,
@@ -144,6 +145,7 @@ impl Client {
             hold_turn_on_action: true,
             entity_push: true,
             world_config: None,
+            shared_chunks: None,
             accept_required_packs: true,
             signed_chat: true,
             follow_transfers: false,
@@ -249,6 +251,37 @@ impl Client {
     #[must_use]
     pub fn world_config(mut self, config: ghast_world::WorldConfig) -> Self {
         self.world_config = Some(config);
+        self
+    }
+
+    /// Share the block storage of chunk sections with every other client given the same
+    /// store (see [`ghast_world::SharedChunks`]): bots in the same area then hold one copy of
+    /// each identical section instead of one each. Reads stay as fast as without it; a block
+    /// change copies only the section it touches, for this bot only. Opt-in (default: every
+    /// bot owns its sections). Used by the modern versions (26.1, 26.2); the older versions
+    /// ignore it.
+    ///
+    /// ```no_run
+    /// use ghast_client::{Account, Client, GameVersion, world::SharedChunks};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let cache = SharedChunks::new(); // one store for all bots of the process
+    /// let mut clients = Vec::new();
+    /// for i in 0..10 {
+    ///     let client = Client::new(
+    ///         "localhost:25565".parse()?,
+    ///         GameVersion::V26_2,
+    ///         Account::offline(&format!("Bot{i}"))?,
+    ///     )
+    ///     .shared_chunks(&cache);
+    ///     clients.push(client);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn shared_chunks(mut self, cache: &ghast_world::SharedChunks) -> Self {
+        self.shared_chunks = Some(cache.clone());
         self
     }
 
@@ -533,6 +566,7 @@ where
                 force_step_position: client.force_step_position,
                 entities: entity_config(behavior.interests()),
                 world: client.world_config,
+                shared_chunks: client.shared_chunks.clone(),
                 profile_name: Some(client.account.name().to_string()),
             }),
         ),

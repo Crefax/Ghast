@@ -15,8 +15,8 @@ use ghast_protocol::codec::{McWrite, Reader};
 use ghast_protocol::v26_1::configuration::clientbound::ClientboundConfigurationPacket;
 use ghast_protocol::v26_1::play::clientbound::{self as cb, ClientboundPlayPacket};
 use ghast_protocol::{PacketSet, RawPacket};
-use ghast_world::WorldConfig;
 use ghast_world::v26_1::World;
+use ghast_world::{SharedChunks, WorldConfig};
 
 const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/world_26_1_2.bin.zz");
 
@@ -234,6 +234,36 @@ fn bench(c: &mut Criterion) {
                 }
             })
         });
+        // Sharing on, nothing in the store yet (the previous iteration's sections die when
+        // the dimension is entered again): hash + decode + store every section.
+        let mut ws = world_with_registries(&f);
+        ws.set_shared_chunks(Some(SharedChunks::new()));
+        g.bench_function(format!("{label} raw body, shared (cold store)"), |b| {
+            b.iter(|| {
+                ws.enter_dimension(name, *ty, 32);
+                for ch in chunks {
+                    ws.handle_raw(black_box(ch)).unwrap();
+                }
+            })
+        });
+        // Sharing on, another world already holds every section: hash + take, no decode.
+        let cache = SharedChunks::new();
+        let mut keeper = world_with_registries(&f);
+        keeper.set_shared_chunks(Some(cache.clone()));
+        keeper.enter_dimension(name, *ty, 32);
+        for ch in chunks {
+            keeper.handle_raw(ch).unwrap();
+        }
+        ws.set_shared_chunks(Some(cache));
+        g.bench_function(format!("{label} raw body, shared (warm store)"), |b| {
+            b.iter(|| {
+                ws.enter_dimension(name, *ty, 32);
+                for ch in chunks {
+                    ws.handle_raw(black_box(ch)).unwrap();
+                }
+            })
+        });
+        drop(keeper);
         if k == 0 {
             g.bench_function(format!("{label} generated packet + apply"), |b| {
                 b.iter(|| {
@@ -275,6 +305,17 @@ fn bench(c: &mut Criterion) {
     for ch in chunks {
         w.handle_raw(ch).unwrap();
     }
+    // The same columns with shared sections (another world holds them too).
+    let cache = SharedChunks::new();
+    let mut sw = world_with_registries(&f);
+    let mut sw2 = world_with_registries(&f);
+    for x in [&mut sw, &mut sw2] {
+        x.set_shared_chunks(Some(cache.clone()));
+        x.enter_dimension(name, *ty, 32);
+        for ch in chunks {
+            x.handle_raw(ch).unwrap();
+        }
+    }
     let mut g = c.benchmark_group("26.1 block reads");
     let boxed: Vec<(i32, i32, i32)> = (0..512)
         .map(|i| (-2 + (i % 5), 98 + ((i / 5) % 6), -2 + ((i / 30) % 5)))
@@ -285,6 +326,15 @@ fn bench(c: &mut Criterion) {
             let mut h = 0u32;
             for &(x, y, z) in &boxed {
                 h = h.wrapping_add(u32::from(w.block_state(x, y, z).unwrap().id()));
+            }
+            black_box(h)
+        })
+    });
+    g.bench_function("World::block_state 5x6x5 box, shared", |b| {
+        b.iter(|| {
+            let mut h = 0u32;
+            for &(x, y, z) in &boxed {
+                h = h.wrapping_add(u32::from(sw.block_state(x, y, z).unwrap().id()));
             }
             black_box(h)
         })
@@ -322,6 +372,16 @@ fn bench(c: &mut Criterion) {
         }
     }
     assert_eq!(flat.block_state(5, 63, 5), BlockState::from_id(stone));
+    let flat_cache = SharedChunks::new();
+    let mut flat_shared = world_with_registries(&f);
+    flat_shared.set_shared_chunks(Some(flat_cache.clone()));
+    flat_shared.enter_dimension("minecraft:overworld", 0, 32);
+    for cx in -4..=4 {
+        for cz in -4..=4 {
+            flat_shared.handle_raw(&flat_chunk(cx, cz, stone)).unwrap();
+        }
+    }
+    assert_eq!(flat_cache.sections(), 1, "81 columns, one shared section");
     assert_eq!(flat.block_state(5, 64, 5), Some(BlockState::AIR));
     let mut mem = modern::memory_world_26_1();
     mem.load_chunks(-4, -4, 4, 4);
@@ -354,6 +414,8 @@ fn bench(c: &mut Criterion) {
     assert_eq!((a.pos, a.vel), (b.pos, b.vel));
     assert_eq!((a.pos, a.vel), (cv.pos, cv.vel));
     assert_eq!((a.pos, a.vel), (d.pos, d.vel));
+    let e = run_ticks(&flat_shared, start, &forward);
+    assert_eq!((a.pos, a.vel), (e.pos, e.vel));
 
     let mut g = c.benchmark_group("26.1 modern_tick walk_flat");
     g.throughput(Throughput::Elements(TICKS as u64));
@@ -365,6 +427,9 @@ fn bench(c: &mut Criterion) {
     });
     g.bench_function("ghast-world World", |b| {
         b.iter(|| run_ticks(&flat, start, &forward))
+    });
+    g.bench_function("ghast-world World, shared", |b| {
+        b.iter(|| run_ticks(&flat_shared, start, &forward))
     });
     g.bench_function("ghast-world View (taken per tick)", |b| {
         b.iter(|| {

@@ -41,6 +41,7 @@ pub mod packed;
 #[cfg(any(feature = "v26_1", feature = "v26_2"))]
 pub mod paletted;
 mod section;
+mod shared;
 
 #[cfg(feature = "v1_12")]
 pub mod v1_12;
@@ -55,6 +56,8 @@ pub mod v1_8;
 mod modern_775 {
     pub(crate) use ghast_data::v26_1 as data;
     pub(crate) use ghast_protocol::v26_1 as proto;
+    /// Protocol number (keeps the sections of different block-id tables apart in a store).
+    pub(crate) const PROTOCOL: u16 = 775;
     #[path = "v26_1.rs"]
     pub mod world;
 }
@@ -69,6 +72,8 @@ pub use modern_775::world as v26_1;
 mod modern_776 {
     pub(crate) use ghast_data::v26_2 as data;
     pub(crate) use ghast_protocol::v26_2 as proto;
+    /// Protocol number (keeps the sections of different block-id tables apart in a store).
+    pub(crate) const PROTOCOL: u16 = 776;
     #[allow(clippy::duplicate_mod)]
     #[path = "v26_1.rs"]
     pub mod world;
@@ -83,6 +88,7 @@ pub use column::{
 };
 pub use error::WorldError;
 pub use section::{Direct, Indexed, SECTION_VOLUME, Section, block_index};
+pub use shared::SharedChunks;
 
 /// What a world keeps besides block states.
 ///

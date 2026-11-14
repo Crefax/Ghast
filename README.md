@@ -123,6 +123,13 @@ The `swarm` example runs N wandering bots: `cargo run -p ghast --release --examp
 --count 50 --version 26.2`. Running each bot in its own process (strongest isolation) needs
 nothing from the library.
 
+Bots that stand in the same area receive the same chunks, and at view distance 10 the block
+storage of those chunks is most of a bot's memory. Give every client one `world::SharedChunks`
+store (`Client::shared_chunks(&cache)`, opt-in) and each identical 16×16×16 section is held
+once for all of them. Reads cost what they cost without it (no lock on the read path); a block
+change copies only the section it touches, for that bot only; memory is freed with the last bot
+that holds a section. 26.1 and 26.2 only (the older versions ignore the option).
+
 ## Versions
 
 | game versions | protocol | status |

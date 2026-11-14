@@ -450,6 +450,19 @@ fn glider_equipped(inv: &ghast_inventory::Inventory) -> bool {
         .any(|(s, slot)| s.is_some_and(|s| can_glide_using(s, slot)))
 }
 
+/// A world with `c`. Tests: `GHAST_TEST_SHARED=1` gives every world of the test binary one
+/// shared section store, so the whole suite can be replayed with sharing on.
+fn new_world(c: ghast_world::WorldConfig) -> super::world::World {
+    #[cfg_attr(not(test), allow(unused_mut))]
+    let mut w = super::world::World::new(c);
+    #[cfg(test)]
+    if std::env::var_os("GHAST_TEST_SHARED").is_some() {
+        static STORE: std::sync::OnceLock<ghast_world::SharedChunks> = std::sync::OnceLock::new();
+        w.set_shared_chunks(Some(STORE.get_or_init(Default::default).clone()));
+    }
+    w
+}
+
 impl ModernSim {
     /// Something in `ext` acts next tick (see [`ModernSim::ext_active`]).
     #[inline]
@@ -940,7 +953,7 @@ impl ModernSim {
 
     pub(crate) fn new() -> Self {
         ModernSim {
-            world: super::world::World::new(config()),
+            world: new_world(config()),
             player: modern::PlayerState::new([0.0; 3], 0.0, 0.0),
             packets: ghast_physics::Packets::new(),
             updates: BlockUpdates::default(),
@@ -976,7 +989,10 @@ impl ModernSim {
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
         if let Some(c) = opts.world {
-            s.world = super::world::World::new(c);
+            s.world = new_world(c);
+        }
+        if let Some(cache) = &opts.shared_chunks {
+            s.world.set_shared_chunks(Some(cache.clone()));
         }
         if let Some(p) = opts.record.as_deref() {
             log::warn!(
@@ -1013,6 +1029,18 @@ impl ModernSim {
         s.world.enter_dimension("minecraft:the_nether", 1, 8);
         s.sync_level();
         s
+    }
+
+    /// Test hook: share the world's sections through `cache` (the engine bench).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_share_chunks(&mut self, cache: Option<ghast_world::SharedChunks>) {
+        self.world.set_shared_chunks(cache);
     }
 
     /// Test hook: a world in the vanilla overworld (registries as with known packs).

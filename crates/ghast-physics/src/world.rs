@@ -282,7 +282,10 @@ impl<'w, W: BlockView> TickCache<'w, W> {
 impl<W: BlockView> BlockView for TickCache<'_, W> {
     type State = W::State;
 
-    #[inline]
+    // Always inlined: the hottest call of every tick. Left to the size heuristic, a world
+    // whose read path grows by a few match arms (shared sections) turned this into a call at
+    // the collision loops (engine bench: +11 % instructions per tick on 26.1).
+    #[inline(always)]
     fn block(&self, x: i32, y: i32, z: i32) -> W::State {
         let (dx, dy, dz) = (
             x.wrapping_sub(self.origin[0]) as u32,

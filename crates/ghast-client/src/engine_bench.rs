@@ -77,7 +77,12 @@ fn opts(caps_version: GameVersion) -> CoreOptions {
     }
 }
 
-fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
+fn run<S: Sim>(
+    version: GameVersion,
+    sim: S,
+    ticks: u64,
+    shared: Option<&ghast_world::SharedChunks>,
+) -> u64 {
     let mut e = Engine::new(opts(version), sim);
     let load = |e: &mut Engine<S>, x: i32, z: i32| {
         let raw = match version {
@@ -237,6 +242,9 @@ fn run<S: Sim>(version: GameVersion, sim: S, ticks: u64) -> u64 {
         use std::hash::Hasher;
         println!("{} digest {:016x}", version.name(), h.finish());
     }
+    if let Some(s) = shared {
+        println!("{}: {} shared sections", version.name(), s.sections());
+    }
     sent
 }
 
@@ -251,28 +259,28 @@ fn engine_bench() {
     let want = |v: GameVersion| only.as_deref().is_none_or(|o| o == v.name());
     let mut total = 0;
     if want(GameVersion::V1_8_9) {
-        total += run(GameVersion::V1_8_9, crate::sim::Sim18::new(), ticks);
+        total += run(GameVersion::V1_8_9, crate::sim::Sim18::new(), ticks, None);
     }
     if want(GameVersion::V1_12_2) {
-        total += run(GameVersion::V1_12_2, crate::sim::Sim12::new(), ticks);
+        total += run(GameVersion::V1_12_2, crate::sim::Sim12::new(), ticks, None);
     }
     if want(GameVersion::V1_16_5) {
-        total += run(GameVersion::V1_16_5, crate::sim::Sim16::new(), ticks);
+        total += run(GameVersion::V1_16_5, crate::sim::Sim16::new(), ticks, None);
     }
+    // GHAST_BENCH_SHARED=1 (modern): the world shares its sections through a store.
+    let shared = std::env::var_os("GHAST_BENCH_SHARED")
+        .is_some()
+        .then(ghast_world::SharedChunks::new);
     if want(GameVersion::V26_1) {
-        total += run(
-            GameVersion::V26_1,
-            crate::sim::Sim26::test_overworld(),
-            ticks,
-        );
+        let mut sim = crate::sim::Sim26::test_overworld();
+        sim.test_share_chunks(shared.clone());
+        total += run(GameVersion::V26_1, sim, ticks, shared.as_ref());
     }
     #[cfg(feature = "v26_2")]
     if want(GameVersion::V26_2) {
-        total += run(
-            GameVersion::V26_2,
-            crate::sim::Sim262::test_overworld(),
-            ticks,
-        );
+        let mut sim = crate::sim::Sim262::test_overworld();
+        sim.test_share_chunks(shared.clone());
+        total += run(GameVersion::V26_2, sim, ticks, shared.as_ref());
     }
     println!("engine_bench: {ticks} ticks, {total} packets");
 }

@@ -49,7 +49,7 @@ use ghast_protocol::nbt::{AnonNbt, Tag};
 use crate::border::{Border, BorderPacket, LerpMath};
 use crate::column::{BlockEntity, ColumnMap};
 use crate::paletted::{Builder, Section, WireBlocks, block_index};
-use crate::{Applied, ChunkPos, WorldConfig, WorldError};
+use crate::{Applied, ChunkPos, SharedChunks, WorldConfig, WorldError};
 
 /// Bits per block of the global palette: `ceil(log2(STATE_COUNT))` (15 for 26.1).
 pub const GLOBAL_BITS: u32 = ceil_log2(STATE_COUNT);
@@ -430,6 +430,8 @@ pub struct World {
     biome_zoom_seed: i64,
     /// `Level.getSeaLevel()` (login / respawn).
     sea_level: i32,
+    /// Where non-uniform sections are shared with other worlds ([`World::set_shared_chunks`]).
+    shared: Option<SharedChunks>,
 }
 
 impl std::fmt::Debug for World {
@@ -497,7 +499,21 @@ impl World {
             batch: ChunkBatchSize::default(),
             biome_zoom_seed: 0,
             sea_level: 63,
+            shared: None,
         }
+    }
+
+    /// Shares the block storage of the sections this world decodes from now on through
+    /// `cache` (see [`SharedChunks`]), or stops sharing (`None`). Columns already loaded keep
+    /// the storage they have. Without a store (the default) sections are owned as before.
+    pub fn set_shared_chunks(&mut self, cache: Option<SharedChunks>) {
+        self.shared = cache;
+    }
+
+    /// The store this world shares sections through, if any.
+    #[must_use]
+    pub fn shared_chunks(&self) -> Option<&SharedChunks> {
+        self.shared.as_ref()
     }
 
     /// The configuration.
@@ -533,7 +549,7 @@ impl World {
 
     /// The block state at a position, or `None` when its column is not loaded. Positions
     /// outside the build height in a loaded column are `void_air`, as in vanilla.
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockState> {
         let c = self.columns.get(x >> 4, z >> 4)?;
@@ -1130,7 +1146,11 @@ impl World {
                 section: j.min(255) as u8,
                 reason,
             };
-            let s = read_section(&mut self.builder, &mut r).map_err(err);
+            let s = match &self.shared {
+                None => read_section(&mut self.builder, &mut r),
+                Some(cache) => read_section_shared(&mut self.builder, cache, &mut r),
+            }
+            .map_err(err);
             let s = match s {
                 Ok(s) => s,
                 Err(e) => {
@@ -1327,8 +1347,10 @@ impl World {
     }
 }
 
-/// Block read inside a column (`ry = y - min_y`): void air outside the height.
-#[inline]
+/// Block read inside a column (`ry = y - min_y`): void air outside the height. The read
+/// chain (`View::block` → `View::block_state` → `read` → `Section::get`) is always inlined so
+/// the physics' collision loops keep it inline (engine bench, instructions per tick).
+#[inline(always)]
 fn read(c: &Column, x: i32, ry: i32, z: i32) -> BlockState {
     match c.sections.get((ry >> 4) as usize) {
         Some(s) if ry >= 0 => state(s.get(block_index(x, ry, z))),
@@ -1390,6 +1412,53 @@ fn read_section(b: &mut Builder, r: &mut Reader<'_>) -> Result<Section, &'static
             })
         }
     }
+}
+
+/// Length of the section at the reader (counts and block container) when it is worth sharing:
+/// `None` for a single-value container (nothing on the heap) and for anything malformed (the
+/// decoder then reports the error). Ids are not checked here: a store only holds sections
+/// whose identical bytes decoded without error for the same protocol.
+fn shareable_len(r: &Reader<'_>) -> Option<usize> {
+    let mut p = r.clone();
+    let start = p.position();
+    p.skip(4).ok()?;
+    let bits = p.read_i8().ok()?;
+    let longs = match bits {
+        0 => return None,
+        1..=8 => {
+            let n = usize::try_from(p.read_varint().ok()?).ok()?;
+            if (bits <= 4 && n > 16) || n > p.remaining() {
+                return None;
+            }
+            for _ in 0..n {
+                p.read_varint().ok()?;
+            }
+            let storage = if bits <= 4 { 4 } else { bits as usize };
+            4096usize.div_ceil(64 / storage)
+        }
+        _ => 4096usize.div_ceil((64 / GLOBAL_BITS) as usize),
+    };
+    p.skip(longs * 8).ok()?;
+    Some(p.position() - start)
+}
+
+/// [`read_section`] through a store: a section whose exact bytes are already in the store is
+/// taken from there without decoding; a new one is decoded and stored.
+fn read_section_shared(
+    b: &mut Builder,
+    cache: &SharedChunks,
+    r: &mut Reader<'_>,
+) -> Result<Section, &'static str> {
+    let Some(len) = shareable_len(r) else {
+        return read_section(b, r);
+    };
+    let key = cache.key(super::PROTOCOL, &r.rest_slice()[..len]);
+    if let Some(s) = cache.get(key) {
+        r.skip(len).map_err(|_| "truncated")?;
+        return Ok(s);
+    }
+    let s = read_section(b, r)?;
+    Ok(cache.insert(key, s))
 }
 
 /// Reads one biome container (`count` = biome registry size, 0 = unknown: ids not checked).
@@ -1477,7 +1546,7 @@ impl std::fmt::Debug for View<'_> {
 }
 
 impl<'w> View<'w> {
-    #[inline]
+    #[inline(always)]
     fn column(&self, cx: i32, cz: i32) -> Option<&'w Column> {
         let dx = cx.wrapping_sub(self.cx0) as u32;
         let dz = cz.wrapping_sub(self.cz0) as u32;
@@ -1489,7 +1558,7 @@ impl<'w> View<'w> {
     }
 
     /// Like [`World::block_state`].
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockState> {
         let c = self.column(x >> 4, z >> 4)?;
@@ -1525,7 +1594,7 @@ mod physics {
 
         /// Vanilla semantics: unloaded columns (the client's empty chunk) and positions outside
         /// the build height read as `void_air`.
-        #[inline]
+        #[inline(always)]
         fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
             self.block_state(x, y, z).unwrap_or_else(void_air)
         }
@@ -1543,7 +1612,7 @@ mod physics {
     impl ghast_physics::BlockView for View<'_> {
         type State = BlockState;
 
-        #[inline]
+        #[inline(always)]
         fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
             self.block_state(x, y, z).unwrap_or_else(void_air)
         }
@@ -1569,6 +1638,200 @@ mod tests {
         assert_eq!(ceil_log2(65), 7);
         assert_eq!(ceil_log2(64), 6);
         assert_eq!(ceil_log2(1), 0);
+    }
+
+    /// An overworld world (vanilla registry entry, min_y -64, 24 sections).
+    fn overworld() -> World {
+        let mut w = World::new(WorldConfig::default());
+        w.apply_registry(
+            "minecraft:dimension_type",
+            [("minecraft:overworld", None)].into_iter(),
+        );
+        w.enter_dimension("minecraft:overworld", 0, 8);
+        w
+    }
+
+    /// A chunk body: section 7 (y 48..64) has `top` in its top row (y 63) and `rest` below,
+    /// as a 4-bit linear palette; every other section is single-value air.
+    fn chunk(cx: i32, cz: i32, top: u16, rest: u16) -> Bytes {
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        let mut d = bytes::BytesMut::new();
+        for s in 0..24 {
+            d.put_i16(if s == 7 { 4096 } else { 0 });
+            d.put_i16(0);
+            if s == 7 {
+                d.put_u8(4);
+                d.put_varint(2);
+                d.put_varint(i32::from(rest));
+                d.put_varint(i32::from(top));
+                for w in 0..256 {
+                    d.put_u64(if w >= 240 { 0x1111_1111_1111_1111 } else { 0 });
+                }
+            } else {
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        let mut b = bytes::BytesMut::new();
+        b.put_i32(cx);
+        b.put_i32(cz);
+        b.put_varint(0);
+        b.put_varint(d.len() as i32);
+        b.put_slice(&d);
+        b.put_varint(0);
+        b.freeze()
+    }
+
+    fn sec(w: &World, cx: i32, cz: i32) -> &Section {
+        &w.column(cx, cz).unwrap().sections()[7]
+    }
+
+    fn same_storage(a: &Section, b: &Section) -> bool {
+        use crate::paletted::Shared;
+        match (a, b) {
+            (Section::Shared1(x), Section::Shared1(y)) => Shared::ptr_eq(x, y),
+            (Section::Shared2(x), Section::Shared2(y)) => Shared::ptr_eq(x, y),
+            (Section::Shared4(x), Section::Shared4(y)) => Shared::ptr_eq(x, y),
+            (Section::Shared8(x), Section::Shared8(y)) => Shared::ptr_eq(x, y),
+            (Section::SharedDirect(x), Section::SharedDirect(y)) => Shared::ptr_eq(x, y),
+            _ => false,
+        }
+    }
+
+    const STONE: u16 = 1;
+    const DIRT: u16 = 10;
+
+    #[test]
+    fn worlds_share_one_section_and_copy_on_write() {
+        let cache = SharedChunks::new();
+        let (mut a, mut b, mut plain) = (overworld(), overworld(), overworld());
+        a.set_shared_chunks(Some(cache.clone()));
+        b.set_shared_chunks(Some(cache.clone()));
+        let body = chunk(0, 0, STONE, DIRT);
+        for w in [&mut a, &mut b, &mut plain] {
+            assert_eq!(w.apply_map_chunk_body(&body).unwrap(), Applied::Changed);
+        }
+        assert!(sec(&a, 0, 0).is_shared() && !sec(&plain, 0, 0).is_shared());
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)), "decoded once");
+        assert_eq!((cache.entries(), cache.sections()), (1, 1));
+        assert!(matches!(sec(&a, 0, 0), Section::Shared1(s) if s.holders() == 2));
+        // Uniform sections are never stored.
+        assert!(!a.column(0, 0).unwrap().sections()[0].is_shared());
+        for (x, z) in [(1, 1), (5, 9)] {
+            for w in [&a, &b] {
+                assert_eq!(w.block_state(x, 63, z).unwrap().id(), STONE);
+                assert_eq!(w.block_state(x, 62, z).unwrap().id(), DIRT);
+            }
+        }
+        // a changes a block: a gets its own copy, b still reads the shared one.
+        assert!(a.set_block_state(1, 63, 1, BlockState::AIR));
+        assert!(!sec(&a, 0, 0).is_shared() && sec(&b, 0, 0).is_shared());
+        assert_eq!(a.block_state(1, 63, 1), Some(BlockState::AIR));
+        assert_eq!(b.block_state(1, 63, 1).unwrap().id(), STONE);
+        assert_eq!((cache.entries(), cache.sections()), (1, 1));
+        // A change to the same state does not copy.
+        assert!(b.set_block_state(5, 63, 5, BlockState::from_id(STONE).unwrap()));
+        assert!(sec(&b, 0, 0).is_shared());
+        // b changes another block: the last holder let go, the entry is gone.
+        assert!(b.set_block_state(2, 62, 2, BlockState::AIR));
+        assert_eq!((cache.entries(), cache.sections()), (0, 0));
+        assert_eq!(a.block_state(2, 62, 2).unwrap().id(), DIRT);
+        assert_eq!(b.block_state(2, 62, 2), Some(BlockState::AIR));
+        assert_eq!(b.block_state(1, 63, 1).unwrap().id(), STONE);
+        // Owned copies read like the plain world except for their own edits.
+        for i in 0..4096 {
+            let (x, y, z) = (i & 15, 48 + (i >> 8), (i >> 4) & 15);
+            let p = plain.block_state(x, y, z);
+            if (x, y, z) != (1, 63, 1) {
+                assert_eq!(a.block_state(x, y, z), p);
+            }
+            if (x, y, z) != (2, 62, 2) {
+                assert_eq!(b.block_state(x, y, z), p);
+            }
+        }
+    }
+
+    #[test]
+    fn unload_frees_the_entry() {
+        let cache = SharedChunks::new();
+        let (mut a, mut b) = (overworld(), overworld());
+        a.set_shared_chunks(Some(cache.clone()));
+        b.set_shared_chunks(Some(cache.clone()));
+        for w in [&mut a, &mut b] {
+            w.apply_map_chunk_body(&chunk(0, 0, STONE, DIRT)).unwrap();
+            w.apply_map_chunk_body(&chunk(1, 0, DIRT, STONE)).unwrap();
+        }
+        assert_eq!(cache.entries(), 2);
+        assert!(cache.heap_bytes() > 2 * 512);
+        let unload = |w: &mut World, x| {
+            w.apply_unload_chunk(&UnloadChunk {
+                chunk_z: 0,
+                chunk_x: x,
+            })
+        };
+        assert_eq!(unload(&mut a, 0), Applied::Changed);
+        assert_eq!(cache.entries(), 2, "b still holds (0, 0)");
+        assert_eq!(unload(&mut b, 0), Applied::Changed);
+        assert_eq!(cache.entries(), 1);
+        b.clear();
+        assert_eq!(cache.entries(), 1, "a still holds (1, 0)");
+        drop(a);
+        assert_eq!((cache.entries(), cache.sections()), (0, 0));
+        // Worlds outlive the store handle they were given.
+        let mut c = overworld();
+        c.set_shared_chunks(Some(SharedChunks::new()));
+        c.apply_map_chunk_body(&chunk(0, 0, STONE, DIRT)).unwrap();
+        c.set_shared_chunks(None);
+        assert!(sec(&c, 0, 0).is_shared());
+        assert_eq!(c.block_state(3, 63, 3).unwrap().id(), STONE);
+        drop(c);
+    }
+
+    #[test]
+    fn a_later_full_chunk_replaces_shared_sections() {
+        let cache = SharedChunks::new();
+        let (mut a, mut b) = (overworld(), overworld());
+        a.set_shared_chunks(Some(cache.clone()));
+        b.set_shared_chunks(Some(cache.clone()));
+        a.apply_map_chunk_body(&chunk(0, 0, STONE, DIRT)).unwrap();
+        b.apply_map_chunk_body(&chunk(0, 0, STONE, DIRT)).unwrap();
+        // a gets new contents for the same column; b keeps the old ones.
+        a.apply_map_chunk_body(&chunk(0, 0, DIRT, STONE)).unwrap();
+        assert_eq!(cache.entries(), 2);
+        assert_eq!(a.block_state(4, 63, 4).unwrap().id(), DIRT);
+        assert_eq!(b.block_state(4, 63, 4).unwrap().id(), STONE);
+        assert!(!same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        // The same contents again: a's own entry is reused, b's old one dies.
+        b.apply_map_chunk_body(&chunk(0, 0, DIRT, STONE)).unwrap();
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert_eq!(cache.entries(), 1);
+        // Same bytes at another column position share too (the key is the section bytes).
+        b.apply_map_chunk_body(&chunk(3, -2, DIRT, STONE)).unwrap();
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 3, -2)));
+        assert_eq!(cache.entries(), 1);
+    }
+
+    #[test]
+    fn malformed_sections_are_not_stored() {
+        let cache = SharedChunks::new();
+        let mut a = overworld();
+        a.set_shared_chunks(Some(cache.clone()));
+        // Palette entry 1 used but the palette has one entry: an error, nothing stored.
+        let mut body = chunk(0, 0, STONE, DIRT).to_vec();
+        let at = body
+            .windows(4)
+            .position(|w| w == [4, 2, DIRT as u8, STONE as u8])
+            .unwrap();
+        body[at + 1] = 1;
+        body.remove(at + 3);
+        let n = body.len();
+        let err = a.apply_map_chunk_body(&Bytes::from(body));
+        assert!(err.is_err(), "{n} {err:?}");
+        assert!(a.column(0, 0).is_none());
+        assert_eq!(cache.entries(), 0);
     }
 
     #[test]

@@ -108,6 +108,9 @@ impl Sim12 {
             s.world = ghast_world::v1_12::World::new(c);
             s.block_entities = c.block_entities;
         }
+        if opts.shared_chunks.is_some() {
+            log::debug!("shared chunks are not used on 1.12.2; every section stays owned");
+        }
         if let Some(p) = opts.record.as_deref() {
             log::warn!(
                 "movement recording is not supported on 1.12.2; not recording to {}",

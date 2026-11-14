@@ -23,6 +23,26 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
   `Swarm::stop_all`, `Swarm::shutdown(grace)` (stop, wait, abort the rest, join the threads;
   `ShutdownReport`), and a bounded `Drop`. Handles work after the swarm is dropped. Nothing in
   `Client` or the tick loop changed; the only new dependency is tokio's `sync` feature.
+- **`SharedChunks`: one copy of identical chunk sections for many bots** (`ghast-world`,
+  `Client::shared_chunks`, opt-in, 26.1 / 26.2). Bots in one area share each identical
+  16×16×16 section's block storage instead of holding one copy each. Sharing is per section and
+  copy on write: a block change (server update or local prediction) first copies that one
+  section for that bot, so no bot sees another bot's packets. The key is a 128-bit keyed hash of
+  the section's exact chunk-packet bytes (a skip pass finds them); a section already in the store
+  is not decoded at all. The store holds weak references and removes an entry when the last
+  holder drops it. Reads stay one pointer hop with no lock; the store's lock is taken while a
+  chunk is decoded and when a last holder lets go. Uniform sections, biomes and block entities
+  stay per world (the modern worlds keep no light). Diverged sections never merge back. New
+  API: `SharedChunks` (`new`, `sections`, `heap_bytes`, `same_store`), `v26_x::World::
+  set_shared_chunks` / `shared_chunks`, `paletted::Section::{Shared1, Shared2, Shared4, Shared8,
+  SharedDirect}` with `paletted::Shared` and `Section::is_shared` (the enum is
+  `#[non_exhaustive]`; a shared section's `heap_bytes` is 0, the store counts it once).
+  The 1.8.9 / 1.12.2 / 1.16.5 worlds ignore the option.
+- The block read chain of the modern worlds and the physics' per-tick block cache are always
+  inlined (they were left to the compiler's size heuristic). Engine bench, instructions per
+  tick: 1.8.9 12,494 → 11,792; 1.12.2 19,593 → 18,361; 1.16.5 40,462 → 39,771; 26.1
+  36,317 → 36,234; 26.2 36,396 → 36,318 (the same with sharing on). Outbound packet digests
+  unchanged.
 - `swarm` example: N wandering bots in one process (`--count`, `--workers`, `--join-delay-ms`).
 - README: "Running many bots".
 

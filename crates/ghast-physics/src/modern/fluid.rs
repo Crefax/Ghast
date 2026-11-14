@@ -74,8 +74,10 @@ impl Tracker {
 }
 
 impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
-    /// The fluid byte at a position (`Level.getFluidState`).
-    #[inline]
+    /// The fluid byte at a position (`Level.getFluidState`). Always inlined: it is one cached
+    /// block read, and the compiler's size heuristic otherwise keeps it out of line at some
+    /// callers (measured with the engine bench).
+    #[inline(always)]
     pub(crate) fn fluid(&self, x: i32, y: i32, z: i32) -> u8 {
         self.phys(x, y, z).fluid()
     }

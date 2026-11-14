@@ -16,12 +16,122 @@
 //! README): 18.6 KB of block storage per overworld chunk, against 38.8 KB for the byte-per-block
 //! representation the older worlds use.
 //!
+//! With a [`crate::SharedChunks`] store, a world keeps the packed storage of a section it shares
+//! with other worlds in the `Shared*` variants ([`Section::Shared4`], ...): the same layout and
+//! the same single pointer hop as the boxed variants, behind an `Arc` instead of a `Box`. A
+//! change to such a section first copies it into the matching boxed variant (copy on write).
+//!
 //! A palette index past the palette's used entries reads as palette entry 0 of the padded
 //! palette (air unless the section was built with air at 0): decoding rejects such indices, so
 //! this only matters for sections built by hand.
 
+use std::sync::{Arc, Weak};
+
 /// Number of blocks in a section.
 pub const VOLUME: usize = 4096;
+
+/// Section storage shared by the worlds of one [`crate::SharedChunks`] store: immutable and
+/// reference counted. It reads like the boxed storage it replaces (`Deref` to the packed type);
+/// [`Section::set`] copies it before a change.
+pub struct Shared<T>(Arc<Node<T>>);
+
+/// The shared allocation: the storage, its store key and the store to tell on the last drop.
+pub(crate) struct Node<T> {
+    data: T,
+    key: u128,
+    cache: Weak<crate::shared::Inner>,
+}
+
+impl<T> Drop for Node<T> {
+    fn drop(&mut self) {
+        crate::shared::forget(&self.cache, self.key);
+    }
+}
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Shared(Arc::clone(&self.0))
+    }
+}
+
+impl<T> std::ops::Deref for Shared<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        &self.0.data
+    }
+}
+
+impl<T> Shared<T> {
+    /// `true` when both are the same shared allocation.
+    #[must_use]
+    pub fn ptr_eq(a: &Self, b: &Self) -> bool {
+        Arc::ptr_eq(&a.0, &b.0)
+    }
+
+    /// Number of sections (in all worlds) currently holding this storage.
+    #[must_use]
+    pub fn holders(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+}
+
+fn share<T>(data: T, key: u128, cache: &Weak<crate::shared::Inner>) -> (Shared<T>, Weak<Node<T>>) {
+    let a = Arc::new(Node {
+        data,
+        key,
+        cache: cache.clone(),
+    });
+    let w = Arc::downgrade(&a);
+    (Shared(a), w)
+}
+
+/// A store entry: a weak reference to one shared storage.
+pub(crate) enum WeakSection {
+    Bits1(Weak<Node<Packed1>>),
+    Bits2(Weak<Node<Packed2>>),
+    Bits4(Weak<Node<Packed4>>),
+    Bits8(Weak<Node<Packed8>>),
+    Direct(Weak<Node<[u16; VOLUME]>>),
+}
+
+impl WeakSection {
+    /// The live section, if any world still holds it.
+    pub(crate) fn upgrade(&self) -> Option<Section> {
+        Some(match self {
+            WeakSection::Bits1(w) => Section::Shared1(Shared(w.upgrade()?)),
+            WeakSection::Bits2(w) => Section::Shared2(Shared(w.upgrade()?)),
+            WeakSection::Bits4(w) => Section::Shared4(Shared(w.upgrade()?)),
+            WeakSection::Bits8(w) => Section::Shared8(Shared(w.upgrade()?)),
+            WeakSection::Direct(w) => Section::SharedDirect(Shared(w.upgrade()?)),
+        })
+    }
+
+    /// `true` when no world holds the storage any more.
+    pub(crate) fn is_dead(&self) -> bool {
+        match self {
+            WeakSection::Bits1(w) => w.strong_count() == 0,
+            WeakSection::Bits2(w) => w.strong_count() == 0,
+            WeakSection::Bits4(w) => w.strong_count() == 0,
+            WeakSection::Bits8(w) => w.strong_count() == 0,
+            WeakSection::Direct(w) => w.strong_count() == 0,
+        }
+    }
+
+    /// Heap bytes of the shared allocation.
+    pub(crate) fn storage_bytes(&self) -> usize {
+        // Arc header (two counters) + key + store pointer + the storage.
+        let head = 2 * size_of::<usize>() + size_of::<u128>() + size_of::<usize>();
+        head + match self {
+            WeakSection::Bits1(_) => size_of::<Packed1>(),
+            WeakSection::Bits2(_) => size_of::<Packed2>(),
+            WeakSection::Bits4(_) => size_of::<Packed4>(),
+            WeakSection::Bits8(_) => size_of::<Packed8>(),
+            WeakSection::Direct(_) => size_of::<[u16; VOLUME]>(),
+        }
+    }
+}
 
 /// Packed palette indices of one section: `B` bits per block (`W` = `4096 * B / 64` words) and a
 /// palette of `P` = `2^B` raw states.
@@ -134,6 +244,16 @@ pub enum Section {
     Bits8(Box<Packed8>),
     /// More than 256 distinct states: one raw state per block.
     Direct(Box<[u16; VOLUME]>),
+    /// [`Section::Bits1`] storage shared through a [`crate::SharedChunks`] store.
+    Shared1(Shared<Packed1>),
+    /// [`Section::Bits2`] storage shared through a [`crate::SharedChunks`] store.
+    Shared2(Shared<Packed2>),
+    /// [`Section::Bits4`] storage shared through a [`crate::SharedChunks`] store.
+    Shared4(Shared<Packed4>),
+    /// [`Section::Bits8`] storage shared through a [`crate::SharedChunks`] store.
+    Shared8(Shared<Packed8>),
+    /// [`Section::Direct`] storage shared through a [`crate::SharedChunks`] store.
+    SharedDirect(Shared<[u16; VOLUME]>),
 }
 
 impl std::fmt::Debug for Section {
@@ -145,6 +265,11 @@ impl std::fmt::Debug for Section {
             Section::Bits4(p) => f.debug_tuple("Bits4").field(&p.palette()).finish(),
             Section::Bits8(p) => f.debug_tuple("Bits8").field(&p.palette()).finish(),
             Section::Direct(_) => f.write_str("Direct"),
+            Section::Shared1(p) => f.debug_tuple("Shared1").field(&p.palette()).finish(),
+            Section::Shared2(p) => f.debug_tuple("Shared2").field(&p.palette()).finish(),
+            Section::Shared4(p) => f.debug_tuple("Shared4").field(&p.palette()).finish(),
+            Section::Shared8(p) => f.debug_tuple("Shared8").field(&p.palette()).finish(),
+            Section::SharedDirect(_) => f.write_str("SharedDirect"),
         }
     }
 }
@@ -164,7 +289,7 @@ pub const fn block_index(x: i32, y: i32, z: i32) -> usize {
 
 impl Section {
     /// Raw state of block `i` ([`block_index`]).
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn get(&self, i: usize) -> u16 {
         match self {
@@ -174,6 +299,11 @@ impl Section {
             Section::Bits2(p) => p.get(i),
             Section::Bits1(p) => p.get(i),
             Section::Direct(d) => d[i & (VOLUME - 1)],
+            Section::Shared4(p) => p.get(i),
+            Section::Shared8(p) => p.get(i),
+            Section::Shared2(p) => p.get(i),
+            Section::Shared1(p) => p.get(i),
+            Section::SharedDirect(d) => d[i & (VOLUME - 1)],
         }
     }
 
@@ -182,12 +312,26 @@ impl Section {
     pub fn bits(&self) -> u32 {
         match self {
             Section::Uniform(_) => 0,
-            Section::Bits1(_) => 1,
-            Section::Bits2(_) => 2,
-            Section::Bits4(_) => 4,
-            Section::Bits8(_) => 8,
-            Section::Direct(_) => 16,
+            Section::Bits1(_) | Section::Shared1(_) => 1,
+            Section::Bits2(_) | Section::Shared2(_) => 2,
+            Section::Bits4(_) | Section::Shared4(_) => 4,
+            Section::Bits8(_) | Section::Shared8(_) => 8,
+            Section::Direct(_) | Section::SharedDirect(_) => 16,
         }
+    }
+
+    /// `true` when the storage is shared through a [`crate::SharedChunks`] store (one of the
+    /// `Shared*` variants).
+    #[must_use]
+    pub fn is_shared(&self) -> bool {
+        matches!(
+            self,
+            Section::Shared1(_)
+                | Section::Shared2(_)
+                | Section::Shared4(_)
+                | Section::Shared8(_)
+                | Section::SharedDirect(_)
+        )
     }
 
     /// `true` when every block is raw state 0 (air).
@@ -196,11 +340,17 @@ impl Section {
         matches!(self, Section::Uniform(0))
     }
 
-    /// Heap bytes owned by this section.
+    /// Heap bytes owned by this section. Shared storage is not owned by one section and counts
+    /// 0 here ([`crate::SharedChunks::heap_bytes`] counts it once).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         match self {
-            Section::Uniform(_) => 0,
+            Section::Uniform(_)
+            | Section::Shared1(_)
+            | Section::Shared2(_)
+            | Section::Shared4(_)
+            | Section::Shared8(_)
+            | Section::SharedDirect(_) => 0,
             Section::Bits1(_) => size_of::<Packed1>(),
             Section::Bits2(_) => size_of::<Packed2>(),
             Section::Bits4(_) => size_of::<Packed4>(),
@@ -218,7 +368,57 @@ impl Section {
             Section::Bits4(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
             Section::Bits8(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
             Section::Direct(d) => d.iter().enumerate().for_each(|(i, &s)| f(i, s)),
+            Section::Shared1(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
+            Section::Shared2(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
+            Section::Shared4(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
+            Section::Shared8(p) => p.for_each_index(|i, k| f(i, p.palette[k])),
+            Section::SharedDirect(d) => d.iter().enumerate().for_each(|(i, &s)| f(i, s)),
         }
+    }
+
+    /// Moves boxed storage behind an `Arc` for a store; a uniform section is handed back.
+    pub(crate) fn into_shared(
+        self,
+        key: u128,
+        cache: Weak<crate::shared::Inner>,
+    ) -> Result<(Section, WeakSection), Section> {
+        Ok(match self {
+            Section::Bits1(b) => {
+                let (s, w) = share(*b, key, &cache);
+                (Section::Shared1(s), WeakSection::Bits1(w))
+            }
+            Section::Bits2(b) => {
+                let (s, w) = share(*b, key, &cache);
+                (Section::Shared2(s), WeakSection::Bits2(w))
+            }
+            Section::Bits4(b) => {
+                let (s, w) = share(*b, key, &cache);
+                (Section::Shared4(s), WeakSection::Bits4(w))
+            }
+            Section::Bits8(b) => {
+                let (s, w) = share(*b, key, &cache);
+                (Section::Shared8(s), WeakSection::Bits8(w))
+            }
+            Section::Direct(b) => {
+                let (s, w) = share(*b, key, &cache);
+                (Section::SharedDirect(s), WeakSection::Direct(w))
+            }
+            other => return Err(other),
+        })
+    }
+
+    /// Copy on write: replaces shared storage with an owned copy (no-op otherwise).
+    fn unshare(&mut self) {
+        let owned = match self {
+            Section::Shared1(p) => Section::Bits1(Box::new((**p).clone())),
+            Section::Shared2(p) => Section::Bits2(Box::new((**p).clone())),
+            Section::Shared4(p) => Section::Bits4(Box::new((**p).clone())),
+            Section::Shared8(p) => Section::Bits8(Box::new((**p).clone())),
+            Section::SharedDirect(d) => Section::Direct(Box::new(**d)),
+            _ => return,
+        };
+        // The shared handle is dropped here, outside any store lock.
+        *self = owned;
     }
 
     /// Sets block `i` to `state`; returns the previous state.
@@ -257,6 +457,14 @@ impl Section {
             Section::Bits4(p) => packed!(p, widen4),
             Section::Bits8(p) => packed!(p, widen8),
             Section::Direct(d) => d[i] = state,
+            Section::Shared1(_)
+            | Section::Shared2(_)
+            | Section::Shared4(_)
+            | Section::Shared8(_)
+            | Section::SharedDirect(_) => {
+                self.unshare();
+                self.set(i, state);
+            }
         }
         old
     }
