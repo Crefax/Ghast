@@ -136,7 +136,12 @@ impl Default for SwarmBuilder {
 }
 
 impl SwarmBuilder {
-    /// Number of worker threads (default: [`std::thread::available_parallelism`]; at least 1).
+    /// Number of worker threads (default: 1; at least 1).
+    ///
+    /// One worker is the cheapest layout until its thread is close to a full core: a busy
+    /// thread handles many bots per wake-up, while bots spread thinly over many threads make
+    /// every thread sleep and wake for each small batch of packets. Add workers when one
+    /// thread is no longer enough (watch the CPU of the `ghast-swarm-<n>` threads), not before.
     #[must_use]
     pub fn workers(mut self, n: usize) -> Self {
         self.workers = Some(n.max(1));
@@ -175,9 +180,7 @@ impl SwarmBuilder {
     ///
     /// Creating a runtime or a thread failed (the threads started so far are stopped again).
     pub fn build(self) -> std::io::Result<Swarm> {
-        let n = self.workers.unwrap_or_else(|| {
-            thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
-        });
+        let n = self.workers.unwrap_or(1);
         let shared = Arc::new(Shared {
             stop: Signal::default(),
             abort: Signal::default(),
@@ -288,7 +291,7 @@ impl Drop for LoadGuard {
     }
 }
 
-/// Many bots in one process, spread over a few worker threads.
+/// Many bots in one process, on one or a few worker threads.
 ///
 /// Each worker thread runs a current-thread tokio runtime, which is the cheap layout for many
 /// bots (a multi-thread runtime moves bots between threads and pays for the wake-ups). Each
@@ -372,7 +375,7 @@ impl Swarm {
         SwarmBuilder::default()
     }
 
-    /// A swarm with the default settings: one worker per available core, no join delay.
+    /// A swarm with the default settings: one worker thread, no join delay.
     ///
     /// # Errors
     ///

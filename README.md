@@ -85,9 +85,10 @@ planned paths with the async helpers).
 One bot: run it on a `current_thread` tokio runtime, as the examples do. A multi-thread
 runtime gains nothing for a single bot and costs CPU in thread wake-ups.
 
-Many bots in one process: use `ghast::Swarm`. It starts a few worker threads (default: one per
-core), each with its own current-thread runtime, places every bot on the least-loaded worker
-and keeps it there. Bots stay independent sessions (any server, any version); a bot that
+Many bots in one process: use `ghast::Swarm`. It runs the bots on worker threads (default: one),
+each with its own current-thread runtime, places every bot on the least-loaded worker and keeps
+it there. One worker is the cheapest layout until its thread is close to a full core; add
+workers (`Swarm::builder().workers(n)`) only then. Bots stay independent sessions (any server, any version); a bot that
 panics or fails only ends itself. A join delay spaces out the logins.
 
 ```rust,no_run

@@ -3,7 +3,7 @@
 //! Usernames are `<username>0`, `<username>1`, …
 //!
 //! ```text
-//! cargo run -p ghast --release --example swarm -- --count 50 --workers 4 --join-delay-ms 200 \
+//! cargo run -p ghast --release --example swarm -- --count 50 --workers 1 --join-delay-ms 200 \
 //!     --host localhost --port 25565 --username Wander --version 26.2 [--minutes 10]
 //! ```
 //!

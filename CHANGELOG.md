@@ -13,7 +13,7 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
 ### Added
 
 - **`Swarm`: many bots in one process** (`ghast-client`, re-exported by `ghast`). N worker
-  threads (default: available parallelism), each with its own current-thread tokio runtime and
+  threads (default: 1), each with its own current-thread tokio runtime and
   `LocalSet`; `Swarm::spawn(|bot| async move { ... })` sends the closure to the least-loaded
   worker (ties round-robin), where it runs, so the bot's future need not be `Send`. Builder:
   worker count, join delay (minimum spacing between bot starts across the swarm), thread name
