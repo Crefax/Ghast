@@ -9,7 +9,7 @@
 //!
 //! Every option of the other examples works (`--proxy`, `--reconnect`, …). `--count`,
 //! `--workers` and `--join-delay-ms` can also come from `GHAST_SWARM_COUNT`,
-//! `GHAST_SWARM_WORKERS` and `GHAST_SWARM_JOIN_DELAY_MS`. Ctrl-C makes every bot log out.
+//! `GHAST_SWARM_WORKERS` and `GHAST_SWARM_JOIN_DELAY_MS`. Ctrl-C or SIGTERM makes every bot log out.
 
 mod support;
 
@@ -169,7 +169,7 @@ fn main() {
         bots.push((name, handle));
     }
 
-    // The main thread only waits: for every bot to end, or for Ctrl-C.
+    // The main thread only waits: for every bot to end, or for Ctrl-C / SIGTERM.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -183,9 +183,25 @@ fn main() {
             }
         };
         tokio::pin!(wait_all);
+        // SIGTERM (`timeout`, service managers) stops the bots like Ctrl-C does.
+        let terminate = async {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{SignalKind, signal};
+                match signal(SignalKind::terminate()) {
+                    Ok(mut term) => {
+                        term.recv().await;
+                    }
+                    Err(_) => std::future::pending::<()>().await,
+                }
+            }
+            #[cfg(not(unix))]
+            std::future::pending::<()>().await;
+        };
         tokio::select! {
             () = &mut wait_all => return,
             _ = tokio::signal::ctrl_c() => {}
+            () = terminate => {}
         }
         log::info!("swarm: stopping {} bots", swarm.bots());
         swarm.stop_all();
