@@ -18,14 +18,17 @@
 //!
 //! With a [`crate::SharedChunks`] store, a world keeps the packed storage of a section it shares
 //! with other worlds in the `Shared*` variants ([`Section::Shared4`], ...): the same layout and
-//! the same single pointer hop as the boxed variants, behind an `Arc` instead of a `Box`. A
-//! change to such a section first copies it into the matching boxed variant (copy on write).
+//! the same single pointer hop as the boxed variants, behind an `Arc` instead of a `Box`.
+//! [`Section::set`] on such a section first copies it into the matching boxed variant (copy on
+//! write); a world with a store changes blocks through the store instead, which hands back
+//! shared storage again (see [`crate::SharedChunks`]).
 //!
 //! A palette index past the palette's used entries reads as palette entry 0 of the padded
 //! palette (air unless the section was built with air at 0): decoding rejects such indices, so
 //! this only matters for sections built by hand.
 
-use std::sync::{Arc, Weak};
+use std::cell::RefCell;
+use std::sync::{Arc, OnceLock, Weak};
 
 /// Number of blocks in a section.
 pub const VOLUME: usize = 4096;
@@ -38,8 +41,22 @@ pub struct Shared<T>(Arc<Node<T>>);
 /// The shared allocation: the storage, its store key and the store to tell on the last drop.
 pub(crate) struct Node<T> {
     data: T,
+    /// The key this storage is stored under: the key of the wire bytes it was decoded from, or
+    /// the key of its content (a section made by a block change).
     key: u128,
+    /// The content key (see `SharedChunks::update`), computed when first needed.
+    content: OnceLock<u128>,
     cache: Weak<crate::shared::Inner>,
+}
+
+/// What a section is to the store at one address: its whole identity, as the table of shared
+/// section arrays compares it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ident {
+    /// [`Section::Uniform`].
+    Uniform(u16),
+    /// Storage stored under this key.
+    Keyed(u128),
 }
 
 impl<T> Drop for Node<T> {
@@ -70,17 +87,25 @@ impl<T> Shared<T> {
         Arc::ptr_eq(&a.0, &b.0)
     }
 
-    /// Number of sections (in all worlds) currently holding this storage.
+    /// Number of handles to this storage. Worlds with the same store also share the section
+    /// array of a whole column, so this counts the section arrays (and the sections cloned
+    /// out of one) that hold the storage, not the worlds.
     #[must_use]
     pub fn holders(&self) -> usize {
         Arc::strong_count(&self.0)
     }
 }
 
-fn share<T>(data: T, key: u128, cache: &Weak<crate::shared::Inner>) -> (Shared<T>, Weak<Node<T>>) {
+fn share<T>(
+    data: T,
+    key: u128,
+    content: Option<u128>,
+    cache: &Weak<crate::shared::Inner>,
+) -> (Shared<T>, Weak<Node<T>>) {
     let a = Arc::new(Node {
         data,
         key,
+        content: content.map(OnceLock::from).unwrap_or_default(),
         cache: cache.clone(),
     });
     let w = Arc::downgrade(&a);
@@ -108,6 +133,18 @@ impl WeakSection {
         })
     }
 
+    /// `true` when this entry is the storage of `section`.
+    pub(crate) fn points_to(&self, section: &Section) -> bool {
+        match (self, section) {
+            (WeakSection::Bits1(w), Section::Shared1(s)) => w.as_ptr() == Arc::as_ptr(&s.0),
+            (WeakSection::Bits2(w), Section::Shared2(s)) => w.as_ptr() == Arc::as_ptr(&s.0),
+            (WeakSection::Bits4(w), Section::Shared4(s)) => w.as_ptr() == Arc::as_ptr(&s.0),
+            (WeakSection::Bits8(w), Section::Shared8(s)) => w.as_ptr() == Arc::as_ptr(&s.0),
+            (WeakSection::Direct(w), Section::SharedDirect(s)) => w.as_ptr() == Arc::as_ptr(&s.0),
+            _ => false,
+        }
+    }
+
     /// `true` when no world holds the storage any more.
     pub(crate) fn is_dead(&self) -> bool {
         match self {
@@ -121,8 +158,11 @@ impl WeakSection {
 
     /// Heap bytes of the shared allocation.
     pub(crate) fn storage_bytes(&self) -> usize {
-        // Arc header (two counters) + key + store pointer + the storage.
-        let head = 2 * size_of::<usize>() + size_of::<u128>() + size_of::<usize>();
+        // Arc header (two counters) + key + content key cell + store pointer + the storage.
+        let head = 2 * size_of::<usize>()
+            + size_of::<u128>()
+            + size_of::<OnceLock<u128>>()
+            + size_of::<usize>();
         head + match self {
             WeakSection::Bits1(_) => size_of::<Packed1>(),
             WeakSection::Bits2(_) => size_of::<Packed2>(),
@@ -307,6 +347,26 @@ impl Section {
         }
     }
 
+    /// Raw state of the block at `x`, `y`, `z` (the low four bits of each): the same as
+    /// `get(block_index(x, y, z))`, but a uniform section answers without computing the index.
+    #[inline(always)]
+    #[must_use]
+    pub fn get_at(&self, x: i32, y: i32, z: i32) -> u16 {
+        match self {
+            Section::Uniform(s) => *s,
+            Section::Bits4(p) => p.get(block_index(x, y, z)),
+            Section::Bits8(p) => p.get(block_index(x, y, z)),
+            Section::Bits2(p) => p.get(block_index(x, y, z)),
+            Section::Bits1(p) => p.get(block_index(x, y, z)),
+            Section::Direct(d) => d[block_index(x, y, z)],
+            Section::Shared4(p) => p.get(block_index(x, y, z)),
+            Section::Shared8(p) => p.get(block_index(x, y, z)),
+            Section::Shared2(p) => p.get(block_index(x, y, z)),
+            Section::Shared1(p) => p.get(block_index(x, y, z)),
+            Section::SharedDirect(d) => d[block_index(x, y, z)],
+        }
+    }
+
     /// Bits per block in memory (0 for uniform, 16 for direct).
     #[must_use]
     pub fn bits(&self) -> u32 {
@@ -380,31 +440,122 @@ impl Section {
     pub(crate) fn into_shared(
         self,
         key: u128,
+        content: Option<u128>,
         cache: Weak<crate::shared::Inner>,
     ) -> Result<(Section, WeakSection), Section> {
         Ok(match self {
             Section::Bits1(b) => {
-                let (s, w) = share(*b, key, &cache);
+                let (s, w) = share(*b, key, content, &cache);
                 (Section::Shared1(s), WeakSection::Bits1(w))
             }
             Section::Bits2(b) => {
-                let (s, w) = share(*b, key, &cache);
+                let (s, w) = share(*b, key, content, &cache);
                 (Section::Shared2(s), WeakSection::Bits2(w))
             }
             Section::Bits4(b) => {
-                let (s, w) = share(*b, key, &cache);
+                let (s, w) = share(*b, key, content, &cache);
                 (Section::Shared4(s), WeakSection::Bits4(w))
             }
             Section::Bits8(b) => {
-                let (s, w) = share(*b, key, &cache);
+                let (s, w) = share(*b, key, content, &cache);
                 (Section::Shared8(s), WeakSection::Bits8(w))
             }
             Section::Direct(b) => {
-                let (s, w) = share(*b, key, &cache);
+                let (s, w) = share(*b, key, content, &cache);
                 (Section::SharedDirect(s), WeakSection::Direct(w))
             }
             other => return Err(other),
         })
+    }
+
+    /// The identity of this section in the store at `store`: `None` for owned storage and for
+    /// storage shared through another store.
+    pub(crate) fn ident(&self, store: *const crate::shared::Inner) -> Option<Ident> {
+        macro_rules! node {
+            ($p:expr) => {
+                (std::ptr::eq($p.0.cache.as_ptr(), store)).then_some(Ident::Keyed($p.0.key))
+            };
+        }
+        match self {
+            Section::Uniform(u) => Some(Ident::Uniform(*u)),
+            Section::Shared1(p) => node!(p),
+            Section::Shared2(p) => node!(p),
+            Section::Shared4(p) => node!(p),
+            Section::Shared8(p) => node!(p),
+            Section::SharedDirect(p) => node!(p),
+            _ => None,
+        }
+    }
+
+    /// The content key cell of storage shared through the store at `store`.
+    pub(crate) fn content_cell(
+        &self,
+        store: *const crate::shared::Inner,
+    ) -> Option<&OnceLock<u128>> {
+        macro_rules! node {
+            ($p:expr) => {
+                (std::ptr::eq($p.0.cache.as_ptr(), store)).then_some(&$p.0.content)
+            };
+        }
+        match self {
+            Section::Shared1(p) => node!(p),
+            Section::Shared2(p) => node!(p),
+            Section::Shared4(p) => node!(p),
+            Section::Shared8(p) => node!(p),
+            Section::SharedDirect(p) => node!(p),
+            _ => None,
+        }
+    }
+
+    /// Number of handles to shared storage (`None` for the other variants).
+    pub(crate) fn shared_holders(&self) -> Option<usize> {
+        match self {
+            Section::Shared1(p) => Some(p.holders()),
+            Section::Shared2(p) => Some(p.holders()),
+            Section::Shared4(p) => Some(p.holders()),
+            Section::Shared8(p) => Some(p.holders()),
+            Section::SharedDirect(p) => Some(p.holders()),
+            _ => None,
+        }
+    }
+
+    /// Changes one block of shared storage in place and gives it a new key. Only when this is
+    /// the one handle to the storage and no store entry points at it (`Arc::get_mut`), and the
+    /// change fits the storage as it is (the palette has `state` or room for it). Returns the
+    /// store entry for the new key; `None` (nothing changed) otherwise.
+    pub(crate) fn set_sole(&mut self, i: usize, state: u16, key: u128) -> Option<WeakSection> {
+        let i = i & (VOLUME - 1);
+        macro_rules! packed {
+            ($p:expr, $v:ident) => {{
+                let n = Arc::get_mut(&mut $p.0)?;
+                let k = n.data.find_or_insert(state)?;
+                n.data.set_index(i, k);
+                n.key = key;
+                n.content = OnceLock::from(key);
+                Some(WeakSection::$v(Arc::downgrade(&$p.0)))
+            }};
+        }
+        match self {
+            Section::Shared1(p) => packed!(p, Bits1),
+            Section::Shared2(p) => packed!(p, Bits2),
+            Section::Shared4(p) => packed!(p, Bits4),
+            Section::Shared8(p) => packed!(p, Bits8),
+            Section::SharedDirect(p) => {
+                let n = Arc::get_mut(&mut p.0)?;
+                n.data[i] = state;
+                n.key = key;
+                n.content = OnceLock::from(key);
+                Some(WeakSection::Direct(Arc::downgrade(&p.0)))
+            }
+            _ => None,
+        }
+    }
+
+    /// A copy with owned storage (shared storage is copied into the matching boxed variant).
+    pub(crate) fn to_owned_storage(&self) -> Section {
+        let mut s = self.clone();
+        s.unshare();
+        s
     }
 
     /// Copy on write: replaces shared storage with an owned copy (no-op otherwise).
@@ -571,10 +722,27 @@ fn unpack_indices(data: &[u8], sb: u32, out: &mut [u8; VOLUME]) {
 /// Why a paletted container was rejected.
 pub(crate) type BuildError = &'static str;
 
-/// Builds sections from wire containers; keeps a scratch table for direct (global) data.
+/// Builds sections from wire containers.
 pub(crate) struct Builder {
-    /// `state -> new palette index + 1` (0 = not seen), sized to the state space.
-    lookup: Vec<u16>,
+    /// Number of block states (raw ids are below it).
+    state_space: usize,
+}
+
+thread_local! {
+    /// The builders' scratch table: `state -> new palette index + 1` (0 = not seen, and all 0
+    /// between two builds). One per thread instead of one per world: it is as large as the
+    /// state space (two bytes per block state) and only the less common wire layouts use it.
+    static LOOKUP: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Runs `f` on the thread's scratch table, `space` entries long.
+fn with_lookup<R>(space: usize, f: impl FnOnce(&mut [u16]) -> R) -> R {
+    LOOKUP.with_borrow_mut(|v| {
+        if v.len() < space {
+            v.resize(space, 0);
+        }
+        f(&mut v[..space])
+    })
 }
 
 /// One block container as read from the wire: storage bits, palette (validated raw states) and
@@ -590,9 +758,7 @@ pub(crate) struct WireBlocks<'a> {
 
 impl Builder {
     pub(crate) fn new(state_space: usize) -> Self {
-        Builder {
-            lookup: vec![0; state_space],
-        }
+        Builder { state_space }
     }
 
     /// Builds a section from an indirect or direct wire container.
@@ -668,22 +834,25 @@ impl Builder {
                 }
                 let mut palette = [0u16; 256];
                 let mut remap = [0u8; 256];
-                let mut k = 0usize;
-                for (e, &s) in pal.iter().enumerate() {
-                    if !used[e] {
-                        continue;
+                let k = with_lookup(self.state_space, |lookup| {
+                    let mut k = 0usize;
+                    for (e, &s) in pal.iter().enumerate() {
+                        if !used[e] {
+                            continue;
+                        }
+                        let slot = &mut lookup[usize::from(s)];
+                        if *slot == 0 {
+                            palette[k] = s;
+                            k += 1;
+                            *slot = k as u16;
+                        }
+                        remap[e] = (*slot - 1) as u8;
                     }
-                    let slot = &mut self.lookup[usize::from(s)];
-                    if *slot == 0 {
-                        palette[k] = s;
-                        k += 1;
-                        *slot = k as u16;
+                    for &s in &palette[..k] {
+                        lookup[usize::from(s)] = 0;
                     }
-                    remap[e] = (*slot - 1) as u8;
-                }
-                for &s in &palette[..k] {
-                    self.lookup[usize::from(s)] = 0;
-                }
+                    k
+                });
                 for i in &mut idx {
                     *i = remap[usize::from(*i)];
                 }
@@ -691,7 +860,7 @@ impl Builder {
             }
             None => {
                 // Global ids: build a palette of the distinct states.
-                let space = self.lookup.len();
+                let space = self.state_space;
                 let mut states = Box::new([0u16; VOLUME]);
                 let mut i = 0usize;
                 'outer: for word in words() {
@@ -711,17 +880,19 @@ impl Builder {
                 }
                 let mut palette = Vec::new();
                 let mut idx = Box::new([0u16; VOLUME]);
-                for (dst, &s) in idx.iter_mut().zip(states.iter()) {
-                    let slot = &mut self.lookup[usize::from(s)];
-                    if *slot == 0 {
-                        palette.push(s);
-                        *slot = palette.len() as u16;
+                with_lookup(space, |lookup| {
+                    for (dst, &s) in idx.iter_mut().zip(states.iter()) {
+                        let slot = &mut lookup[usize::from(s)];
+                        if *slot == 0 {
+                            palette.push(s);
+                            *slot = palette.len() as u16;
+                        }
+                        *dst = *slot - 1;
                     }
-                    *dst = *slot - 1;
-                }
-                for &s in &palette {
-                    self.lookup[usize::from(s)] = 0;
-                }
+                    for &s in &palette {
+                        lookup[usize::from(s)] = 0;
+                    }
+                });
                 if palette.len() > 256 {
                     return Ok(Section::Direct(states));
                 }
@@ -750,6 +921,10 @@ mod tests {
     fn check(s: &Section, expect: &[u16]) {
         for (i, &e) in expect.iter().enumerate() {
             assert_eq!(s.get(i), e, "index {i} in {s:?}");
+            // Coordinates with any high bits: only the low four of each count.
+            let (x, y, z) = (i as i32 & 15, (i as i32 >> 8) & 15, (i as i32 >> 4) & 15);
+            assert_eq!(s.get_at(x - 32, y + 4096, z + 16), e);
+            assert_eq!(block_index(x - 32, y + 4096, z + 16), i);
         }
         let mut n = 0;
         s.for_each(|i, v| {
@@ -794,7 +969,7 @@ mod tests {
             let expect: Vec<u16> = idx.iter().map(|&k| pal[k as usize]).collect();
             check(&s, &expect);
         }
-        assert!(b.lookup.iter().all(|&x| x == 0));
+        LOOKUP.with_borrow(|v| assert!(v.len() >= 30000 && v.iter().all(|&x| x == 0)));
     }
 
     #[test]

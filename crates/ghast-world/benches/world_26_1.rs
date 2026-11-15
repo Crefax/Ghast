@@ -361,6 +361,56 @@ fn bench(c: &mut Criterion) {
     });
     g.finish();
 
+    // ---------------------------------------------------------------- changes
+    // Block changes in a non-uniform section: a world without a store (in place), a world
+    // alone on a store (in place, under a new key each time), and four worlds on one store
+    // that get the same changes (the first copies, the others find its section).
+    let mut g = c.benchmark_group("26.1 block changes");
+    let states = [
+        BlockState::parse("stone").unwrap(),
+        BlockState::parse("dirt").unwrap(),
+    ];
+    let mut k = 0usize;
+    let mut change = |ws: &mut [World]| {
+        let (x, z) = ((k % 7) as i32, ((k / 7) % 5) as i32);
+        let s = states[(k / 35) % 2];
+        k += 1;
+        for w in ws {
+            black_box(w.set_block_state(x, 60, z, s));
+        }
+    };
+    g.bench_function("set_block_state", |b| {
+        b.iter(|| change(std::slice::from_mut(&mut w)))
+    });
+    let lone_cache = SharedChunks::new();
+    let mut lone = world_with_registries(&f);
+    lone.set_shared_chunks(Some(lone_cache));
+    lone.enter_dimension(name, *ty, 32);
+    for ch in chunks {
+        lone.handle_raw(ch).unwrap();
+    }
+    g.bench_function("set_block_state, shared (one world)", |b| {
+        b.iter(|| change(std::slice::from_mut(&mut lone)))
+    });
+    let four_cache = SharedChunks::new();
+    let mut four: Vec<World> = (0..4)
+        .map(|_| {
+            let mut x = world_with_registries(&f);
+            x.set_shared_chunks(Some(four_cache.clone()));
+            x.enter_dimension(name, *ty, 32);
+            for ch in chunks {
+                x.handle_raw(ch).unwrap();
+            }
+            x
+        })
+        .collect();
+    g.throughput(Throughput::Elements(4));
+    g.bench_function("set_block_state, shared (four worlds)", |b| {
+        b.iter(|| change(&mut four))
+    });
+    g.finish();
+    drop((lone, four));
+
     // ---------------------------------------------------------------- physics
     let stone = BlockState::parse("stone").unwrap().id();
     let mut flat = world_with_registries(&f);

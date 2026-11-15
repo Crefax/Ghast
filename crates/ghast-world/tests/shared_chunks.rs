@@ -1,7 +1,8 @@
 //! `SharedChunks` on real server bytes (the 26.1.2 fixture of `tests/v26_1.rs`): worlds that
 //! share sections read exactly what an unshared world reads (the 1747 server-confirmed probes
 //! included, with the session's live block and section updates), identical sections are held
-//! once, across threads too, and everything is freed with the last world.
+//! once and stay shared through those updates, across threads too, and everything is freed
+//! with the last world.
 #![cfg(feature = "v26_1")]
 
 use std::collections::HashMap;
@@ -179,22 +180,23 @@ fn shared_worlds_replay_the_server_session() {
     );
     assert!(max_shared > 50, "{max_shared}");
     assert!(cache.sections() > 0 && cache.sections() <= shared_now);
-    // Edited sections were copied: the plain world and the shared ones still agree (above),
-    // and some sections of the last area are owned again.
+    // The session's block and section updates moved both worlds to the same new sections
+    // (checked pair by pair above); the plain world and the shared ones still agree, and
+    // neither sharing world owns a section's storage.
     let owned_non_uniform = a
         .columns()
         .iter()
         .flat_map(|(_, c)| c.sections())
         .filter(|s| !s.is_shared() && s.bits() > 0)
         .count();
-    assert!(
-        owned_non_uniform > 0,
-        "the session's block updates copied some sections"
-    );
+    assert_eq!(owned_non_uniform, 0, "updated sections stay shared");
+    // Both worlds hold the same columns: one section array per column, shared too.
+    assert_eq!(cache.columns(), a.columns().len());
+    assert!(a.heap_bytes() < plain.heap_bytes() / 8);
     drop(a);
     assert!(cache.sections() > 0);
     drop(b);
-    assert_eq!(cache.sections(), 0);
+    assert_eq!((cache.sections(), cache.columns()), (0, 0));
     assert!(cache.heap_bytes() < 64 * 1024, "{}", cache.heap_bytes());
 }
 

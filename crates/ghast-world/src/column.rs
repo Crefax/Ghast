@@ -358,11 +358,19 @@ fn key(x: i32, z: i32) -> u64 {
     u64::from(x as u32) | (u64::from(z as u32) << 32)
 }
 
+/// The position a [`key`] was made from.
+#[inline]
+fn pos(key: u64) -> ChunkPos {
+    ChunkPos::new(key as u32 as i32, (key >> 32) as u32 as i32)
+}
+
 /// The loaded columns. Version-independent; the version worlds wrap it. `C` is the column
 /// type (the legacy [`Column`] by default; the modern worlds use their own).
 #[derive(Clone, Debug)]
 pub struct ColumnMap<C = Column> {
-    map: HashMap<u64, (ChunkPos, C), BuildHasherDefault<ChunkHasher>>,
+    /// By packed position ([`key`]); the table holds nothing else per column, so a slot is the
+    /// key plus the column.
+    map: HashMap<u64, C, BuildHasherDefault<ChunkHasher>>,
 }
 
 impl<C> Default for ColumnMap<C> {
@@ -378,13 +386,13 @@ impl<C> ColumnMap<C> {
     #[inline]
     #[must_use]
     pub fn get(&self, cx: i32, cz: i32) -> Option<&C> {
-        self.map.get(&key(cx, cz)).map(|(_, c)| c)
+        self.map.get(&key(cx, cz))
     }
 
     /// Mutable access to a loaded column.
     #[inline]
     pub fn get_mut(&mut self, cx: i32, cz: i32) -> Option<&mut C> {
-        self.map.get_mut(&key(cx, cz)).map(|(_, c)| c)
+        self.map.get_mut(&key(cx, cz))
     }
 
     /// `true` when the column has been received and not unloaded.
@@ -396,8 +404,36 @@ impl<C> ColumnMap<C> {
 
     /// Inserts (replaces) a column.
     pub fn insert(&mut self, cx: i32, cz: i32, column: C) {
+        self.map.insert(key(cx, cz), column);
+    }
+
+    /// Inserts a column and returns the one it replaced.
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) fn replace(&mut self, cx: i32, cz: i32, column: C) -> Option<C> {
+        self.map.insert(key(cx, cz), column)
+    }
+
+    /// Removes and returns a column.
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) fn take(&mut self, cx: i32, cz: i32) -> Option<C> {
+        self.map.remove(&key(cx, cz))
+    }
+
+    /// Removes and returns every column.
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) fn drain(&mut self) -> impl Iterator<Item = C> + '_ {
+        self.map.drain().map(|(_, c)| c)
+    }
+
+    /// Removes and returns the columns for which `keep` returns `false`.
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) fn extract(
+        &mut self,
+        mut keep: impl FnMut(ChunkPos) -> bool,
+    ) -> impl Iterator<Item = C> {
         self.map
-            .insert(key(cx, cz), (ChunkPos::new(cx, cz), column));
+            .extract_if(move |k, _| !keep(pos(*k)))
+            .map(|(_, c)| c)
     }
 
     /// Removes a column; `true` if it was loaded.
@@ -412,7 +448,7 @@ impl<C> ColumnMap<C> {
 
     /// Keeps only the columns for which `keep` returns `true`.
     pub fn retain(&mut self, mut keep: impl FnMut(ChunkPos) -> bool) {
-        self.map.retain(|_, (p, _)| keep(*p));
+        self.map.retain(|k, _| keep(pos(*k)));
     }
 
     /// Number of loaded columns.
@@ -429,18 +465,26 @@ impl<C> ColumnMap<C> {
 
     /// Iterates the loaded columns (arbitrary order).
     pub fn iter(&self) -> impl Iterator<Item = (ChunkPos, &C)> {
-        self.map.values().map(|(p, c)| (*p, c))
+        self.map.iter().map(|(k, c)| (pos(*k), c))
     }
 
     /// Iterates the loaded columns mutably (arbitrary order).
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (ChunkPos, &mut C)> {
-        self.map.values_mut().map(|(p, c)| (*p, c))
+        self.map.iter_mut().map(|(k, c)| (pos(*k), c))
     }
 
     /// Heap bytes of the hash table itself (entries included, column contents excluded).
     #[must_use]
     pub fn table_bytes(&self) -> usize {
-        self.map.capacity() * (size_of::<(u64, (ChunkPos, C))>() + 1)
+        // The table has a power of two of buckets and fills at most 7/8 of them (`capacity`
+        // is that usable part); each bucket is a slot plus a control byte.
+        let capacity = self.map.capacity();
+        let buckets = if capacity == 0 {
+            0
+        } else {
+            (capacity * 8 / 7).next_power_of_two()
+        };
+        buckets * (size_of::<(u64, C)>() + 1)
     }
 }
 
@@ -455,12 +499,7 @@ impl ColumnMap<Column> {
     /// Approximate heap bytes: columns plus the hash table.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.table_bytes()
-            + self
-                .map
-                .values()
-                .map(|(_, c)| c.heap_bytes())
-                .sum::<usize>()
+        self.table_bytes() + self.map.values().map(Column::heap_bytes).sum::<usize>()
     }
 }
 

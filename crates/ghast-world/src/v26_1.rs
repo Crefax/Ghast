@@ -48,7 +48,9 @@ use ghast_protocol::nbt::{AnonNbt, Tag};
 
 use crate::border::{Border, BorderPacket, LerpMath};
 use crate::column::{BlockEntity, ColumnMap};
-use crate::paletted::{Builder, Section, WireBlocks, block_index};
+use std::sync::Arc;
+
+use crate::paletted::{Builder, Ident, Section, WireBlocks, block_index};
 use crate::{Applied, ChunkPos, SharedChunks, WorldConfig, WorldError};
 
 /// Bits per block of the global palette: `ceil(log2(STATE_COUNT))` (15 for 26.1).
@@ -237,10 +239,26 @@ pub struct Dimension {
 /// A loaded 26.1 chunk column.
 #[derive(Clone, Debug, Default)]
 pub struct Column {
-    sections: Box<[Section]>,
+    /// The sections, behind the one pointer a read follows. With a [`SharedChunks`] store the
+    /// array is shared with the other worlds that hold the same sections (it is never written
+    /// while another handle exists).
+    sections: Arc<[Section]>,
+    /// What most columns of a bot do not have (kept out of the column table's slots).
+    cold: Option<Box<Cold>>,
+}
+
+/// The rarely present parts of a [`Column`].
+#[derive(Clone, Debug, Default)]
+struct Cold {
     biomes: Option<Box<[BiomeSection]>>,
     /// Block entities keyed by [`be_key`] (only with [`WorldConfig::block_entities`]).
     block_entities: Vec<(u32, BlockEntity)>,
+}
+
+/// Exclusive access to a column's section array: the array itself when this is its only
+/// handle (always, for a world that never had a store), else a copy of it first.
+fn sections_mut(sections: &mut Arc<[Section]>) -> &mut [Section] {
+    Arc::make_mut(sections)
 }
 
 /// Biomes of one section as sent (registry ids of `minecraft:worldgen/biome`).
@@ -283,7 +301,7 @@ impl Column {
     #[must_use]
     pub fn raw_rel(&self, x: i32, ry: i32, z: i32) -> u16 {
         match self.sections.get((ry >> 4) as usize) {
-            Some(s) if ry >= 0 => s.get(block_index(x, ry, z)),
+            Some(s) if ry >= 0 => s.get_at(x, ry, z),
             _ => 0,
         }
     }
@@ -291,14 +309,37 @@ impl Column {
     /// Biomes per section (only with [`WorldConfig::biomes`]).
     #[must_use]
     pub fn biomes(&self) -> Option<&[BiomeSection]> {
-        self.biomes.as_deref()
+        self.cold.as_ref()?.biomes.as_deref()
+    }
+
+    fn stored_block_entities(&self) -> &[(u32, BlockEntity)] {
+        self.cold.as_ref().map_or(&[], |c| &c.block_entities)
+    }
+
+    fn has_block_entities(&self) -> bool {
+        self.cold
+            .as_ref()
+            .is_some_and(|c| !c.block_entities.is_empty())
+    }
+
+    fn set_stored_biomes(&mut self, biomes: Option<Box<[BiomeSection]>>) {
+        match (&mut self.cold, biomes) {
+            (Some(c), b) => c.biomes = b,
+            (None, None) => {}
+            (cold @ None, b) => {
+                *cold = Some(Box::new(Cold {
+                    biomes: b,
+                    block_entities: Vec::new(),
+                }));
+            }
+        }
     }
 
     /// Block entities as `([x, ry, z], data)` with `ry = y - min_y`, in arrival order. Empty
     /// unless [`WorldConfig::block_entities`] is on. [`BlockEntity::Nbt`]'s `action` is the
     /// block entity type's registry id (`u8::MAX` if it does not fit).
     pub fn block_entities(&self) -> impl Iterator<Item = ([i32; 3], &BlockEntity)> {
-        self.block_entities.iter().map(|(k, b)| {
+        self.stored_block_entities().iter().map(|(k, b)| {
             (
                 [(k & 15) as i32, (k >> 8) as i32, ((k >> 4) & 15) as i32],
                 b,
@@ -307,19 +348,26 @@ impl Column {
     }
 
     fn put_block_entity(&mut self, key: u32, be: BlockEntity) {
-        match self.block_entities.iter_mut().find(|(k, _)| *k == key) {
+        let list = &mut self.cold.get_or_insert_default().block_entities;
+        match list.iter_mut().find(|(k, _)| *k == key) {
             Some(slot) => slot.1 = be,
-            None => self.block_entities.push((key, be)),
+            None => list.push((key, be)),
         }
     }
 
-    /// Heap bytes owned by this column.
+    /// Heap bytes owned by this column. A section array shared through a [`SharedChunks`]
+    /// store counts 0 here, like shared section storage (the store counts both once).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        let sections = self.sections.len() * size_of::<Section>()
-            + self.sections.iter().map(Section::heap_bytes).sum::<usize>();
-        let biomes = self.biomes.as_ref().map_or(0, |b| {
-            b.len() * size_of::<BiomeSection>()
+        let sections = if Arc::weak_count(&self.sections) == 0 {
+            self.sections.len() * size_of::<Section>()
+                + self.sections.iter().map(Section::heap_bytes).sum::<usize>()
+        } else {
+            0
+        };
+        let cold = self.cold.as_ref().map_or(0, |_| size_of::<Cold>());
+        let biomes = self.biomes().map_or(0, |b| {
+            size_of_val(b)
                 + b.iter()
                     .map(|s| match s {
                         BiomeSection::Single(_) => 0,
@@ -327,16 +375,20 @@ impl Column {
                     })
                     .sum::<usize>()
         });
-        let be = self.block_entities.capacity() * size_of::<(u32, BlockEntity)>()
+        let be = self
+            .cold
+            .as_ref()
+            .map_or(0, |c| c.block_entities.capacity())
+            * size_of::<(u32, BlockEntity)>()
             + self
-                .block_entities
+                .stored_block_entities()
                 .iter()
                 .map(|(_, b)| match b {
                     BlockEntity::Nbt { nbt, .. } => nbt.len(),
                     BlockEntity::Sign(l) => l.iter().map(|s| s.len()).sum(),
                 })
                 .sum::<usize>();
-        sections + biomes + be
+        sections + cold + biomes + be
     }
 }
 
@@ -432,6 +484,8 @@ pub struct World {
     sea_level: i32,
     /// Where non-uniform sections are shared with other worlds ([`World::set_shared_chunks`]).
     shared: Option<SharedChunks>,
+    /// Lowest block Y of the current dimension (0 without one), for the read path.
+    min_y: i32,
 }
 
 impl std::fmt::Debug for World {
@@ -500,6 +554,7 @@ impl World {
             biome_zoom_seed: 0,
             sea_level: 63,
             shared: None,
+            min_y: 0,
         }
     }
 
@@ -553,8 +608,7 @@ impl World {
     #[must_use]
     pub fn block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockState> {
         let c = self.columns.get(x >> 4, z >> 4)?;
-        let min_y = self.dim.as_ref().map_or(0, |d| d.kind.min_y);
-        Some(read(c, x, y.wrapping_sub(min_y), z))
+        Some(read(&c.sections, x, y.wrapping_sub(self.min_y), z))
     }
 
     /// `true` when the column `(chunk_x, chunk_z)` is loaded.
@@ -622,7 +676,22 @@ impl World {
 
     /// Unloads everything (keeps the registries and the dimension).
     pub fn clear(&mut self) {
-        self.columns.clear();
+        match &self.shared {
+            None => self.columns.clear(),
+            Some(cache) => {
+                for col in self.columns.drain() {
+                    cache.release_column(col.sections);
+                }
+            }
+        }
+    }
+
+    /// Drops a column this world held (through the store, which then forgets a section array
+    /// nobody holds any more).
+    fn release(&self, col: Option<Column>) {
+        if let (Some(cache), Some(col)) = (&self.shared, col) {
+            cache.release_column(col.sections);
+        }
     }
 
     /// Turns [`WorldConfig::biomes`] on or off at run time. On: columns that arrive (and
@@ -632,7 +701,7 @@ impl World {
         self.config.biomes = on;
         if !on {
             for (_, col) in self.columns.iter_mut() {
-                col.biomes = None;
+                col.set_stored_biomes(None);
             }
         }
     }
@@ -657,7 +726,7 @@ impl World {
     pub fn biome_at(&self, x: i32, y: i32, z: i32) -> Option<u16> {
         let d = self.dim.as_ref()?;
         let [qx, qy, qz] = crate::climate::zoom_cell(self.biome_zoom_seed, x, y, z);
-        let biomes = self.columns.get(qx >> 2, qz >> 2)?.biomes.as_deref()?;
+        let biomes = self.columns.get(qx >> 2, qz >> 2)?.biomes()?;
         let lo = d.kind.min_y >> 2;
         let hi = lo + (d.kind.height >> 2) - 1;
         let qy = qy.clamp(lo, hi);
@@ -715,7 +784,7 @@ impl World {
             world: self,
             cx0: cx - 1,
             cz0: cz - 1,
-            min_y: self.dim.as_ref().map_or(0, |d| d.kind.min_y),
+            min_y: self.min_y,
             cols,
         }
     }
@@ -967,7 +1036,7 @@ impl World {
         view_distance: Option<i32>,
         (seed, sea_level): (i64, i32),
     ) -> Applied {
-        self.columns.clear();
+        self.clear();
         #[cfg(feature = "physics")]
         {
             self.collision_border = ghast_physics::modern::BorderState::new();
@@ -987,6 +1056,7 @@ impl World {
             type_index,
             kind,
         });
+        self.min_y = self.dim.as_ref().map_or(0, |d| d.kind.min_y);
         Applied::Changed
     }
 
@@ -1058,13 +1128,23 @@ impl World {
     fn purge_outside_window(&mut self) -> Applied {
         let before = self.columns.len();
         let view = self.view;
-        self.columns.retain(|p| view.contains(p.x, p.z));
+        match &self.shared {
+            None => self.columns.retain(|p| view.contains(p.x, p.z)),
+            Some(cache) => {
+                for col in self.columns.extract(|p| view.contains(p.x, p.z)) {
+                    cache.release_column(col.sections);
+                }
+            }
+        }
         changed(self.columns.len() != before)
     }
 
     /// `forget_level_chunk`.
     pub fn apply_unload_chunk(&mut self, p: &UnloadChunk) -> Applied {
-        changed(self.columns.remove(p.chunk_x, p.chunk_z))
+        let col = self.columns.take(p.chunk_x, p.chunk_z);
+        let was_loaded = col.is_some();
+        self.release(col);
+        changed(was_loaded)
     }
 
     /// `level_chunk_with_light` (decoded with the generated type; [`World::handle_raw`] skips
@@ -1133,50 +1213,33 @@ impl World {
         if !self.view.contains(x, z) {
             return Ok(Applied::Ignored);
         }
-        let n = (height >> 4) as usize;
-        let biome_bits = ceil_log2(self.registries.biome_count.max(1));
-        let biome_count = self.registries.biome_count;
-        let keep_biomes = self.config.biomes;
-        let mut r = Reader::new(data);
-        let mut sections = Vec::with_capacity(n);
-        let mut biomes = keep_biomes.then(|| Vec::with_capacity(n));
-        for j in 0..n {
-            let err = |reason| WorldError::Section {
-                pos: ChunkPos::new(x, z),
-                section: j.min(255) as u8,
-                reason,
-            };
-            let s = match &self.shared {
-                None => read_section(&mut self.builder, &mut r),
-                Some(cache) => read_section_shared(&mut self.builder, cache, &mut r),
-            }
-            .map_err(err);
-            let s = match s {
-                Ok(s) => s,
-                Err(e) => {
-                    self.columns.remove(x, z);
-                    return Err(e);
-                }
-            };
-            sections.push(s);
-            let b = read_biomes(&mut r, biome_bits, biome_count).map_err(err);
-            match b {
-                Ok(b) => {
-                    if let Some(v) = &mut biomes {
-                        v.push(b);
-                    }
-                }
-                Err(e) => {
-                    self.columns.remove(x, z);
-                    return Err(e);
-                }
-            }
-        }
-        let mut col = Column {
-            sections: sections.into_boxed_slice(),
-            biomes: biomes.map(Vec::into_boxed_slice),
-            block_entities: Vec::new(),
+        let layout = Layout {
+            sections: (height >> 4) as usize,
+            biome_bits: ceil_log2(self.registries.biome_count.max(1)),
+            biome_count: self.registries.biome_count,
+            keep_biomes: self.config.biomes,
         };
+        let decoded = match &self.shared {
+            None => decode_sections(&mut self.builder, data, &layout),
+            Some(cache) => decode_sections_shared(&mut self.builder, cache, data, &layout),
+        };
+        let (sections, biomes) = match decoded {
+            Ok(d) => d,
+            Err((j, reason)) => {
+                let old = self.columns.take(x, z);
+                self.release(old);
+                return Err(WorldError::Section {
+                    pos: ChunkPos::new(x, z),
+                    section: j.min(255) as u8,
+                    reason,
+                });
+            }
+        };
+        let mut col = Column {
+            sections,
+            cold: None,
+        };
+        col.set_stored_biomes(biomes.map(Vec::into_boxed_slice));
         if self.config.block_entities {
             for (bx, y, bz, ty, nbt) in block_entities {
                 let ry = i32::from(y) - min_y;
@@ -1190,12 +1253,14 @@ impl World {
                     be_key(i32::from(bx), ry, i32::from(bz)),
                     BlockEntity::Nbt {
                         action: u8::try_from(ty).unwrap_or(u8::MAX),
-                        nbt: nbt.as_bytes().clone(),
+                        // A copy of its own: a slice would keep the whole packet buffer alive.
+                        nbt: Bytes::copy_from_slice(nbt.as_bytes()),
                     },
                 );
             }
         }
-        self.columns.insert(x, z, col);
+        let old = self.columns.replace(x, z, col);
+        self.release(old);
         Ok(Applied::Changed)
     }
 
@@ -1229,7 +1294,7 @@ impl World {
                 match read_biomes(&mut r, bits, count) {
                     Ok(b) => v.push(b),
                     Err(reason) => {
-                        col.biomes = None;
+                        col.set_stored_biomes(None);
                         return Err(WorldError::Section {
                             pos: ChunkPos::new(cx, cz),
                             section: j.min(255) as u8,
@@ -1238,7 +1303,7 @@ impl World {
                     }
                 }
             }
-            col.biomes = Some(v.into_boxed_slice());
+            col.set_stored_biomes(Some(v.into_boxed_slice()));
             any = true;
         }
         Ok(changed(any))
@@ -1251,7 +1316,7 @@ impl World {
         let k = be_key(x, ry, z);
         self.columns
             .get(x >> 4, z >> 4)?
-            .block_entities
+            .stored_block_entities()
             .iter()
             .find(|(key, _)| *key == k)
             .map(|(_, b)| b)
@@ -1281,7 +1346,8 @@ impl World {
             be_key(l.x, ry, l.z),
             BlockEntity::Nbt {
                 action: u8::try_from(p.action).unwrap_or(u8::MAX),
-                nbt: nbt.as_bytes().clone(),
+                // A copy of its own: a slice would keep the whole packet buffer alive.
+                nbt: Bytes::copy_from_slice(nbt.as_bytes()),
             },
         );
         Applied::Changed
@@ -1304,13 +1370,41 @@ impl World {
         if ry < 0 {
             return false;
         }
-        let Some(s) = col.sections.get_mut((ry >> 4) as usize) else {
-            return false;
+        let j = (ry >> 4) as usize;
+        let i = block_index(x, ry, z);
+        let old = match &self.shared {
+            None => {
+                let Some(s) = sections_mut(&mut col.sections).get_mut(j) else {
+                    return false;
+                };
+                s.set(i, raw)
+            }
+            Some(cache) => {
+                let Some(s) = col.sections.get(j) else {
+                    return false;
+                };
+                let old = s.get(i);
+                // A section of the store moves to the shared section with this change; a
+                // section this world owns is changed in place.
+                if old != raw
+                    && !cache.update(
+                        super::PROTOCOL,
+                        &mut col.sections,
+                        j,
+                        std::iter::once((i, raw)),
+                        None,
+                    )
+                {
+                    sections_mut(&mut col.sections)[j].set(i, raw);
+                }
+                old
+            }
         };
-        let old = s.set(block_index(x, ry, z), raw);
-        if !col.block_entities.is_empty() && !same_block(old, raw) {
+        if col.has_block_entities() && !same_block(old, raw) {
             let k = be_key(x, ry, z);
-            col.block_entities.retain(|(key, _)| *key != k);
+            if let Some(c) = &mut col.cold {
+                c.block_entities.retain(|(key, _)| *key != k);
+            }
         }
         true
     }
@@ -1332,6 +1426,9 @@ impl World {
         if !self.columns.contains(c.x, c.z) {
             return Applied::Ignored;
         }
+        if self.shared.is_some() && self.update_section_shared(c.x, sy, c.z, &p.records) {
+            return changed(!p.records.is_empty());
+        }
         let mut any = false;
         for &r in &p.records {
             let local = (r & 0xFFF) as i32;
@@ -1347,14 +1444,199 @@ impl World {
     }
 }
 
+impl World {
+    /// `section_blocks_update` for a section of the store: every record in one step, so that
+    /// the worlds that receive the same packet end up sharing one section again (and a world
+    /// copies the section at most once per packet). `false` when this is not possible (the
+    /// section is outside the column or owned by this world): the caller then applies the
+    /// records one by one.
+    fn update_section_shared(&mut self, cx: i32, sy: i32, cz: i32, records: &[i64]) -> bool {
+        let (Some(cache), Some(min_y)) = (&self.shared, self.min_y()) else {
+            return false;
+        };
+        // `ry = sy * 16 + local y - min_y` is in one section for every record only when the
+        // dimension starts on a section boundary (vanilla requires it).
+        let base = sy.wrapping_mul(16).wrapping_sub(min_y);
+        if min_y & 15 != 0 || base < 0 {
+            return false;
+        }
+        let Some(col) = self.columns.get_mut(cx, cz) else {
+            return false;
+        };
+        let j = (base >> 4) as usize;
+        if j >= col.sections.len() {
+            return false;
+        }
+        let recs = records.iter().map(|&r| {
+            let local = (r & 0xFFF) as i32;
+            (
+                block_index((local >> 8) & 15, local & 15, (local >> 4) & 15),
+                raw_from_wire(((r as u64) >> 12) as i64),
+            )
+        });
+        let Column { sections, cold } = col;
+        let has_block_entities = cold.as_ref().is_some_and(|c| !c.block_entities.is_empty());
+        let mut drop_block_entity = |i: usize, old: u16, new: u16| {
+            if !same_block(old, new)
+                && let Some(c) = cold
+            {
+                // `be_key` of the block: its row above `min_y`, then z and x as in the index.
+                let k = ((base as u32 + (i >> 8) as u32) << 8) | (i & 0xFF) as u32;
+                c.block_entities.retain(|(key, _)| *key != k);
+            }
+        };
+        cache.update(
+            super::PROTOCOL,
+            sections,
+            j,
+            recs,
+            has_block_entities.then_some(&mut drop_block_entity as &mut dyn FnMut(usize, u16, u16)),
+        )
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        // Hands the section arrays back to the store (see `SharedChunks::release_column`).
+        self.clear();
+    }
+}
+
+/// How a chunk packet's section data is laid out (from the dimension and the registries).
+struct Layout {
+    sections: usize,
+    biome_bits: u32,
+    biome_count: usize,
+    keep_biomes: bool,
+}
+
+/// A column's sections and (when kept) biomes, or the first malformed section and why.
+type Decoded = Result<(Arc<[Section]>, Option<Vec<BiomeSection>>), (usize, &'static str)>;
+
+/// Decodes a chunk packet's sections, in order.
+fn decode_sections(b: &mut Builder, data: &Bytes, l: &Layout) -> Decoded {
+    let mut r = Reader::new(data);
+    let mut biomes = l.keep_biomes.then(|| Vec::with_capacity(l.sections));
+    let mut err = None;
+    // Collected straight into the array (one allocation); after an error the rest is filler.
+    let sections: Arc<[Section]> = (0..l.sections)
+        .map(|j| {
+            if err.is_some() {
+                return Section::Uniform(0);
+            }
+            let step = read_section(b, &mut r).and_then(|s| {
+                match &mut biomes {
+                    Some(v) => v.push(read_biomes(&mut r, l.biome_bits, l.biome_count)?),
+                    None => skip_biomes(&mut r, l.biome_bits, l.biome_count)?,
+                }
+                Ok(s)
+            });
+            match step {
+                Ok(s) => s,
+                Err(reason) => {
+                    err = Some((j, reason));
+                    Section::Uniform(0)
+                }
+            }
+        })
+        .collect();
+    match err {
+        Some(e) => Err(e),
+        None => Ok((sections, biomes)),
+    }
+}
+
+/// [`decode_sections`] through a store. A first pass over the packet finds every section's
+/// identity without decoding it (a single-value container's state, or the key of the bytes of
+/// any other container). When a world already holds a column with exactly these sections, its
+/// section array is taken: one lookup for the whole column. Otherwise each section is taken
+/// from the store or decoded and stored, and the new array is stored too.
+///
+/// Errors are those of [`decode_sections`]: anything the first pass cannot read sends the
+/// packet there, and a section that fails to decode in the second pass is the first malformed
+/// one (the first pass read everything else).
+fn decode_sections_shared(
+    b: &mut Builder,
+    cache: &SharedChunks,
+    data: &Bytes,
+    l: &Layout,
+) -> Decoded {
+    let mut r = Reader::new(data);
+    let mut biomes = l.keep_biomes.then(|| Vec::with_capacity(l.sections));
+    // (identity, offset of the section in `data`).
+    let mut wire: Vec<(Ident, usize)> = Vec::with_capacity(l.sections);
+    for _ in 0..l.sections {
+        let at = r.position();
+        let ident = match shareable_len(&r) {
+            Some(len) => {
+                let key = cache.key(super::PROTOCOL, &r.rest_slice()[..len]);
+                r.skip(len).ok().map(|()| Ident::Keyed(key))
+            }
+            None => match read_section(b, &mut r) {
+                Ok(Section::Uniform(u)) => Some(Ident::Uniform(u)),
+                _ => None,
+            },
+        };
+        let biome = match &mut biomes {
+            Some(v) => read_biomes(&mut r, l.biome_bits, l.biome_count).map(|b| v.push(b)),
+            None => skip_biomes(&mut r, l.biome_bits, l.biome_count),
+        };
+        let (Some(ident), Ok(())) = (ident, biome) else {
+            // Malformed: decode in order for the exact error (nothing is shared then).
+            let (sections, biomes) = decode_sections(b, data, l)?;
+            return Ok((cache.intern_column(sections), biomes));
+        };
+        wire.push((ident, at));
+    }
+    if let Some(sections) = cache.find_column(wire.iter().map(|w| w.0)) {
+        return Ok((sections, biomes));
+    }
+    let mut err = None;
+    let sections: Arc<[Section]> = wire
+        .iter()
+        .enumerate()
+        .map(|(j, &(ident, at))| {
+            let key = match ident {
+                Ident::Uniform(u) => return Section::Uniform(u),
+                Ident::Keyed(key) => key,
+            };
+            if err.is_some() {
+                return Section::Uniform(0);
+            }
+            if let Some(s) = cache.get(key) {
+                return s;
+            }
+            let mut r = Reader::new(data);
+            let s = r
+                .skip(at)
+                .map_err(|_| "truncated")
+                .and_then(|()| read_section(b, &mut r));
+            match s {
+                Ok(s) => cache.insert(key, s),
+                Err(reason) => {
+                    err = Some((j, reason));
+                    Section::Uniform(0)
+                }
+            }
+        })
+        .collect();
+    match err {
+        Some(e) => Err(e),
+        None => Ok((cache.intern_column(sections), biomes)),
+    }
+}
+
 /// Block read inside a column (`ry = y - min_y`): void air outside the height. The read
 /// chain (`View::block` → `View::block_state` → `read` → `Section::get`) is always inlined so
 /// the physics' collision loops keep it inline (engine bench, instructions per tick).
 #[inline(always)]
-fn read(c: &Column, x: i32, ry: i32, z: i32) -> BlockState {
-    match c.sections.get((ry >> 4) as usize) {
-        Some(s) if ry >= 0 => state(s.get(block_index(x, ry, z))),
-        _ => void_air(),
+fn read(sections: &[Section], x: i32, ry: i32, z: i32) -> BlockState {
+    // One unsigned compare covers both ends: a negative `ry` is at least 2^31 as `u32`, so
+    // its section index is at least 2^27, more sections than a dimension can have (its height
+    // is an `i32`).
+    match sections.get((ry as u32 >> 4) as usize) {
+        Some(s) => state(s.get_at(x, ry, z)),
+        None => void_air(),
     }
 }
 
@@ -1395,20 +1677,20 @@ fn read_section(b: &mut Builder, r: &mut Reader<'_>) -> Result<Section, &'static
                 }
             }
             let longs = 4096usize.div_ceil((64 / storage) as usize);
-            let data = r.read_bytes(longs * 8).map_err(|_| EOF)?;
+            let data = r.take(longs * 8).map_err(|_| EOF)?;
             b.build(&WireBlocks {
                 storage_bits: storage,
                 palette: Some(&pal[..n.min(256)]),
-                data: &data,
+                data,
             })
         }
         _ => {
             let longs = 4096usize.div_ceil((64 / GLOBAL_BITS) as usize);
-            let data = r.read_bytes(longs * 8).map_err(|_| EOF)?;
+            let data = r.take(longs * 8).map_err(|_| EOF)?;
             b.build(&WireBlocks {
                 storage_bits: GLOBAL_BITS,
                 palette: None,
-                data: &data,
+                data,
             })
         }
     }
@@ -1442,31 +1724,33 @@ fn shareable_len(r: &Reader<'_>) -> Option<usize> {
     Some(p.position() - start)
 }
 
-/// [`read_section`] through a store: a section whose exact bytes are already in the store is
-/// taken from there without decoding; a new one is decoded and stored.
-fn read_section_shared(
-    b: &mut Builder,
-    cache: &SharedChunks,
-    r: &mut Reader<'_>,
-) -> Result<Section, &'static str> {
-    let Some(len) = shareable_len(r) else {
-        return read_section(b, r);
-    };
-    let key = cache.key(super::PROTOCOL, &r.rest_slice()[..len]);
-    if let Some(s) = cache.get(key) {
-        r.skip(len).map_err(|_| "truncated")?;
-        return Ok(s);
-    }
-    let s = read_section(b, r)?;
-    Ok(cache.insert(key, s))
-}
-
 /// Reads one biome container (`count` = biome registry size, 0 = unknown: ids not checked).
 fn read_biomes(
     r: &mut Reader<'_>,
     global_bits: u32,
     count: usize,
 ) -> Result<BiomeSection, &'static str> {
+    let mut cells = [0u16; 64];
+    Ok(match read_biome_cells(r, global_bits, count, &mut cells)? {
+        Some(single) => BiomeSection::Single(single),
+        None => BiomeSection::Cells(Box::new(cells)),
+    })
+}
+
+/// Reads and checks one biome container without keeping it (the same errors as
+/// [`read_biomes`], no allocation).
+fn skip_biomes(r: &mut Reader<'_>, global_bits: u32, count: usize) -> Result<(), &'static str> {
+    read_biome_cells(r, global_bits, count, &mut [0u16; 64]).map(|_| ())
+}
+
+/// Reads one biome container into `cells`; `Some(biome)` when the whole section has one biome
+/// (`cells` is then unspecified).
+fn read_biome_cells(
+    r: &mut Reader<'_>,
+    global_bits: u32,
+    count: usize,
+    cells: &mut [u16; 64],
+) -> Result<Option<u16>, &'static str> {
     const EOF: &str = "truncated";
     let check = |id: i32| -> Result<u16, &'static str> {
         u16::try_from(id)
@@ -1478,7 +1762,7 @@ fn read_biomes(
     let (storage, palette) = match bits {
         0 => {
             let id = check(r.read_varint().map_err(|_| EOF)?)?;
-            return Ok(BiomeSection::Single(id));
+            return Ok(Some(id));
         }
         1..=3 => {
             let n = r.read_varint().map_err(|_| EOF)?;
@@ -1496,8 +1780,7 @@ fn read_biomes(
     };
     let per = (64 / storage) as usize;
     let longs = 64usize.div_ceil(per);
-    let data = r.read_bytes(longs * 8).map_err(|_| EOF)?;
-    let mut cells = Box::new([0u16; 64]);
+    let data = r.take(longs * 8).map_err(|_| EOF)?;
     let mask = (1u64 << storage) - 1;
     let mut i = 0;
     for w in data.as_chunks::<8>().0 {
@@ -1521,9 +1804,9 @@ fn read_biomes(
         }
     }
     if cells.iter().all(|&c| c == cells[0]) {
-        return Ok(BiomeSection::Single(cells[0]));
+        return Ok(Some(cells[0]));
     }
-    Ok(BiomeSection::Cells(cells))
+    Ok(None)
 }
 
 /// A 3×3-column snapshot of a [`World`] for fast reads in a small box (see [`World::view`]).
@@ -1562,7 +1845,7 @@ impl<'w> View<'w> {
     #[must_use]
     pub fn block_state(&self, x: i32, y: i32, z: i32) -> Option<BlockState> {
         let c = self.column(x >> 4, z >> 4)?;
-        Some(read(c, x, y.wrapping_sub(self.min_y), z))
+        Some(read(&c.sections, x, y.wrapping_sub(self.min_y), z))
     }
 
     /// Like [`World::is_column_loaded`].
@@ -1701,11 +1984,107 @@ mod tests {
         }
     }
 
+    /// A chunk body like [`chunk`] with any linear palette in section 7: block `i` has
+    /// `palette[index(i)]`.
+    fn chunk_with(cx: i32, cz: i32, palette: &[u16], index: impl Fn(usize) -> usize) -> Bytes {
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        assert!((2..=16).contains(&palette.len()));
+        let mut d = bytes::BytesMut::new();
+        for s in 0..24 {
+            d.put_i16(if s == 7 { 4096 } else { 0 });
+            d.put_i16(0);
+            if s == 7 {
+                d.put_u8(4);
+                d.put_varint(palette.len() as i32);
+                for &p in palette {
+                    d.put_varint(i32::from(p));
+                }
+                for w in 0..256 {
+                    let mut x = 0u64;
+                    for k in 0..16 {
+                        x |= (index(w * 16 + k) as u64 & 15) << (4 * k);
+                    }
+                    d.put_u64(x);
+                }
+            } else {
+                d.put_u8(0);
+                d.put_varint(0);
+            }
+            d.put_u8(0);
+            d.put_varint(0);
+        }
+        let mut b = bytes::BytesMut::new();
+        b.put_i32(cx);
+        b.put_i32(cz);
+        b.put_varint(0);
+        b.put_varint(d.len() as i32);
+        b.put_slice(&d);
+        b.put_varint(0);
+        b.freeze()
+    }
+
+    fn array(w: &World, cx: i32, cz: i32) -> &Arc<[Section]> {
+        &w.column(cx, cz).unwrap().sections
+    }
+
+    /// A server `block_update`.
+    fn update(w: &mut World, x: i32, y: i32, z: i32, raw: u16) -> Applied {
+        w.apply_block_change(&BlockChange {
+            location: ghast_protocol::BlockPos { x, y, z },
+            r#type: i32::from(raw),
+        })
+    }
+
+    /// A server `section_blocks_update` for section `sy` of column `(cx, cz)`: records are
+    /// `(x, y, z, state)` with section-local coordinates.
+    fn update_many(
+        w: &mut World,
+        (cx, sy, cz): (i32, i32, i32),
+        recs: &[(i32, i32, i32, u16)],
+    ) -> Applied {
+        w.apply_multi_block_change(&MultiBlockChange {
+            chunk_coordinates: cb::MultiBlockChangeChunkCoordinates {
+                x: cx,
+                z: cz,
+                y: sy,
+            },
+            records: recs
+                .iter()
+                .map(|&(x, y, z, s)| (i64::from(s) << 12) | i64::from((x << 8) | (z << 4) | y))
+                .collect(),
+        })
+    }
+
+    /// Every loaded column, block and block entity of `w` is what `plain` has.
+    fn assert_same(plain: &World, w: &World) {
+        assert_eq!(plain.columns().len(), w.columns().len());
+        for (p, c) in plain.columns().iter() {
+            let d = w.column(p.x, p.z).expect("same columns");
+            assert_eq!(c.sections().len(), d.sections().len());
+            for (j, (a, b)) in c.sections().iter().zip(d.sections()).enumerate() {
+                if let (Section::Uniform(x), Section::Uniform(y)) = (a, b) {
+                    assert_eq!(x, y, "{p:?} section {j}");
+                    continue;
+                }
+                for i in 0..4096 {
+                    assert_eq!(a.get(i), b.get(i), "{p:?} section {j} block {i}");
+                }
+            }
+            let bes = |c: &Column| {
+                let mut v: Vec<_> = c.block_entities().map(|(pos, _)| pos).collect();
+                v.sort_unstable();
+                v
+            };
+            assert_eq!(bes(c), bes(d), "{p:?} block entities");
+        }
+    }
+
     const STONE: u16 = 1;
     const DIRT: u16 = 10;
 
     #[test]
-    fn worlds_share_one_section_and_copy_on_write() {
+    fn worlds_share_one_section_and_one_array() {
         let cache = SharedChunks::new();
         let (mut a, mut b, mut plain) = (overworld(), overworld(), overworld());
         a.set_shared_chunks(Some(cache.clone()));
@@ -1716,8 +2095,12 @@ mod tests {
         }
         assert!(sec(&a, 0, 0).is_shared() && !sec(&plain, 0, 0).is_shared());
         assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)), "decoded once");
+        assert!(Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)), "one array");
         assert_eq!((cache.entries(), cache.sections()), (1, 1));
-        assert!(matches!(sec(&a, 0, 0), Section::Shared1(s) if s.holders() == 2));
+        assert_eq!((cache.column_entries(), cache.columns()), (1, 1));
+        // The one array holds the storage; both worlds hold the array.
+        assert!(matches!(sec(&a, 0, 0), Section::Shared1(s) if s.holders() == 1));
+        assert_eq!(Arc::strong_count(array(&a, 0, 0)), 2);
         // Uniform sections are never stored.
         assert!(!a.column(0, 0).unwrap().sections()[0].is_shared());
         for (x, z) in [(1, 1), (5, 9)] {
@@ -1726,22 +2109,28 @@ mod tests {
                 assert_eq!(w.block_state(x, 62, z).unwrap().id(), DIRT);
             }
         }
-        // a changes a block: a gets its own copy, b still reads the shared one.
+        // a predicts a change b never gets: a moves to another section, b reads the old one.
         assert!(a.set_block_state(1, 63, 1, BlockState::AIR));
-        assert!(!sec(&a, 0, 0).is_shared() && sec(&b, 0, 0).is_shared());
+        assert!(sec(&a, 0, 0).is_shared() && sec(&b, 0, 0).is_shared());
+        assert!(!same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert!(!Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)));
         assert_eq!(a.block_state(1, 63, 1), Some(BlockState::AIR));
         assert_eq!(b.block_state(1, 63, 1).unwrap().id(), STONE);
-        assert_eq!((cache.entries(), cache.sections()), (1, 1));
-        // A change to the same state does not copy.
+        assert_eq!((cache.entries(), cache.sections()), (2, 2));
+        assert_eq!((cache.column_entries(), cache.columns()), (2, 2));
+        // A change to the same state touches nothing.
+        let before = Arc::as_ptr(array(&b, 0, 0));
         assert!(b.set_block_state(5, 63, 5, BlockState::from_id(STONE).unwrap()));
-        assert!(sec(&b, 0, 0).is_shared());
-        // b changes another block: the last holder let go, the entry is gone.
+        assert_eq!(Arc::as_ptr(array(&b, 0, 0)), before);
+        assert_eq!((cache.entries(), cache.column_entries()), (2, 2));
+        // b changes another block: nobody holds the decoded section any more.
         assert!(b.set_block_state(2, 62, 2, BlockState::AIR));
-        assert_eq!((cache.entries(), cache.sections()), (0, 0));
+        assert_eq!((cache.entries(), cache.sections()), (2, 2));
+        assert_eq!((cache.column_entries(), cache.columns()), (2, 2));
         assert_eq!(a.block_state(2, 62, 2).unwrap().id(), DIRT);
         assert_eq!(b.block_state(2, 62, 2), Some(BlockState::AIR));
         assert_eq!(b.block_state(1, 63, 1).unwrap().id(), STONE);
-        // Owned copies read like the plain world except for their own edits.
+        // Both read like the plain world except for their own edits.
         for i in 0..4096 {
             let (x, y, z) = (i & 15, 48 + (i >> 8), (i >> 4) & 15);
             let p = plain.block_state(x, y, z);
@@ -1752,6 +2141,518 @@ mod tests {
                 assert_eq!(b.block_state(x, y, z), p);
             }
         }
+        // Each gets the other's change: the same content again, so one section and one array.
+        assert!(a.set_block_state(2, 62, 2, BlockState::AIR));
+        assert!(b.set_block_state(1, 63, 1, BlockState::AIR));
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert!(Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)));
+        assert_eq!((cache.entries(), cache.column_entries()), (1, 1));
+        drop((a, b));
+        assert_eq!((cache.entries(), cache.column_entries()), (0, 0));
+    }
+
+    #[test]
+    fn the_same_updates_keep_one_copy() {
+        let cache = SharedChunks::new();
+        let mut plain = overworld();
+        let mut ws = [overworld(), overworld(), overworld()];
+        for w in &mut ws {
+            w.set_shared_chunks(Some(cache.clone()));
+        }
+        let body = chunk(0, 0, STONE, DIRT);
+        plain.apply_map_chunk_body(&body).unwrap();
+        for w in &mut ws {
+            w.apply_map_chunk_body(&body).unwrap();
+        }
+        // Single updates, a section update, updates in the uniform sections above and below,
+        // states that grow the palette past 2, 4 and 16 entries, and a change back.
+        type Step = Box<dyn Fn(&mut World) -> Applied>;
+        let mut steps: Vec<Step> = vec![
+            Box::new(|w| update(w, 3, 63, 3, 0)),
+            Box::new(|w| update(w, 3, 62, 3, 7)),
+            Box::new(|w| update_many(w, (0, 3, 0), &[(1, 2, 3, 9), (4, 15, 6, 0), (1, 2, 4, 9)])),
+            Box::new(|w| update(w, 8, 64, 8, STONE)),
+            Box::new(|w| update_many(w, (0, 2, 0), &[(0, 0, 0, 5), (15, 15, 15, 6)])),
+            Box::new(|w| update(w, 3, 63, 3, STONE)),
+        ];
+        for k in 0..40u16 {
+            steps.push(Box::new(move |w| {
+                update(w, i32::from(k % 16), 50, i32::from(k / 16), 100 + k)
+            }));
+        }
+        steps.push(Box::new(|w| {
+            let recs: Vec<_> = (0..300)
+                .map(|k| (k % 16, 5, (k / 16) % 16, 400 + k as u16))
+                .collect();
+            update_many(w, (0, 3, 0), &recs)
+        }));
+        let mut widths = std::collections::BTreeSet::new();
+        widths.insert(sec(&ws[0], 0, 0).bits());
+        for step in &steps {
+            let r = step(&mut plain);
+            assert_eq!(r, Applied::Changed);
+            for w in &mut ws {
+                assert_eq!(step(w), r);
+            }
+            for w in &ws {
+                assert_same(&plain, w);
+                assert!(Arc::ptr_eq(array(w, 0, 0), array(&ws[0], 0, 0)));
+            }
+            for j in 6..=8 {
+                let s = &array(&ws[0], 0, 0)[j];
+                assert!(
+                    s.is_shared() || matches!(s, Section::Uniform(_)),
+                    "{j}: {s:?}"
+                );
+            }
+            widths.insert(sec(&ws[0], 0, 0).bits());
+            // One section per changed place, one array: nothing left of the steps before.
+            assert_eq!(cache.entries(), cache.sections());
+            assert!(cache.sections() <= 3, "{}", cache.sections());
+            assert_eq!((cache.column_entries(), cache.columns()), (1, 1));
+        }
+        assert_eq!(widths.into_iter().collect::<Vec<_>>(), [1, 2, 4, 8, 16]);
+        drop(ws);
+        assert_eq!((cache.entries(), cache.column_entries()), (0, 0));
+    }
+
+    #[test]
+    fn updates_in_another_order_are_still_exact() {
+        let cache = SharedChunks::new();
+        let (mut a, mut b) = (overworld(), overworld());
+        let (mut pa, mut pb) = (overworld(), overworld());
+        a.set_shared_chunks(Some(cache.clone()));
+        b.set_shared_chunks(Some(cache.clone()));
+        let body = chunk(0, 0, STONE, DIRT);
+        for w in [&mut a, &mut b, &mut pa, &mut pb] {
+            w.apply_map_chunk_body(&body).unwrap();
+        }
+        // Different blocks in a different order: different sections on the way, the same
+        // content at the end.
+        for w in [&mut a, &mut pa] {
+            update(w, 1, 60, 1, 7);
+            update(w, 2, 60, 2, 8);
+        }
+        update(&mut b, 2, 60, 2, 8);
+        update(&mut pb, 2, 60, 2, 8);
+        assert!(!same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert_same(&pb, &b);
+        update(&mut b, 1, 60, 1, 7);
+        update(&mut pb, 1, 60, 1, 7);
+        assert_same(&pa, &a);
+        assert_same(&pb, &b);
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert!(Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)));
+        // The same block in a different order: each world keeps what its own stream says.
+        for (w, first, second) in [(&mut a, 20, 21), (&mut pa, 20, 21)] {
+            update(w, 9, 61, 9, first);
+            update(w, 9, 61, 9, second);
+        }
+        for (w, first, second) in [(&mut b, 21, 20), (&mut pb, 21, 20)] {
+            update(w, 9, 61, 9, first);
+            update(w, 9, 61, 9, second);
+        }
+        assert_eq!(a.block_state(9, 61, 9).unwrap().id(), 21);
+        assert_eq!(b.block_state(9, 61, 9).unwrap().id(), 20);
+        assert!(!same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert_same(&pa, &a);
+        assert_same(&pb, &b);
+        // A world predicts a change; the other only learns it from the server later.
+        assert!(a.set_block_state(9, 61, 9, BlockState::AIR));
+        assert!(pa.set_block_state(9, 61, 9, BlockState::AIR));
+        assert_eq!(b.block_state(9, 61, 9).unwrap().id(), 20);
+        assert_same(&pb, &b);
+        for w in [&mut a, &mut b, &mut pa, &mut pb] {
+            update(w, 9, 61, 9, 0);
+        }
+        assert_same(&pa, &a);
+        assert_same(&pb, &b);
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert_eq!((cache.entries(), cache.column_entries()), (1, 1));
+    }
+
+    #[test]
+    fn a_sole_holder_changes_its_storage_in_place_under_a_new_key() {
+        let cache = SharedChunks::new();
+        let (mut a, mut b, mut plain) = (overworld(), overworld(), overworld());
+        a.set_shared_chunks(Some(cache.clone()));
+        b.set_shared_chunks(Some(cache.clone()));
+        let body = chunk(0, 0, STONE, DIRT);
+        a.apply_map_chunk_body(&body).unwrap();
+        plain.apply_map_chunk_body(&body).unwrap();
+        let storage = |w: &World| match sec(w, 0, 0) {
+            Section::Shared1(s) => std::ptr::from_ref::<crate::paletted::Packed1>(s).cast::<u8>(),
+            Section::Shared2(s) => std::ptr::from_ref::<crate::paletted::Packed2>(s).cast::<u8>(),
+            other => panic!("{other:?}"),
+        };
+        let (before, before_array) = (storage(&a), Arc::as_ptr(array(&a, 0, 0)));
+        update(&mut a, 4, 60, 4, STONE);
+        update(&mut plain, 4, 60, 4, STONE);
+        assert_eq!(storage(&a), before, "changed in place");
+        assert_eq!(Arc::as_ptr(array(&a, 0, 0)), before_array);
+        assert_eq!((cache.entries(), cache.column_entries()), (1, 1));
+        assert_same(&plain, &a);
+        // The changed storage is not the decoded section any more: a world that now decodes
+        // the same bytes must not get it.
+        b.apply_map_chunk_body(&body).unwrap();
+        assert!(!same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert!(!Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)));
+        assert_eq!(b.block_state(4, 60, 4).unwrap().id(), DIRT);
+        assert_eq!(a.block_state(4, 60, 4).unwrap().id(), STONE);
+        assert_eq!((cache.entries(), cache.column_entries()), (2, 2));
+        // It is found by its content: b gets the same update and joins a.
+        update(&mut b, 4, 60, 4, STONE);
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        assert!(Arc::ptr_eq(array(&a, 0, 0), array(&b, 0, 0)));
+        assert_eq!((cache.entries(), cache.column_entries()), (1, 1));
+        // Held by two worlds now: a change by one must not show in the other.
+        let shared = storage(&a);
+        update(&mut a, 5, 60, 5, STONE);
+        assert_ne!(storage(&a), shared);
+        assert_eq!(storage(&b), shared);
+        assert_eq!(b.block_state(5, 60, 5).unwrap().id(), DIRT);
+        // A full palette (2 entries, a third state) cannot change in place: a new section.
+        let before = storage(&a);
+        update(&mut a, 6, 60, 6, 33);
+        update(&mut plain, 5, 60, 5, STONE);
+        update(&mut plain, 6, 60, 6, 33);
+        assert_ne!(storage(&a), before);
+        assert_same(&plain, &a);
+        assert_eq!((cache.entries(), cache.column_entries()), (2, 2));
+        drop((a, b));
+        assert_eq!((cache.entries(), cache.column_entries()), (0, 0));
+    }
+
+    #[test]
+    fn sections_a_world_owns_stay_its_own() {
+        let cache = SharedChunks::new();
+        let other = SharedChunks::new();
+        let body = chunk(0, 0, STONE, DIRT);
+        // Decoded without a store: owned, and still owned after a change with a store.
+        let mut a = overworld();
+        a.apply_map_chunk_body(&body).unwrap();
+        a.set_shared_chunks(Some(cache.clone()));
+        update(&mut a, 1, 60, 1, STONE);
+        assert!(!sec(&a, 0, 0).is_shared());
+        assert_eq!(a.block_state(1, 60, 1).unwrap().id(), STONE);
+        assert_eq!((cache.entries(), cache.column_entries()), (0, 0));
+        // A uniform section of that column is the store's to share; the array is not.
+        update(&mut a, 1, 70, 1, STONE);
+        assert!(array(&a, 0, 0)[8].is_shared());
+        assert_eq!((cache.entries(), cache.column_entries()), (1, 0));
+        // Shared through another store: copied on the first change, as without a store, and
+        // the worlds of that store do not see it.
+        let (mut b, mut c) = (overworld(), overworld());
+        b.set_shared_chunks(Some(other.clone()));
+        c.set_shared_chunks(Some(other.clone()));
+        b.apply_map_chunk_body(&body).unwrap();
+        c.apply_map_chunk_body(&body).unwrap();
+        b.set_shared_chunks(Some(cache.clone()));
+        update(&mut b, 2, 60, 2, STONE);
+        assert!(!sec(&b, 0, 0).is_shared() && sec(&c, 0, 0).is_shared());
+        assert_eq!(b.block_state(2, 60, 2).unwrap().id(), STONE);
+        assert_eq!(c.block_state(2, 60, 2).unwrap().id(), DIRT);
+        assert_eq!((other.entries(), other.sections()), (1, 1));
+        // And with no store at all.
+        c.set_shared_chunks(None);
+        let mut d = overworld();
+        d.set_shared_chunks(Some(other.clone()));
+        d.apply_map_chunk_body(&body).unwrap();
+        assert!(Arc::ptr_eq(array(&c, 0, 0), array(&d, 0, 0)));
+        update(&mut c, 3, 60, 3, STONE);
+        assert!(!sec(&c, 0, 0).is_shared() && sec(&d, 0, 0).is_shared());
+        assert_eq!(d.block_state(3, 60, 3).unwrap().id(), DIRT);
+        assert_eq!(c.block_state(3, 60, 3).unwrap().id(), STONE);
+        // A cloned column (two handles to an unshared array) is copied before a write.
+        let mut e = overworld();
+        e.apply_map_chunk_body(&body).unwrap();
+        let copy = e.column(0, 0).unwrap().clone();
+        update(&mut e, 4, 60, 4, STONE);
+        assert_eq!(copy.sections()[7].get(block_index(4, 60 + 64, 4)), DIRT);
+        assert_eq!(e.block_state(4, 60, 4).unwrap().id(), STONE);
+    }
+
+    #[test]
+    fn section_updates_drop_block_entities_like_an_unshared_world() {
+        let cache = SharedChunks::new();
+        let config = WorldConfig::default().with_block_entities(true);
+        let make = |shared: bool| {
+            let mut w = World::new(config);
+            w.apply_registry(
+                "minecraft:dimension_type",
+                [("minecraft:overworld", None)].into_iter(),
+            );
+            w.enter_dimension("minecraft:overworld", 0, 8);
+            w.set_shared_chunks(shared.then(|| cache.clone()));
+            w.apply_map_chunk_body(&chunk(0, 0, STONE, DIRT)).unwrap();
+            for (x, y, z) in [(1, 50, 1), (2, 50, 2), (3, 50, 3), (4, 70, 4)] {
+                let r = w.apply_tile_entity_data(&TileEntityData {
+                    location: ghast_protocol::BlockPos { x, y, z },
+                    action: 1,
+                    nbt_data: Some(AnonNbt::from_bytes(Bytes::from_static(&[10, 0])).unwrap()),
+                });
+                assert_eq!(r, Applied::Changed);
+            }
+            w
+        };
+        let (mut plain, mut a, mut b) = (make(false), make(true), make(true));
+        // (1, 50, 1): another block; (2, 50, 2): the same state (kept); (3, 50, 3): changed
+        // and changed back in one packet (dropped, as the records apply in order).
+        let recs = [
+            (1, 2, 1, 5),
+            (2, 2, 2, DIRT),
+            (3, 2, 3, 5),
+            (3, 2, 3, DIRT),
+            (9, 9, 9, 6),
+        ];
+        for w in [&mut plain, &mut a, &mut b] {
+            assert_eq!(update_many(w, (0, 3, 0), &recs), Applied::Changed);
+            assert_eq!(update(w, 4, 70, 4, STONE), Applied::Changed);
+        }
+        assert_eq!(plain.column(0, 0).unwrap().block_entities().count(), 1);
+        assert!(plain.block_entity(2, 50, 2).is_some());
+        assert_same(&plain, &a);
+        assert_same(&plain, &b);
+        assert!(same_storage(sec(&a, 0, 0), sec(&b, 0, 0)));
+        // Records that leave the section as it was change nothing.
+        let before = Arc::as_ptr(array(&a, 0, 0));
+        let recs = [(7, 7, 7, 5), (7, 7, 7, DIRT)];
+        for w in [&mut plain, &mut a] {
+            assert_eq!(update_many(w, (0, 3, 0), &recs), Applied::Changed);
+        }
+        assert_eq!(Arc::as_ptr(array(&a, 0, 0)), before);
+        assert_same(&plain, &a);
+        // Outside the column: ignored, as without a store.
+        for w in [&mut plain, &mut a] {
+            assert_eq!(update_many(w, (0, 40, 0), &recs), Applied::Ignored);
+            assert_eq!(update_many(w, (0, -9, 0), &recs), Applied::Ignored);
+            assert_eq!(update_many(w, (0, 3, 0), &[]), Applied::Ignored);
+            assert_eq!(update_many(w, (5, 3, 0), &recs), Applied::Ignored);
+        }
+    }
+
+    #[test]
+    fn block_entity_data_is_copied_out_of_the_packet() {
+        let config = WorldConfig::default().with_block_entities(true);
+        let mut w = World::new(config);
+        w.apply_registry(
+            "minecraft:dimension_type",
+            [("minecraft:overworld", None)].into_iter(),
+        );
+        w.enter_dimension("minecraft:overworld", 0, 8);
+        // A chunk with one block entity at (3, 50, 4): the list replaces the empty one.
+        let mut body = chunk(0, 0, STONE, DIRT).to_vec();
+        body.pop();
+        body.extend_from_slice(&[1, (3 << 4) | 4, 0, 50, 7, 10, 0]);
+        let body = Bytes::from(body);
+        w.apply_map_chunk_body(&body).unwrap();
+        // A `block_entity_data` packet whose NBT is a slice of a larger read buffer.
+        let mut buffer = vec![0u8; 4096];
+        buffer[1000..1002].copy_from_slice(&[10, 0]);
+        let buffer = Bytes::from(buffer);
+        let r = w.apply_tile_entity_data(&TileEntityData {
+            location: ghast_protocol::BlockPos { x: 5, y: 51, z: 6 },
+            action: 1,
+            nbt_data: Some(AnonNbt::from_bytes(buffer.slice(1000..1002)).unwrap()),
+        });
+        assert_eq!(r, Applied::Changed);
+        let outside = |held: &Bytes, of: &Bytes| {
+            let (p, start) = (held.as_ptr() as usize, of.as_ptr() as usize);
+            p < start || p >= start + of.len()
+        };
+        for (pos, source) in [((3, 50, 4), &body), ((5, 51, 6), &buffer)] {
+            let Some(BlockEntity::Nbt { nbt, .. }) = w.block_entity(pos.0, pos.1, pos.2) else {
+                panic!("no block entity at {pos:?}");
+            };
+            assert_eq!(&nbt[..], &[10, 0]);
+            assert!(outside(nbt, source), "{pos:?} holds the packet buffer");
+        }
+    }
+
+    /// xorshift64*.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            (self.next() >> 33) % n
+        }
+    }
+
+    /// One random thing a server (or the bot) does to a world.
+    #[derive(Debug, Clone)]
+    enum Op {
+        Chunk(i32, u8),
+        Unload(i32),
+        Update(i32, i32, i32, u16),
+        Many(i32, i32, Vec<(i32, i32, i32, u16)>),
+        BlockEntity(i32, i32, i32),
+    }
+
+    impl Op {
+        fn random(r: &mut Rng) -> Op {
+            // Few places and few states, so that worlds meet again; states up to 40 so that
+            // palettes grow through every width but direct.
+            let state = |r: &mut Rng| match r.below(4) {
+                0 => 0,
+                1 => [STONE, DIRT][r.below(2) as usize],
+                _ => r.below(40) as u16,
+            };
+            let cx = r.below(2) as i32;
+            match r.below(20) {
+                0 => Op::Chunk(cx, r.below(4) as u8),
+                1 => Op::Unload(cx),
+                2 => Op::BlockEntity(cx * 16 + r.below(3) as i32, 50, r.below(3) as i32),
+                3..=9 => {
+                    let most = if r.below(8) == 0 { 400 } else { 6 };
+                    let n = 1 + r.below(most) as usize;
+                    let side = if r.below(3) == 0 { 2 } else { 16 };
+                    let recs = (0..n)
+                        .map(|_| {
+                            (
+                                r.below(side) as i32,
+                                r.below(side) as i32,
+                                r.below(side) as i32,
+                                state(r),
+                            )
+                        })
+                        .collect();
+                    Op::Many(cx, 1 + r.below(4) as i32, recs)
+                }
+                _ => Op::Update(
+                    cx * 16 + r.below(3) as i32,
+                    30 + r.below(50) as i32,
+                    r.below(3) as i32,
+                    state(r),
+                ),
+            }
+        }
+
+        fn apply(&self, w: &mut World) -> Result<Applied, WorldError> {
+            Ok(match self {
+                Op::Chunk(cx, 0) => w.apply_map_chunk_body(&chunk(*cx, 0, STONE, DIRT))?,
+                Op::Chunk(cx, 1) => w.apply_map_chunk_body(&chunk(*cx, 0, DIRT, STONE))?,
+                Op::Chunk(cx, 2) => {
+                    let palette: Vec<u16> = (0..16).map(|k| 50 + k).collect();
+                    w.apply_map_chunk_body(&chunk_with(*cx, 0, &palette, |i| (i * 7) % 16))?
+                }
+                Op::Chunk(cx, _) => {
+                    // A palette entry past the palette: an error, the column unloads.
+                    w.apply_map_chunk_body(&chunk_with(*cx, 0, &[STONE, DIRT], |i| i % 3))?
+                }
+                Op::Unload(cx) => w.apply_unload_chunk(&UnloadChunk {
+                    chunk_z: 0,
+                    chunk_x: *cx,
+                }),
+                Op::Update(x, y, z, s) => update(w, *x, *y, *z, *s),
+                Op::Many(cx, sy, recs) => update_many(w, (*cx, *sy, 0), recs),
+                Op::BlockEntity(x, y, z) => w.apply_tile_entity_data(&TileEntityData {
+                    location: ghast_protocol::BlockPos {
+                        x: *x,
+                        y: *y,
+                        z: *z,
+                    },
+                    action: 1,
+                    nbt_data: Some(AnonNbt::from_bytes(Bytes::from_static(&[10, 0])).unwrap()),
+                }),
+            })
+        }
+    }
+
+    fn bot(cache: Option<&SharedChunks>) -> World {
+        let mut w = World::new(WorldConfig::default().with_block_entities(true));
+        w.apply_registry(
+            "minecraft:dimension_type",
+            [("minecraft:overworld", None)].into_iter(),
+        );
+        w.enter_dimension("minecraft:overworld", 0, 8);
+        w.set_shared_chunks(cache.cloned());
+        w
+    }
+
+    /// Random chunks, block updates, section updates, unloads, block entities and store
+    /// changes on several worlds of one store, each next to a world without a store that gets
+    /// the same packets: after every step each sharing world reads exactly what its unshared
+    /// twin reads, whatever the other worlds did.
+    #[test]
+    fn random_packets_read_like_unshared_worlds() {
+        let (cache, other) = (SharedChunks::new(), SharedChunks::new());
+        let mut r = Rng(0x9e37_79b9_7f4a_7c15);
+        let mut shared: Vec<World> = (0..4).map(|_| bot(Some(&cache))).collect();
+        let mut plain: Vec<World> = (0..4).map(|_| bot(None)).collect();
+        let (mut met, mut most) = (0usize, 0usize);
+        for step in 0..2500 {
+            let op = Op::random(&mut r);
+            // Mostly every world (the same server), sometimes only some (a prediction, a
+            // packet the others get later or never).
+            let mask = if r.below(4) == 0 { r.below(16) } else { 15 };
+            for k in 0..4 {
+                if mask & (1 << k) == 0 {
+                    continue;
+                }
+                let want = op.apply(&mut plain[k]).map_err(|e| e.to_string());
+                let got = op.apply(&mut shared[k]).map_err(|e| e.to_string());
+                assert_eq!(got, want, "step {step} world {k}: {op:?}");
+            }
+            if r.below(200) == 0 {
+                let k = r.below(4) as usize;
+                let to = [None, Some(&cache), Some(&other)][r.below(3) as usize];
+                shared[k].set_shared_chunks(to.cloned());
+            }
+            for k in 0..4 {
+                assert_same(&plain[k], &shared[k]);
+            }
+            for k in 1..4 {
+                if let (Some(a), Some(b)) = (shared[0].column(0, 0), shared[k].column(0, 0)) {
+                    met += usize::from(Arc::ptr_eq(&a.sections, &b.sections));
+                }
+            }
+            most = most.max(cache.sections());
+            assert!(cache.sections() <= 4 * 2 * 5, "{}", cache.sections());
+        }
+        assert!(met > 300 && most > 3, "{met} {most}");
+        drop(shared);
+        // A world that changed stores cannot tell its old store about the arrays it drops:
+        // those entries are dead (nothing is held) until the table's next sweep.
+        assert_eq!((cache.entries(), cache.columns()), (0, 0));
+        assert_eq!((other.entries(), other.columns()), (0, 0));
+        assert!(cache.column_entries() + other.column_entries() <= 8);
+    }
+
+    /// The same on four threads at once (one sharing world and its unshared twin per thread,
+    /// one store): racing lookups, in-place changes and last drops never show a world
+    /// anything but its own packets.
+    #[test]
+    fn random_packets_on_threads_read_like_unshared_worlds() {
+        let cache = SharedChunks::new();
+        std::thread::scope(|s| {
+            for t in 0..4u64 {
+                let cache = cache.clone();
+                s.spawn(move || {
+                    // Two threads replay one stream (they meet all the time), two their own.
+                    let mut r = Rng(0x1234_5678_9abc_def1 + t / 2);
+                    let (mut shared, mut plain) = (bot(Some(&cache)), bot(None));
+                    for step in 0..4000 {
+                        let op = Op::random(&mut r);
+                        let want = op.apply(&mut plain).map_err(|e| e.to_string());
+                        let got = op.apply(&mut shared).map_err(|e| e.to_string());
+                        assert_eq!(got, want, "thread {t} step {step}: {op:?}");
+                        if step % 16 == 0 {
+                            assert_same(&plain, &shared);
+                        }
+                    }
+                    assert_same(&plain, &shared);
+                });
+            }
+        });
+        assert_eq!(cache.entries(), 0);
+        assert_eq!(cache.columns(), 0);
     }
 
     #[test]
