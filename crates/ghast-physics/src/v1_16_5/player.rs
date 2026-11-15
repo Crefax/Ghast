@@ -425,7 +425,7 @@ pub fn tick<W: BlockView<State = BlockState>>(
 }
 
 /// [`tick`] with other entities around: the player collides with the boxes in `around` (see
-/// [`super::entity`]; their pushes are [`super::push_by`], outside the player's tick).
+/// the `entity` module; their pushes are [`super::push_by`], outside the player's tick).
 pub fn tick_in<W: BlockView<State = BlockState>>(
     p: &mut PlayerState,
     around: &Surroundings<'_>,

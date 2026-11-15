@@ -362,7 +362,7 @@ pub trait ClientVersion: Version + sealed::Sealed {
     fn decode_play(raw: &RawPacket, wire: &mut Self::Wire) -> Result<Option<Inbound>, DecodeError>;
     /// A 1.8 – 1.16 server resource pack (`resource_pack_send`, no pack id): pushes the answers
     /// the vanilla client sends (`ClientPlayNetworkHandler.onResourcePackSend` with the server
-    /// entry's pack policy set; see [`legacy_pack_statuses`]) as raw packets. Other packets and
+    /// entry's pack policy set; see `legacy_pack_statuses`) as raw packets. Other packets and
     /// versions with pack ids (those arrive as [`Inbound::ResourcePackPush`]) push nothing.
     #[inline]
     fn resource_pack(
