@@ -116,6 +116,7 @@ final class Recorder {
         j.key("state");
         state(j, run.player);
         Ents.tickRecord(j, run);
+        Ext.tickRecord(j, run);
         j.key("packets").beginArray();
         for (Packet<?> p : Harness.connection.sent) {
             packet(j, p);
@@ -155,7 +156,9 @@ final class Recorder {
                     .field("allow_flying", a.allowFlying()).field("creative", a.creative())
                     .fieldF32("fly_speed", a.flySpeed()).fieldF32("walk_speed", a.walkSpeed());
         } else if (e instanceof Scenario.VersionEvent ve) {
-            Ents.event(j, ve);
+            if (!Ext.event(j, ve)) {
+                Ents.event(j, ve);
+            }
         }
         j.endObject();
     }

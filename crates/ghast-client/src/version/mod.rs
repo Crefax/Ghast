@@ -360,6 +360,19 @@ pub trait ClientVersion: Version + sealed::Sealed {
     fn play_filter(interests: Interests) -> PacketFilter;
     /// Decodes a play-state packet; `Ok(None)` for packets the core does not use.
     fn decode_play(raw: &RawPacket, wire: &mut Self::Wire) -> Result<Option<Inbound>, DecodeError>;
+    /// A 1.8 – 1.16 server resource pack (`resource_pack_send`, no pack id): pushes the answers
+    /// the vanilla client sends (`ClientPlayNetworkHandler.onResourcePackSend` with the server
+    /// entry's pack policy set; see [`legacy_pack_statuses`]) as raw packets. Other packets and
+    /// versions with pack ids (those arrive as [`Inbound::ResourcePackPush`]) push nothing.
+    #[inline]
+    fn resource_pack(
+        raw: &RawPacket,
+        accept: bool,
+        out: &mut Vec<crate::common::Outbound>,
+    ) -> Result<(), DecodeError> {
+        let _ = (raw, accept, out);
+        Ok(())
+    }
     /// Applies an inventory packet (windows, slots, confirms, held slot, login / respawn
     /// reset) to the inventory; returns the confirm answer to send now, if any. Other packets
     /// are ignored.
@@ -419,6 +432,73 @@ pub(crate) fn truncate_utf16(s: &str, max: usize) -> &str {
         }
     }
     s
+}
+
+/// The statuses the 1.8 – 1.16 client answers a server pack with (0 loaded, 1 declined,
+/// 2 failed download, 3 accepted). With the server entry's policy ENABLED it answers accepted
+/// and, once the download ends, loaded (a bot never downloads); DISABLED answers declined. A
+/// pack it cannot load (`loadable` false: a `level://` pack of a world save, which a bot does
+/// not have, or a URL the 1.12+ check rejects) gets "failed download" alone. These packs carry
+/// no "required" flag, so `accept` decides for every pack (a server that needs one kicks on
+/// decline).
+#[cfg(any(feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+pub(crate) const fn legacy_pack_statuses(loadable: bool, accept: bool) -> &'static [i32] {
+    if !loadable {
+        &[2]
+    } else if accept {
+        &[3, 0]
+    } else {
+        &[1]
+    }
+}
+
+/// The 1.12 – 1.16 client's resource pack URL check (`ClientPlayNetworkHandler`
+/// `method_12229` / `validateResourcePackUrl`): `new URI(url)` must parse and its scheme be
+/// exactly `http`, `https` or `level`; a `level` URL must not contain `..` and must end in
+/// `/resources.zip`. `java.net.URI` syntax is approximated: a scheme-specific part is present
+/// (and not a bare `//`), every `%` starts a two-digit hex escape, no ASCII control character,
+/// space, backtick or one of `"<>\^{|}`, no non-ASCII control or space, at most one `#`, and `[` `]`
+/// only inside the authority (the IPv6 literal itself is not checked).
+#[cfg(any(feature = "v1_12_2", feature = "v1_16_5"))]
+pub(crate) fn pack_url_valid(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return false;
+    };
+    let level = scheme == "level";
+    if !(scheme == "http" || scheme == "https" || level) || rest.is_empty() || rest == "//" {
+        return false;
+    }
+    let authority_end = rest
+        .strip_prefix("//")
+        .map_or(0, |a| 2 + a.find(['/', '?', '#']).unwrap_or(a.len()));
+    let bytes = rest.as_bytes();
+    let mut fragments = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'%' => {
+                let hex = |j: usize| bytes.get(j).is_some_and(u8::is_ascii_hexdigit);
+                if !(hex(i + 1) && hex(i + 2)) {
+                    return false;
+                }
+            }
+            b'#' => {
+                fragments += 1;
+                if fragments > 1 {
+                    return false;
+                }
+            }
+            b'[' | b']' if i >= authority_end => return false,
+            0..=0x20 | 0x7f | b'"' | b'<' | b'>' | b'\\' | b'^' | b'`' | b'{' | b'|' | b'}' => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    // Non-ASCII "other" characters are legal unless they are controls or spaces.
+    if !rest.is_ascii() && rest.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    !level || (!url.contains("..") && url.ends_with("/resources.zip"))
 }
 
 /// The common part of vanilla's teleport handling: relative axes are added, absolute axes

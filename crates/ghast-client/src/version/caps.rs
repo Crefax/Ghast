@@ -101,6 +101,11 @@ pub struct Capabilities {
     pub block_sequence: bool,
     /// Chat packets carry a timestamp, salt and message acknowledgements (1.19.3+).
     pub chat_acknowledgements: bool,
+    /// The drop key takes the item off the held stack on the client at once and then swings
+    /// the main arm when it took one (1.16.5 `ClientPlayerEntity.dropSelectedItem` and the
+    /// key handler; 26.1 `LocalPlayer.drop`); 1.8.9 / 1.12.2 only send the packet and wait for
+    /// the server's slot update.
+    pub drop_prediction: bool,
     /// The client itself pushes the player away from other entities in its entity tick
     /// (26.1+; 1.12.2: `LivingEntity.tickCramming`, other players and boats push the local
     /// player on the client too; 1.16.5: `LivingEntity.tickCramming`,
@@ -140,6 +145,7 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     block_sequence: false,
     chat_acknowledgements: false,
     client_entity_push: false,
+    drop_prediction: false,
 };
 
 /// 1.12.2 (protocol 340).
@@ -167,6 +173,7 @@ pub(crate) const V1_16_5: Capabilities = Capabilities {
     sneak_eye_height: f(1.27),
     immediate_respawn_rule: true,
     client_entity_push: true,
+    drop_prediction: true,
     ..V1_12_2
 };
 

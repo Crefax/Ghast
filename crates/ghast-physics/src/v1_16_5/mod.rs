@@ -7,15 +7,19 @@
 mod blocks;
 mod collide;
 mod entity;
+mod ext;
 mod fluid;
 mod player;
 
-pub use entity::{PushKind, Pusher, Surroundings, collides, push_by, push_kind, query_reaches};
+pub use entity::{
+    OtherEntity, PushKind, Pusher, Surroundings, collides, push_by, push_kind, query_reaches,
+};
+pub use ext::PlayerExt;
 /// The 1.16.5 block state the world view returns (re-exported from `ghast-data`).
 pub use ghast_data::v1_16_5::BlockState;
 pub use player::{
     Effects, Enchantments, MovementInput, PlayerState, Pose, STEP_HEIGHT, SentState,
-    SpeedModifiers, WIDTH, box_at, is_climbing, tick, tick_in,
+    SpeedModifiers, WIDTH, box_at, in_water_or_rain, is_climbing, riptide, tick, tick_ext, tick_in,
 };
 
 use crate::input::{Packets, TickInput};

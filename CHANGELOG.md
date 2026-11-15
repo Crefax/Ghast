@@ -10,6 +10,31 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
 
 ### Added
 
+- **1.8.9, 1.12.2 and 1.16.5: the server's resource pack prompt is answered** (`ghast-client`).
+  Before, `resource_pack_send` was not decoded on these versions and the bot never answered,
+  so servers that need a pack could kick it. Now the bot answers like the vanilla client with
+  the server entry's pack policy set (`ClientPlayNetworkHandler.onResourcePackSend`): accepted
+  then loaded, or declined, by the existing `Client::accept_required_resource_packs` (default
+  on; these versions have no "required" flag, so the option decides for every pack). Nothing
+  is downloaded. A `level://` pack and, on 1.12.2 / 1.16.5, a URL the vanilla check rejects
+  are answered "failed download" alone; the 1.8 answer echoes the pack hash. New (sealed
+  trait, defaulted): `ClientVersion::resource_pack`. No engine change (engine bench unchanged).
+- **Drop and swap-hands keys on every version** (`ghast-client`, `ghast-inventory`).
+  `TickContext::drop_held(whole_stack)` and `TickContext::swap_hands()` do what the vanilla
+  keys do outside a screen (`MinecraftClient.handleInputEvents`): a `block_dig` / player action
+  "drop item" (4) or "drop all items" (3), or on 1.9+ "swap held items" (6), at the origin
+  facing down, written at once in call order like the other actions. 1.16.5 and 26.x predict
+  the drop as vanilla does (`ClientPlayerEntity.dropSelectedItem`, `LocalPlayer.drop`): the
+  item leaves the held slot before the server's `set_slot` and, when one did, the main arm
+  swings after the drop; 1.8.9 and 1.12.2 only send the packet. The swap predicts nothing.
+  Refused while a screen is open, dead or in spectator mode (and the swap on 1.8.9). New:
+  `DigStatus::DropStack`, `DropItem`, `SwapHands`, `Capabilities::drop_prediction`,
+  `Inventory::drop_held`.
+- **An item use ends when its hand no longer holds the item** (`ghast-client`): 1.16.5
+  `LivingEntity.tickActiveItemStack` and 26.1 `updatingUsingItem` end it silently in the player
+  tick (a dropped stack, a swap's slot updates, any other slot update that changes the item);
+  ghast kept "using" until the button was released (slowed movement). 1.8.9 / 1.12.2 end it
+  on any slot update of that hand (stack identity); the item-change part is modelled there too.
 - **1.12.2: entities push the player and boats / shulkers are solid, as on the vanilla
   client** (`ghast-physics`, `ghast-client`). Vanilla 1.12.2 pushes the local player on the
   client (`LivingEntity.tickCramming`, `OtherClientPlayerEntity.tickMovement`, `BoatEntity.tick`;
@@ -50,6 +75,58 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   through the physics. Not modelled: riding (the bot or the other entity), an opening shulker
   moving the player, and entities that move themselves on the client (squids, ghasts,
   phantoms are left out of the oracle cases).
+- **1.16.5: lava pushes harder in the nether, as on the vanilla client** (`ghast-physics`,
+  `ghast-client`). Vanilla 1.16.5 moves an entity in flowing lava with 0.007 per tick in an
+  ultrawarm dimension and 0.0023333 elsewhere (`Entity.updateWaterState`); ghast always used
+  the overworld value. The 1.16.5 sim now reads the `ultrawarm` flag of the dimension type in
+  the join packet (and in a respawn into another world; a respawn into the same world keeps
+  it, as `ClientPlayNetworkHandler.onPlayerRespawn` does) and runs the extended tick there.
+  Nothing else in the 1.16.5 player's movement reads the dimension type. New in
+  `ghast-physics::v1_16_5`: `PlayerExt` (`#[non_exhaustive]`, `ultrawarm`) and `tick_ext`.
+  Proof: the new oracle case kind `nether` (8 hand cases + 100 fuzz cases, 6,329 ticks,
+  `tests/golden/1.16.5/nether.jsonl.gz`) replays with 0 differences through the physics and
+  through the engine (dimension from a real join packet, with and without entity tracking),
+  and a 1.0 M tick cached fuzz with 0 differences through the physics. Cost: none outside an
+  ultrawarm dimension (engine bench unchanged within ±1 instruction per tick).
+- **1.16.5: riptide, as on the vanilla client** (`ghast-physics`, `ghast-client`). A trident
+  with Riptide now works on 1.16.5 like vanilla: `TridentItem.use` refuses it out of water
+  and rain (the held use key retries every 4 ticks), releasing it after at least 10 ticks
+  launches the player on the client (`TridentItem.onStoppedUsing`: the push
+  `3 * (1 + level) / 4` along the look in `float`, a 1.2-block move up on the ground, the
+  20-tick spin counter), the counter ends on a horizontal collision or when the spin sweeps a
+  living entity (which also reverses the motion, ×−0.2; other entities in the swept box keep
+  a collision from ending it), and the spin pose (0.6 high) follows the server's living
+  entity flag 4. The rain check follows `World.hasRain`: the rain gradient from the weather
+  game events, sky light in the dimension, the biome at the block through the client's
+  voronoi zoom (precipitation and base temperature; with `WorldConfig::biomes` on, otherwise
+  every biome counts as rainy) and the motion-blocking column above. The sim reads our own
+  entity data once a riptide trident was held (the packet filter grows by `entity_metadata`
+  then). New in `ghast-physics::v1_16_5`: `riptide`, `in_water_or_rain`, `OtherEntity`,
+  `Surroundings::others` / `with_others`, `PlayerExt::{spin_attack, riptide_ticks,
+  apply_living_flags}`. The spin pose (vanilla `SPIN_ATTACK`) is held as `Pose::FallFlying`,
+  which has the same box and eye height (the 1.16.5 physics never glides); `PlayerExt::spin_attack`
+  says which it is, and the spin's behaviour is keyed on it. Proof: the
+  new oracle case kind `riptide` (18 hand cases + 100 fuzz cases, 6,799 ticks,
+  `tests/golden/1.16.5/riptide.jsonl.gz`) replays with 0 differences through the physics and
+  through the engine (with entity tracking; a case ends where the player uses the trident
+  while looking at a block, which the oracle does not do), and a 1.0 M tick cached fuzz with 0
+  differences through the physics (524,602 of its ticks through the engine). Cost: none
+  without a use or a riptide trident (engine bench unchanged within ±2 instructions per tick
+  on every version). Not modelled: an other player hit by the spin while we sprint with a full
+  attack cooldown or a knockback trident (vanilla then also scales our motion by 0.6 and stops
+  sprinting), the height-adjusted biome temperature (cold biomes above y ≈ 94 snow instead of
+  rain), sky light below 15 under blocks that do not block motion (cobwebs), and the spin's hits
+  without entity tracking.
+- **Oracle (1.16.5): real height maps, the use key's retry, rotation before the keys**
+  (`oracle`). The harness's chunks now carry the `WORLD_SURFACE` and `MOTION_BLOCKING` height
+  maps a server sends (before they were empty, so rain reached everywhere), the use key retries
+  every 4 ticks while held (`MinecraftClient.itemUseCooldown`) and the tick's rotation is set
+  before the key handling. No existing golden file changed.
+- **Oracle (1.16.5): the entity cases are deterministic** (`oracle`, `tests/golden`). The
+  harness now sends an item entity's velocity right after its spawn, as a server's
+  `EntityTrackerEntry.sendPackets` does; before, the client item kept the random velocity of its
+  constructor and `entities.jsonl.gz` changed from run to run (only the item records; the
+  player's states and packets are unchanged, so every replay result stays the same).
 
 ## 0.4.4 — 2026-11-15
 

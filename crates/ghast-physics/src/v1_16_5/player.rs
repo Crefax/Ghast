@@ -14,7 +14,8 @@ use super::blocks::{
     should_suffocate, slipperiness, state_at, velocity_multiplier,
 };
 use super::collide::{BorderShape, Collider, EntityBoxes, NoEntities, bx, contract, offset};
-use super::entity::Surroundings;
+use super::entity::{OtherEntity, Surroundings};
+use super::ext::PlayerExt;
 use super::fluid::{
     FluidContact, V3, ceil, fluid_at_point, height, region_loaded, update_in_fluid,
 };
@@ -39,7 +40,11 @@ pub enum Pose {
     Crouching,
     /// Swimming / crawling (0.6 high).
     Swimming,
-    /// Elytra flight (0.6 high; not simulated).
+    /// Elytra flight (0.6 high, eyes at 0.4; gliding is not simulated). Also the box of the
+    /// riptide spin (vanilla `SPIN_ATTACK`: the same size and eye height), the only way this
+    /// physics enters the pose: while [`PlayerExt::spin_attack`] is set the player takes this
+    /// pose, and every behaviour of the spin is keyed on that flag (it is not a swimming pose:
+    /// no crawling slowdown).
     FallFlying,
     /// Sleeping (0.2 × 0.2; not simulated).
     Sleeping,
@@ -416,7 +421,7 @@ pub fn tick<W: BlockView<State = BlockState>>(
     world: &W,
     out: &mut Packets,
 ) {
-    tick_among(p, NoEntities, input, world, out);
+    tick_among(p, NoEntities, NoExt, input, world, out);
 }
 
 /// [`tick`] with other entities around: the player collides with the boxes in `around` (see
@@ -428,7 +433,188 @@ pub fn tick_in<W: BlockView<State = BlockState>>(
     world: &W,
     out: &mut Packets,
 ) {
-    tick_among(p, around.entities, input, &Beside(world), out);
+    tick_among(p, around.entities, NoExt, input, &Beside(world), out);
+}
+
+/// [`tick_in`] with the movement state beyond [`PlayerState`] (see [`PlayerExt`]: the dimension
+/// type, riptide). With a default [`PlayerExt`] it is the same tick as [`tick_in`].
+pub fn tick_ext<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    around: &Surroundings<'_>,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    tick_among(
+        p,
+        around.entities,
+        ExtCtx {
+            x,
+            others: around.others,
+        },
+        input,
+        &Apart(world),
+        out,
+    );
+}
+
+/// The world of the extended tick: its own type, for the same reason as [`Beside`].
+struct Apart<'a, W>(&'a W);
+
+impl<W: BlockView> BlockView for Apart<'_, W> {
+    type State = W::State;
+
+    #[inline(always)]
+    fn block(&self, x: i32, y: i32, z: i32) -> Self::State {
+        self.0.block(x, y, z)
+    }
+
+    #[inline(always)]
+    fn is_chunk_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.0.is_chunk_loaded(chunk_x, chunk_z)
+    }
+
+    #[inline(always)]
+    fn world_border(&self) -> WorldBorder {
+        self.0.world_border()
+    }
+}
+
+/// The extension state a tick runs with: none (the plain ticks, everything compiled out) or a
+/// [`PlayerExt`] with the other entities the riptide spin can touch.
+pub(super) trait Extra {
+    /// `false` for [`NoExt`]: known at compile time.
+    const ON: bool;
+    /// The extension state (only called when [`Extra::ON`]).
+    fn ext(&mut self) -> &mut PlayerExt;
+    /// The other entities in the world (only read when [`Extra::ON`]).
+    fn others(&self) -> &[OtherEntity];
+}
+
+/// No extension state.
+pub(super) struct NoExt;
+
+impl Extra for NoExt {
+    const ON: bool = false;
+
+    #[inline(always)]
+    fn ext(&mut self) -> &mut PlayerExt {
+        unreachable!("the plain tick has no extension state")
+    }
+
+    #[inline(always)]
+    fn others(&self) -> &[OtherEntity] {
+        &[]
+    }
+}
+
+/// The extension state of [`tick_ext`].
+pub(super) struct ExtCtx<'a> {
+    x: &'a mut PlayerExt,
+    others: &'a [OtherEntity],
+}
+
+impl Extra for ExtCtx<'_> {
+    const ON: bool = true;
+
+    #[inline(always)]
+    fn ext(&mut self) -> &mut PlayerExt {
+        self.x
+    }
+
+    #[inline(always)]
+    fn others(&self) -> &[OtherEntity] {
+        self.others
+    }
+}
+
+/// The client's riptide launch (`TridentItem.onStoppedUsing` with riptide, which runs on the
+/// client too), in vanilla order: the push along the look (`yaw`, `pitch`: the tick's rotation,
+/// the mouse turned before the key handling) with `float` strength `3 * (1 + level) / 4`, the
+/// 20-tick spin counter ([`PlayerExt::riptide_ticks`]) and, on the ground, a move 1.2 blocks up
+/// (`ClientPlayerEntity.move`: collisions, block contacts and auto-jump included; `around`: the
+/// entity boxes it collides with).
+///
+/// Call it where the client releases the use key (before the tick, in
+/// `MinecraftClient.handleInputEvents`) when vanilla's conditions hold: the trident was in use
+/// for at least 10 player ticks, its riptide `level` is above 0 and the player is in water or
+/// rain ([`in_water_or_rain`]). The release packet (`block_dig` `release_use_item`) comes before
+/// it and is the caller's.
+pub fn riptide<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    around: &Surroundings<'_>,
+    world: &W,
+    level: u8,
+    yaw: f32,
+    pitch: f32,
+) {
+    p.yaw = yaw;
+    p.pitch = pitch;
+    let d = (std::f64::consts::PI / 180.0) as f32;
+    let mut h = -math::sin(yaw * d) * math::cos(pitch * d);
+    let mut k = -math::sin(pitch * d);
+    let mut l = math::cos(yaw * d) * math::cos(pitch * d);
+    let m = f64::from(h * h + k * k + l * l).sqrt() as f32;
+    let n = 3.0f32 * ((1.0 + f32::from(level)) / 4.0);
+    h *= n / m;
+    k *= n / m;
+    l *= n / m;
+    // Entity.addVelocity.
+    p.vel = [
+        p.vel[0] + f64::from(h),
+        p.vel[1] + f64::from(k),
+        p.vel[2] + f64::from(l),
+    ];
+    p.velocity_dirty = true;
+    x.riptide_ticks = 20;
+    if p.on_ground {
+        let world = Apart(world);
+        let cache = TickCache::new(&world, floor(p.pos[0]), floor(p.pos[1]), floor(p.pos[2]));
+        let mut t = Ctx {
+            p,
+            w: &cache,
+            border: BorderShape::new(&world.world_border()),
+            entities: around.entities,
+            x: ExtCtx {
+                x,
+                others: around.others,
+            },
+        };
+        t.move_self(V3::new(0.0, f64::from(1.199_999_9f32), 0.0));
+    }
+}
+
+/// `isTouchingWaterOrRain()`: in water, or `raining` and rain reaches the block position or the
+/// block at the top of the box: no motion-blocking block (one whose material blocks movement, or
+/// one holding a fluid: the client's `MOTION_BLOCKING` height map) is at or above it in its
+/// column. `raining` is the caller's: the level rains (rain gradient above 0.2), the biome there
+/// has rain at its temperature, and the dimension has sky light (vanilla also needs the sky light
+/// at the position to be 15).
+#[must_use]
+pub fn in_water_or_rain<W: BlockView<State = BlockState>>(
+    p: &PlayerState,
+    world: &W,
+    raining: bool,
+) -> bool {
+    if p.touching_water {
+        return true;
+    }
+    if !raining {
+        return false;
+    }
+    let (bx_, bz) = (floor(p.pos[0]), floor(p.pos[2]));
+    // The MOTION_BLOCKING height map is at least 0: below the world no rain.
+    let open = |y: i32| {
+        y >= 0
+            && (y..256).all(|yy| {
+                let s = state_at(world, bx_, yy, bz);
+                !super::blocks::blocks_movement(s) && super::blocks::fluid(s).is_none()
+            })
+    };
+    // Entity.getBlockPos and the block at the box top (`new BlockPos(x, maxY, z)`).
+    open(floor(p.pos[1])) || open(floor(p.bb.max_y))
 }
 
 /// The world of the tick next to entities: its own type, so that tick is compiled apart from
@@ -457,9 +643,10 @@ impl<W: BlockView> BlockView for Beside<'_, W> {
 // Always inlined: each entry point keeps its own copy of the tick (the one without entities is
 // then the plain block-only tick).
 #[inline(always)]
-fn tick_among<W: BlockView<State = BlockState>, E: EntityBoxes>(
+fn tick_among<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra>(
     p: &mut PlayerState,
     entities: E,
+    x: X,
     input: &TickInput,
     world: &W,
     out: &mut Packets,
@@ -476,20 +663,23 @@ fn tick_among<W: BlockView<State = BlockState>, E: EntityBoxes>(
         w: &cache,
         border: BorderShape::new(&world.world_border()),
         entities,
+        x,
     };
     t.player_tick(&input.keys, input.using_item, out);
     t.send_movement(out);
 }
 
-struct Ctx<'a, W, E> {
+struct Ctx<'a, W, E, X> {
     p: &'a mut PlayerState,
     w: &'a W,
     border: BorderShape,
     /// Boxes of the entities the player collides with.
     entities: E,
+    /// The extension state.
+    x: X,
 }
 
-impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
+impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X> {
     fn collider(&self) -> Collider<'_, W, E> {
         Collider {
             w: self.w,
@@ -576,11 +766,17 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
         self.p.lava_height = 0.0;
         self.check_water();
         let mut v = self.vel();
+        // Entity.updateWaterState: lava pushes harder in an ultrawarm dimension (the nether).
+        let speed = if X::ON && self.x.ext().ultrawarm {
+            0.007
+        } else {
+            0.002_333_333_333_333_333_5
+        };
         let c = update_in_fluid(
             self.w,
             &self.p.bb,
             FluidKind::Lava,
-            0.002_333_333_333_333_333_5,
+            speed,
             !self.p.abilities.flying,
             &mut v,
         );
@@ -617,6 +813,9 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
     fn update_pose(&mut self) {
         let wanted = if self.p.is_swimming() {
             Pose::Swimming
+        } else if X::ON && self.x.ext().spin_attack {
+            // SPIN_ATTACK: the elytra pose's box (see `Pose::FallFlying`).
+            Pose::FallFlying
         } else if self.p.input.sneaking && !self.p.abilities.flying {
             Pose::Crouching
         } else {
@@ -632,7 +831,11 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
             wanted
         } else if self.pose_fits(wanted) {
             wanted
-        } else if wanted == Pose::Swimming || !self.pose_fits(Pose::Swimming) {
+        } else if wanted == Pose::Swimming
+            || (X::ON && wanted == Pose::FallFlying)
+            || !self.pose_fits(Pose::Swimming)
+        {
+            // The spin box is the swimming box: neither fits.
             return;
         } else if wanted == Pose::Standing && self.pose_fits(Pose::Crouching) {
             Pose::Crouching
@@ -903,7 +1106,60 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
         p.sideways_speed *= 0.98;
         p.forward_speed *= 0.98;
         let input = V3::new(f64::from(p.sideways_speed), 0.0, f64::from(p.forward_speed));
+        let before = p.bb;
         self.player_travel(input);
+        if X::ON {
+            self.tick_riptide(&before);
+        }
+    }
+
+    /// `LivingEntity.tickMovement` after the travel: the riptide spin counter counts down and
+    /// `tickRiptide` looks at what the box swept this tick (`before` united with the box now): a
+    /// living entity there is hit (the counter ends, the motion is reversed and scaled by 0.2);
+    /// with nothing there a horizontal collision ends the counter. Other entities there that are
+    /// not living (items, boats, ...) end nothing, but keep the collision from ending it.
+    #[inline(never)]
+    fn tick_riptide(&mut self, before: &Aabb) {
+        if self.x.ext().riptide_ticks <= 0 {
+            return;
+        }
+        self.x.ext().riptide_ticks -= 1;
+        let b = self.p.bb;
+        let u = Aabb::new(
+            math::java_min(before.min_x, b.min_x),
+            math::java_min(before.min_y, b.min_y),
+            math::java_min(before.min_z, b.min_z),
+            math::java_max(before.max_x, b.max_x),
+            math::java_max(before.max_y, b.max_y),
+            math::java_max(before.max_z, b.max_z),
+        );
+        let touches = |e: &&OtherEntity| {
+            let o = &e.bb;
+            o.min_x < u.max_x
+                && o.max_x > u.min_x
+                && o.min_y < u.max_y
+                && o.max_y > u.min_y
+                && o.min_z < u.max_z
+                && o.max_z > u.min_z
+        };
+        let mut any = false;
+        let mut hit = false;
+        for e in self.x.others().iter().filter(touches) {
+            any = true;
+            if e.living {
+                hit = true;
+                break;
+            }
+        }
+        if hit {
+            // PlayerEntity.attack runs on the client too; against a mob it does not change the
+            // player's motion (the target's `damage` is refused on the client).
+            self.x.ext().riptide_ticks = 0;
+            let p = &mut *self.p;
+            p.vel = [p.vel[0] * -0.2, p.vel[1] * -0.2, p.vel[2] * -0.2];
+        } else if !any && self.p.horizontal_collision {
+            self.x.ext().riptide_ticks = 0;
+        }
     }
 
     fn jump_velocity_multiplier(&self) -> f32 {

@@ -417,6 +417,17 @@ events; seeds 4-6 add item use and origins at ±2^24).
 1.16.5: `MC=1.16.5 oracle/run.sh fuzz --seed S --count 2000 --ticks 100 --out
 "$PWD/oracle/cache/1.16.5/fuzz/physics_sS.jsonl.gz"`; seeds 11-15 = 1,000,000 ticks, 0 diffs (plus the
 committed `tests/golden/1.16.5/` scenarios and `fuzz_seed1`, replayed by `tests/golden_1_16_5.rs`).
+The dimension type (`PlayerExt::ultrawarm` + `tick_ext`; vanilla `Entity.updateWaterState`: lava
+pushes with 0.007 instead of 0.0023333333333333335 in an ultrawarm dimension, the nether; nothing
+else in the 1.16.5 player's movement reads the dimension type): `nether.jsonl.gz` (8 hand cases
++ 100 fuzz cases, 6,329 ticks) and `fuzz --nether true` seeds 51-55 in `fuzz-nether/` (1,000,000
+ticks), 0 diffs.
+Riptide (`riptide` — the client's launch on releasing the trident —, `in_water_or_rain`,
+`PlayerExt::{spin_attack, riptide_ticks}`, `Surroundings::others` for the spin's contacts,
+the spin pose as `Pose::FallFlying`, the same box): `riptide.jsonl.gz` (18 hand cases + 100 fuzz cases, 6,799 ticks) and
+`fuzz --riptide true` seeds 61-65 in `fuzz-riptide/` (1,000,000 ticks), 0 diffs. The use state
+(10-tick minimum, the 4-tick retry, refusal out of water and rain) is the caller's, as are the
+rain (gradient, biome, sky light) and the list of other entities.
 
 1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
 `fuzz_seed1`, `fuzz_edges_seed1` and `entities` (23 hand cases + 60 fuzz cases with other entities,

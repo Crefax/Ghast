@@ -1423,6 +1423,30 @@ fn consume_held_and_offhand() {
     assert_eq!(inv.offhand().map(|s| s.count()), Some(2));
 }
 
+/// The 1.16.5 / 26.1 drop key prediction (`removeStack(selected, whole ? count : 1)`).
+#[test]
+fn drop_held_one_or_all() {
+    let mut inv = player_inv(
+        Version::V1_16_5,
+        &[(36, s16("torch", 3)), (37, s16("torch", 1))],
+    );
+    inv.drain_events();
+    assert!(inv.drop_held(false));
+    assert_eq!(inv.held().map(|s| s.count()), Some(2));
+    assert!(inv.drain_events().player_changed);
+    assert!(inv.drop_held(true));
+    assert_eq!(inv.held(), None, "the whole stack");
+    inv.drain_events();
+    assert!(!inv.drop_held(false), "nothing held");
+    assert!(!inv.drain_events().player_changed);
+    inv.select(1);
+    assert!(inv.drop_held(false));
+    assert_eq!(inv.hotbar(1), None, "the last item");
+    // The server's slot update corrects it.
+    inv.on_set_slot(0, 37, Some(s16("torch", 1)));
+    assert_eq!(inv.held().map(|s| s.count()), Some(1));
+}
+
 // ------------------------------------------------------------------ 1.12.2 specifics
 
 const SHIELD_12: i32 = 442;

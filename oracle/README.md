@@ -409,8 +409,8 @@ Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 orac
 `MC=1.16.5 oracle/run.sh fuzz --seed 7 --count 1000`. Mappings: Fabric **Yarn** `1.16.5+build.10`
 (CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
 Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` and
-`fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
-`voxel_shapes.jsonl.gz`.
+`fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `entities.jsonl.gz`, `nether.jsonl.gz`,
+`riptide.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`, `voxel_shapes.jsonl.gz`.
 
 Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
 and javac refuses to compile against them, so `prepareVanilla` drops parameter annotations from the
@@ -435,15 +435,26 @@ More of the client is real than in 1.8.9:
   initialiser loads the GLFW native library; the movement key bindings are allocated directly, sprint
   and sneak as hold-mode `StickyKeyBinding`s), and the tab-list entry (gives `isSpectator`).
 - The player list entry is built for the game mode, so **spectator mode works** (no-clip flight).
-- Item use (`use` key): a **shield** in the main hand (swords no longer block). Rising edge →
-  `interactItem` → `use_item` packet; falling edge → `stopUsingItem` → `block_dig` status 5.
+- Item use (`use` key): a **shield** in the main hand (swords no longer block; a riptide case
+  holds its trident instead). The use key as `MinecraftClient.tick` handles it with the
+  crosshair on nothing: the item use cooldown counts down, a press → `doItemUse` →
+  `interactItem` → `use_item` packet, a held key retries once the 4-tick cooldown has run out
+  (before 0.4.5 only the press used the item: the same for a shield, which never refuses), a
+  release → `stopUsingItem` → `block_dig` status 5.
+- Chunks carry the `WORLD_SURFACE` and `MOTION_BLOCKING` height maps a server sends
+  (`Heightmap.populateHeightmaps` before the chunk data packet; before 0.4.5 they were empty,
+  which only rain reads).
 - `auto_jump` is a setup field (vanilla's option default is on; bots turn it off; the scenarios use
   off except `auto_jump`).
 - Not covered: elytra / fall flying (the 1.16.5 client starts gliding itself — `checkFallFlying` sets
   the flag when an elytra is in the chest slot — but only the server clears it; no case equips one),
-  riptide, boats and other vehicles, entity collisions, pistons pushing the player, a non-default or
-  moving world border, the nether (lava pushes 0.007 instead of 0.0023333), powder snow (1.17),
-  held-item packets, `ClientWorld.tick()`.
+  boats and other vehicles, pistons pushing the player, a non-default or moving world border,
+  powder snow (1.17), held-item packets, `ClientWorld.tick()`, light (no light packets are
+  sent: the client's sky light reads 15 everywhere in a dimension with sky light).
+- Order inside one tick: inbound packets → the tick's yaw / pitch (the renderer turns the player
+  between ticks, `Mouse.updateMouse` after the frame's ticks, so the key handling sees it too) →
+  keys → use key → `world.tickEntities()`. Before 0.4.5 the rotation was set after the use key;
+  no golden file changed (nothing the use key did read it).
 
 ### 1.16.5 fuzz
 
@@ -477,6 +488,59 @@ for s in 31 32 33 34 35; do MC=1.16.5 oracle/run.sh fuzz --palette edges --seed 
 for s in 41 42 43 44 45; do MC=1.16.5 oracle/run.sh fuzz --extras true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-extras/extras_s$s.jsonl.gz"; done
 MC=1.16.5 oracle/run.sh fuzz --extras true --use-item true --seed 46 --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-extras/extras_use_s46.jsonl.gz"
 ```
+
+### 1.16.5 movement beyond the plain player (`Ext`)
+
+`Ext.Setup` (a subclass of the entity cases' `Ents.Setup`, header `setup.ext`) adds:
+
+**`nether`** (8 cases + 100 fuzz, `nether.jsonl.gz`, `MC=1.16.5 oracle/run.sh nether`): the client
+world built with the `the_nether` dimension type and world key (`setup.ext.dimension`;
+`ClientWorld` gets them as `onGameJoin` does from the join packet; biome `nether_wastes`):
+`Entity.updateWaterState` pushes with lava's flow at 0.007 instead of 0.0023333333333333335 in
+an ultrawarm dimension. Nothing else on the 1.16.5 player's movement path reads the dimension
+type (`LavaFluid`'s flow speed, level decrease and tick rate only change how the server spreads
+lava; the client light provider has no sky light there, which only rain would read). Cases:
+still and flowing lava, a fall into flowing lava, a lava slope against the flow, deep lava with
+falling lava on top, creative flight through lava, the bottom and the top of the world, water in
+the nether. Fuzz (`Ext.netherFuzz`, `fuzz --nether true`, cases `…_x_ne`): the `withExtras` case
+in the nether with still, flowing and falling lava pools around the spawn. Cached run
+(`oracle/cache/1.16.5/fuzz-nether/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 51 52 53 54 55; do MC=1.16.5 oracle/run.sh fuzz --nether true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-nether/nether_s$s.jsonl.gz"; done
+```
+
+**`riptide`** (18 cases + 100 fuzz, `riptide.jsonl.gz`, `MC=1.16.5 oracle/run.sh riptide`): a
+trident with riptide I-III in the selected slot (`setup.ext.hand` `trident`, `riptide`), rain
+(`setup.ext.raining`: the server's rain-started and rain-gradient game state packets) and the
+server's spin flag (event `{"type":"living_flags","set","clear"}`: an entity data packet for the
+player's living entity flags, index 7, with the use bits 1 and 2 as the client has them, then
+the masks; 4 is the spin). Cases: in water, held too short, on dry land (refused, retried every
+4 ticks), walking into the pool with the key held (the retry starts the use), in the rain on
+open ground (the 1.2-block move up), under a roof and under glass, into a wall, levels 1-3
+straight up, the spin pose under a ceiling, the spin flag on land (walking, sneaking,
+sprinting in the pose), into a zombie and an armor stand (the hit: counter 0, motion ×−0.2),
+an item at the wall (not living: the wall does not end the counter while it is in the swept
+box), into a boat, rain in the nether (no sky light). Tick records of these cases add
+`ext: {riptide_ticks, spin_attack, living_flags, item_use_time}`; cases with other entities
+(`setup.ext.with_entities`) also the `entities` records. Fuzz (`Ext.riptideFuzz`,
+`fuzz --riptide true`, cases `…_x_rt`): the `withExtras` case with a trident, often a pool at
+the spawn and rain, use spans of 3-25 ticks, pitch changes, spin flag events, and in a quarter
+of the cases 1-3 entities (mobs, armor stands, items, boats) around. Quirks: the launch reads
+the tick's rotation (the mouse turns before the key handling) and happens before any entity
+ticks (so before the pushes of the entities that tick before the player); rain needs the
+`MOTION_BLOCKING` height map to be at or below the block (feet or head) and is off below y 0.
+Cached run (`oracle/cache/1.16.5/fuzz-riptide/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 61 62 63 64 65; do MC=1.16.5 oracle/run.sh fuzz --riptide true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-riptide/riptide_s$s.jsonl.gz"; done
+```
+
+Entity spawns (`Ents`) send an entity's velocity right after its spawn and entity data when its
+type always updates velocity (`EntityTrackerEntry.sendPackets`; not with a mob spawn packet).
+Before 0.4.5 they did not, and the client's item entities kept the random velocity of their
+constructor: `entities.jsonl.gz` differed from run to run in the item records only (the
+player's records were always the same).
 
 ### 1.16.5 format differences
 

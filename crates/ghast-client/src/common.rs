@@ -862,6 +862,12 @@ pub enum DigStatus {
     Finish,
     /// Release the used item: stop eating / blocking / drawing (5).
     ReleaseUseItem,
+    /// Drop the whole held stack (3; the drop key with control held).
+    DropStack,
+    /// Drop one item of the held stack (4; the drop key).
+    DropItem,
+    /// Swap the main- and off-hand stacks (6; 1.9+, the swap-hands key).
+    SwapHands,
 }
 
 impl DigStatus {
@@ -873,6 +879,9 @@ impl DigStatus {
             DigStatus::Abort => 1,
             DigStatus::Finish => 2,
             DigStatus::ReleaseUseItem => 5,
+            DigStatus::DropStack => 3,
+            DigStatus::DropItem => 4,
+            DigStatus::SwapHands => 6,
         }
     }
 }

@@ -477,6 +477,9 @@ fn engine_text(o: &Outbound) -> Option<String> {
                 DigStatus::Abort => "ABORT_DESTROY_BLOCK",
                 DigStatus::Finish => "STOP_DESTROY_BLOCK",
                 DigStatus::ReleaseUseItem => "RELEASE_USE_ITEM",
+                DigStatus::DropStack => "DROP_ALL_ITEMS",
+                DigStatus::DropItem => "DROP_ITEM",
+                DigStatus::SwapHands => "SWAP_HELD_ITEMS",
             };
             format!("C07 {a} {} {} {} f={}", pos.x, pos.y, pos.z, face.id())
         }

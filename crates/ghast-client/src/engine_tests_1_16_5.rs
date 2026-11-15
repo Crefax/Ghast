@@ -68,6 +68,10 @@ impl Body {
         b.0.extend_from_slice(s.as_bytes());
         b
     }
+    fn raw_bytes(mut self, b: &[u8]) -> Self {
+        self.0.extend_from_slice(b);
+        self
+    }
     fn raw(self, id: i32) -> RawPacket {
         RawPacket {
             id,
@@ -312,6 +316,11 @@ fn ours(o: &Outbound) -> Option<Value> {
                 _ => "other",
             }
         ]),
+        Outbound::UseItem { off_hand, .. } => serde_json::json!(["use_item", u8::from(off_hand)]),
+        Outbound::Dig {
+            status: crate::common::DigStatus::ReleaseUseItem,
+            ..
+        } => serde_json::json!(["release_use_item"]),
         _ => return None,
     })
 }
@@ -342,11 +351,16 @@ fn theirs(p: &Value) -> Option<Value> {
         ]),
         "flying" => serde_json::json!(["flying", og]),
         "entity_action" => serde_json::json!(["entity_action", p["action_name"]]),
+        "use_item" => serde_json::json!(["use_item", p["hand"]]),
+        "block_dig" if p["status_name"] == "release_use_item" => {
+            serde_json::json!(["release_use_item"])
+        }
         _ => return None,
     })
 }
 
-struct Keys(Controls);
+/// The tick's movement keys and the use key (right button).
+struct Keys(Controls, bool);
 
 impl Behavior for Keys {
     fn name(&self) -> &str {
@@ -354,7 +368,43 @@ impl Behavior for Keys {
     }
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
         ctx.set_controls(self.0);
+        ctx.set_buttons(crate::hands::Buttons {
+            left: false,
+            right: self.1,
+        });
     }
+}
+
+/// A 1.16.5 `entity_metadata` for our entity (id 1): the living entity flags byte (index 7).
+fn living_flags_packet(flags: u8) -> RawPacket {
+    Body::default()
+        .varint(1)
+        .i8(7)
+        .varint(0)
+        .i8(flags as i8)
+        .i8(-1)
+        .raw(cb::id::ENTITY_METADATA)
+}
+
+/// A stack's NBT `{Enchantments: [{id: "minecraft:<name>", lvl: <level>s}, ...]}`.
+fn enchantments_nbt(list: &[(&str, u8)]) -> ghast_protocol::nbt::RawNbt {
+    let mut b = vec![10, 0, 0, 9, 0, 12];
+    b.extend_from_slice(b"Enchantments");
+    b.push(10);
+    b.extend_from_slice(&(list.len() as i32).to_be_bytes());
+    for (name, level) in list {
+        let id = format!("minecraft:{name}");
+        b.extend_from_slice(&[8, 0, 2]);
+        b.extend_from_slice(b"id");
+        b.extend_from_slice(&(id.len() as u16).to_be_bytes());
+        b.extend_from_slice(id.as_bytes());
+        b.extend_from_slice(&[2, 0, 3]);
+        b.extend_from_slice(b"lvl");
+        b.extend_from_slice(&i16::from(*level).to_be_bytes());
+        b.push(0);
+    }
+    b.push(0);
+    ghast_protocol::nbt::RawNbt::from_bytes(bytes::Bytes::from(b)).unwrap()
 }
 
 /// The events this replay drives (the player's own events of the other fuzz kinds are not
@@ -374,6 +424,7 @@ fn driven(ev: &Value) -> bool {
                 | "teleport"
                 | "abilities"
                 | "speed_attribute"
+                | "living_flags"
                 | "effects"
         )
     )
@@ -383,6 +434,67 @@ fn driven(ev: &Value) -> bool {
 /// with the generic metadata store): every case whose events this replay drives. Returns
 /// (cases, ticks, cases skipped).
 pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usize, usize) {
+    replay_file_with(path, metadata, true)
+}
+
+/// A 1.16.5 join packet (our entity id 1) for a world `name` whose dimension type compound
+/// holds `ultrawarm` (the only field the movement reads).
+fn login_packet(name: &str, ultrawarm: bool) -> RawPacket {
+    Body::default()
+        .i32(1)
+        .bool(false)
+        .i8(0)
+        .i8(-1)
+        .varint(1)
+        .string(name)
+        .raw_bytes(&[10, 0, 0, 0])
+        .raw_bytes(&dimension_nbt(ultrawarm))
+        .string(name)
+        .i64(0)
+        .varint(20)
+        .varint(10)
+        .bool(false)
+        .bool(true)
+        .bool(false)
+        .bool(false)
+        .raw(cb::id::LOGIN)
+}
+
+/// A 1.16.5 respawn packet into world `name` with that dimension type.
+fn respawn_packet(name: &str, ultrawarm: bool) -> RawPacket {
+    Body::default()
+        .raw_bytes(&dimension_nbt(ultrawarm))
+        .string(name)
+        .i64(0)
+        .i8(0)
+        .i8(-1)
+        .bool(false)
+        .bool(false)
+        .bool(false)
+        .raw(cb::id::RESPAWN)
+}
+
+/// A nameless compound `{ultrawarm: <byte>, has_skylight: <byte>}` (the nether: ultrawarm,
+/// no sky light).
+fn dimension_nbt(ultrawarm: bool) -> Vec<u8> {
+    let mut b = vec![10, 0, 0, 1, 0, 9];
+    b.extend_from_slice(b"ultrawarm");
+    b.push(u8::from(ultrawarm));
+    b.extend_from_slice(&[1, 0, 12]);
+    b.extend_from_slice(b"has_skylight");
+    b.push(u8::from(!ultrawarm));
+    b.push(0);
+    b
+}
+
+/// [`replay_file`]; `tracking`: with entity tracking (else the plain client, what a bot without
+/// `Interests::ENTITY_TRACKING` runs). A case with `setup.ext.dimension` joins that dimension
+/// through a real join packet.
+pub(super) fn replay_file_with(
+    path: &std::path::Path,
+    metadata: bool,
+    tracking: bool,
+) -> (usize, usize, usize) {
     let f = std::fs::File::open(path).unwrap();
     // One case at a time (the cached files are large).
     let mut lines = std::io::BufReader::new(flate2::read::GzDecoder::new(f))
@@ -390,8 +502,9 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
         .map(|l| serde_json::from_str::<Value>(&l.unwrap()).unwrap())
         .peekable();
     let (mut cases, mut skipped, mut ticks_done, mut packets, mut orders) = (0, 0, 0, 0, 0);
-    // Cases cut short where the player left the loaded columns.
+    // Cases cut short where the player left the loaded columns, or used an item on a block.
     let mut left = 0;
+    let mut picked = 0;
     let mut failed = Vec::new();
     while let Some(header) = lines.next() {
         let sc = &header;
@@ -430,18 +543,40 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
             dimension_nbt: None,
             respawn_screen: true,
         }));
-        // What `Client` sets up for `Interests::ENTITY_TRACKING` (+ `ENTITIES`) on 1.16.5.
-        e.sim.set_entities(Some(
-            ghast_entity::Config::default()
-                .with_metadata(metadata)
-                .with_equipment(false)
-                .with_effects(false)
-                .with_player_list(false)
-                .with_player_names(true)
-                .with_events(false),
-        ));
-        // The login the tracker saw: our entity id 1, a new client world.
-        e.sim.test_tracker_login(1);
+        // The join packet's dimension type (ClientPlayNetworkHandler.onGameJoin); riptide cases
+        // join too (our entity id for the spin flag).
+        let ext = setup.get("ext");
+        let dimension = ext.and_then(|x| x.get("dimension")).and_then(Value::as_str);
+        let hand = ext.and_then(|x| x.get("hand")).and_then(Value::as_str);
+        let joined = dimension.is_some() || hand.is_some();
+        if joined {
+            let d = dimension.unwrap_or("overworld");
+            let ultrawarm = match d {
+                "the_nether" => true,
+                "overworld" => false,
+                other => panic!("dimension {other}"),
+            };
+            e.sim
+                .world_packet(&login_packet(&format!("minecraft:{d}"), ultrawarm))
+                .unwrap();
+            assert_eq!(e.sim.test_ext().ultrawarm, ultrawarm, "{name}: join packet");
+        }
+        if tracking {
+            // What `Client` sets up for `Interests::ENTITY_TRACKING` (+ `ENTITIES`) on 1.16.5.
+            e.sim.set_entities(Some(
+                ghast_entity::Config::default()
+                    .with_metadata(metadata)
+                    .with_equipment(false)
+                    .with_effects(false)
+                    .with_player_list(false)
+                    .with_player_names(true)
+                    .with_events(false),
+            ));
+            // The login the tracker saw: our entity id 1, a new client world.
+            if !joined {
+                e.sim.test_tracker_login(1);
+            }
+        }
         // The oracle world: the loaded columns, air outside the fills (in order).
         for r in sc["loaded_chunks"].as_array().unwrap() {
             let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
@@ -489,6 +624,51 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
                 }
             }
         }
+        // Riptide: the trident in the selected hotbar slot, the rain as game state packets.
+        if let Some(h) = hand {
+            assert_eq!(h, "trident", "{name}");
+            let id = ghast_data::v1_16_5::Item::from_name(h).unwrap().id();
+            let level = ext
+                .and_then(|x| x.get("riptide"))
+                .map_or(0, |v| v.as_u64().unwrap());
+            let mut stack = ghast_inventory::Stack::new(i32::from(id), 1, 0);
+            if level > 0 {
+                stack = stack.with_nbt(Some(enchantments_nbt(&[("riptide", level as u8)])));
+            }
+            e.inventory_mut().on_set_slot(0, 36, Some(stack));
+            // The inventory now drives the boots' enchantments: the oracle's boots, as the
+            // server's equipment would show them in the player's armour slot.
+            let boots: Vec<(&str, u8)> = [
+                ("depth_strider", "depth_strider"),
+                ("soul_speed", "soul_speed"),
+            ]
+            .iter()
+            .filter_map(|(k, n)| {
+                let l = setup[*k].as_u64().unwrap_or(0) as u8;
+                (l > 0).then_some((*n, l))
+            })
+            .collect();
+            if !boots.is_empty() {
+                let id = ghast_data::v1_16_5::Item::from_name("diamond_boots")
+                    .unwrap()
+                    .id();
+                let stack = ghast_inventory::Stack::new(i32::from(id), 1, 0)
+                    .with_nbt(Some(enchantments_nbt(&boots)));
+                e.inventory_mut().on_set_slot(0, 8, Some(stack));
+            }
+            if ext.and_then(|x| x.get("raining")).and_then(Value::as_bool) == Some(true) {
+                e.handle(Inbound::GameState {
+                    reason: 1,
+                    value: 0.0,
+                });
+                e.handle(Inbound::GameState {
+                    reason: 7,
+                    value: 1.0,
+                });
+            }
+        }
+        // The spin flag as the server sends it (living entity flags, index 7).
+        let mut living = 0u8;
         e.core.pose.pos = Vec3::new(p.pos[0], p.pos[1], p.pos[2]);
         e.core.pose.yaw = p.yaw;
         e.core.pose.pitch = p.pitch;
@@ -603,6 +783,12 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
                         }
                         effects = list.iter().map(|f| f.0).collect();
                     }
+                    "living_flags" => {
+                        let set = ev["set"].as_u64().unwrap() as u8;
+                        let clear = ev["clear"].as_u64().unwrap() as u8;
+                        living = (living & !clear) | set;
+                        e.sim.world_packet(&living_flags_packet(living)).unwrap();
+                    }
                     _ => {
                         for raw in event_packets(ev) {
                             e.sim.world_packet(&raw).unwrap();
@@ -629,19 +815,28 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
             }
             let keys = input["keys"].as_str().unwrap();
             let has = |k: &str| keys.split(',').any(|n| n == k);
-            let mut b = Keys(Controls {
-                forward: has("forward"),
-                back: has("back"),
-                left: has("left"),
-                right: has("right"),
-                jump: has("jump"),
-                sneak: has("sneak"),
-                sprint: has("sprint"),
-            });
+            let mut b = Keys(
+                Controls {
+                    forward: has("forward"),
+                    back: has("back"),
+                    left: has("left"),
+                    right: has("right"),
+                    jump: has("jump"),
+                    sneak: has("sneak"),
+                    sprint: has("sprint"),
+                },
+                has("use"),
+            );
             e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
             e.note_inbound(t0);
             e.tick(&mut b, t0);
             let out = std::mem::take(e.outbound());
+            // The oracle uses the item with the crosshair on nothing; the engine picks the
+            // block it looks at (and may activate it): a case ends at its first block use.
+            if out.iter().any(|o| matches!(o, Outbound::Place { .. })) {
+                picked += 1;
+                break;
+            }
             let got: Vec<Value> = out.iter().filter_map(ours).collect();
             let want: Vec<Value> = rec["packets"]
                 .as_array()
@@ -719,7 +914,7 @@ pub(super) fn replay_file(path: &std::path::Path, metadata: bool) -> (usize, usi
         }
     }
     eprintln!(
-        "1.16.5 {} through the engine (metadata {metadata}): {cases} cases ({skipped} skipped, {left} left the loaded columns), {ticks_done} ticks, {orders} tick orders, {packets} packets identical",
+        "1.16.5 {} through the engine (tracking {tracking}, metadata {metadata}): {cases} cases ({skipped} skipped, {left} left the loaded columns, {picked} used an item on a block), {ticks_done} ticks, {orders} tick orders, {packets} packets identical",
         path.display()
     );
     assert!(
@@ -774,4 +969,200 @@ fn entities_cache_1_16_5() {
         ticks += t;
     }
     eprintln!("1.16.5 entities cache through the engine: {cases} cases, {ticks} ticks");
+}
+
+fn nether_file() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5/nether.jsonl.gz")
+}
+
+/// The nether goldens (lava pushes with 0.007 in an ultrawarm dimension) through the engine: the
+/// dimension type arrives in the join packet; without and with entity tracking.
+#[test]
+fn nether_matches_the_oracle_1_16_5() {
+    let (cases, ticks, skipped) = replay_file_with(&nether_file(), false, false);
+    assert!(
+        cases >= 100 && ticks > 5000 && skipped == 0,
+        "{cases} cases, {ticks} ticks, {skipped} skipped"
+    );
+    replay_file_with(&nether_file(), false, true);
+}
+
+/// The cached nether fuzz (`oracle/cache/1.16.5/fuzz-nether/*.jsonl.gz`, not committed) through
+/// the engine; `GHAST_FUZZ_NETHER` names another directory. Skipped when absent.
+#[test]
+#[ignore = "cache run: cargo test --release -p ghast-client --lib -- --ignored nether_cache_1_16_5"]
+fn nether_cache_1_16_5() {
+    let dir = std::env::var("GHAST_FUZZ_NETHER").map_or_else(
+        |_| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../oracle/cache/1.16.5/fuzz-nether")
+        },
+        std::path::PathBuf::from,
+    );
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {} not found", dir.display());
+        return;
+    };
+    let mut files: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in files {
+        let (c, t, _) = replay_file_with(&f, false, false);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.16.5 nether cache through the engine: {cases} cases, {ticks} ticks");
+}
+
+/// The dimension type follows the join packet and a respawn into another world; a respawn into
+/// the same world keeps it (vanilla keeps the world there).
+#[test]
+fn dimension_type_from_join_and_respawn_1_16_5() {
+    let mut sim = Sim16::new();
+    sim.world_packet(&login_packet("minecraft:overworld", false))
+        .unwrap();
+    assert!(!sim.test_ext().ultrawarm);
+    sim.world_packet(&respawn_packet("minecraft:the_nether", true))
+        .unwrap();
+    assert!(sim.test_ext().ultrawarm);
+    // Same world name: the client keeps its world and its dimension type.
+    sim.world_packet(&respawn_packet("minecraft:the_nether", false))
+        .unwrap();
+    assert!(sim.test_ext().ultrawarm);
+    sim.world_packet(&respawn_packet("minecraft:overworld", false))
+        .unwrap();
+    assert!(!sim.test_ext().ultrawarm);
+    sim.world_packet(&login_packet("minecraft:the_nether", true))
+        .unwrap();
+    assert!(sim.test_ext().ultrawarm);
+}
+
+fn riptide_file() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5/riptide.jsonl.gz")
+}
+
+/// The riptide goldens through the engine: the trident (with its riptide enchantment in the
+/// stack NBT) in the main hand, the rain as game state packets, the server's spin flag as our
+/// entity data, the use key from the behaviour; every movement, `entity_action`, `use_item` and
+/// `release_use_item` packet and the velocity of every tick must equal the real client's.
+/// With entity tracking (the spin's hits need it). The oracle uses the item with the
+/// crosshair on nothing: a case whose player looks at a block in reach when it uses the item
+/// ends there (the engine uses the item on the block first, as the real client would).
+#[test]
+fn riptide_matches_the_oracle_1_16_5() {
+    let (cases, ticks, skipped) = replay_file_with(&riptide_file(), false, true);
+    assert!(
+        cases >= 100 && ticks > 4000 && skipped == 0,
+        "{cases} cases, {ticks} ticks, {skipped} skipped"
+    );
+}
+
+/// The cached riptide fuzz (`oracle/cache/1.16.5/fuzz-riptide/*.jsonl.gz`, not committed)
+/// through the engine; `GHAST_FUZZ_RIPTIDE` names another directory. Skipped when absent.
+#[test]
+#[ignore = "cache run: cargo test --release -p ghast-client --lib -- --ignored riptide_cache_1_16_5"]
+fn riptide_cache_1_16_5() {
+    let dir = std::env::var("GHAST_FUZZ_RIPTIDE").map_or_else(
+        |_| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../oracle/cache/1.16.5/fuzz-riptide")
+        },
+        std::path::PathBuf::from,
+    );
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {} not found", dir.display());
+        return;
+    };
+    let mut files: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in files {
+        let (c, t, _) = replay_file_with(&f, false, true);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.16.5 riptide cache through the engine: {cases} cases, {ticks} ticks");
+}
+
+/// The riptide's rain check: the level rains, the biome rains (by the biome cell the client's
+/// voronoi zoom picks) and the dimension has sky light; a riptide trident in the hand also
+/// makes the sim read our entity data (the spin flag).
+#[test]
+fn riptide_rain_and_spin_flag_1_16_5() {
+    use ghast_protocol::v1_16_5::play::clientbound as cb;
+    let chunk = |biome: i32| {
+        RawPacket::from_packet(&cb::MapChunk {
+            x: 0,
+            z: 0,
+            ground_up: true,
+            bit_map: 0,
+            heightmaps: ghast_protocol::nbt::RawNbt::from_bytes(bytes::Bytes::from_static(&[
+                10, 0, 0, 0,
+            ]))
+            .unwrap(),
+            biomes: Some(vec![biome; 1024]),
+            chunk_data: bytes::Bytes::new(),
+            block_entities: Vec::new(),
+        })
+        .unwrap()
+    };
+    let trident = ghast_data::v1_16_5::Item::from_name("trident")
+        .unwrap()
+        .id();
+    let stack = ghast_inventory::Stack::new(i32::from(trident), 1, 0)
+        .with_nbt(Some(enchantments_nbt(&[("riptide", 3)])));
+    let usable = |sim: &Sim16| {
+        let held = sim.held_item(trident, 1, 0);
+        sim.item_use_facts(&stack, false, held).usable
+    };
+    let mut p = ghast_physics::v1_16_5::PlayerState::new([8.5, 64.0, 8.5], 0.0, 0.0);
+    p.on_ground = true;
+    // The world keeps biomes (`WorldConfig::biomes`; without them every biome counts as rainy).
+    let opts = crate::sim::SimOptions {
+        world: Some(ghast_world::WorldConfig::default().with_biomes(true)),
+        ..Default::default()
+    };
+    for (biome, overworld, rain, want) in [
+        (1, true, true, true),   // plains
+        (2, true, true, false),  // desert: no precipitation
+        (12, true, true, false), // snowy tundra: snow
+        (1, true, false, false), // no rain
+        (8, false, true, false), // the nether: no sky light
+        (1, false, true, false), // a rainy biome in a dimension without sky light
+    ] {
+        let mut sim = Sim16::with(&opts);
+        let name = if overworld {
+            "minecraft:overworld"
+        } else {
+            "minecraft:the_nether"
+        };
+        sim.world_packet(&login_packet(name, !overworld)).unwrap();
+        sim.world_packet(&chunk(biome)).unwrap();
+        sim.test_set_player(p);
+        if rain {
+            sim.weather(1, 0.0);
+            sim.weather(7, 1.0);
+        }
+        assert_eq!(
+            usable(&sim),
+            want,
+            "biome {biome}, overworld {overworld}, rain {rain}"
+        );
+    }
+    // A riptide trident in a hand: our entity data joins the packet filter; the spin flag
+    // arrives with it.
+    let mut sim = Sim16::new();
+    sim.world_packet(&login_packet("minecraft:overworld", false))
+        .unwrap();
+    assert!(!sim.world_packet_ids().contains(&cb::id::ENTITY_METADATA));
+    let _ = usable(&sim);
+    assert!(sim.take_filter_dirty());
+    assert!(!sim.take_filter_dirty());
+    assert!(sim.world_packet_ids().contains(&cb::id::ENTITY_METADATA));
+    sim.world_packet(&living_flags_packet(4)).unwrap();
+    assert!(sim.test_ext().spin_attack);
+    sim.world_packet(&living_flags_packet(1)).unwrap();
+    assert!(!sim.test_ext().spin_attack);
 }

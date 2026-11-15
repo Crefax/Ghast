@@ -126,6 +126,8 @@ impl ClientVersion for V1_16_5 {
         for &id in ghast_world::v1_16_5::PACKET_IDS {
             f.insert(id);
         }
+        // Server resource packs are answered (servers that need one kick a silent client).
+        f.insert(cb::id::RESOURCE_PACK_SEND);
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::CHAT);
         }
@@ -292,6 +294,17 @@ impl ClientVersion for V1_16_5 {
             }
             _ => return Ok(None),
         }))
+    }
+
+    fn resource_pack(
+        raw: &RawPacket,
+        accept: bool,
+        out: &mut Vec<Outbound>,
+    ) -> Result<(), DecodeError> {
+        if raw.id == cb::id::RESOURCE_PACK_SEND {
+            pack_answer(raw, accept, out)?;
+        }
+        Ok(())
     }
 
     const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V1_16_5;
@@ -489,6 +502,21 @@ impl ClientVersion for V1_16_5 {
         pose.yaw = yaw % 360.0;
         pose.pitch = pitch.clamp(-90.0, 90.0) % 360.0;
     }
+}
+
+/// `onResourcePackSend`: the URL check (`super::pack_url_valid`), then a `level://` pack is a
+/// world save's, which a bot does not have. The answer is the status alone (1.10+).
+#[cold]
+fn pack_answer(raw: &RawPacket, accept: bool, out: &mut Vec<Outbound>) -> Result<(), DecodeError> {
+    let p: cb::ResourcePackSend = raw.decode_as()?;
+    let loadable = super::pack_url_valid(&p.url) && !p.url.starts_with("level://");
+    for &result in super::legacy_pack_statuses(loadable, accept) {
+        // A VarInt always encodes.
+        if let Ok(raw) = RawPacket::from_packet(&sb::ResourcePackReceive { result }) {
+            out.push(Outbound::Raw(raw));
+        }
+    }
+    Ok(())
 }
 
 impl super::HasSim for V1_16_5 {

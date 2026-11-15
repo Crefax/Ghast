@@ -56,6 +56,7 @@ import net.minecraft.util.registry.DynamicRegistryManager;
 import net.minecraft.util.registry.Registry;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.GameMode;
+import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
 import net.minecraft.world.biome.BiomeKeys;
@@ -191,6 +192,8 @@ final class Harness {
         int tick;
         int teleportId;
         private boolean useHeld;
+        /** {@code MinecraftClient.itemUseCooldown}. */
+        private int itemUseCooldown;
 
         Run(Scenario sc) {
             init();
@@ -206,7 +209,8 @@ final class Harness {
             client.interactionManager = new ClientPlayerInteractionManager(client, net);
             ClientWorld.Properties props = new ClientWorld.Properties(Difficulty.NORMAL, false, false);
             Reflect.set(ClientPlayNetworkHandler.class, net, "worldProperties", props);
-            world = new ClientWorld(net, props, World.OVERWORLD, overworld, LOAD_DISTANCE, () -> DummyProfiler.INSTANCE,
+            // The join packet's dimension (key + type): the overworld, or the case's (Ext).
+            world = new ClientWorld(net, props, Ext.dimensionKey(sc), Ext.dimensionType(sc), LOAD_DISTANCE, () -> DummyProfiler.INSTANCE,
                     client.worldRenderer, false, 0L);
             world.random.setSeed(0L);
             Reflect.set(ClientPlayNetworkHandler.class, net, "world", world);
@@ -285,7 +289,9 @@ final class Harness {
             }
             if (sc.usesItem()) {
                 // A shield in the selected hotbar slot: using it holds the item use (blocking) for 72000 ticks.
-                player.inventory.main.set(player.inventory.selectedSlot, new ItemStack(Items.SHIELD));
+                // Cases with an Ext hand item (a riptide trident) hold that instead.
+                ItemStack hand = Ext.handStack(sc);
+                player.inventory.main.set(player.inventory.selectedSlot, hand != null ? hand : new ItemStack(Items.SHIELD));
             }
 
             // --- position packet (absolute) ---
@@ -308,6 +314,7 @@ final class Harness {
             invoke(ClientWorld.class, world, "checkEntityChunkPos", player);
             // Other entities (cases with an entity setup only).
             Ents.finishSetup(this);
+            Ext.finishSetup(this);
             connection.sent.clear();
         }
 
@@ -381,7 +388,7 @@ final class Harness {
          */
         private void loadChunk(int cx, int cz, List<Scenario.Block> blocks) {
             Biome[] biomes = new Biome[BiomeArray.DEFAULT_LENGTH];
-            Arrays.fill(biomes, plains);
+            Arrays.fill(biomes, Ext.biome(sc));
             WorldChunk source = new WorldChunk(world, new ChunkPos(cx, cz), new BiomeArray(registries.get(Registry.BIOME_KEY), biomes));
             ChunkSection[] sections = source.getSectionArray();
             for (Scenario.Block b : blocks) {
@@ -393,6 +400,9 @@ final class Harness {
                 }
                 sections[si].setBlockState(b.x() & 15, b.y() & 15, b.z() & 15, state, false);
             }
+            // The height maps a server holds for the column (the packet sends the client ones:
+            // WORLD_SURFACE and MOTION_BLOCKING; rain reads MOTION_BLOCKING).
+            Heightmap.populateHeightmaps(source, java.util.EnumSet.of(Heightmap.Type.WORLD_SURFACE, Heightmap.Type.MOTION_BLOCKING));
             ChunkDataS2CPacket packet = new ChunkDataS2CPacket(source, 65535);
             BiomeArray biomeArray = new BiomeArray(registries.get(Registry.BIOME_KEY), packet.getBiomeArray());
             WorldChunk chunk = world.getChunkManager().loadChunkFromPacket(cx, cz, biomeArray, packet.getReadBuffer(),
@@ -403,33 +413,55 @@ final class Harness {
             world.addEntitiesToChunk(chunk);
         }
 
-        /** One client tick: inbound packets, keys, use key, mouse look, then the world tick. */
+        /** One client tick: inbound packets, mouse look, keys, use key, then the world tick. */
         void step(Scenario.Tick t) {
             for (Scenario.Event e : t.events()) {
                 applyEvent(e);
             }
-            setKeys(t.keys());
-            useKey((t.keys() & Scenario.USE) != 0);
+            // The renderer turns the player between ticks (Mouse.updateMouse after the frame's
+            // ticks): the whole tick, key handling included, sees this tick's rotation.
             player.yaw = t.yaw();
             player.pitch = t.pitch();
+            setKeys(t.keys());
+            useKey((t.keys() & Scenario.USE) != 0);
             Ents.beforeTick(this);
             world.tickEntities();
             tick++;
         }
 
-        /** MinecraftClient.doItemUse / handleInputEvents with the crosshair on nothing. */
+        /**
+         * The use key in {@code MinecraftClient.tick} with the crosshair on nothing: the item use
+         * cooldown counts down, then {@code handleInputEvents}: while using, a released key stops the
+         * use; otherwise a press uses the item ({@code doItemUse}), and a held key retries once the
+         * cooldown has run out (a trident refused on dry land is tried again every 4 ticks).
+         */
         private void useKey(boolean held) {
-            if (held && !useHeld && !player.isUsingItem()) {
-                for (Hand hand : Hand.values()) {
-                    if (!player.getStackInHand(hand).isEmpty()
-                            && client.interactionManager.interactItem(player, world, hand).isAccepted()) {
-                        break;
-                    }
+            if (itemUseCooldown > 0) {
+                itemUseCooldown--;
+            }
+            boolean press = held && !useHeld;
+            if (player.isUsingItem()) {
+                if (!held) {
+                    client.interactionManager.stopUsingItem(player);
                 }
-            } else if (!held && player.isUsingItem()) {
-                client.interactionManager.stopUsingItem(player);
+            } else if (press) {
+                doItemUse();
+            }
+            if (held && itemUseCooldown == 0 && !player.isUsingItem()) {
+                doItemUse();
             }
             useHeld = held;
+        }
+
+        /** {@code MinecraftClient.doItemUse} with a miss hit result. */
+        private void doItemUse() {
+            itemUseCooldown = 4;
+            for (Hand hand : Hand.values()) {
+                if (!player.getStackInHand(hand).isEmpty()
+                        && client.interactionManager.interactItem(player, world, hand).isAccepted()) {
+                    return;
+                }
+            }
         }
 
         private void applyEvent(Scenario.Event e) {
@@ -485,7 +517,9 @@ final class Harness {
                 b.writeFloat(a.walkSpeed());
                 net.onPlayerAbilities(read(new PlayerAbilitiesS2CPacket(), b));
             } else if (e instanceof Scenario.VersionEvent ve) {
-                Ents.apply(this, ve);
+                if (!Ext.apply(this, ve)) {
+                    Ents.apply(this, ve);
+                }
             }
         }
 

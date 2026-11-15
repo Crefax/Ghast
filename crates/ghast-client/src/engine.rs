@@ -835,6 +835,11 @@ impl<S: Sim> Engine<S> {
         &self.core.opts.name
     }
 
+    /// [`crate::Client::accept_required_resource_packs`].
+    pub(crate) fn accept_required_packs(&self) -> bool {
+        self.core.opts.accept_required_packs
+    }
+
     pub(crate) fn tick_count(&self) -> u64 {
         self.core.tick
     }
@@ -1992,6 +1997,67 @@ impl TickContext<'_> {
         self.core.out.push(Outbound::Swing);
     }
 
+    /// The drop key outside a screen (`MinecraftClient.handleInputEvents`): a `player_action`
+    /// that drops one item of the held stack, or the whole stack with `whole_stack` (the key
+    /// with control held), written now. It goes out with an empty hand too, like vanilla.
+    /// 1.16.5 and 26.x predict it as vanilla does (`ClientPlayerEntity.dropSelectedItem`,
+    /// `LocalPlayer.drop`): the item leaves the held slot at once (the server's `set_slot`
+    /// then confirms or corrects it) and, when one did, the main arm swings (`arm_animation`
+    /// after the drop); a use of the held item ends with its stack. 1.8.9 and 1.12.2 send the
+    /// drop alone and wait for the server's slot update. Refused (nothing sent, `false`) while
+    /// a screen is open (a window, the player inventory, a dialog: vanilla's keys then go to
+    /// the screen), while dead, or in spectator mode.
+    pub fn drop_held(&mut self, whole_stack: bool) -> bool {
+        if !self.keys_reach_player() {
+            return false;
+        }
+        let c = &mut *self.core;
+        c.out.push(Outbound::Dig {
+            status: if whole_stack {
+                crate::common::DigStatus::DropStack
+            } else {
+                crate::common::DigStatus::DropItem
+            },
+            pos: ghast_protocol::BlockPos::new(0, 0, 0),
+            face: crate::common::Face::Down,
+        });
+        if c.opts.caps.drop_prediction && c.inv.drop_held(whole_stack) {
+            if c.inv.held().is_none() && c.hands.use_item().is_some_and(|(off, _)| !off) {
+                // tickActiveItemStack / updatingUsingItem: the used stack is gone.
+                c.hands.stop_using();
+            }
+            c.out.push(Outbound::Swing);
+            // A dig or place later in this tick sees the new hand, as in vanilla's key order.
+            self.held = held_item(&self.core.inv, self.world);
+        }
+        true
+    }
+
+    /// The swap-hands key outside a screen (1.9+): a `player_action` that swaps the main- and
+    /// off-hand stacks, written now. Like vanilla the client predicts nothing: both stacks
+    /// come back in the server's slot updates (1.16.5: a use of the main or off hand then ends
+    /// unless that hand still holds the used item). Sent while an item is in use too, as
+    /// vanilla does. Refused (nothing sent, `false`) on 1.8.9 (no off hand), while a screen is
+    /// open, while dead, or in spectator mode.
+    pub fn swap_hands(&mut self) -> bool {
+        if !self.core.opts.caps.combat_1_9 || !self.keys_reach_player() {
+            return false;
+        }
+        self.core.out.push(Outbound::Dig {
+            status: crate::common::DigStatus::SwapHands,
+            pos: ghast_protocol::BlockPos::new(0, 0, 0),
+            face: crate::common::Face::Down,
+        });
+        true
+    }
+
+    /// Vanilla handles the drop and swap keys only without a screen and for a living,
+    /// non-spectator player.
+    fn keys_reach_player(&self) -> bool {
+        let c = &*self.core;
+        !c.inv.gui_open() && c.dialog.is_none() && !c.dead && c.game_mode != GameMode::Spectator
+    }
+
     /// Escape hatch: queues a serverbound play packet the behaviour encoded itself (`id` and
     /// `body` of this session's protocol version, see [`TickContext::version`]), written as
     /// given in call order with the other actions, before this tick's movement packet.
@@ -2662,6 +2728,17 @@ mod tests_26_1;
 ))]
 #[path = "engine_tests_26_2.rs"]
 mod tests_26_2;
+
+/// Resource packs and the drop / swap actions on 1.8 – 1.16 (`engine_tests_actions.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_actions.rs"]
+mod tests_actions;
 
 /// The engine replay of the 1.12.2 entity goldens (`engine_tests_1_12.rs`).
 #[cfg(all(

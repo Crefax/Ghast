@@ -57,11 +57,16 @@ final class Ents {
     private Ents() {}
 
     /** Version setup of a case (header key {@code ext} inside {@code setup}). */
-    static final class Setup {
+    static class Setup {
         /** Entities spawned at setup, in order (after the player joined). Never null. */
         final List<Spawn> entities = new ArrayList<>();
         /** Teams created at setup (before the entities), in order. */
         final List<TeamOp> teams = new ArrayList<>();
+
+        /** Tick records list the other entities ({@link Ext.Setup} cases only when they spawn some). */
+        boolean records() {
+            return true;
+        }
     }
 
     static Setup setup(Scenario sc) {
@@ -245,6 +250,12 @@ final class Ents {
                 ? new PlayerSpawnS2CPacket(p) : server.createSpawnPacket());
         roundTrip(spawn).apply(net);
         roundTrip(new EntityTrackerUpdateS2CPacket(s.id(), server.getDataTracker(), true)).apply(net);
+        // EntityTrackerEntry.sendPackets: types that always update their velocity get it right
+        // after the spawn (not with a mob spawn packet, which carries it). Without it the client's
+        // item entity keeps the random velocity of its constructor (unseeded entity random).
+        if (server.getType().alwaysUpdateVelocity() && !(spawn instanceof net.minecraft.network.packet.s2c.play.MobSpawnS2CPacket)) {
+            roundTrip(new net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket(s.id(), server.getVelocity())).apply(net);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -292,7 +303,7 @@ final class Ents {
         QUERY_ORDER.clear();
         TICKS.clear();
         IN_SECTION.clear();
-        if (of(run.sc) == null) {
+        if (of(run.sc) == null || !of(run.sc).records()) {
             return;
         }
         for (Entity e : run.world.getEntities()) {
@@ -327,7 +338,7 @@ final class Ents {
 
     /** The {@code entities} of a tick record: every entity of the world in tick order. */
     static void tickRecord(Json j, Harness.Run run) {
-        if (of(run.sc) == null) {
+        if (of(run.sc) == null || !of(run.sc).records()) {
             return;
         }
         j.key("entities").beginArray();
@@ -376,6 +387,7 @@ final class Ents {
             spawnJson(j.beginObject(), sp).endObject();
         }
         j.endArray();
+        Ext.header(j, s);
         j.endObject();
     }
 
@@ -450,6 +462,7 @@ final class Ents {
             return;
         }
         JsonObject x = s.getAsJsonObject("ext");
+        Ext.readSetup(x, sc);
         Setup st = setup(sc);
         for (JsonElement e : x.getAsJsonArray("teams")) {
             st.teams.add(readTeam(e.getAsJsonObject()));

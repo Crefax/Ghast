@@ -37,6 +37,29 @@ pub struct Surroundings<'a> {
     /// Boxes of the entities the player collides with, as they are when the player ticks
     /// (any order; vanilla's `getOtherEntities` order only matters at the `1e-7` tolerance).
     pub entities: &'a [Aabb],
+    /// Every other entity of the client world (any type, no spectators), with its box as it is
+    /// when the player ticks: what the riptide spin can touch ([`tick_ext`](super::tick_ext)
+    /// reads it only while the spin counter runs).
+    pub others: &'a [OtherEntity],
+}
+
+/// Another entity of the client world, for the riptide spin's contact test
+/// (`LivingEntity.tickRiptide`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct OtherEntity {
+    /// Its box when the player ticks.
+    pub bb: Aabb,
+    /// `instanceof LivingEntity` (mobs, armor stands, other players): the spin hits it.
+    pub living: bool,
+}
+
+impl OtherEntity {
+    /// An entity with this box.
+    #[must_use]
+    pub fn new(bb: Aabb, living: bool) -> OtherEntity {
+        OtherEntity { bb, living }
+    }
 }
 
 impl<'a> Surroundings<'a> {
@@ -50,6 +73,13 @@ impl<'a> Surroundings<'a> {
     #[must_use]
     pub fn with_entities(mut self, entities: &'a [Aabb]) -> Surroundings<'a> {
         self.entities = entities;
+        self
+    }
+
+    /// With these other entities (the riptide spin's contacts).
+    #[must_use]
+    pub fn with_others(mut self, others: &'a [OtherEntity]) -> Surroundings<'a> {
+        self.others = others;
         self
     }
 }

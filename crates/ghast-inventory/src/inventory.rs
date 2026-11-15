@@ -1861,6 +1861,28 @@ impl Inventory {
         true
     }
 
+    /// Client-side drop of the held stack (no packet): one item off the selected hotbar stack,
+    /// or all of it with `whole_stack`, the slot emptied when nothing is left. The 1.16.5 / 26.1
+    /// drop key does this before the server's `set_slot` (`ClientPlayerEntity.dropSelectedItem`,
+    /// `LocalPlayer.drop`: `removeStack(selected, whole ? count : 1)`); 1.8 / 1.12 do not.
+    /// Returns whether there was a stack (vanilla then swings the arm).
+    pub fn drop_held(&mut self, whole_stack: bool) -> bool {
+        let slot = &mut self.m.player[usize::from(self.m.selected.min(8))];
+        let Some(s) = slot.as_mut() else {
+            return false;
+        };
+        if s.count <= 0 {
+            return false;
+        }
+        if whole_stack || s.count == 1 {
+            *slot = None;
+        } else {
+            s.count -= 1;
+        }
+        self.events.player_changed = true;
+        true
+    }
+
     /// Selects a hotbar slot (the behaviour's `select_slot`; vanilla's insertStack prefers it).
     pub fn select(&mut self, slot: u8) {
         if slot < 9 {

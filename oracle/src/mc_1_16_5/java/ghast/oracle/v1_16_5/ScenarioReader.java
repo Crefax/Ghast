@@ -176,7 +176,10 @@ final class ScenarioReader {
                         events.add(new Scenario.Effects(List.copyOf(fx)));
                     }
                     default -> {
-                        Scenario.VersionEvent ve = Ents.readEvent(ev);
+                        Scenario.VersionEvent ve = Ext.readEvent(ev);
+                        if (ve == null) {
+                            ve = Ents.readEvent(ev);
+                        }
                         if (ve == null) {
                             throw new IllegalArgumentException("unknown event " + ev);
                         }

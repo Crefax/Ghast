@@ -274,6 +274,12 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
 - Chat truncated to 100 (1.8) / 256 (1.16) UTF-16 units like the vanilla packet constructor.
 - 1.16 immediate respawn (game state 11 / `combat_event` entity dead) respawns at once.
 - Login plugin requests (1.16) are answered "not understood".
+- Server resource packs on 1.8 – 1.16 (`ClientPlayNetworkHandler.onResourcePackSend`, the
+  server entry's pack policy set): accepted then loaded (`Client::accept_required_resource_packs`,
+  default on; these versions have no "required" flag) or declined; nothing is downloaded. A
+  `level://` pack (no world saves) and, on 1.12+, a URL the client's check rejects (scheme not
+  `http` / `https` / `level`, invalid URI syntax) get "failed download" alone. The 1.8 answer
+  echoes the pack hash.
 
 ## Movement and world
 
@@ -338,7 +344,17 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
   click and per damage tick; letting go aborts. Right held: `block_place` on the face
   (activation or placing swings) every 4 ticks, else the item use packet; usable items (food,
   potion, milk, bow, sword) set `using_item` until right is released (`block_dig` release),
-  the server's entity status 9, or a slot change. A broken block is predicted air.
+  the server's entity status 9, a slot change, or the used hand no longer holding that item
+  (1.16.5 `tickActiveItemStack`, 26.1 `updatingUsingItem`; 1.8 / 1.12 also end it on any slot
+  update of that hand, which is not modelled). A broken block is predicted air.
+- `ctx.drop_held(whole_stack)` / `ctx.swap_hands()`: the drop and swap-hands keys outside a
+  screen (`MinecraftClient.handleInputEvents`), a `block_dig` drop item (4) / drop stack (3) /
+  swap (6, 1.9+) at the origin facing down, written now in call order. 1.16.5 and 26.x
+  predict the drop like vanilla (`ClientPlayerEntity.dropSelectedItem`, `LocalPlayer.drop`):
+  the item leaves the held slot at once and the main arm swings when one did; 1.8.9 / 1.12.2
+  send the packet alone. The swap predicts nothing (the server's slot updates move both
+  stacks). Refused while a screen is open (window, inventory, dialog), dead or spectating;
+  the swap also on 1.8.9.
 - `ctx.dig(pos, face)` / `ctx.place(support, face, hit)`: refused unless
   `ctx.target()` — the ray from the **sent** eyes along the sent look, reach 4.5 — is on that
   block face; dig = start (+ instant break) then swing, place = `block_place` then swing.
@@ -359,8 +375,8 @@ first success ending it, so empty hands send a `block_place` per hand; swords no
 shields / bows / crossbows / tridents / potions / milk / food are used; the swing names its
 hand.
 
-Open: entities are not hit by the crosshair yet; the 1.16 attack cooldown only matters for entity attacks (not implemented);
-1.16 ray boxes are approximated (union of collision boxes).
+The 1.16 crosshair also picks entities (see Entities below), the attack cooldown is kept
+(`Hands::attack_strength`), and the ray boxes are the oracle-verified outline shapes.
 
 ## Entities (ghast-entity, opt-in)
 

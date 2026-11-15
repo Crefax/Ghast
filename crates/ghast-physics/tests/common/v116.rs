@@ -29,7 +29,8 @@ fn pose_of(s: &str) -> Pose {
         "standing" => Pose::Standing,
         "crouching" => Pose::Crouching,
         "swimming" => Pose::Swimming,
-        "fall_flying" => Pose::FallFlying,
+        // The physics never glides: its FallFlying pose is the riptide spin's box.
+        "fall_flying" | "spin_attack" => Pose::FallFlying,
         "sleeping" => Pose::Sleeping,
         other => panic!("pose {other}"),
     }
@@ -40,7 +41,7 @@ fn pose_name(p: Pose) -> &'static str {
         Pose::Standing => "standing",
         Pose::Crouching => "crouching",
         Pose::Swimming => "swimming",
-        Pose::FallFlying => "fall_flying",
+        Pose::FallFlying => "spin_attack",
         Pose::Sleeping => "sleeping",
     }
 }
@@ -380,6 +381,49 @@ fn living(name: &str) -> bool {
     !matches!(name, "boat" | "minecart" | "item")
 }
 
+/// The use-key model of the harness (`MinecraftClient.handleInputEvents` with the crosshair on
+/// nothing): a press uses the item, a held key retries once the 4-tick cooldown has run out.
+#[derive(Default)]
+struct UseKey {
+    down: bool,
+    cooldown: i32,
+    using: bool,
+    /// Player ticks the current use has lasted.
+    held: u32,
+}
+
+impl UseKey {
+    /// Returns how long the use lasted when the key released it this tick.
+    fn tick(&mut self, down: bool, can_use: bool) -> Option<u32> {
+        let press = down && !self.down;
+        self.down = down;
+        if self.cooldown > 0 {
+            self.cooldown -= 1;
+        }
+        let mut released = None;
+        if self.using {
+            if !down {
+                self.using = false;
+                released = Some(self.held);
+            }
+        } else if press {
+            self.start(can_use);
+        }
+        if down && self.cooldown == 0 && !self.using {
+            self.start(can_use);
+        }
+        released
+    }
+
+    fn start(&mut self, can_use: bool) {
+        self.cooldown = 4;
+        if can_use {
+            self.using = true;
+            self.held = 0;
+        }
+    }
+}
+
 /// Replays one 1.16.5 case.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
@@ -401,6 +445,11 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let mut teams = Teams::default();
     let mut kinds: std::collections::HashMap<i64, (String, String)> =
         std::collections::HashMap::new();
+    // Movement state beyond the player (`setup.ext`: dimension, riptide): the extended tick.
+    let mut ext: Option<v1_16_5::PlayerExt> = None;
+    // Riptide: the trident's level, the level's rain (the oracle's biome is plains; the nether
+    // has no sky light), the harness's use key.
+    let (mut riptide, mut raining, mut trident) = (0u8, false, false);
     if let Some(x) = case.header["setup"].get("ext") {
         for t in x["teams"].as_array().unwrap() {
             teams.apply(t);
@@ -408,7 +457,28 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         for e in x["entities"].as_array().unwrap() {
             spawned(e, &mut kinds);
         }
+        let mut e = v1_16_5::PlayerExt::new();
+        let mut on = false;
+        if let Some(d) = x.get("dimension").and_then(Value::as_str) {
+            e.ultrawarm = match d {
+                "the_nether" => true,
+                other => panic!("dimension {other}"),
+            };
+            on = true;
+        }
+        if let Some(h) = x.get("hand").and_then(Value::as_str) {
+            assert_eq!(h, "trident", "hand item {h}");
+            trident = true;
+            riptide = x.get("riptide").map_or(0, |v| i(v) as u8);
+            raining = x.get("raining").and_then(Value::as_bool).unwrap_or(false)
+                && x.get("dimension").is_none();
+            on = true;
+        }
+        if on {
+            ext = Some(e);
+        }
     }
+    let mut use_key = UseKey::default();
     // Where the client world files the player (its position after its last tick).
     let mut filed = p.pos;
     for rec in &case.ticks[1..] {
@@ -460,20 +530,63 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     "team" => teams.apply(e),
                     "entity_move" | "entity_rel" | "entity_look" | "remove_entity"
                     | "game_mode" => {}
+                    "living_flags" => {
+                        let x = ext.as_mut().expect("living flags need the extended tick");
+                        let cur = if x.spin_attack { 4u8 } else { 0 };
+                        let next = (cur & !(i(&e["clear"]) as u8)) | i(&e["set"]) as u8;
+                        x.apply_living_flags(next);
+                    }
                     other => panic!("unknown event {other}"),
                 }
             }
         }
-        let (keys, use_key) = keys_of(input["keys"].as_str().unwrap());
+        let (keys, use_down) = keys_of(input["keys"].as_str().unwrap());
         // Spectators cannot use items (`interactItem` passes in spectator mode), so the shield
         // is never raised; the physics only sees whether an item is in use.
-        let using_item = use_key && !p.spectator;
+        let mut using_item = use_down && !p.spectator;
+        // The trident: `TridentItem.use` refuses a riptide trident out of water and rain; the
+        // release launches (before the tick, along the tick's rotation).
+        let mut launch = false;
+        if trident {
+            let wet = v1_16_5::in_water_or_rain(&p, &world, raining);
+            let can_use = !p.spectator && (riptide == 0 || wet);
+            if let Some(held) = use_key.tick(use_down, can_use) {
+                launch = riptide > 0 && held >= 10 && wet;
+            }
+            using_item = use_key.using;
+        }
         let ti = TickInput {
             keys,
             yaw: f32_of(&input["yaw"]),
             pitch: f32_of(&input["pitch"]),
             using_item,
         };
+        // The launch happens in the key handling, before any entity ticks: its move up collides
+        // with the entities' boxes before their tick.
+        if launch {
+            let mut pre: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
+            for e in rec
+                .get("entities")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if e.get("player").is_none()
+                    && v1_16_5::collides(e["type"].as_str().unwrap())
+                    && b(&e["alive"])
+                    && b(&e["in_section_pre"])
+                    && let Some(bb) = e.get("pre")
+                {
+                    let order = e.get("query_order").and_then(Value::as_i64);
+                    pre.push((order.unwrap_or(i64::MAX), aabb_of(bb)));
+                }
+            }
+            pre.sort_by_key(|c| c.0);
+            let boxes: Vec<ghast_physics::math::Aabb> = pre.iter().map(|c| c.1).collect();
+            let at = v1_16_5::Surroundings::new().with_entities(&boxes);
+            let x = ext.as_mut().unwrap();
+            v1_16_5::riptide(&mut p, x, &at, &world, riptide, ti.yaw, ti.pitch);
+        }
         // Other entities in the client's tick order: those before the player push it first (with
         // their box after their tick); the player collides with the collidable ones as they are
         // when it ticks; those after it push it after its tick.
@@ -523,8 +636,40 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         colliders.sort_by_key(|c| c.0);
         let colliders: Vec<ghast_physics::math::Aabb> =
             colliders.into_iter().map(|c| c.1).collect();
-        let around = v1_16_5::Surroundings::new().with_entities(&colliders);
-        v1_16_5::tick_in(&mut p, &around, &ti, &world, &mut out);
+        // What the riptide spin can touch: every other entity in the client world's entity
+        // sections (no spectators), with its box when the player ticks.
+        let mut others: Vec<v1_16_5::OtherEntity> = Vec::new();
+        if let Some(ents) = rec.get("entities").and_then(Value::as_array) {
+            let mut before_player = true;
+            for e in ents {
+                if e.get("player").is_some() {
+                    before_player = false;
+                    continue;
+                }
+                let name = e["type"].as_str().unwrap();
+                if e.get("spectator").and_then(Value::as_bool) == Some(true) {
+                    continue;
+                }
+                let at_tick = if before_player {
+                    b(&e["in_section_post"]).then(|| aabb_of(&e["post"]))
+                } else {
+                    (b(&e["in_section_pre"]) && e.get("pre").is_some()).then(|| aabb_of(&e["pre"]))
+                };
+                if let Some(bb) = at_tick {
+                    others.push(v1_16_5::OtherEntity::new(bb, living(name)));
+                }
+            }
+        }
+        let around = v1_16_5::Surroundings::new()
+            .with_entities(&colliders)
+            .with_others(&others);
+        match &mut ext {
+            Some(x) => v1_16_5::tick_ext(&mut p, x, &around, &ti, &world, &mut out),
+            None => v1_16_5::tick_in(&mut p, &around, &ti, &world, &mut out),
+        }
+        if trident && use_key.using {
+            use_key.held += 1;
+        }
         filed = p.pos;
         for pusher in &after {
             v1_16_5::push_by(&mut p, filed, &world, pusher);
@@ -532,6 +677,17 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(x)) = (rec.get("ext"), &ext) {
+            let got = json!({
+                "riptide_ticks": x.riptide_ticks,
+                "spin_attack": x.spin_attack,
+                "living_flags": want["living_flags"],
+                "item_use_time": if use_key.using { json!(use_key.held) } else { json!(0) },
+            });
+            if let Some(d) = diff("ext", want, &got) {
+                return Err(mm(t, d));
+            }
         }
         let expected: Vec<Value> = rec["packets"]
             .as_array()

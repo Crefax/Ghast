@@ -52,3 +52,16 @@ fn fuzz_edges_seed1_1_16_5() {
 fn entities_1_16_5() {
     check("entities.jsonl.gz");
 }
+
+/// The nether dimension type: lava pushes with 0.007 (hand cases + the golden nether fuzz).
+#[test]
+fn nether_1_16_5() {
+    check("nether.jsonl.gz");
+}
+
+/// Riptide: the trident's use in water and rain, the launch, the spin counter, the spin pose and
+/// the spin's contacts (hand cases + the golden riptide fuzz).
+#[test]
+fn riptide_1_16_5() {
+    check("riptide.jsonl.gz");
+}

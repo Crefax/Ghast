@@ -114,6 +114,8 @@ impl ClientVersion for V1_8 {
         for &id in ghast_world::v1_8::PACKET_IDS {
             f.insert(id);
         }
+        // Server resource packs are answered (servers that need one kick a silent client).
+        f.insert(cb::id::RESOURCE_PACK_SEND);
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::CHAT);
         }
@@ -269,6 +271,17 @@ impl ClientVersion for V1_8 {
             }
             _ => return Ok(None),
         }))
+    }
+
+    fn resource_pack(
+        raw: &RawPacket,
+        accept: bool,
+        out: &mut Vec<Outbound>,
+    ) -> Result<(), DecodeError> {
+        if raw.id == cb::id::RESOURCE_PACK_SEND {
+            pack_answer(raw, accept, out)?;
+        }
+        Ok(())
     }
 
     const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V1_8;
@@ -478,6 +491,26 @@ fn velocity(x: i16, y: i16, z: i16) -> Vec3 {
         f64::from(y) / 8000.0,
         f64::from(z) / 8000.0,
     )
+}
+
+/// `onResourcePackSend` (1.8.9: no URL check; a `level://` pack is a world save's, which a bot
+/// does not have). The answer echoes the hash, at most 40 characters like the packet's
+/// constructor.
+#[cold]
+fn pack_answer(raw: &RawPacket, accept: bool, out: &mut Vec<Outbound>) -> Result<(), DecodeError> {
+    let p: cb::ResourcePackSend = raw.decode_as()?;
+    let hash = ByteString::from(truncate_utf16(&p.hash, 40));
+    for &result in super::legacy_pack_statuses(!p.url.starts_with("level://"), accept) {
+        let answer = sb::ResourcePackReceive {
+            hash: hash.clone(),
+            result,
+        };
+        // A short string and a VarInt always encode.
+        if let Ok(raw) = RawPacket::from_packet(&answer) {
+            out.push(Outbound::Raw(raw));
+        }
+    }
+    Ok(())
 }
 
 impl super::HasSim for V1_8 {

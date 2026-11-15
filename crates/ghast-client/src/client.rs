@@ -235,8 +235,9 @@ impl Client {
         self
     }
 
-    /// Records every session's movement in the oracle's replay format (1.8.9; the file is
-    /// overwritten by each session). For debugging anticheat flags against vanilla.
+    /// Records every session's movement in the oracle's replay format (1.8.9 and 1.16.5; other
+    /// versions log a warning and record nothing; the file is overwritten by each session).
+    /// For debugging anticheat flags against vanilla.
     #[must_use]
     pub fn record(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.record = Some(path.into());
@@ -334,6 +335,11 @@ impl Client {
     /// shows the prompt); a pack the server requires is reported accepted and loaded when this
     /// is on (default), declined otherwise (the server then usually disconnects). Nothing is
     /// downloaded.
+    ///
+    /// 1.8 – 1.16 packs carry no "required" flag, so this decides for every pack: on, it is
+    /// reported accepted then loaded (the vanilla client with the server's packs enabled),
+    /// off, declined. A pack the vanilla client could not load (a `level://` world pack, or on
+    /// 1.12+ a URL its check rejects) is reported "failed download" either way.
     #[must_use]
     pub fn accept_required_resource_packs(mut self, on: bool) -> Self {
         self.accept_required_packs = on;
@@ -1264,6 +1270,15 @@ where
                     .outbound()
                     .push(crate::common::Outbound::Inventory(o));
             }
+            // 1.8 – 1.16 resource packs are answered here (no id; nothing to decode for later).
+            let accept = self.engine.accept_required_packs();
+            V::resource_pack(&raw, accept, self.engine.outbound()).map_err(|source| {
+                ClientError::Decode {
+                    state: State::Play,
+                    id: raw.id,
+                    source,
+                }
+            })?;
             let p = V::decode_play(&raw, &mut self.wire).map_err(|source| ClientError::Decode {
                 state: State::Play,
                 id: raw.id,

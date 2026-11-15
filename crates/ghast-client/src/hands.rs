@@ -923,6 +923,20 @@ impl Hands {
         self.send_click_block_to_controller(left, t, io);
         self.left_was = left;
         self.right_was = right;
+        // The player tick that follows (1.16.5 LivingEntity.tickActiveItemStack, 26.1
+        // updatingUsingItem): the use ends silently once the used hand no longer holds that
+        // item (a drop, a swap's slot updates). 1.8 / 1.12 compare the stack object, so they
+        // end it on every slot update of that hand; a changed item is the part modelled.
+        if self.using {
+            let hand = if self.use_hand_off {
+                io.off_held
+            } else {
+                io.held
+            };
+            if hand.is_none_or(|h| h.id != self.use_item) {
+                self.using = false;
+            }
+        }
     }
 
     fn click_mouse(&mut self, t: Option<BlockHit>, io: &mut HandsIo<'_>) {

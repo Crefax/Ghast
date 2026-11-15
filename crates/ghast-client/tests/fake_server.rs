@@ -42,6 +42,10 @@ trait Fake: ClientVersion {
     fn stone(x: i32, y: i32, z: i32) -> RawPacket;
     /// An experience orb (a simple entity spawn).
     fn xp_orb(entity_id: i32) -> RawPacket;
+    /// A server resource pack prompt.
+    fn pack_prompt(url: &str, hash: &str) -> RawPacket;
+    /// The hash (1.8 only, else empty) and status of a resource pack answer.
+    fn pack_status(raw: &RawPacket) -> (String, i32);
     fn sb_play_name(raw: &RawPacket) -> &'static str;
     fn handshake_protocol(raw: &RawPacket) -> i32;
     fn login_start_name(raw: &RawPacket) -> String;
@@ -156,6 +160,18 @@ impl Fake for V1_8 {
             location: ghast_protocol::BlockPos::new(x, y, z),
             r#type: 1 << 4,
         })
+    }
+    fn pack_prompt(url: &str, hash: &str) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::ResourcePackSend {
+            url: ByteString::from(url),
+            hash: ByteString::from(hash),
+        })
+    }
+    fn pack_status(raw: &RawPacket) -> (String, i32) {
+        let p = raw
+            .decode_as::<ghast_protocol::v1_8::play::serverbound::ResourcePackReceive>()
+            .unwrap();
+        (p.hash.to_string(), p.result)
     }
     fn xp_orb(entity_id: i32) -> RawPacket {
         raw(
@@ -300,6 +316,20 @@ impl Fake for V1_12_2 {
             r#type: 1 << 4,
         })
     }
+    fn pack_prompt(url: &str, hash: &str) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_12_2::play::clientbound::ResourcePackSend {
+                url: ByteString::from(url),
+                hash: ByteString::from(hash),
+            },
+        )
+    }
+    fn pack_status(raw: &RawPacket) -> (String, i32) {
+        let p = raw
+            .decode_as::<ghast_protocol::v1_12_2::play::serverbound::ResourcePackReceive>()
+            .unwrap();
+        (String::new(), p.result)
+    }
     fn xp_orb(entity_id: i32) -> RawPacket {
         raw(
             &ghast_protocol::v1_12_2::play::clientbound::SpawnEntityExperienceOrb {
@@ -442,6 +472,20 @@ impl Fake for V1_16_5 {
             location: ghast_protocol::BlockPos::new(x, y, z),
             r#type: 1,
         })
+    }
+    fn pack_prompt(url: &str, hash: &str) -> RawPacket {
+        raw(
+            &ghast_protocol::v1_16_5::play::clientbound::ResourcePackSend {
+                url: ByteString::from(url),
+                hash: ByteString::from(hash),
+            },
+        )
+    }
+    fn pack_status(raw: &RawPacket) -> (String, i32) {
+        let p = raw
+            .decode_as::<ghast_protocol::v1_16_5::play::serverbound::ResourcePackReceive>()
+            .unwrap();
+        (String::new(), p.result)
     }
     fn xp_orb(entity_id: i32) -> RawPacket {
         raw(
@@ -955,6 +999,50 @@ async fn chat_reaches_the_behaviour<V: Fake>(v: GameVersion) {
     assert!(b.0[1].contains("Bob") && b.0[1].contains("hi"), "{:?}", b.0);
 }
 both!(chat_reaches_the_behaviour, chat_reaches_the_behaviour);
+
+/// Server resource packs (`onResourcePackSend` with the server entry's policy set): a remote
+/// pack is answered accepted then loaded (1.8 echoes the hash), a `level://` pack failed
+/// download; with the option off, declined. Nothing is downloaded.
+async fn resource_packs_are_answered<V: Fake>(v: GameVersion) {
+    for on in [true, false] {
+        let (l, addr) = listen().await;
+        let server = async {
+            let mut c = accept(&l).await;
+            c.login::<V>("Tester", 128).await;
+            spawn::<V>(&mut c).await;
+            c.until::<V>("position_look").await;
+            let hash = "0123456789abcdef0123456789abcdef01234567";
+            let mut got = Vec::new();
+            for (url, n) in [
+                ("https://example.invalid/pack.zip", if on { 2 } else { 1 }),
+                ("level://world/resources.zip", 1),
+            ] {
+                c.send(&V::pack_prompt(url, hash)).await;
+                for _ in 0..n {
+                    let p = loop {
+                        let p = c.recv().await.expect("answer");
+                        if V::sb_play_name(&p) == "resource_pack_receive" {
+                            break p;
+                        }
+                    };
+                    got.push(V::pack_status(&p));
+                }
+            }
+            let h = if V::PROTOCOL == 47 { hash } else { "" };
+            let want: Vec<(String, i32)> = if on { vec![3, 0, 2] } else { vec![1, 2] }
+                .into_iter()
+                .map(|r| (h.to_string(), r))
+                .collect();
+            assert_eq!(got, want, "{v:?} accept {on}");
+            c.send(&V::kick(r#"{"text":"done"}"#)).await;
+        };
+        let cl = client(addr, v, "Tester").accept_required_resource_packs(on);
+        let mut idle = Idle;
+        let (end, ()) = tokio::join!(cl.run(&mut idle), server);
+        assert!(matches!(end, Ok(SessionEnd::Kicked { .. })), "{end:?}");
+    }
+}
+both!(resource_packs_are_answered, resource_packs_are_answered);
 
 /// The auth-lobby case (1.8, dimension 1 = the End, no sky light): the first map_chunk for
 /// the player's column announces one section (bit mask 1, ground-up) but carries only the

@@ -33,6 +33,153 @@ pub(crate) struct Sim16 {
     around: Around16,
     /// Where the client world files the player: its position after its last tick.
     filed_pos: [f64; 3],
+    /// Movement state beyond the player (the dimension type, riptide).
+    ext: ghast_physics::v1_16_5::PlayerExt,
+    /// The tick takes the slow path: entity tracking, an extension state that changes the
+    /// movement or a use the riptide follows ([`Sim16::update_slow`]); a use that starts takes
+    /// it too.
+    slow: bool,
+    /// Riptide: the tridents in the hands, the rain, the use (see [`Riptide16`]).
+    rt: Riptide16,
+}
+
+/// What the engine's look at the held items ([`Sim::item_use_facts`], through `&self`) leaves
+/// for the tick. Boxed: interior mutability inline in [`Sim16`] would cost every `&Sim16`
+/// borrow of the engine its no-alias guarantees.
+#[derive(Debug, Default)]
+struct HeldCells {
+    /// Per hand (main, off): the riptide level of the trident there (0: none), whether that
+    /// hand's use would start (`HeldItem::usable` and the food rule, as the hands decide), and
+    /// the player's age when the engine looked (an empty hand is not looked at: an older entry
+    /// is stale).
+    hands: std::cell::Cell<[(u8, bool, i32); 2]>,
+    /// A riptide trident was held: our entity data is read from now on (the spin flag).
+    watch: std::cell::Cell<bool>,
+    /// The packet filter must change ([`Sim::take_filter_dirty`]).
+    filter_dirty: std::cell::Cell<bool>,
+}
+
+/// What the 1.16.5 riptide reads beyond the physics state.
+#[derive(Debug)]
+struct Riptide16 {
+    /// See [`HeldCells`].
+    held: Box<HeldCells>,
+    /// The use in progress (riptide level of its hand), and the player ticks it lasted.
+    using: Option<u8>,
+    use_ticks: u32,
+    /// `World.rainGradient` (game state packets).
+    rain_level: f32,
+    /// The dimension type has sky light (no rain without it).
+    sky: bool,
+    /// The world's hashed seed (biome zoom, `BiomeAccess`).
+    seed: i64,
+    /// Our entity id (the join packet).
+    own_id: i32,
+}
+
+impl Default for Riptide16 {
+    fn default() -> Self {
+        Riptide16 {
+            held: Box::default(),
+            using: None,
+            use_ticks: 0,
+            rain_level: 0.0,
+            sky: true,
+            seed: 0,
+            own_id: i32::MIN,
+        }
+    }
+}
+
+/// `VoronoiBiomeAccessType.getBiome`: the biome cell (quart position) whose biome the block at
+/// `x`, `y`, `z` has, for the world's hashed seed. The client decodes the dimension type from
+/// the join packet with `DimensionType.CODEC`, which always builds the 3D access type.
+fn voronoi_cell(seed: i64, x: i32, y: i32, z: i32) -> [i32; 3] {
+    // SeedMixer.mixSeed.
+    let mix = |s: i64, salt: i64| {
+        s.wrapping_mul(
+            s.wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407),
+        )
+        .wrapping_add(salt)
+    };
+    let distribute = |s: i64| (f64::from((s >> 24).rem_euclid(1024) as i32) / 1024.0 - 0.5) * 0.9;
+    let (x, y, z) = (x - 2, y - 2, z - 2);
+    let base = [x >> 2, y >> 2, z >> 2];
+    let frac = [
+        f64::from(x & 3) / 4.0,
+        f64::from(y & 3) / 4.0,
+        f64::from(z & 3) / 4.0,
+    ];
+    let mut best = 0;
+    let mut dist = 0.0;
+    for o in 0..8 {
+        let hi = [o & 4 != 0, o & 2 != 0, o & 1 != 0];
+        let c: [i64; 3] = std::array::from_fn(|i| i64::from(base[i] + i32::from(hi[i])));
+        let f: [f64; 3] = std::array::from_fn(|i| if hi[i] { frac[i] - 1.0 } else { frac[i] });
+        let mut l = mix(seed, c[0]);
+        l = mix(l, c[1]);
+        l = mix(l, c[2]);
+        l = mix(l, c[0]);
+        l = mix(l, c[1]);
+        l = mix(l, c[2]);
+        let d = distribute(l);
+        l = mix(l, seed);
+        let e = distribute(l);
+        l = mix(l, seed);
+        let g = distribute(l);
+        let sq = |v: f64| v * v;
+        let v = sq(f[2] + g) + sq(f[1] + e) + sq(f[0] + d);
+        if o == 0 || dist > v {
+            best = o;
+            dist = v;
+        }
+    }
+    [
+        base[0] + i32::from(best & 4 != 0),
+        base[1] + i32::from(best & 2 != 0),
+        base[2] + i32::from(best & 1 != 0),
+    ]
+}
+
+/// A byte field of a 1.16.5 dimension type compound (`ultrawarm`, `has_skylight`).
+fn dimension_flag(dimension: &ghast_protocol::nbt::RawNbt, name: &str) -> Option<bool> {
+    use ghast_protocol::nbt::Tag;
+    let Ok(Some(t)) = dimension.parse() else {
+        return None;
+    };
+    match t.tag.as_compound().and_then(|c| c.get(name)) {
+        Some(Tag::Byte(b)) => Some(*b != 0),
+        _ => None,
+    }
+}
+
+/// The riptide level (`Enchantments` list, `minecraft:riptide`) and the `Damage` of a 1.16.5
+/// stack's NBT.
+fn trident_nbt(s: &ghast_inventory::Stack) -> (u8, i32) {
+    use ghast_protocol::nbt::Tag;
+    let Some(root) = s.nbt().and_then(|n| n.parse().ok().flatten()) else {
+        return (0, 0);
+    };
+    let Some(c) = root.tag.as_compound() else {
+        return (0, 0);
+    };
+    let num = |t: Option<&Tag>| match t {
+        Some(Tag::Short(v)) => i32::from(*v),
+        Some(Tag::Int(v)) => *v,
+        Some(Tag::Byte(v)) => i32::from(*v),
+        _ => 0,
+    };
+    let mut level = 0;
+    if let Some(Tag::List(l)) = c.get("Enchantments") {
+        for e in l.items.iter().filter_map(Tag::as_compound) {
+            if matches!(e.get("id"), Some(Tag::String(n)) if n == "minecraft:riptide") {
+                level = u8::try_from(num(e.get("lvl")).clamp(0, 255)).unwrap_or(0);
+                break;
+            }
+        }
+    }
+    (level, num(c.get("Damage")))
 }
 
 /// The entities around the player this tick.
@@ -46,6 +193,8 @@ struct Around16 {
     before: Vec<(u32, ghast_physics::v1_16_5::Pusher)>,
     /// The tracker's client view ticked this tick (in [`Sim::step`]).
     ticked: bool,
+    /// What the riptide spin can touch this tick.
+    others: Vec<ghast_physics::v1_16_5::OtherEntity>,
 }
 
 /// Per entity type: the player collides with it.
@@ -149,7 +298,151 @@ impl Sim16 {
             profile_name: "".into(),
             around: Around16::default(),
             filed_pos: [0.0; 3],
+            ext: ghast_physics::v1_16_5::PlayerExt::new(),
+            slow: false,
+            rt: Riptide16::default(),
         }
+    }
+
+    /// Whether the tick needs the slow path (entities, a non-default extension state, a use
+    /// the riptide follows).
+    fn update_slow(&mut self) {
+        self.slow = self.entities.is_some() || !self.ext.is_inert() || self.rt.using.is_some();
+    }
+
+    /// The join / respawn packet's dimension type and seed (a new client world).
+    fn new_world(&mut self, dimension: &ghast_protocol::nbt::RawNbt, seed: i64) {
+        self.ext.ultrawarm = dimension_flag(dimension, "ultrawarm").unwrap_or(false);
+        self.rt.sky = dimension_flag(dimension, "has_skylight").unwrap_or(true);
+        self.rt.seed = seed;
+        self.update_slow();
+    }
+
+    /// `World.hasRain(pos)` without the height map: the level rains (gradient above 0.2), the
+    /// dimension has sky light and the biome at the block (`VoronoiBiomeAccessType`, the
+    /// dimension type the client decodes from the packet) rains there: precipitation `rain`
+    /// and a base temperature of at least 0.15. A biome the world does not keep counts as
+    /// raining; vanilla reads plains in a column it does not have.
+    fn rains_at(&self, x: i32, y: i32, z: i32) -> bool {
+        // `getRainGradient > 0.2` (false for a NaN gradient too).
+        let raining = self.rt.rain_level.partial_cmp(&0.2) == Some(std::cmp::Ordering::Greater);
+        if !raining || !self.rt.sky {
+            return false;
+        }
+        let [qx, qy, qz] = voronoi_cell(self.rt.seed, x, y, z);
+        let id = match self.world.column(qx >> 2, qz >> 2) {
+            None => Some(1),
+            Some(c) => match c.biomes() {
+                ghast_world::Biomes::Cells(b) => {
+                    let i = (qy.clamp(0, 63) << 4 | (qz & 3) << 2 | (qx & 3)) as usize;
+                    Some(b[i])
+                }
+                _ => None,
+            },
+        };
+        let Some(id) = id else {
+            return true;
+        };
+        ghast_data::v1_16_5::biome(id)
+            .is_none_or(|b| b.precipitation == "rain" && b.temperature >= 0.15)
+    }
+
+    /// `isTouchingWaterOrRain()` of the player as it is now.
+    fn wet(&self) -> bool {
+        use ghast_physics::v1_16_5 as phys;
+        let p = &self.player;
+        if p.touching_water {
+            return true;
+        }
+        let (bx, bz) = (p.pos[0].floor() as i32, p.pos[2].floor() as i32);
+        let (feet, head) = (p.pos[1].floor() as i32, p.bb.max_y.floor() as i32);
+        // The physics checks both blocks against one flag: keep only the raining ones.
+        let mut q = *p;
+        match (self.rains_at(bx, feet, bz), self.rains_at(bx, head, bz)) {
+            (false, false) => return false,
+            (true, true) => {}
+            (true, false) => q.bb.max_y = q.pos[1],
+            (false, true) => q.pos[1] = q.bb.max_y,
+        }
+        phys::in_water_or_rain(&q, &self.world, true)
+    }
+
+    /// The riptide part of the key handling, before the tick: follows the use of a riptide
+    /// trident and launches on its release (`TridentItem.onStoppedUsing`).
+    fn riptide_use(&mut self, input: &ghast_physics::TickInput, out: &[Outbound]) {
+        let age = self.player.age;
+        let hands = self
+            .rt
+            .held
+            .hands
+            .get()
+            .map(|h| if h.2 == age { (h.0, h.1) } else { (0, false) });
+        match (self.rt.using, input.using_item) {
+            (None, true) => {
+                // The hands start with the main hand, then the off hand.
+                let hand = if hands[0].1 { hands[0] } else { hands[1] };
+                self.rt.using = Some(hand.0);
+                self.rt.use_ticks = 0;
+            }
+            (Some(level), false) => {
+                self.rt.using = None;
+                // A release (the hands sent `release_use_item`); a use cut short otherwise (a
+                // slot change, ...) launches nothing.
+                let released = out.iter().rev().any(|o| {
+                    matches!(
+                        o,
+                        Outbound::Dig {
+                            status: crate::common::DigStatus::ReleaseUseItem,
+                            ..
+                        }
+                    )
+                });
+                if released && level > 0 && self.rt.use_ticks >= 10 && self.wet() {
+                    let boxes = self.launch_boxes();
+                    let around = ghast_physics::v1_16_5::Surroundings::new().with_entities(&boxes);
+                    ghast_physics::v1_16_5::riptide(
+                        &mut self.player,
+                        &mut self.ext,
+                        &around,
+                        &self.world,
+                        level,
+                        input.yaw,
+                        input.pitch,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The boxes of the entities the player collides with before any entity ticks (the key
+    /// handling's launch move).
+    fn launch_boxes(&self) -> Vec<ghast_physics::math::Aabb> {
+        let Some(t) = self.entities.as_ref() else {
+            return Vec::new();
+        };
+        let w = &self.world;
+        t.iter()
+            .filter(|e| entity_bits(e) & COLLIDES != 0 && t.client_alive(e.id()))
+            .filter_map(|e| {
+                let pos = t.client_position(e.id())?;
+                w.is_column_loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4)
+                    .then(|| t.client_box(e.id()).map(aabb))
+                    .flatten()
+            })
+            .collect()
+    }
+
+    /// Test hook: the extension state (the dimension type).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_ext(&self) -> ghast_physics::v1_16_5::PlayerExt {
+        self.ext
     }
 
     /// A tracker for this sim: with the vanilla client's own entity view (tick order,
@@ -394,6 +687,97 @@ impl Sim16 {
         }
     }
 
+    /// `entity_metadata` for our own entity (read once a riptide trident was held): the living
+    /// entity flags (index 7), whose bit 4 is the riptide spin.
+    fn own_metadata(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::defs::p754::types::EntityMetadataValue as V;
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        let mut r = ghast_protocol::Reader::new(&raw.body);
+        if r.read_varint()? != self.rt.own_id {
+            return Ok(());
+        }
+        let p: cb::EntityMetadata = raw.decode_as()?;
+        for e in &p.metadata {
+            if let (7, V::Byte(b)) = (e.key, &e.value) {
+                self.ext.apply_living_flags(*b as u8);
+            }
+        }
+        self.update_slow();
+        Ok(())
+    }
+
+    /// The other entities of the client world the riptide spin can touch, with their boxes
+    /// when the player ticks (before their own tick for the ones that tick after it).
+    fn spin_contacts(&mut self, before: bool) {
+        let Some(t) = self.entities.as_ref() else {
+            return;
+        };
+        let w = &self.world;
+        for e in t.iter() {
+            let id = e.id();
+            if t.ticks_before_self(id) != before || t.is_spectator(e) {
+                continue;
+            }
+            let (Some(b), Some(pos)) = (t.client_box(id), t.client_position(id)) else {
+                continue;
+            };
+            if !w.is_column_loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4) {
+                continue;
+            }
+            let living = matches!(e.entity_type(), ghast_entity::EntityType::Player)
+                || e.class() == ghast_entity::EntityClass::Mob;
+            self.around
+                .others
+                .push(ghast_physics::v1_16_5::OtherEntity::new(aabb(b), living));
+        }
+    }
+
+    /// The tick with entities around and / or the extension state.
+    #[inline(never)]
+    fn slow_tick(&mut self, input: &ghast_physics::TickInput, out: &[Outbound]) {
+        // The key handling (before the entities tick): the riptide launch.
+        if self.rt.using.is_some() || input.using_item {
+            self.riptide_use(input, out);
+        }
+        self.around.others.clear();
+        let spinning = self.ext.riptide_ticks > 0;
+        if spinning {
+            // The ones after the player, before the tracker ticks them.
+            self.spin_contacts(false);
+        }
+        if self.entities.is_some() {
+            self.entities_around();
+        }
+        if spinning {
+            self.spin_contacts(true);
+        }
+        let around = ghast_physics::v1_16_5::Surroundings::new()
+            .with_entities(&self.around.boxes)
+            .with_others(&self.around.others);
+        if self.ext.is_inert() {
+            ghast_physics::v1_16_5::tick_in(
+                &mut self.player,
+                &around,
+                input,
+                &self.world,
+                &mut self.packets,
+            );
+        } else {
+            ghast_physics::v1_16_5::tick_ext(
+                &mut self.player,
+                &mut self.ext,
+                &around,
+                input,
+                &self.world,
+                &mut self.packets,
+            );
+        }
+        if self.rt.using.is_some() {
+            self.rt.use_ticks += 1;
+        }
+        self.update_slow();
+    }
+
     /// A sim with options (recording, Grim compatibility).
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
@@ -410,6 +794,7 @@ impl Sim16 {
         if opts.shared_chunks.is_some() {
             log::debug!("shared chunks are not used on 1.16.5; every section stays owned");
         }
+        s.update_slow();
         if let Some(p) = opts.record.as_deref() {
             match crate::record::Recorder::create(p) {
                 Ok(r) => s.rec = Some(r),
@@ -566,17 +951,33 @@ impl Sim for Sim16 {
             }
             return Ok(());
         }
+        if raw.id == cb::id::ENTITY_METADATA {
+            return self.own_metadata(raw);
+        }
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
-                w.apply_login(&raw.decode_as()?);
+                let p: cb::Login = raw.decode_as()?;
+                // ClientPlayNetworkHandler.onGameJoin: the world gets the packet's dimension type.
+                w.apply_login(&p);
+                self.rt.own_id = p.entity_id;
+                self.rt.rain_level = 0.0;
+                self.new_world(&p.dimension, p.hashed_seed);
                 // A new world, a new scoreboard.
                 if let Some(t) = &mut self.teams {
                     t.clear();
                 }
             }
             cb::id::RESPAWN => {
-                w.apply_respawn(&raw.decode_as()?);
+                let p: cb::Respawn = raw.decode_as()?;
+                // onPlayerRespawn builds a new world (with the packet's dimension type, seed and
+                // fresh weather) only when the world name changes.
+                let new = *p.world_name != *w.world_name();
+                w.apply_respawn(&p);
+                if new {
+                    self.rt.rain_level = 0.0;
+                    self.new_world(&p.dimension, p.hashed_seed);
+                }
             }
             cb::id::MAP_CHUNK => {
                 w.apply_map_chunk(&raw.decode_as()?)?;
@@ -631,6 +1032,12 @@ impl Sim for Sim16 {
         self.filed_pos = [0.0; 3];
         self.player.abilities = abilities;
         self.player.food_level = food;
+        // A new client player: no spin, no use.
+        self.ext.spin_attack = false;
+        self.ext.riptide_ticks = 0;
+        self.rt.using = None;
+        self.rt.held.hands.set([(0, false, -1); 2]);
+        self.update_slow();
     }
 
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
@@ -747,7 +1154,62 @@ impl Sim for Sim16 {
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
-        self.world.packet_ids().collect()
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        let mut ids: Vec<i32> = self.world.packet_ids().collect();
+        // Our own entity data (the riptide spin flag), once a riptide trident was held.
+        if self.rt.held.watch.get() {
+            ids.push(cb::id::ENTITY_METADATA);
+        }
+        ids
+    }
+
+    fn take_filter_dirty(&mut self) -> bool {
+        self.rt.held.filter_dirty.replace(false)
+    }
+
+    // Out of line: inlined, it makes `Engine::handle` (every inbound packet) dearer.
+    #[inline(never)]
+    fn weather(&mut self, reason: u8, value: f32) {
+        // ClientPlayNetworkHandler.onGameStateChange: RAIN_STARTED sets the gradient to 0 (the
+        // server raises it with RAIN_GRADIENT_CHANGED), RAIN_STOPPED to 1, the gradient change
+        // to the value (clamped to 0..1, World.setRainGradient).
+        self.rt.rain_level = match reason {
+            1 => 0.0,
+            2 => 1.0,
+            _ => value.clamp(0.0, 1.0),
+        };
+    }
+
+    // Out of line: the engine's key handling inlines it for every held stack.
+    #[inline(never)]
+    fn item_use_facts(
+        &self,
+        stack: &ghast_inventory::Stack,
+        off_hand: bool,
+        mut held: HeldItem,
+    ) -> HeldItem {
+        let trident = u16::try_from(stack.id())
+            .ok()
+            .and_then(ghast_data::v1_16_5::Item::from_id)
+            .is_some_and(|i| i.info().name == "trident");
+        let mut level = 0;
+        if trident {
+            // TridentItem.use: FAIL when the next point of damage breaks it, and with riptide
+            // out of water and rain.
+            let (lvl, damage) = trident_nbt(stack);
+            level = lvl;
+            held.usable = held.usable && damage < 250 - 1 && (lvl == 0 || self.wet());
+            // A riptide trident: read our entity data (the spin flag) from now on.
+            if lvl > 0 && !self.rt.held.watch.replace(true) {
+                self.rt.held.filter_dirty.set(true);
+            }
+        }
+        let starts =
+            held.usable && (!held.food || held.always_edible || self.player.food_level < 20);
+        let mut h = self.rt.held.hands.get();
+        h[usize::from(off_hand)] = (level, starts, self.player.age);
+        self.rt.held.hands.set(h);
+        held
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {
@@ -769,6 +1231,7 @@ impl Sim for Sim16 {
             });
             t
         });
+        self.update_slow();
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
@@ -827,17 +1290,8 @@ impl Sim for Sim16 {
                     .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.id())))
             });
         }
-        if self.entities.is_some() {
-            self.entities_around();
-            let around =
-                ghast_physics::v1_16_5::Surroundings::new().with_entities(&self.around.boxes);
-            ghast_physics::v1_16_5::tick_in(
-                &mut self.player,
-                &around,
-                &input,
-                &self.world,
-                &mut self.packets,
-            );
+        if self.slow || using_item {
+            self.slow_tick(&input, out);
         } else {
             ghast_physics::v1_16_5::tick(&mut self.player, &input, &self.world, &mut self.packets);
         }
@@ -876,4 +1330,29 @@ fn sync_pose_16(pose: &mut Pose, p: &ghast_physics::v1_16_5::PlayerState) {
     pose.flying = p.abilities.flying;
     pose.sneaking = p.sneaking();
     pose.sprinting = p.sprinting;
+}
+
+#[cfg(all(test, ghast_modern))]
+mod tests {
+    /// 1.16.5's `VoronoiBiomeAccessType` is the zoom of 26.1's `BiomeManager.getBiome` (whose
+    /// port is checked against the 26.1 client): same cells over random seeds and positions.
+    #[test]
+    fn voronoi_cell_is_the_modern_zoom() {
+        let mut r: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            r ^= r << 13;
+            r ^= r >> 7;
+            r ^= r << 17;
+            r
+        };
+        for _ in 0..20_000 {
+            let seed = next() as i64;
+            let p = [next(), next(), next()].map(|v| (v as i32) >> 8);
+            assert_eq!(
+                super::voronoi_cell(seed, p[0], p[1], p[2]),
+                ghast_world::climate::zoom_cell(seed, p[0], p[1], p[2]),
+                "seed {seed} at {p:?}"
+            );
+        }
+    }
 }

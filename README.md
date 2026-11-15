@@ -16,7 +16,7 @@ Status: early (0.4, on crates.io). APIs will still change; see CONTRIBUTING.md f
 
 | | ghast | |
 |---|---|---|
-| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 12.72 million ticks | positions, velocities, flags and packets compared by their bits |
+| Player physics vs the vanilla oracle (randomized fuzz, 1.8.9, 1.12.2 and 1.16.5) | **0 diffs** over 17.72 million ticks | positions, velocities, flags and packets compared by their bits |
 | Player physics vs the vanilla 26.1 client (randomized fuzz incl. edges, attributes, item use, teleports, elytra, riptide, entity pushes, nether, world border, boats, minecarts) | **0 diffs** over 12.20 million ticks | 26.1.1 and 26.1.2 give identical records |
 | Player physics vs the vanilla 26.2 client (the same mechanics plus collision restitution: slime, beds, `bounciness`, friction and air-drag attributes) | **0 diffs** over 16.20 million ticks | |
 | Window clicks vs vanilla's client-side prediction | **0 diffs** over ~154,000 random clicks per version (1.8.9 – 1.16.5) and 237,292 each on 26.1 and 26.2 (every menu, byte-identical packets) | incl. crafting results |
@@ -155,9 +155,10 @@ protocol are served by the same code.
 |---|---|---|---|---|
 | login: offline, online (Microsoft, feature `microsoft`), compression, encryption, SOCKS5 | yes | yes | yes | offline and compression lab-tested; online mode lab-tested against a local stand-in of the account services (not with a real account) |
 | configuration state (known packs, registries, resource packs, cookies, reconfiguration) | – | – | – | yes (reconfiguration lab-tested through a Velocity proxy) |
+| server resource pack prompt (answered accepted + loaded or declined; never downloaded) | yes | yes | yes | yes |
 | keep-alive, teleports, respawn, chat, vanilla join packets | yes | yes | yes | yes (signed chat and commands oracle-verified; server transfers) |
 | chunks and block changes | yes | yes | yes | yes |
-| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified | oracle-verified (+ attributes, powder snow, supporting block, elytra and rockets, riptide, entity pushes, boats, minecarts; living mounts not yet) |
+| player physics (walk, sprint, sneak, jump, fly, water / lava, ladders, cobwebs, soul sand, ice, slime, step-up, effects) | oracle-verified | oracle-verified (+ levitation, bed bounce, sneaking size) | oracle-verified (+ the nether's stronger lava push, riptide) | oracle-verified (+ attributes, powder snow, supporting block, elytra and rockets, riptide, entity pushes, boats, minecarts; living mounts not yet) |
 | crosshair raytrace, dig / place / use items | oracle-verified rays | oracle-verified rays | oracle-verified rays | oracle-verified rays |
 | block breaking time (per tick progress, finish tick) | oracle-verified | oracle-verified | oracle-verified | oracle-verified |
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | oracle-verified (every menu, creative screen, anvil / grindstone / loom / trades) |
