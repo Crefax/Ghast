@@ -48,6 +48,8 @@
     allow(unused_imports, unused_variables)
 )]
 
+#[cfg(feature = "v1_16_5")]
+mod client16;
 mod common;
 mod entity;
 #[cfg(any(feature = "v26_1", feature = "v26_2"))]

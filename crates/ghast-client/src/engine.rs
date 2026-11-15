@@ -1491,7 +1491,7 @@ impl<S: Sim> Engine<S> {
             .step(&mut c.pose, c.controls, using, c.entity_id, &mut c.out);
         // ClientLevel.tickEntities: after this tick's pick and key handling, and after the
         // player (the first entity in the client's tick list): the other entities' ticks see
-        // the moved player and push it (26.1).
+        // the moved player and push it (1.12.2, 26.1+).
         self.sim.tick_entities(&mut c.pose);
         c.hands.count_use_tick();
         for o in &c.out[first..] {
@@ -2169,7 +2169,8 @@ impl TickContext<'_> {
 
     /// **Not vanilla when off**: whether other entities push the player from now on (default
     /// on, see [`crate::Client::entity_push`]). Takes effect on this tick's entity ticks; a
-    /// no-op on versions whose client does not push the player (1.8.9, 1.12.2, 1.16.5).
+    /// no-op where the sim does not push the player (1.8.9, whose client never does; 1.16.5 so
+    /// far).
     pub fn set_entity_push(&mut self, on: bool) {
         self.core.entity_push = on;
     }
@@ -2661,6 +2662,28 @@ mod tests_26_1;
 ))]
 #[path = "engine_tests_26_2.rs"]
 mod tests_26_2;
+
+/// The engine replay of the 1.12.2 entity goldens (`engine_tests_1_12.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_1_12.rs"]
+mod tests_1_12;
+
+/// The engine replay of the 1.16.5 entity goldens (`engine_tests_1_16_5.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_1_16_5.rs"]
+mod tests_1_16_5;
 
 #[cfg(all(
     test,

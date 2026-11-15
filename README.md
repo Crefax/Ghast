@@ -161,7 +161,7 @@ protocol are served by the same code.
 | crosshair raytrace, dig / place / use items | oracle-verified rays | oracle-verified rays | oracle-verified rays | oracle-verified rays |
 | block breaking time (per tick progress, finish tick) | oracle-verified | oracle-verified | oracle-verified | oracle-verified |
 | inventory and container clicks, crafting results | oracle-verified | oracle-verified (results come from the server, as in vanilla 1.12) | oracle-verified | oracle-verified (every menu, creative screen, anvil / grindstone / loom / trades) |
-| entities: tracking, crosshair, attack / interact | yes | yes | yes | yes (tracking oracle-verified; collisions and pushes with entity tracking on) |
+| entities: tracking, crosshair, attack / interact | yes | yes (pushes by mobs, players and boats, collisions with boats and shulkers: oracle-verified, with entity tracking on) | yes (pushes by mobs, players and boats, collisions with boats and shulkers: oracle-verified, with entity tracking on) | yes (tracking oracle-verified; collisions and pushes with entity tracking on) |
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
 | path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags |
 | bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | live view (1.8.9 assets, look-alikes for newer blocks); recordings untested |

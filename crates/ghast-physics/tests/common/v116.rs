@@ -266,6 +266,120 @@ pub fn packet_json(p: &Packet) -> Value {
     }
 }
 
+fn aabb_of(v: &Value) -> ghast_physics::math::Aabb {
+    ghast_physics::math::Aabb::new(
+        f64_of(&v[0]),
+        f64_of(&v[1]),
+        f64_of(&v[2]),
+        f64_of(&v[3]),
+        f64_of(&v[4]),
+        f64_of(&v[5]),
+    )
+}
+
+/// The client scoreboard's teams as far as collision rules go (an independent model of
+/// `EntityPredicates.canBePushedBy` for the replay).
+#[derive(Default)]
+pub struct Teams {
+    /// Team name -> collision rule.
+    rules: std::collections::HashMap<String, String>,
+    /// Scoreboard name -> team name.
+    members: std::collections::HashMap<String, String>,
+}
+
+impl Teams {
+    /// Applies a `team` event / setup entry.
+    pub fn apply(&mut self, t: &Value) {
+        let name = t["name"].as_str().unwrap().to_string();
+        let mode = i(&t["mode"]);
+        let members = t["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap().to_string());
+        match mode {
+            0 => {
+                self.rules
+                    .entry(name.clone())
+                    .or_insert_with(|| "always".into());
+                if let Some(r) = t.get("rule").and_then(Value::as_str) {
+                    self.rules.insert(name.clone(), r.into());
+                }
+                for m in members {
+                    self.members.insert(m, name.clone());
+                }
+            }
+            1 => {
+                self.rules.remove(&name);
+                self.members.retain(|_, v| *v != name);
+            }
+            2 => {
+                if let Some(r) = t.get("rule").and_then(Value::as_str) {
+                    self.rules.insert(name, r.into());
+                }
+            }
+            3 => {
+                for m in members {
+                    self.members.insert(m, name.clone());
+                }
+            }
+            4 => {
+                for m in members {
+                    if self.members.get(&m) == Some(&name) {
+                        self.members.remove(&m);
+                    }
+                }
+            }
+            _ => panic!("team mode {mode}"),
+        }
+    }
+
+    fn of(&self, who: &str) -> (Option<&str>, &str) {
+        match self.members.get(who) {
+            Some(t) => (
+                Some(t.as_str()),
+                self.rules.get(t).map_or("always", |r| r.as_str()),
+            ),
+            None => (None, "always"),
+        }
+    }
+
+    /// `canBePushedBy(pusher)` for the local player `me`.
+    pub fn may_push(&self, pusher: &str, me: &str) -> bool {
+        let (own, own_rule) = self.of(pusher);
+        if own_rule == "never" {
+            return false;
+        }
+        let (theirs, their_rule) = self.of(me);
+        if their_rule == "never" {
+            return false;
+        }
+        let same = own.is_some() && own == theirs;
+        if (own_rule == "pushOwnTeam" || their_rule == "pushOwnTeam") && same {
+            return false;
+        }
+        (own_rule != "pushOtherTeams" && their_rule != "pushOtherTeams") || same
+    }
+}
+
+/// The local player's scoreboard name in the oracle.
+const ORACLE_NAME: &str = "oracle";
+
+/// Spawned entities of a case: id -> (type, scoreboard name).
+fn spawned(e: &Value, out: &mut std::collections::HashMap<i64, (String, String)>) {
+    let ty = e["entity"].as_str().unwrap().to_string();
+    let name = match e.get("name").and_then(Value::as_str) {
+        Some(n) => n.to_string(),
+        None => e["uuid"].as_str().unwrap().to_string(),
+    };
+    out.insert(e["id"].as_i64().unwrap(), (ty, name));
+}
+
+/// `instanceof LivingEntity` for the types of the oracle's entity cases.
+fn living(name: &str) -> bool {
+    !matches!(name, "boat" | "minecart" | "item")
+}
+
 /// Replays one 1.16.5 case.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
@@ -283,6 +397,20 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         return Err(mm(0, d));
     }
     let mut out = Packets::new();
+    // Entity cases: the teams and the spawned entities.
+    let mut teams = Teams::default();
+    let mut kinds: std::collections::HashMap<i64, (String, String)> =
+        std::collections::HashMap::new();
+    if let Some(x) = case.header["setup"].get("ext") {
+        for t in x["teams"].as_array().unwrap() {
+            teams.apply(t);
+        }
+        for e in x["entities"].as_array().unwrap() {
+            spawned(e, &mut kinds);
+        }
+    }
+    // Where the client world files the player (its position after its last tick).
+    let mut filed = p.pos;
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
         let input = &rec["input"];
@@ -327,6 +455,11 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .collect();
                         p.apply_speed_attribute(f64_of(&e["base"]), &mods);
                     }
+                    // Other entities: their boxes come with the tick record.
+                    "spawn" => spawned(e, &mut kinds),
+                    "team" => teams.apply(e),
+                    "entity_move" | "entity_rel" | "entity_look" | "remove_entity"
+                    | "game_mode" => {}
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -341,7 +474,61 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item,
         };
-        v1_16_5::tick(&mut p, &ti, &world, &mut out);
+        // Other entities in the client's tick order: those before the player push it first (with
+        // their box after their tick); the player collides with the collidable ones as they are
+        // when it ticks; those after it push it after its tick.
+        let mut colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
+        let mut after: Vec<v1_16_5::Pusher> = Vec::new();
+        if let Some(ents) = rec.get("entities").and_then(Value::as_array) {
+            let mut before_player = true;
+            for e in ents {
+                if e.get("player").is_some() {
+                    before_player = false;
+                    continue;
+                }
+                let id = e["id"].as_i64().unwrap();
+                let name = e["type"].as_str().unwrap();
+                let at_tick = if before_player {
+                    b(&e["in_section_post"]).then(|| aabb_of(&e["post"]))
+                } else {
+                    (b(&e["in_section_pre"]) && e.get("pre").is_some()).then(|| aabb_of(&e["pre"]))
+                };
+                if v1_16_5::collides(name)
+                    && b(&e["alive"])
+                    && let Some(bb) = at_tick
+                {
+                    colliders.push((
+                        e.get("query_order")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(i64::MAX),
+                        bb,
+                    ));
+                }
+                let spectator = e.get("spectator").and_then(Value::as_bool).unwrap_or(false);
+                let score_name = kinds.get(&id).map_or("", |k| k.1.as_str());
+                if let Some(kind) = v1_16_5::push_kind(name, living(name))
+                    && b(&e["ticks"])
+                    && !spectator
+                    && teams.may_push(score_name, ORACLE_NAME)
+                {
+                    let pusher = v1_16_5::Pusher::new(f3(&e["pos"]), aabb_of(&e["post"]), kind);
+                    if before_player {
+                        v1_16_5::push_by(&mut p, filed, &world, &pusher);
+                    } else {
+                        after.push(pusher);
+                    }
+                }
+            }
+        }
+        colliders.sort_by_key(|c| c.0);
+        let colliders: Vec<ghast_physics::math::Aabb> =
+            colliders.into_iter().map(|c| c.1).collect();
+        let around = v1_16_5::Surroundings::new().with_entities(&colliders);
+        v1_16_5::tick_in(&mut p, &around, &ti, &world, &mut out);
+        filed = p.pos;
+        for pusher in &after {
+            v1_16_5::push_by(&mut p, filed, &world, pusher);
+        }
         sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));

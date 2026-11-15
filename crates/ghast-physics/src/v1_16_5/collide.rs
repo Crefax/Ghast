@@ -7,6 +7,7 @@ use ghast_data::v1_16_5::BlockState;
 use super::blocks::{
     Shape, ShapeCtx, class, collision_class, collision_shape, exceeds_cube, state_at,
 };
+use super::entity::{collision_hit, cuboid_max_distance};
 use super::fluid::V3;
 use crate::math::{Aabb, floor, java_max, java_min};
 use crate::voxel::{EPSILON, Points, VoxelShape};
@@ -153,14 +154,47 @@ impl Placed<'_> {
     }
 }
 
+/// Entity boxes of the collision queries. A type parameter, so the tick without entities
+/// compiles to the block-only queries.
+pub(crate) trait EntityBoxes: Copy {
+    /// `true` for [`NoEntities`]: no entity box, known at compile time.
+    const NONE: bool;
+    /// The boxes.
+    fn boxes(&self) -> &[Aabb];
+}
+
+/// No entity boxes.
+#[derive(Clone, Copy)]
+pub(crate) struct NoEntities;
+
+impl EntityBoxes for NoEntities {
+    const NONE: bool = true;
+
+    #[inline(always)]
+    fn boxes(&self) -> &[Aabb] {
+        &[]
+    }
+}
+
+impl EntityBoxes for &[Aabb] {
+    const NONE: bool = false;
+
+    #[inline(always)]
+    fn boxes(&self) -> &[Aabb] {
+        self
+    }
+}
+
 /// Collision queries of one player for one tick.
-pub(crate) struct Collider<'w, W> {
+pub(crate) struct Collider<'w, W, E> {
     pub w: &'w W,
     pub border: &'w BorderShape,
     pub ctx: ShapeCtx,
+    /// Boxes of the entities the player collides with (`getEntityCollisions` candidates).
+    pub entities: E,
 }
 
-impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
+impl<'w, W: BlockView<State = BlockState>, E: EntityBoxes> Collider<'w, W, E> {
     /// Vanilla `BlockCollisionSpliterator` for the player whose box is `entity_box`: the border
     /// shape (when the player is near it) and every block shape overlapping `query`, in order.
     /// `pred` filters blocks (`isBlockSpaceEmpty`); `f` returns `false` to stop.
@@ -263,7 +297,8 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
         );
     }
 
-    /// Vanilla `isSpaceEmpty(entity, box)`.
+    /// Vanilla `isSpaceEmpty(entity, box)`: no block shape, no border, no entity box
+    /// (`getEntityCollisions`).
     pub(crate) fn is_space_empty(&self, entity_box: &Aabb, query: &Aabb) -> bool {
         let mut empty = true;
         self.each_collision(
@@ -275,7 +310,8 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
                 false
             },
         );
-        empty
+        let ents = self.entities.boxes();
+        empty && (E::NONE || ents.is_empty() || !ents.iter().any(|e| collision_hit(query, e)))
     }
 
     /// Vanilla `isBlockSpaceEmpty(entity, box, predicate)`.
@@ -295,12 +331,41 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
 
     /// Vanilla `Entity.adjustMovementForCollisions(movement)` including step-up.
     pub(crate) fn adjust(&self, movement: V3, entity_box: &Aabb, on_ground: bool, step: f32) -> V3 {
+        if E::NONE {
+            return self.adjust_among(movement, entity_box, on_ground, step, NoEntities);
+        }
+        // The entity boxes are collected once, over the box stretched by the whole movement, and
+        // reused for every step-up attempt.
+        let hits: Vec<Aabb> = if self.entities.boxes().is_empty() {
+            Vec::new()
+        } else {
+            let q = stretch(entity_box, movement);
+            self.entities
+                .boxes()
+                .iter()
+                .filter(|e| collision_hit(&q, e))
+                .copied()
+                .collect()
+        };
+        self.adjust_among(movement, entity_box, on_ground, step, &hits[..])
+    }
+
+    /// [`Self::adjust`] against the entity boxes `hits`.
+    #[inline(always)]
+    fn adjust_among<H: EntityBoxes>(
+        &self,
+        movement: V3,
+        entity_box: &Aabb,
+        on_ground: bool,
+        step: f32,
+        hits: H,
+    ) -> V3 {
         let b = *entity_box;
         let border_extra = !self.border.shape().intersects(&contract(&b, EPSILON), None);
         let v = if movement.length_sq() == 0.0 {
             movement
         } else {
-            self.adjust_static(movement, &b, entity_box, border_extra)
+            self.adjust_static(movement, &b, entity_box, border_extra, hits)
         };
         let changed_x = movement.x != v.x;
         let changed_y = movement.y != v.y;
@@ -313,12 +378,14 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
                 &b,
                 entity_box,
                 border_extra,
+                hits,
             );
             let up = self.adjust_static(
                 V3::new(0.0, step, 0.0),
                 &stretch(&b, V3::new(movement.x, 0.0, movement.z)),
                 entity_box,
                 border_extra,
+                hits,
             );
             if up.y < step {
                 let across = self
@@ -327,6 +394,7 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
                         &offset(&b, up.x, up.y, up.z),
                         entity_box,
                         border_extra,
+                        hits,
                     )
                     .add(up);
                 if horizontal_sq(across) > horizontal_sq(stepped) {
@@ -339,6 +407,7 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
                     &offset(&b, stepped.x, stepped.y, stepped.z),
                     entity_box,
                     border_extra,
+                    hits,
                 );
                 return stepped.add(down);
             }
@@ -346,18 +415,34 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
         v
     }
 
-    /// Vanilla static `adjustMovementForCollisions(entity, movement, box, world, ctx, extra)`.
-    fn adjust_static(&self, m: V3, b: &Aabb, entity_box: &Aabb, border_extra: bool) -> V3 {
+    /// Vanilla static `adjustMovementForCollisions(entity, movement, box, world, ctx, extra)`;
+    /// `ents` are the entity boxes of the extra shapes (they come before the border).
+    fn adjust_static<H: EntityBoxes>(
+        &self,
+        m: V3,
+        b: &Aabb,
+        entity_box: &Aabb,
+        border_extra: bool,
+        ents: H,
+    ) -> V3 {
         let zeros = u8::from(m.x == 0.0) + u8::from(m.y == 0.0) + u8::from(m.z == 0.0);
         if zeros <= 1 {
-            self.sweep_shapes(m, b, entity_box, border_extra)
+            self.sweep_shapes(m, b, entity_box, border_extra, ents)
         } else {
-            self.sweep_push(m, b, border_extra)
+            self.sweep_push(m, b, border_extra, ents)
         }
     }
 
-    /// Axis order Y, then the smaller of X / Z last.
-    fn sweep_shapes(&self, m: V3, b: &Aabb, entity_box: &Aabb, border_extra: bool) -> V3 {
+    /// Axis order Y, then the smaller of X / Z last. Shapes in vanilla's stream order: the
+    /// entity boxes, the border, then the blocks.
+    fn sweep_shapes<H: EntityBoxes>(
+        &self,
+        m: V3,
+        b: &Aabb,
+        entity_box: &Aabb,
+        border_extra: bool,
+        ents: H,
+    ) -> V3 {
         let query = stretch(b, m);
         // Vanilla collects the shapes once (a reusable stream) and reuses them for every axis.
         let mut shapes: Vec<Placed<'w>> = Vec::with_capacity(16);
@@ -374,6 +459,12 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
             },
         );
         let max_offset = |axis: usize, bb: &Aabb, mut d: f64| -> f64 {
+            for e in ents.boxes() {
+                if d.abs() < EPSILON {
+                    return 0.0;
+                }
+                d = cuboid_max_distance(e, axis, bb, d);
+            }
             for p in &shapes {
                 if d.abs() < EPSILON {
                     return 0.0;
@@ -411,35 +502,42 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
 
     /// Single-axis movement (vanilla `calculatePushVelocity`): blocks are queried with the box
     /// shifted into block-local space.
-    fn sweep_push(&self, m: V3, b: &Aabb, border_extra: bool) -> V3 {
+    fn sweep_push<H: EntityBoxes>(&self, m: V3, b: &Aabb, border_extra: bool, ents: H) -> V3 {
         let (mut dx, mut dy, mut dz) = (m.x, m.y, m.z);
         let mut bb = *b;
         if dy != 0.0 {
-            dy = self.push_axis(1, &bb, dy, border_extra);
+            dy = self.push_axis(1, &bb, dy, border_extra, ents);
             if dy != 0.0 {
                 bb = offset(&bb, 0.0, dy, 0.0);
             }
         }
         let z_first = dx.abs() < dz.abs();
         if z_first && dz != 0.0 {
-            dz = self.push_axis(2, &bb, dz, border_extra);
+            dz = self.push_axis(2, &bb, dz, border_extra, ents);
             if dz != 0.0 {
                 bb = offset(&bb, 0.0, 0.0, dz);
             }
         }
         if dx != 0.0 {
-            dx = self.push_axis(0, &bb, dx, border_extra);
+            dx = self.push_axis(0, &bb, dx, border_extra, ents);
             if !z_first && dx != 0.0 {
                 bb = offset(&bb, dx, 0.0, 0.0);
             }
         }
         if !z_first && dz != 0.0 {
-            dz = self.push_axis(2, &bb, dz, border_extra);
+            dz = self.push_axis(2, &bb, dz, border_extra, ents);
         }
         V3::new(dx, dy, dz)
     }
 
-    fn push_axis(&self, axis: usize, b: &Aabb, initial: f64, border_extra: bool) -> f64 {
+    fn push_axis<H: EntityBoxes>(
+        &self,
+        axis: usize,
+        b: &Aabb,
+        initial: f64,
+        border_extra: bool,
+        ents: H,
+    ) -> f64 {
         let lo = [b.min_x, b.min_y, b.min_z];
         let hi = [b.max_x, b.max_y, b.max_z];
         if (0..3).any(|a| hi[a] - lo[a] < 1.0e-6) {
@@ -505,6 +603,10 @@ impl<'w, W: BlockView<State = BlockState>> Collider<'w, W> {
                 }
             }
             p += step;
+        }
+        // The extra shapes after the blocks: the entity boxes, then the border.
+        for e in ents.boxes() {
+            initial = cuboid_max_distance(e, axis, b, initial);
         }
         if border_extra {
             initial = Placed::Border(self.border).max_distance(axis, b, initial);

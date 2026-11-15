@@ -342,6 +342,16 @@ oracle (`tests/golden/1.12.2/`, `oracle/README.md` "1.12.2"):
   same door (a half whose metadata does not carry a property has the palette's hidden default:
   the last value — facing east, closed, right hinge); chests reach towards a chest of the same
   kind; chorus plants grow arms towards chorus blocks (and end stone below).
+- **Other entities** (`entity.rs`, new in 1.9 – 1.12 on the client): living entities (not bats,
+  parrots, armor stands or the ender dragon), other players and boats push the local player from
+  their own client ticks (`tickCramming`; only the main player is pushable on the client), with
+  `MathHelper.sqrt(double)`'s `float` root; boats push only when the player's feet are not above
+  the boat's bottom, over the boat's box grown by 0.2 and shrunk by 0.01 vertically (`push_by`,
+  `push_kind`). Boats and live shulkers are solid for the player's move, step-up, sneak edge
+  guard and jump-out test (`tick_in` with their boxes; `collides`). A boat's tick breaks the lily
+  pads it touches in the client's world (`lily_pads_broken_by_boat`). Team rules, spectator
+  pushers, the entities' client positions (interpolation) and their tick order are the caller's
+  (`ghast-client` does them).
 - **Packets**: a bare on-ground packet only when `on_ground` changed (no idle packets), the
   position refresh on the 20th tick; teleports clamp x / z to ±3e7 and the pitch to ±90 and are
   answered with `teleport_confirm` (sent by the client crate) then `position_look`.
@@ -409,11 +419,13 @@ events; seeds 4-6 add item use and origins at ±2^24).
 committed `tests/golden/1.16.5/` scenarios and `fuzz_seed1`, replayed by `tests/golden_1_16_5.rs`).
 
 1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
-`fuzz_seed1` and `fuzz_edges_seed1`; `src/v1_12/tests.rs` checks every line of the 1.12.2 collision
+`fuzz_seed1`, `fuzz_edges_seed1` and `entities` (23 hand cases + 60 fuzz cases with other entities,
+4,506 ticks); `src/v1_12/tests.rs` checks every line of the 1.12.2 collision
 dumps (6,083 box lines incl. neighbour configurations, 12,192 far lines) and the stairs face shapes.
 Large fuzz: the same commands with `MC=1.12.2` and `oracle/cache/1.12.2/` (seeds 11-15, 21 with
 `--use-item true`, extra 1-6 replayed from `fuzz-in/`, edges 31-35, extras 41-45) = 4,160,000 ticks,
-0 diffs.
+0 diffs; entities (`fuzz --entities true`, seeds 51-60 in `fuzz-entities/`) 2,000,000 ticks, 0
+diffs.
 
 **Total randomized oracle fuzz: 9,320,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
 1,000,000 extras, 1,000,000 edges), 1.12.2 4,160,000 and 1.16.5 1,000,000.

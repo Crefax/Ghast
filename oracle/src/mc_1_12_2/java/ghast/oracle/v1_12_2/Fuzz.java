@@ -137,6 +137,13 @@ final class Fuzz {
         return sc;
     }
 
+    /** A copy of {@code src} under another name (same description). */
+    static Scenario renamedTo(Scenario src, String name) {
+        Scenario sc = renamed(src, name);
+        sc.description = src.description;
+        return sc;
+    }
+
     private static Scenario renamed(Scenario src, String name) {
         Scenario sc = new Scenario(name);
         sc.description = src.description + ", use key";

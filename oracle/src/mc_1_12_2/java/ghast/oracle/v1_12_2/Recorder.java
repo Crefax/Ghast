@@ -84,6 +84,7 @@ final class Recorder {
         j.key("effects").beginArray();
         sc.effects.forEach((id, amp) -> j.beginArray().value(id).value(amp).endArray());
         j.endArray();
+        Ent.header(j, sc);
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -116,6 +117,7 @@ final class Recorder {
         }
         j.endArray();
         run.net.sent.clear();
+        Ent.tickRecord(j, run);
         return j.endObject().toString();
     }
 
@@ -148,6 +150,8 @@ final class Recorder {
             j.field("type", "abilities").field("invulnerable", a.invulnerable()).field("flying", a.flying())
                     .field("allow_flying", a.allowFlying()).field("creative", a.creative())
                     .fieldF32("fly_speed", a.flySpeed()).fieldF32("walk_speed", a.walkSpeed());
+        } else {
+            Ent.event(j, e);
         }
         j.endObject();
     }

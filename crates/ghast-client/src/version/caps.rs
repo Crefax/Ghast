@@ -102,9 +102,12 @@ pub struct Capabilities {
     /// Chat packets carry a timestamp, salt and message acknowledgements (1.19.3+).
     pub chat_acknowledgements: bool,
     /// The client itself pushes the player away from other entities in its entity tick
-    /// (26.1+; older clients leave it to the server). Judging those pushes needs each player
-    /// entity's tab-list name (team collision rules) and game mode (spectators do not push),
-    /// so entity tracking then also keeps a names-only tab list.
+    /// (26.1+; 1.12.2: `LivingEntity.tickCramming`, other players and boats push the local
+    /// player on the client too; 1.16.5: `LivingEntity.tickCramming`,
+    /// `OtherClientPlayerEntity.tickMovement` and `BoatEntity.tick`, in the client world's entity
+    /// map order; 1.8.9 leaves it to the server). Judging those pushes needs
+    /// each player entity's tab-list name (team collision rules) and game mode (spectators do
+    /// not push), so entity tracking then also keeps a names-only tab list.
     pub client_entity_push: bool,
 }
 
@@ -150,6 +153,7 @@ pub(crate) const V1_12_2: Capabilities = Capabilities {
     chat_limit: 256,
     seed_planting_prediction: false,
     teleport_confirm: true,
+    client_entity_push: true,
     ..V1_8_9
 };
 
@@ -162,6 +166,7 @@ pub(crate) const V1_16_5: Capabilities = Capabilities {
     item_model: ItemModel::FlatNbt,
     sneak_eye_height: f(1.27),
     immediate_respawn_rule: true,
+    client_entity_push: true,
     ..V1_12_2
 };
 

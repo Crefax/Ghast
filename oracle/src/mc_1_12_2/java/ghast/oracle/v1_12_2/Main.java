@@ -51,14 +51,20 @@ public final class Main {
                 boolean useItem = Boolean.parseBoolean(a.str("--use-item", "false"));
                 boolean edges = Boolean.parseBoolean(a.str("--edges", "false")) || "edges".equals(a.str("--palette", ""));
                 boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
+                boolean entities = Boolean.parseBoolean(a.str("--entities", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 // Streamed: cases are generated and written one at a time (millions of ticks fit).
                 write(out, sink -> {
                     for (int i = 0; i < count; i++) {
-                        run(edges ? Fuzz.edge(seed, i, ticks)
+                        run(entities ? EntityCases.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
+            }
+            case "entities" -> {
+                Path out = a.path("--out", golden.resolve("entities.jsonl.gz"));
+                String only = a.str("--only", null);
+                write(out, sink -> runAll(EntityCases.all().stream().filter(sc -> only == null || only.equals(sc.name)).toList(), sink));
             }
             case "boxes" -> {
                 Path out = a.path("--out", golden.resolve("collision_boxes.jsonl.gz"));
@@ -127,8 +133,10 @@ public final class Main {
                 ghast oracle (Minecraft %s)
                   golden   [--out DIR]                 write the committed golden set (scenarios, fuzz, boxes)
                   scenarios [--out FILE] [--only NAME] run the hand-written scenarios
-                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--out FILE(.gz)]
-                                                       randomized cases (default into cache/%s/fuzz/)
+                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--entities true] [--out FILE(.gz)]
+                                                       randomized cases (default into cache/%s/fuzz/); --entities: the
+                                                       extras case with other entities (EntityCases.fuzz)
+                  entities [--out FILE] [--only NAME]  the hand-written entity cases (pushes, entity collisions)
                   boxes [--out FILE]                   collision box dump for every block id/meta
                   boxes-far [--out FILE]               the same (alone/settled) at far positions, absolute
                   replay --in FILE [--out FILE]        rerun scenarios read from golden-format JSON lines
@@ -155,6 +163,15 @@ public final class Main {
     static final int GOLDEN_RAYS = 40;
     static final long GOLDEN_CLICK_SEED = 1;
     static final int GOLDEN_CLICK_CASES = 3000;
+    /** Fuzz cases appended to the hand-written entity cases in {@code entities.jsonl.gz}. */
+    static final int GOLDEN_ENTITY_FUZZ = 60;
+
+    static void entities(Consumer<String> sink) {
+        runAll(EntityCases.all(), sink);
+        for (int i = 0; i < GOLDEN_ENTITY_FUZZ; i++) {
+            run(EntityCases.fuzz(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS), sink);
+        }
+    }
 
     /** Golden files are compressed harder; big fuzz runs favour speed. */
     private static boolean bestCompression;
@@ -188,6 +205,7 @@ public final class Main {
             }
         });
         write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
+        write(dir.resolve("entities.jsonl.gz"), Main::entities);
         write(dir.resolve("face_shapes.jsonl.gz"), sink -> FaceDump.lines().forEach(sink));
         write(dir.resolve("selection_boxes.jsonl.gz"), sink -> SelectionDump.lines().forEach(sink));
         write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(GOLDEN_RAY_SEED, GOLDEN_RAY_WORLDS, GOLDEN_RAYS, sink));
@@ -293,6 +311,10 @@ public final class Main {
         for (int i = 0; i < GOLDEN_FUZZ_COUNT; i++) {
             all.add(Fuzz.edge(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
         }
+        all.addAll(EntityCases.all());
+        for (int i = 0; i < GOLDEN_ENTITY_FUZZ; i++) {
+            all.add(EntityCases.fuzz(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
+        }
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -313,7 +335,7 @@ public final class Main {
 
         // Round trip: the written files, read back as inputs and replayed, reproduce themselves.
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz"}) {
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "entities.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = sha256(replayed).equals(sha256(a.resolve(f)));

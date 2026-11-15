@@ -8,13 +8,15 @@
 //! [`BlockView`]: crate::BlockView
 
 mod blocks;
+pub mod entity;
 mod fluid;
 mod player;
 mod ray;
 
+pub use entity::{PushKind, Pusher, collides, lily_pads_broken_by_boat, push_by, push_kind};
 pub use player::{
     Effects, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT, SentState,
-    WIDTH, box_at, is_climbing, is_touching_lava, tick, tick_with,
+    WIDTH, box_at, is_climbing, is_touching_lava, tick, tick_in, tick_with,
 };
 
 /// The 1.12 block state the world view returns (re-exported from `ghast-data`).

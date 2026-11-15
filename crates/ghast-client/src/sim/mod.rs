@@ -13,7 +13,7 @@ use crate::common::{
 use crate::hands::{BlockQuery, HeldItem};
 use crate::version::DataSet;
 
-#[cfg(ghast_modern)]
+#[cfg(any(ghast_modern, feature = "v1_12_2", feature = "v1_16_5"))]
 mod teams;
 #[cfg(feature = "v1_12_2")]
 mod v1_12;
@@ -489,8 +489,12 @@ pub(crate) struct SimOptions {
     pub world: Option<WorldConfig>,
     /// Share section storage through this store (modern versions; the others ignore it).
     pub shared_chunks: Option<ghast_world::SharedChunks>,
-    /// The player's scoreboard name (team membership for entity pushes, 26.1).
-    #[cfg_attr(not(ghast_modern), allow(dead_code))]
+    /// The player's scoreboard name (team membership for entity pushes, 1.12.2, 1.16.5 and
+    /// 26.1+).
+    #[cfg_attr(
+        not(any(ghast_modern, feature = "v1_12_2", feature = "v1_16_5")),
+        allow(dead_code)
+    )]
     pub profile_name: Option<String>,
 }
 

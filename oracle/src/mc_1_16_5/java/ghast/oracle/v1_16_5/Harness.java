@@ -84,7 +84,8 @@ import java.util.UUID;
  * and each tick is {@code ClientWorld.tickEntities()}.
  *
  * <p>Faked: the {@code MinecraftClient} singleton (allocated without its constructor; options, sound
- * manager, tutorial manager, thread, world, player, interaction manager and camera are set), a silent
+ * manager, tutorial manager, social interactions manager, thread, world, player, interaction manager
+ * and camera are set), a silent
  * sound manager, a no-op world renderer, and the connection (captures everything the client sends).
  */
 final class Harness {
@@ -121,6 +122,9 @@ final class Harness {
         Reflect.set(MinecraftClient.class, client, "soundManager", SilentSoundManager.create());
         Reflect.set(MinecraftClient.class, client, "tutorialManager", new TutorialManager(client));
         Reflect.set(MinecraftClient.class, client, "worldRenderer", StubWorldRenderer.create());
+        // Tab-list additions report to the social interactions manager (no service, no screen).
+        Reflect.set(MinecraftClient.class, client, "socialInteractionsManager",
+                new net.minecraft.client.network.SocialInteractionsManager(client, null));
         // Sounds measure their distance to the camera; a game renderer with just its camera object.
         net.minecraft.client.render.GameRenderer gameRenderer = Reflect.allocate(net.minecraft.client.render.GameRenderer.class);
         Reflect.set(net.minecraft.client.render.GameRenderer.class, gameRenderer, "camera", new net.minecraft.client.render.Camera());
@@ -302,6 +306,8 @@ final class Harness {
             }
             // Chunk bookkeeping an earlier tick would have done (player was added before its chunk existed).
             invoke(ClientWorld.class, world, "checkEntityChunkPos", player);
+            // Other entities (cases with an entity setup only).
+            Ents.finishSetup(this);
             connection.sent.clear();
         }
 
@@ -406,6 +412,7 @@ final class Harness {
             useKey((t.keys() & Scenario.USE) != 0);
             player.yaw = t.yaw();
             player.pitch = t.pitch();
+            Ents.beforeTick(this);
             world.tickEntities();
             tick++;
         }
@@ -477,6 +484,8 @@ final class Harness {
                 b.writeFloat(a.flySpeed());
                 b.writeFloat(a.walkSpeed());
                 net.onPlayerAbilities(read(new PlayerAbilitiesS2CPacket(), b));
+            } else if (e instanceof Scenario.VersionEvent ve) {
+                Ents.apply(this, ve);
             }
         }
 

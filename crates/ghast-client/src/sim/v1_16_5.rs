@@ -23,6 +23,93 @@ pub(crate) struct Sim16 {
     session: SessionPackets,
     /// The world keeps block entities (signs, tile entity NBT).
     block_entities: bool,
+    /// Other entities push the player ([`Sim::set_entity_push`]).
+    entity_push: bool,
+    /// With entity tracking: the teams' collision rules (`teams` packets).
+    teams: Option<Box<super::teams::Teams>>,
+    /// The player's scoreboard name (team rules).
+    profile_name: Box<str>,
+    /// This tick's entity scratch (see [`Sim16::entities_around`]).
+    around: Around16,
+    /// Where the client world files the player: its position after its last tick.
+    filed_pos: [f64; 3],
+}
+
+/// The entities around the player this tick.
+#[derive(Debug, Default)]
+struct Around16 {
+    /// The boxes the player collides with.
+    boxes: Vec<ghast_physics::math::Aabb>,
+    /// The pushes of the entities that tick after the player, in tick order.
+    after: Vec<(u32, ghast_physics::v1_16_5::Pusher)>,
+    /// The pushes of the entities that tick before it.
+    before: Vec<(u32, ghast_physics::v1_16_5::Pusher)>,
+    /// The tracker's client view ticked this tick (in [`Sim::step`]).
+    ticked: bool,
+}
+
+/// Per entity type: the player collides with it.
+const COLLIDES: u8 = 1;
+/// Per entity type: a living entity of this type pushes the player.
+const PUSH_LIVING: u8 = 2;
+/// Per entity type: its tick pushes the player like a boat.
+const PUSH_BOAT: u8 = 4;
+
+/// [`COLLIDES`] / [`PUSH_LIVING`] / [`PUSH_BOAT`] of a 1.16.5 entity (players push).
+fn entity_bits(e: &ghast_entity::Entity) -> u8 {
+    use ghast_physics::v1_16_5 as phys;
+    static BITS: std::sync::OnceLock<Box<[u8]>> = std::sync::OnceLock::new();
+    let bits = BITS.get_or_init(|| {
+        let types = ghast_data::v1_16_5::entities();
+        let mut v = vec![
+            0u8;
+            types
+                .iter()
+                .map(|t| usize::from(t.id) + 1)
+                .max()
+                .unwrap_or(0)
+        ];
+        for t in types {
+            let mut b = 0;
+            if phys::collides(t.name) {
+                b |= COLLIDES;
+            }
+            match phys::push_kind(t.name, true) {
+                Some(phys::PushKind::Boat) => b |= PUSH_BOAT,
+                Some(phys::PushKind::Living) => b |= PUSH_LIVING,
+                _ => {}
+            }
+            v[usize::from(t.id)] = b;
+        }
+        v.into_boxed_slice()
+    });
+    match e.entity_type() {
+        ghast_entity::EntityType::Player => PUSH_LIVING,
+        ghast_entity::EntityType::Registry(id) => {
+            let b = bits.get(usize::from(id)).copied().unwrap_or(0);
+            // Living pushes only for living entities (the living-entity spawn packet).
+            if e.class() == ghast_entity::EntityClass::Mob {
+                b
+            } else {
+                b & !PUSH_LIVING
+            }
+        }
+        _ => 0,
+    }
+}
+
+fn aabb(b: [f64; 6]) -> ghast_physics::math::Aabb {
+    ghast_physics::math::Aabb::new(b[0], b[1], b[2], b[3], b[4], b[5])
+}
+
+/// `true` when box `b` comes within `m` of the player's box on every axis.
+fn near(b: &[f64; 6], p: &ghast_physics::math::Aabb, m: [f64; 3]) -> bool {
+    !(b[3] < p.min_x - m[0]
+        || b[0] > p.max_x + m[0]
+        || b[4] < p.min_y - m[1]
+        || b[1] > p.max_y + m[1]
+        || b[5] < p.min_z - m[2]
+        || b[2] > p.max_z + m[2])
 }
 
 impl std::fmt::Debug for Sim16 {
@@ -57,6 +144,253 @@ impl Sim16 {
             updates: BlockUpdates::default(),
             session: SessionPackets::default(),
             block_entities: false,
+            entity_push: true,
+            teams: None,
+            profile_name: "".into(),
+            around: Around16::default(),
+            filed_pos: [0.0; 3],
+        }
+    }
+
+    /// A tracker for this sim: with the vanilla client's own entity view (tick order,
+    /// interpolated positions and boxes) that pushes and entity collisions read.
+    fn tracker(c: ghast_entity::Config) -> ghast_entity::v1_16_5::Tracker {
+        let mut t = ghast_entity::v1_16_5::Tracker::new(c);
+        t.track_client_motion(true);
+        t
+    }
+
+    /// Test hook: the player state (from an oracle record).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_set_player(&mut self, p: ghast_physics::v1_16_5::PlayerState) {
+        self.player = p;
+        self.filed_pos = p.pos;
+    }
+
+    /// Test hook: the player's scoreboard name (team rules).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_set_profile_name(&mut self, name: &str) {
+        self.profile_name = name.into();
+    }
+
+    /// Test hook: a `login` (own entity id, the overworld) into the entity tracker only.
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_tracker_login(&mut self, own_id: i32) {
+        use ghast_protocol::v1_16_5::play::clientbound::id;
+        let Some(t) = &mut self.entities else { return };
+        let mut b = Vec::new();
+        b.extend_from_slice(&own_id.to_be_bytes());
+        b.extend_from_slice(&[0, 0, 0xFF, 1]);
+        let name = b"minecraft:overworld";
+        b.push(name.len() as u8);
+        b.extend_from_slice(name);
+        b.extend_from_slice(&[10, 0, 0, 0, 10, 0, 0, 0]);
+        b.push(name.len() as u8);
+        b.extend_from_slice(name);
+        b.extend_from_slice(&0i64.to_be_bytes());
+        b.extend_from_slice(&[20, 10, 0, 1, 0, 0]);
+        let raw = RawPacket {
+            id: id::LOGIN,
+            body: bytes::Bytes::from(b),
+        };
+        t.apply(&raw).unwrap();
+    }
+
+    /// Test hook: the client position and box the tracker keeps for entity `id`.
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_client_box(&self, id: i32) -> Option<([f64; 3], [f64; 6])> {
+        let t = self.entities.as_ref()?;
+        Some((t.client_position(id)?, t.client_box(id)?))
+    }
+
+    /// Test hook: the player state.
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_player(&self) -> &ghast_physics::v1_16_5::PlayerState {
+        &self.player
+    }
+
+    /// Test hook: the client world's tick order the tracker keeps.
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_tick_order(&self) -> Vec<i32> {
+        self.entities
+            .as_ref()
+            .map(|t| t.client_tick_order().collect())
+            .unwrap_or_default()
+    }
+
+    /// [`Sim::tick_entities`] with a tracker (`ClientWorld.tickEntities`): the entities after
+    /// the player push it after its tick.
+    #[inline(never)]
+    fn tick_tracked(&mut self, pose: &mut Pose) {
+        if !std::mem::take(&mut self.around.ticked) {
+            // The player did not tick: the other entities still do.
+            let w = &self.world;
+            if let Some(t) = &mut self.entities {
+                t.tick_client(|x, z| w.is_column_loaded(x, z));
+            }
+            return;
+        }
+        if self.around.after.is_empty() {
+            return;
+        }
+        let p = &mut self.player;
+        for (_, pusher) in &self.around.after {
+            ghast_physics::v1_16_5::push_by(p, self.filed_pos, &self.world, pusher);
+        }
+        self.around.after.clear();
+        pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+    }
+
+    /// The entities around the player for this tick, as the 1.16.5 client's entity tick
+    /// (`ClientWorld.tickEntities`) has them around the player's own tick: every tracked entity
+    /// takes its interpolation step; the ones that tick before the player push it now, the
+    /// boxes it collides with are those of the moment it ticks (after their tick for the
+    /// entities before it, before it for the others), and the pushes of the entities after it
+    /// are kept for [`Sim::tick_entities`].
+    fn entities_around(&mut self) {
+        let a = &mut self.around;
+        a.boxes.clear();
+        a.after.clear();
+        a.before.clear();
+        let Some(t) = self.entities.as_mut() else {
+            return;
+        };
+        let w = &self.world;
+        let loaded = |x: i32, z: i32| w.is_column_loaded(x, z);
+        let p = &self.player;
+        // Farther than any move of one tick can reach (the physics filters exactly).
+        let reach = |v: f64| v.abs() + 3.0;
+        let m = [reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2])];
+        // The colliders that tick after the player: their boxes before their tick.
+        let mut any = false;
+        for e in t.iter() {
+            let bits = entity_bits(e);
+            if bits == 0 {
+                continue;
+            }
+            any = true;
+            if bits & COLLIDES == 0 || t.ticks_before_self(e.id()) {
+                continue;
+            }
+            if let Some(b) = t.client_box(e.id())
+                && near(&b, &p.bb, m)
+                && t.client_alive(e.id())
+                && t.client_position(e.id())
+                    .is_some_and(|q| loaded((q[0].floor() as i32) >> 4, (q[2].floor() as i32) >> 4))
+            {
+                a.boxes.push(aabb(b));
+            }
+        }
+        t.tick_client(loaded);
+        a.ticked = true;
+        if !any {
+            return;
+        }
+        // The local player rides: no pushes, no entity collisions (not simulated).
+        if let Some(me) = t.self_id()
+            && t.iter().any(|e| e.passengers().contains(&me))
+        {
+            a.boxes.clear();
+            return;
+        }
+        let own: &str = &self.profile_name;
+        let teams = self.teams.as_deref().filter(|t| t.any_rule());
+        for e in t.iter() {
+            let bits = entity_bits(e);
+            if bits == 0 {
+                continue;
+            }
+            let id = e.id();
+            let before = t.ticks_before_self(id);
+            let (Some(b), Some(pos)) = (t.client_box(id), t.client_position(id)) else {
+                continue;
+            };
+            if bits & COLLIDES != 0
+                && before
+                && near(&b, &p.bb, m)
+                && t.client_alive(id)
+                && loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4)
+            {
+                a.boxes.push(aabb(b));
+            }
+            if !self.entity_push || bits & (PUSH_LIVING | PUSH_BOAT) == 0 {
+                continue;
+            }
+            // Boats reach 0.2 farther; nothing else can touch the player (the ones after it
+            // push the moved player: anything its move can reach).
+            let margin = if before { [0.25; 3] } else { m };
+            if !near(&b, &p.bb, margin) || !t.client_ticks(e, loaded) {
+                continue;
+            }
+            // A spectator player has noClip and pushes nothing.
+            if t.is_spectator(e) {
+                continue;
+            }
+            // canBePushedBy: the pusher's and the player's team collision rules.
+            if let Some(teams) = teams {
+                let mut buf = [0u8; 36];
+                let name = match t.scoreboard_name(e) {
+                    Some(n) => n,
+                    None => e.uuid().hyphenated().encode_lower(&mut buf),
+                };
+                if !teams.may_push(name, own) {
+                    continue;
+                }
+            }
+            let kind = if bits & PUSH_BOAT != 0 {
+                ghast_physics::v1_16_5::PushKind::Boat
+            } else {
+                ghast_physics::v1_16_5::PushKind::Living
+            };
+            let rank = t.client_tick_rank(id).unwrap_or(u32::MAX);
+            let pusher = ghast_physics::v1_16_5::Pusher::new(pos, aabb(b), kind);
+            if before {
+                a.before.push((rank, pusher));
+            } else {
+                a.after.push((rank, pusher));
+            }
+        }
+        a.before.sort_by_key(|x| x.0);
+        a.after.sort_by_key(|x| x.0);
+        let p = &mut self.player;
+        for (_, pusher) in &a.before {
+            ghast_physics::v1_16_5::push_by(p, self.filed_pos, &self.world, pusher);
         }
     }
 
@@ -64,7 +398,11 @@ impl Sim16 {
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
         s.force_step_position = opts.force_step_position;
-        s.entities = opts.entities.map(ghast_entity::v1_16_5::Tracker::new);
+        s.entities = opts.entities.map(Self::tracker);
+        s.teams = s.entities.is_some().then(Box::default);
+        if let Some(n) = &opts.profile_name {
+            s.profile_name = n.as_str().into();
+        }
         if let Some(c) = opts.world {
             s.world = ghast_world::v1_16_5::World::new(c);
             s.block_entities = c.block_entities;
@@ -220,10 +558,22 @@ impl Sim for Sim16 {
             t.apply(raw)?;
         }
         use ghast_protocol::v1_16_5::play::clientbound as cb;
+        if raw.id == cb::id::TEAMS {
+            if let Some(t) = &mut self.teams
+                && !t.apply(&raw.body, super::teams::TeamLayout::Legacy1_16)
+            {
+                log::debug!("bad teams packet ({} B)", raw.body.len());
+            }
+            return Ok(());
+        }
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
                 w.apply_login(&raw.decode_as()?);
+                // A new world, a new scoreboard.
+                if let Some(t) = &mut self.teams {
+                    t.clear();
+                }
             }
             cb::id::RESPAWN => {
                 w.apply_respawn(&raw.decode_as()?);
@@ -278,6 +628,7 @@ impl Sim for Sim16 {
         let abilities = self.player.abilities;
         let food = self.player.food_level;
         self.player = ghast_physics::v1_16_5::PlayerState::new([0.0; 3], 0.0, 0.0);
+        self.filed_pos = [0.0; 3];
         self.player.abilities = abilities;
         self.player.food_level = food;
     }
@@ -407,8 +758,10 @@ impl Sim for Sim16 {
         if self.entity_config() == config {
             return;
         }
+        // Teams sent before are not known (all pushes allowed).
+        self.teams = config.is_some().then(Box::default);
         self.entities = config.map(|c| {
-            let mut t = ghast_entity::v1_16_5::Tracker::new(c);
+            let mut t = Self::tracker(c);
             self.session.replay(|r| {
                 if let Err(e) = t.apply(r) {
                     log::debug!("entity tracker: session packet 0x{:02x}: {e}", r.id);
@@ -419,10 +772,23 @@ impl Sim for Sim16 {
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
         self.entities
             .as_ref()
-            .map(|t| t.packet_ids().collect())
+            .map(|t| t.packet_ids().chain([cb::id::TEAMS]).collect())
             .unwrap_or_default()
+    }
+
+    #[inline(always)]
+    fn tick_entities(&mut self, pose: &mut Pose) {
+        // Without a tracker nothing ticks (`around` is only filled with one).
+        if self.entities.is_some() {
+            self.tick_tracked(pose);
+        }
+    }
+
+    fn set_entity_push(&mut self, on: bool) {
+        self.entity_push = on;
     }
 
     fn predict_air(&mut self, x: i32, y: i32, z: i32) {
@@ -461,7 +827,22 @@ impl Sim for Sim16 {
                     .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.id())))
             });
         }
-        ghast_physics::v1_16_5::tick(&mut self.player, &input, &self.world, &mut self.packets);
+        if self.entities.is_some() {
+            self.entities_around();
+            let around =
+                ghast_physics::v1_16_5::Surroundings::new().with_entities(&self.around.boxes);
+            ghast_physics::v1_16_5::tick_in(
+                &mut self.player,
+                &around,
+                &input,
+                &self.world,
+                &mut self.packets,
+            );
+        } else {
+            ghast_physics::v1_16_5::tick(&mut self.player, &input, &self.world, &mut self.packets);
+        }
+        // ClientWorld.checkEntityChunkPos after the player's tick.
+        self.filed_pos = self.player.pos;
         if self.force_step_position != ForceStepPosition::Off {
             let p = &mut self.player;
             let cur = p.pos;

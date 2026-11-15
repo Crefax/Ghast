@@ -1,5 +1,5 @@
 //! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/`,
-//! `oracle/cache/1.16.5/fuzz{,-edges,-extras}/`, `oracle/cache/1.12.2/fuzz{,-edges,-extras}/`, the 26.1 and 26.2 directories (or the file / directory in `GHAST_FUZZ`) produced by
+//! `oracle/cache/1.16.5/fuzz{,-edges,-extras,-entities}/`, `oracle/cache/1.12.2/fuzz{,-edges,-extras,-entities}/`, the 26.1 and 26.2 directories (or the file / directory in `GHAST_FUZZ`) produced by
 //! `oracle/run.sh fuzz`, compared bit for bit. The version is taken from the path.
 //!
 //! Needs the git-ignored oracle cache, so it is behind the `oracle-cache` feature:
@@ -30,9 +30,11 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/1.16.5/fuzz"),
             repo_root().join("oracle/cache/1.16.5/fuzz-edges"),
             repo_root().join("oracle/cache/1.16.5/fuzz-extras"),
+            repo_root().join("oracle/cache/1.16.5/fuzz-entities"),
             repo_root().join("oracle/cache/1.12.2/fuzz"),
             repo_root().join("oracle/cache/1.12.2/fuzz-edges"),
             repo_root().join("oracle/cache/1.12.2/fuzz-extras"),
+            repo_root().join("oracle/cache/1.12.2/fuzz-entities"),
             repo_root().join("oracle/cache/26.1/fuzz"),
             repo_root().join("oracle/cache/26.1/fuzz-edges"),
             repo_root().join("oracle/cache/26.1/fuzz-extras"),

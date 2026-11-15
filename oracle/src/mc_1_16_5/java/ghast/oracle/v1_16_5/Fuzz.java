@@ -348,7 +348,7 @@ final class Fuzz {
         return sc;
     }
 
-    private static void copyInto(Scenario src, Scenario sc) {
+    static void copyInto(Scenario src, Scenario sc) {
         sc.description = src.description;
         sc.outside = src.outside;
         sc.extraChunks.addAll(src.extraChunks);

@@ -286,7 +286,18 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
 - **1.12.2**: `ghast-physics::v1_12` (0 diffs against the 1.12.2 oracle) on the 1.12.2 chunk
   store. A fresh player is added to its chunk on the first tick its column is loaded and moves
   from the next one, as vanilla 1.9+ does; standing still sends no idle packets (only the
-  position refresh every 20 ticks). Recording is not available on 1.12.2 yet.
+  position refresh every 20 ticks). Recording is not available on 1.12.2 yet. With entity
+  tracking (`Interests::ENTITIES` or `ENTITY_TRACKING`) the player is pushed by the mobs, other
+  players and boats around it and collides with boats and live shulkers, as the 1.12.2 client
+  does (it pushes the local player itself): the sim keeps the entities' client positions
+  (interpolation over 3 ticks, boats 10), pushes after the player's tick in spawn order,
+  follows the team collision rules of the `teams` packet (players by the profile name they
+  spawned with) and skips spectator players; a boat breaks the lily pads it touches. Without
+  entity tracking none of this happens. Proven against the 1.12.2 oracle through the engine
+  (`tests/golden/1.12.2/entities.jsonl.gz` and a 2 M tick cached fuzz, 0 differences). Not
+  modelled: riding (the bot or the pushing entity), open shulkers, entities left from before a
+  same-dimension respawn that the server does not resend (vanilla ticks those before the
+  player).
 - **1.16.5**: `ghast-physics::v1_16_5` (0 diffs against the 1.16.5 oracle) on the 1.16.5 chunk
   store, fed the same way (teleports with relative flags, abilities, food, velocity). Its packet
   rules are 1.16's: teleport confirm + `position_look`, no packet at all on idle ticks

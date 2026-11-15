@@ -89,6 +89,7 @@ final class Recorder {
         j.field("auto_jump", sc.autoJump);
         j.field("soul_speed", sc.soulSpeed);
         j.field("depth_strider", sc.depthStrider);
+        Ents.header(j, sc);
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -114,6 +115,7 @@ final class Recorder {
         }
         j.key("state");
         state(j, run.player);
+        Ents.tickRecord(j, run);
         j.key("packets").beginArray();
         for (Packet<?> p : Harness.connection.sent) {
             packet(j, p);
@@ -152,6 +154,8 @@ final class Recorder {
             j.field("type", "abilities").field("invulnerable", a.invulnerable()).field("flying", a.flying())
                     .field("allow_flying", a.allowFlying()).field("creative", a.creative())
                     .fieldF32("fly_speed", a.flySpeed()).fieldF32("walk_speed", a.walkSpeed());
+        } else if (e instanceof Scenario.VersionEvent ve) {
+            Ents.event(j, ve);
         }
         j.endObject();
     }

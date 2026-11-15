@@ -198,10 +198,192 @@ pub fn state_json(p: &PlayerState, w: &v1_12::MemoryWorld, using_item: bool) -> 
     })
 }
 
+/// The team collision rules and tab-list game modes of a case with entities (`setup.entities`
+/// and the tick events), as far as the push rules read them: team name -> rule, scoreboard name
+/// -> team, player entity id -> game mode.
+#[derive(Default)]
+struct EntityRules {
+    rules: std::collections::HashMap<String, String>,
+    member_of: std::collections::HashMap<String, String>,
+    game_mode: std::collections::HashMap<i64, i64>,
+}
+
+impl EntityRules {
+    fn apply(&mut self, e: &Value) {
+        match e["type"].as_str().unwrap() {
+            "tab" => {
+                self.game_mode
+                    .insert(e["id"].as_i64().unwrap(), e["game_mode"].as_i64().unwrap());
+            }
+            "team" => {
+                let name = e["name"].as_str().unwrap().to_string();
+                let mode = e["mode"].as_i64().unwrap();
+                let members = e["members"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|m| m.as_str().unwrap().to_string());
+                if mode == 0 || mode == 2 {
+                    // An unknown rule name keeps the team's rule (new teams: always).
+                    let rule = e["rule"].as_str().unwrap();
+                    if ["always", "never", "pushOtherTeams", "pushOwnTeam"].contains(&rule) {
+                        self.rules.insert(name.clone(), rule.to_string());
+                    } else {
+                        self.rules
+                            .entry(name.clone())
+                            .or_insert_with(|| "always".into());
+                    }
+                }
+                match mode {
+                    0 | 3 => members.for_each(|m| {
+                        self.member_of.insert(m, name.clone());
+                    }),
+                    4 => members.for_each(|m| {
+                        if self.member_of.get(&m) == Some(&name) {
+                            self.member_of.remove(&m);
+                        }
+                    }),
+                    1 => {
+                        self.member_of.retain(|_, t| *t != name);
+                        self.rules.remove(&name);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn team(&self, who: &str) -> (Option<&String>, &str) {
+        match self.member_of.get(who) {
+            Some(t) => (Some(t), self.rules.get(t).map_or("always", String::as_str)),
+            None => (None, "always"),
+        }
+    }
+
+    /// `EntityPredicate.method_13025(pusher)` for the local player (`"oracle"`).
+    fn may_push(&self, pusher: &str) -> bool {
+        let (own, own_rule) = self.team(pusher);
+        let (theirs, their_rule) = self.team("oracle");
+        if own_rule == "never" || their_rule == "never" {
+            return false;
+        }
+        // The rule names read the other way round in vanilla's test (`pushOwnTeam` is
+        // HIDE_FOR_OWN_TEAM, `pushOtherTeams` HIDE_FOR_OTHER_TEAMS).
+        let same = own.is_some() && own == theirs;
+        if (own_rule == "pushOwnTeam" || their_rule == "pushOwnTeam") && same {
+            return false;
+        }
+        (own_rule != "pushOtherTeams" && their_rule != "pushOtherTeams") || same
+    }
+}
+
+fn aabb_of(v: &Value) -> ghast_physics::math::Aabb {
+    let c: Vec<f64> = v.as_array().unwrap().iter().map(f64_of).collect();
+    ghast_physics::math::Aabb::new(c[0], c[1], c[2], c[3], c[4], c[5])
+}
+
+/// The scoreboard name of a recorded entity: `p<id>` for players, else its UUID string
+/// (most `0x656e74`, least the id).
+fn scoreboard_name(e: &Value) -> String {
+    let id = e["id"].as_u64().unwrap();
+    if e["type"] == "player" {
+        format!("p{id}")
+    } else {
+        format!("00000000-0065-6e74-0000-{id:012x}")
+    }
+}
+
+/// The entity boxes the player collides with in tick record `rec` (boats and live shulkers, as
+/// they are when the player ticks) and the pushes of the entities ticking after it.
+/// The entity side of one tick record.
+#[derive(Default)]
+struct EntityInputs {
+    /// Boxes the player collides with.
+    solid: Vec<ghast_physics::math::Aabb>,
+    /// Pushes of the entities ticking before / after the player.
+    before: Vec<v1_12::Pusher>,
+    after: Vec<v1_12::Pusher>,
+    /// Boxes of the boats after their ticks (they break lily pads), before / after the player.
+    boats_before: Vec<ghast_physics::math::Aabb>,
+    boats_after: Vec<ghast_physics::math::Aabb>,
+}
+
+/// Removes the lily pads the boats with these boxes break.
+fn break_lily_pads(world: &mut v1_12::MemoryWorld, boats: &[ghast_physics::math::Aabb]) {
+    let mut hit = Vec::new();
+    for bb in boats {
+        v1_12::lily_pads_broken_by_boat(world, bb, &mut hit);
+    }
+    for [x, y, z] in hit {
+        world.set_raw(x, y, z, 0);
+    }
+}
+
+fn entity_inputs(rec: &Value, rules: &EntityRules) -> EntityInputs {
+    let mut out = EntityInputs::default();
+    let Some(list) = rec.get("entities").and_then(Value::as_array) else {
+        return out;
+    };
+    let mut before_player = true;
+    for e in list {
+        if e.get("player").is_some() {
+            before_player = false;
+            continue;
+        }
+        let name = e["type"].as_str().unwrap();
+        let removed = e.get("removed").is_some();
+        // Entities before the player have ticked when it moves.
+        let at_tick = if before_player {
+            e.get("post")
+        } else {
+            e.get("pre")
+        };
+        if v1_12::collides(name)
+            && let Some(bb) = at_tick
+        {
+            // A shulker collides while alive; a removed boat is still in its chunk's list.
+            let alive = !removed && e.get("alive").is_none_or(b);
+            if name == "boat" || alive {
+                out.solid.push(aabb_of(bb));
+            }
+        }
+        if removed {
+            continue;
+        }
+        if name == "boat" {
+            let bb = aabb_of(&e["post"]);
+            if before_player {
+                out.boats_before.push(bb);
+            } else {
+                out.boats_after.push(bb);
+            }
+        }
+        let living = !matches!(name, "boat" | "item" | "minecart");
+        let Some(kind) = v1_12::push_kind(name, living) else {
+            continue;
+        };
+        // A spectator player has noClip and pushes nothing.
+        if name == "player" && rules.game_mode.get(&e["id"].as_i64().unwrap()) == Some(&3) {
+            continue;
+        }
+        if !rules.may_push(&scoreboard_name(e)) {
+            continue;
+        }
+        let p = v1_12::Pusher::new(f3(&e["pos"]), aabb_of(&e["post"]), kind);
+        if before_player {
+            out.before.push(p);
+        } else {
+            out.after.push(p);
+        }
+    }
+    out
+}
+
 /// Replays one case. Returns the number of ticks compared or the first mismatch.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
-    let world = world_of(&case.header);
+    let mut world = world_of(&case.header);
     let t0 = &case.ticks[0];
     assert_eq!(t0["t"], 0);
     let mut p = player_of(&case.header, t0);
@@ -222,6 +404,14 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     }
     let mut out = Packets::new();
     let mut teleport_id = 0;
+    let mut rules = EntityRules::default();
+    for e in case.header["setup"]["entities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        rules.apply(e);
+    }
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
         let input = &rec["input"];
@@ -268,6 +458,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .collect();
                         p.apply_speed_attribute(f64_of(&e["base"]), &mods);
                     }
+                    "spawn" | "entity_move" | "entity_rel_move" | "remove_entity" => {}
+                    "tab" | "team" => rules.apply(e),
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -279,7 +471,29 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item,
         };
-        v1_12::tick(&mut p, &ti, &world, &mut out);
+        let ent = entity_inputs(rec, &rules);
+        break_lily_pads(&mut world, &ent.boats_before);
+        for pusher in &ent.before {
+            if p.added_to_chunk {
+                v1_12::push_by(&mut p, &world, pusher);
+            }
+        }
+        v1_12::tick_in(
+            &mut p,
+            &ti,
+            &world,
+            &v1_12::Options::default(),
+            &ent.solid,
+            &mut out,
+        );
+        // The other entities tick after the player and push it (only once it is in a chunk's
+        // entity list).
+        for pusher in &ent.after {
+            if p.added_to_chunk {
+                v1_12::push_by(&mut p, &world, pusher);
+            }
+        }
+        break_lily_pads(&mut world, &ent.boats_after);
         sent.extend(out.as_slice().iter().map(super::packet_json));
         if let Some(from) = std::env::var("GHAST_DEBUG_FROM")
             .ok()

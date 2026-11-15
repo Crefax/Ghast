@@ -1,6 +1,6 @@
 //! Replays oracle golden vectors (format: `oracle/README.md`) against `ghast_physics::v1_8` and
 //! compares every recorded field bit for bit.
-#![allow(dead_code)]
+#![allow(dead_code, unexpected_cfgs)]
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -14,7 +14,9 @@ use ghast_physics::{Abilities, Packets, TickInput};
 use ghast_physics::{Keys, Packet};
 use serde_json::{Value, json};
 
-#[cfg(feature = "v1_12")]
+// `v1_12_2`: the ghast-client name of the feature (its engine replays include this module;
+// `unexpected_cfgs` is allowed for that at the top).
+#[cfg(any(feature = "v1_12", feature = "v1_12_2"))]
 pub mod v112;
 #[cfg(feature = "v1_16_5")]
 pub mod v116;

@@ -61,6 +61,13 @@ pub(crate) struct Sim12 {
     session: SessionPackets,
     /// The world keeps block entities.
     block_entities: bool,
+    /// With entity tracking: the client side of the entities that push the player or are solid
+    /// for it, and the teams' collision rules.
+    near: Option<Box<Near12>>,
+    /// The player's scoreboard name (team rules).
+    profile_name: Box<str>,
+    /// Entities push the player (`Client::entity_push`).
+    entity_push: bool,
 }
 
 impl std::fmt::Debug for Sim12 {
@@ -85,6 +92,30 @@ impl Sim12 {
         self.world.set_block_state(x, y, z, st);
     }
 
+    /// Test hook: the player state (from an oracle record).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_set_player(&mut self, p: ghast_physics::v1_12::PlayerState) {
+        self.player = p;
+    }
+
+    /// Test hook: the player's scoreboard name (team rules).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_set_profile_name(&mut self, name: &str) {
+        self.profile_name = name.into();
+    }
+
     pub(crate) fn new() -> Self {
         Sim12 {
             world: ghast_world::v1_12::World::new(config()),
@@ -95,6 +126,9 @@ impl Sim12 {
             updates: BlockUpdates::default(),
             session: SessionPackets::default(),
             block_entities: false,
+            near: None,
+            profile_name: "".into(),
+            entity_push: true,
         }
     }
 
@@ -104,6 +138,10 @@ impl Sim12 {
         let mut s = Self::new();
         s.force_step_position = opts.force_step_position;
         s.entities = opts.entities.map(ghast_entity::v1_12::Tracker::new);
+        s.near = s.entities.is_some().then(Box::default);
+        if let Some(n) = &opts.profile_name {
+            s.profile_name = n.as_str().into();
+        }
         if let Some(c) = opts.world {
             s.world = ghast_world::v1_12::World::new(c);
             s.block_entities = c.block_entities;
@@ -118,6 +156,70 @@ impl Sim12 {
             );
         }
         s
+    }
+}
+
+impl Sim12 {
+    /// The player's tick next to tracked entities: with the boxes of the boats and shulkers
+    /// around it. Out of line, so the tick without entities stays the plain one.
+    #[cold]
+    #[inline(never)]
+    fn step_near(&mut self, pose: &Pose, controls: Controls, using_item: bool) {
+        let input = ghast_physics::TickInput {
+            keys: keys(controls),
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            using_item,
+        };
+        let (Some(n), Some(t)) = (self.near.as_deref_mut(), self.entities.as_ref()) else {
+            return;
+        };
+        n.solids(t, &self.world, &self.player);
+        ghast_physics::v1_12::tick_in(
+            &mut self.player,
+            &input,
+            &self.world,
+            &ghast_physics::v1_12::Options::default(),
+            &n.solids,
+            &mut self.packets,
+        );
+    }
+
+    /// `World.tickEntities` after the player: the entities interpolate, the boats break lily
+    /// pads, then they push the player.
+    #[cold]
+    #[inline(never)]
+    fn tick_near(&mut self, pose: &mut Pose) {
+        let (Some(n), Some(t)) = (self.near.as_deref_mut(), self.entities.as_ref()) else {
+            return;
+        };
+        // The destroyed boats have left their chunks' entity lists.
+        n.ghosts.clear();
+        if n.list.is_empty() {
+            return;
+        }
+        let p = &mut self.player;
+        // Only a ticking player is in its chunk's entity list, where the pushers find it; the
+        // bot riding or carrying something is not pushed (not modelled).
+        let pushing = self.entity_push
+            && p.added_to_chunk
+            && !p.removed
+            && !t
+                .me()
+                .is_some_and(|m| m.vehicle().is_some() || !m.passengers().is_empty());
+        n.tick(t, &self.world, &p.bb, pushing, &self.profile_name);
+        let mut changed = false;
+        for (_, pusher) in &n.pushers {
+            changed |= ghast_physics::v1_12::push_by(p, &self.world, pusher);
+        }
+        if changed {
+            pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+        }
+        // A boat's tick breaks the lily pads it touches in the client's world.
+        for &[x, y, z] in &n.lily_pads {
+            self.world
+                .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
+        }
     }
 }
 
@@ -215,8 +317,33 @@ impl Sim for Sim12 {
             && t.wants(raw.id)
         {
             t.apply(raw)?;
+            if let Some(n) = &mut self.near {
+                n.packet(t, raw);
+            }
         }
         use ghast_protocol::v1_12_2::play::clientbound as cb;
+        if raw.id == cb::id::TEAMS {
+            if let Some(n) = &mut self.near
+                && !n
+                    .teams
+                    .apply(&raw.body, super::teams::TeamLayout::Legacy1_12)
+            {
+                log::debug!("bad teams packet ({} B)", raw.body.len());
+            }
+            return Ok(());
+        }
+        if let Some(n) = &mut self.near
+            && matches!(
+                raw.id,
+                cb::id::MAP_CHUNK
+                    | cb::id::BLOCK_CHANGE
+                    | cb::id::MULTI_BLOCK_CHANGE
+                    | cb::id::LOGIN
+                    | cb::id::RESPAWN
+            )
+        {
+            n.world_version = n.world_version.wrapping_add(1);
+        }
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
@@ -364,13 +491,27 @@ impl Sim for Sim12 {
             });
             t
         });
+        // The tracker starts empty (entities spawned before are known once the server resends
+        // them), and teams sent before are not known (all pushes allowed).
+        self.near = self.entities.is_some().then(Box::default);
     }
 
     fn entity_packet_ids(&self) -> Vec<i32> {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
         self.entities
             .as_ref()
-            .map(|t| t.packet_ids().collect())
+            .map(|t| t.packet_ids().chain([cb::id::TEAMS]).collect())
             .unwrap_or_default()
+    }
+
+    fn tick_entities(&mut self, pose: &mut Pose) {
+        if self.near.is_some() {
+            self.tick_near(pose);
+        }
+    }
+
+    fn set_entity_push(&mut self, on: bool) {
+        self.entity_push = on;
     }
 
     fn predict_air(&mut self, x: i32, y: i32, z: i32) {
@@ -390,14 +531,18 @@ impl Sim for Sim12 {
         entity_id: i32,
         out: &mut Vec<Outbound>,
     ) {
-        let input = ghast_physics::TickInput {
-            keys: keys(controls),
-            yaw: pose.yaw,
-            pitch: pose.pitch,
-            using_item,
-        };
         self.packets.clear();
-        ghast_physics::v1_12::tick(&mut self.player, &input, &self.world, &mut self.packets);
+        if self.near.as_deref().is_some_and(|n| !n.idle()) {
+            self.step_near(pose, controls, using_item);
+        } else {
+            let input = ghast_physics::TickInput {
+                keys: keys(controls),
+                yaw: pose.yaw,
+                pitch: pose.pitch,
+                using_item,
+            };
+            ghast_physics::v1_12::tick(&mut self.player, &input, &self.world, &mut self.packets);
+        }
         if self.force_step_position != ForceStepPosition::Off {
             let p = &mut self.player;
             let cur = [p.pos[0], p.bb.min_y, p.pos[2]];
@@ -425,4 +570,398 @@ fn sync_pose_12(pose: &mut Pose, p: &ghast_physics::v1_12::PlayerState) {
     pose.flying = p.abilities.flying;
     pose.sneaking = p.sneaking();
     pose.sprinting = p.sprinting;
+}
+
+// ---- 1.12.2: entities pushing the player, entities it collides with --------------------------
+
+/// What a tracked entity does to the 1.12 player on the client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Class12 {
+    /// A living entity: `tickCramming` pushes the player; interpolates over 3 ticks.
+    Living,
+    /// Another player: pushes like a living entity unless it is a spectator.
+    Player,
+    /// A boat: pushes from its tick, solid for the player; interpolates over 10 ticks.
+    Boat,
+    /// A shulker: pushes like a living entity, solid while alive; never interpolates (the
+    /// client snaps it to its attached block).
+    Shulker,
+}
+
+/// The 1.12 class of a tracked entity, `None` when it neither pushes nor collides: bats,
+/// parrots, armor stands, the ender dragon, minecarts, items, projectiles, …
+fn class_12(e: &ghast_entity::Entity) -> Option<Class12> {
+    use ghast_entity::EntityType as T;
+    match e.entity_type() {
+        T::Player => Some(Class12::Player),
+        // Spawn-object type 1.
+        T::LegacyObject(1) => Some(Class12::Boat),
+        t @ T::LegacyMob(_) => match ghast_entity::v1_12::info(t)?.name {
+            "shulker" => Some(Class12::Shulker),
+            "bat" | "parrot" | "armor_stand" | "ender_dragon" => None,
+            _ => Some(Class12::Living),
+        },
+        _ => None,
+    }
+}
+
+/// How far from the player boats break lily pads in the client's world here (vanilla: every
+/// ticking boat; the server breaks them as well and sends the change).
+const LILY_PAD_REACH: f64 = 16.0;
+
+/// The client side of one entity that pushes the player or is solid for it.
+#[derive(Clone, Debug)]
+struct Client12 {
+    id: i32,
+    /// Order in the client's entity list (spawn order).
+    seq: u64,
+    class: Class12,
+    /// Client position (`x`, `y`, `z` after the interpolation steps so far; a shulker's is
+    /// the server's, see [`Client12::placed`]).
+    pos: [f64; 3],
+    /// Interpolation target and remaining steps (`serverX`… / `bodyTrackingIncrements`, the
+    /// boat's own fields).
+    target: [f64; 3],
+    steps: u8,
+    /// Size (from the tracker at spawn and after each metadata packet).
+    dims: ghast_data::EntityDimensions,
+    /// Position and box as the client has them now (from `pos`).
+    at: [f64; 3],
+    bb: ghast_physics::math::Aabb,
+    /// A player's profile name from its tab-list entry at spawn (`OtherClientPlayerEntity`
+    /// keeps that profile: its scoreboard name for the team rules).
+    name: Option<Box<str>>,
+    /// A boat: the box and world version of its last lily pad scan (a boat that has not moved
+    /// in an unchanged world breaks nothing new).
+    scanned: Option<(ghast_physics::math::Aabb, u32)>,
+}
+
+impl Client12 {
+    /// Recomputes [`Client12::at`] / [`Client12::bb`] from the position.
+    fn placed(&mut self) {
+        if self.class == Class12::Shulker {
+            // ShulkerEntity.tick snaps it to its attached block (the server keeps that block
+            // under the position it sends): the unit cube there.
+            let [x, y, z] = self.pos;
+            let (x, y, z) = (x.floor() + 0.5, y.floor(), z.floor() + 0.5);
+            self.at = [x, y, z];
+            self.bb =
+                ghast_physics::math::Aabb::new(x - 0.5, y, z - 0.5, x + 0.5, y + 1.0, z + 0.5);
+        } else {
+            self.at = self.pos;
+            self.bb = self
+                .dims
+                .bounding_box(self.pos[0], self.pos[1], self.pos[2]);
+        }
+    }
+
+    /// `updateTrackedPositionAndAngles` with the client's step count: 10 for boats, 3 else.
+    /// A shulker ignores it; the client snaps it to its attached block, which the server keeps
+    /// under the position it sends (so it follows that position here).
+    fn interpolate_to(&mut self, target: [f64; 3]) {
+        match self.class {
+            Class12::Shulker => {
+                self.pos = target;
+                self.target = target;
+                self.placed();
+            }
+            Class12::Boat => {
+                self.target = target;
+                self.steps = 10;
+            }
+            Class12::Living | Class12::Player => {
+                self.target = target;
+                self.steps = 3;
+            }
+        }
+    }
+
+    /// One interpolation step of the entity's client tick.
+    #[inline]
+    fn step(&mut self) {
+        if self.steps > 0 {
+            let n = f64::from(self.steps);
+            for k in 0..3 {
+                self.pos[k] += (self.target[k] - self.pos[k]) / n;
+            }
+            self.steps -= 1;
+            self.placed();
+        }
+    }
+}
+
+/// `true` when box `b` is farther than `r` from the box `p`.
+#[inline]
+fn far(b: &ghast_physics::math::Aabb, p: &ghast_physics::math::Aabb, r: [f64; 3]) -> bool {
+    b.max_x < p.min_x - r[0]
+        || b.min_x > p.max_x + r[0]
+        || b.max_y < p.min_y - r[1]
+        || b.min_y > p.max_y + r[1]
+        || b.max_z < p.min_z - r[2]
+        || b.min_z > p.max_z + r[2]
+}
+
+/// 1.12 entities around the player as the client moves them: positions after the client's
+/// interpolation (the tracker keeps the server's), pushes after the player's tick
+/// (`World.tickEntities`: entities spawned after the player tick after it) and the boxes it
+/// collides with (`World.doesBoxCollide`). Riding (the bot or the other entity) is not
+/// modelled: such entities neither push nor collide here.
+#[derive(Debug, Default)]
+pub(crate) struct Near12 {
+    /// Every tracked entity that pushes or collides (dense; `index` finds one by id).
+    list: Vec<Client12>,
+    index: std::collections::HashMap<i32, u32>,
+    seq: u64,
+    /// Boats in `list`.
+    boats: usize,
+    /// Boats destroyed since the player's last tick: vanilla's world keeps them in their chunk's
+    /// entity list until its entity loop reaches them, after the player moved.
+    ghosts: Vec<ghast_physics::math::Aabb>,
+    /// Scratch: this tick's solid boxes, pushers and broken lily pads.
+    solids: Vec<ghast_physics::math::Aabb>,
+    pushers: Vec<(u64, ghast_physics::v1_12::Pusher)>,
+    lily_pads: Vec<[i32; 3]>,
+    /// Bumped by every block packet (lily pads may have appeared).
+    pub(super) world_version: u32,
+    /// The teams' collision rules (`teams` packets).
+    pub(super) teams: super::teams::Teams,
+}
+
+/// The first VarInt of a body (the entity id of spawn and move packets).
+fn first_varint(body: &[u8]) -> Option<i32> {
+    let mut v: u32 = 0;
+    for (k, &b) in body.iter().take(5).enumerate() {
+        v |= u32::from(b & 0x7f) << (7 * k);
+        if b & 0x80 == 0 {
+            return Some(v as i32);
+        }
+    }
+    None
+}
+
+impl Near12 {
+    /// Nothing to tick and no ghost boxes.
+    fn idle(&self) -> bool {
+        self.list.is_empty() && self.ghosts.is_empty()
+    }
+
+    fn get_mut(&mut self, id: i32) -> Option<&mut Client12> {
+        let &k = self.index.get(&id)?;
+        self.list.get_mut(k as usize)
+    }
+
+    /// Follows one entity packet the tracker has just applied.
+    fn packet(&mut self, t: &ghast_entity::v1_12::Tracker, raw: &RawPacket) {
+        use ghast_protocol::v1_12_2::play::clientbound::id;
+        match raw.id {
+            id::LOGIN | id::RESPAWN => {
+                self.list.clear();
+                self.index.clear();
+                self.boats = 0;
+                self.ghosts.clear();
+                if raw.id == id::LOGIN {
+                    // A new play phase: a new client scoreboard.
+                    self.teams.clear();
+                }
+            }
+            id::SPAWN_ENTITY | id::SPAWN_ENTITY_LIVING | id::NAMED_ENTITY_SPAWN => {
+                let Some(eid) = first_varint(&raw.body) else {
+                    return;
+                };
+                // ClientWorld.addEntity: an entity with the same id leaves the world first.
+                self.remove(eid);
+                if let Some(e) = t.get(eid)
+                    && let Some(class) = class_12(e)
+                    && let Some(dims) = e.dimensions()
+                {
+                    self.seq += 1;
+                    self.boats += usize::from(class == Class12::Boat);
+                    let pos = e.position();
+                    let mut c = Client12 {
+                        id: eid,
+                        seq: self.seq,
+                        class,
+                        pos,
+                        target: pos,
+                        steps: 0,
+                        dims,
+                        at: pos,
+                        bb: ghast_physics::math::Aabb::FULL,
+                        name: t.player_name(eid).map(Into::into),
+                        scanned: None,
+                    };
+                    c.placed();
+                    self.index.insert(eid, self.list.len() as u32);
+                    self.list.push(c);
+                }
+            }
+            id::ENTITY_TELEPORT => {
+                let Some(eid) = first_varint(&raw.body) else {
+                    return;
+                };
+                if let (Some(c), Some(e)) = (self.get_mut(eid), t.get(eid)) {
+                    let d = e.position();
+                    // onEntityPosition: a teleport within 1/32 (1/64 vertically) of the client
+                    // position keeps it and ends the interpolation.
+                    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+                    let tiny = !((c.pos[0] - d[0]).abs() >= 0.03125)
+                        && !((c.pos[1] - d[1]).abs() >= 0.015625)
+                        && !((c.pos[2] - d[2]).abs() >= 0.03125);
+                    if tiny && c.class != Class12::Shulker {
+                        c.target = c.pos;
+                        c.steps = 0;
+                    } else {
+                        c.interpolate_to(d);
+                    }
+                }
+            }
+            id::REL_ENTITY_MOVE | id::ENTITY_MOVE_LOOK | id::ENTITY_LOOK | id::ENTITY => {
+                // onEntityUpdate: towards the tracked position (1/4096 grid on every axis).
+                let Some(eid) = first_varint(&raw.body) else {
+                    return;
+                };
+                if let (Some(c), Some(e)) = (self.get_mut(eid), t.get(eid)) {
+                    c.interpolate_to(e.position());
+                }
+            }
+            id::ENTITY_METADATA => {
+                // Size variants (babies, slime sizes) follow the metadata.
+                let Some(eid) = first_varint(&raw.body) else {
+                    return;
+                };
+                if let (Some(c), Some(e)) = (self.get_mut(eid), t.get(eid))
+                    && let Some(d) = e.dimensions()
+                    && d != c.dims
+                {
+                    c.dims = d;
+                    c.placed();
+                }
+            }
+            id::ENTITY_DESTROY => {
+                let mut r = ghast_protocol::Reader::new(&raw.body);
+                let Ok(n) = r.read_varint() else { return };
+                for _ in 0..n.max(0) {
+                    let Ok(eid) = r.read_varint() else { return };
+                    self.remove(eid);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn remove(&mut self, eid: i32) {
+        let Some(k) = self.index.remove(&eid) else {
+            return;
+        };
+        let c = self.list.swap_remove(k as usize);
+        if let Some(moved) = self.list.get(k as usize) {
+            self.index.insert(moved.id, k);
+        }
+        if c.class == Class12::Boat {
+            self.boats -= 1;
+            self.ghosts.push(c.bb);
+        }
+    }
+
+    /// The entity takes part (its column is loaded, it rides nothing and carries nothing).
+    fn present(
+        t: &ghast_entity::v1_12::Tracker,
+        world: &ghast_world::v1_12::World,
+        c: &Client12,
+    ) -> bool {
+        let Some(e) = t.get(c.id) else { return false };
+        e.vehicle().is_none()
+            && e.passengers().is_empty()
+            && world.is_column_loaded((c.at[0].floor() as i32) >> 4, (c.at[2].floor() as i32) >> 4)
+    }
+
+    /// This tick's boxes the player collides with: boats and live shulkers within reach of any
+    /// move of the tick, and the boats destroyed since the last tick.
+    fn solids(
+        &mut self,
+        t: &ghast_entity::v1_12::Tracker,
+        world: &ghast_world::v1_12::World,
+        p: &ghast_physics::v1_12::PlayerState,
+    ) {
+        self.solids.clear();
+        let riding = t.me().is_some_and(|m| m.vehicle().is_some());
+        let reach = |v: f64| v.abs() + 3.0;
+        let r = [reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2])];
+        for c in &self.list {
+            if !matches!(c.class, Class12::Boat | Class12::Shulker)
+                || far(&c.bb, &p.bb, r)
+                || riding
+                || !Self::present(t, world, c)
+            {
+                continue;
+            }
+            // ShulkerEntity.getBox: only while alive.
+            if c.class == Class12::Shulker
+                && !t
+                    .get(c.id)
+                    .and_then(ghast_entity::v1_12::health)
+                    .is_none_or(|h| h > 0.0)
+            {
+                continue;
+            }
+            self.solids.push(c.bb);
+        }
+        self.solids.extend_from_slice(&self.ghosts);
+    }
+
+    /// The entities' client ticks after the player's: one interpolation step each, the lily
+    /// pads the boats near the player break (`lily_pads_broken_by_boat`; farther ones are left
+    /// to the server), and the entities whose tick pushes the player, in tick order, into
+    /// `pushers` (when `pushing`).
+    fn tick(
+        &mut self,
+        t: &ghast_entity::v1_12::Tracker,
+        world: &ghast_world::v1_12::World,
+        p: &ghast_physics::math::Aabb,
+        pushing: bool,
+        profile_name: &str,
+    ) {
+        use ghast_physics::v1_12::{PushKind, Pusher};
+        self.pushers.clear();
+        self.lily_pads.clear();
+        let version = self.world_version;
+        for c in &mut self.list {
+            c.step();
+            if c.class == Class12::Boat
+                && c.scanned != Some((c.bb, version))
+                && !far(&c.bb, p, [LILY_PAD_REACH; 3])
+                && Self::present(t, world, c)
+            {
+                ghast_physics::v1_12::lily_pads_broken_by_boat(world, &c.bb, &mut self.lily_pads);
+                c.scanned = Some((c.bb, version));
+            }
+            // Boats reach 0.2 farther; nothing else can touch the player.
+            if !pushing || far(&c.bb, p, [0.25; 3]) || !Self::present(t, world, c) {
+                continue;
+            }
+            let Some(e) = t.get(c.id) else { continue };
+            // A spectator player has noClip (set in its tick) and pushes nothing.
+            if c.class == Class12::Player && t.tab_game_mode(&e.uuid()) == Some(3) {
+                continue;
+            }
+            // EntityPredicate.method_13025: the pusher's and the player's team rules.
+            if self.teams.any_rule() {
+                let mut buf = [0u8; 36];
+                let name: &str = match &c.name {
+                    Some(n) => n,
+                    None => e.uuid().hyphenated().encode_lower(&mut buf),
+                };
+                if !self.teams.may_push(name, profile_name) {
+                    continue;
+                }
+            }
+            let kind = if c.class == Class12::Boat {
+                PushKind::Boat
+            } else {
+                PushKind::Living
+            };
+            self.pushers.push((c.seq, Pusher::new(c.at, c.bb, kind)));
+        }
+        self.pushers.sort_unstable_by_key(|x| x.0);
+    }
 }

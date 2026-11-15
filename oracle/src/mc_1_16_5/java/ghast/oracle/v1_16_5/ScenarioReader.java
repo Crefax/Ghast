@@ -128,6 +128,7 @@ final class ScenarioReader {
         sc.autoJump = s.has("auto_jump") && s.get("auto_jump").getAsBoolean();
         sc.soulSpeed = s.has("soul_speed") ? s.get("soul_speed").getAsInt() : 0;
         sc.depthStrider = s.has("depth_strider") ? s.get("depth_strider").getAsInt() : 0;
+        Ents.readSetup(s, sc);
         return sc;
     }
 
@@ -174,7 +175,13 @@ final class ScenarioReader {
                         }
                         events.add(new Scenario.Effects(List.copyOf(fx)));
                     }
-                    default -> throw new IllegalArgumentException("unknown event " + ev);
+                    default -> {
+                        Scenario.VersionEvent ve = Ents.readEvent(ev);
+                        if (ve == null) {
+                            throw new IllegalArgumentException("unknown event " + ev);
+                        }
+                        events.add(ve);
+                    }
                 }
             }
         }

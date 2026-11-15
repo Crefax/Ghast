@@ -45,3 +45,10 @@ fn fuzz_seed1_1_16_5() {
 fn fuzz_edges_seed1_1_16_5() {
     check("fuzz_edges_seed1.jsonl.gz");
 }
+
+/// Other entities: collision with boats and shulkers, pushes by mobs, other players and boats,
+/// team collision rules (hand cases + the golden entities fuzz).
+#[test]
+fn entities_1_16_5() {
+    check("entities.jsonl.gz");
+}

@@ -589,7 +589,8 @@ much of the movement code unnamed: `travel` is `LivingEntity.method_2657`, the i
 `Entity.method_2492`; see its "Names to read carefully" table). Output: `tests/golden/1.12.2/` with the
 same file names as 1.8.9 (`scenarios` 112 cases, `fuzz_seed1` and `fuzz_edges_seed1` 100 x 60,
 `collision_boxes`, `collision_boxes_far`, `selection_boxes`, `raytrace`, `entity_sizes`, `recipes`,
-`clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes`.
+`clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes` and
+`entities` (see "1.12.2 entities").
 
 Setup: the remapped jar needs `remap.stripParameterAnnotations` (javac rejects some inner-class
 constructor annotation tables), `remap.fixPackageAccess` and `remap.publicProtected` (protected members
@@ -618,8 +619,9 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
   `interactItem` (`method_12234`, sends `use_item` with the hand); falling edge → `stopUsingItem`
   (`block_dig` status 5). While the hand is active the input is ×0.2.
 - Effects are sent by id like 1.8.9; 25 = levitation (in the fuzz and the `levitation*` scenarios).
-- Not covered: elytra / fall flying (needs the server flag), vehicles, entity collisions (boats,
-  shulkers), frost walker, auto-jump on.
+- Not covered: elytra / fall flying (needs the server flag), vehicles (riding), frost walker,
+  auto-jump on. Other entities around the player (pushes, boat and shulker collisions): see
+  "1.12.2 entities" below.
 
 ### 1.12.2 format differences (vs 1.8.9)
 
@@ -684,6 +686,65 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
   `{"i", "name", "type":"shapeless", "in":…, "out":hex}`, `{"i", "name", "type":"special", "class"}` in
   `RecipeDispatcher.REGISTRY` order (the order `matches` tries); every ingredient is the list of stacks
   it accepts (empty list = empty cell), data 32767 = any.
+
+### 1.12.2 entities (`entities.jsonl.gz`)
+
+Vanilla 1.12.2 pushes the local player on the client: `LivingEntity.tickMovement` ends with
+`tickCramming()` (no client guard), whose `EntityPredicate.method_13025` lets exactly the main
+player through on the client; `OtherClientPlayerEntity.tickMovement` and `BoatEntity.tick` push
+the same way. Boats and live shulkers are solid for the player (`getBox`, added by
+`World.doesBoxCollide`). Command: `MC=1.12.2 oracle/run.sh entities [--only NAME]` (the hand
+cases) and `fuzz --entities true` (`EntityCases.fuzz`, cases `…_x_en`). The golden file has the 23
+hand cases and 60 fuzz cases × 60 ticks (seed 1).
+
+What is real: every entity arrives as a real server packet, built as wire bytes and decoded by the
+packet's own `read`, then handled by the real `ClientPlayNetworkHandler` (`onMobSpawn`,
+`onEntitySpawn` for boats / items / minecarts / armor stands, `onPlayerSpawn` after an
+`onPlayerList` entry, `onEntityPosition`, `onEntityUpdate` for relative moves,
+`onEntitiesDestroy`, `onPlayerList` game mode updates, `onTeam`); the client then ticks them in
+`World.tickEntities` after the player. What is faked: `MinecraftClient.currentThread` is set to the
+harness thread while a packet is handled (`NetworkThreadUtils.forceMainThread`); the player gets
+entity id 1 (the join packet's id) in cases with entities. No entity metadata is sent: entities
+keep their client defaults (adult, default slime size, a closed shulker without an attached
+block; shulkers are spawned at block centres and never moved, a server moves them by their
+attached block). Riding is not covered.
+
+Format: header `setup.entities` lists the setup events, ticks carry them in `input.events`:
+`{"type":"spawn","id","entity","pos","yaw"}` (`entity`: registry path, e.g. `zombie`,
+`villager_golem`, `boat`, or `player` with UUID `706c6179-…` and name `p<id>`; other entities
+have UUID `656e74-…`), `entity_move` (teleport: `pos`, `yaw`, `on_ground`), `entity_rel_move`
+(`dx`, `dy`, `dz` in 1/4096, `on_ground`), `remove_entity`, `tab` (`id`, `add`, `game_mode`) and
+`team` (`name`, `mode` 0 create / 1 remove / 2 update / 3 add / 4 remove members, `rule`,
+`members`: scoreboard names, `oracle` for the player). Tick records add `entities`: the world's
+entity list in tick order (the player as `{"id":1,"player":true}`), each with `type`, `pre` (box
+before the tick), `post`, `pos` (after it) and `alive`; an entity removed by a packet before the
+tick is listed with `removed` and no `post`. Cases: a zombie overlapping the player, crowds and
+mobs of several sizes, walking into cows and an iron golem, armor stands / bats / parrots / items /
+minecarts (no push, no collision), boats (collide, push, standing on a boat that drives away),
+shulkers, mobs moved by teleports, by relative moves and by teleports under 1/32 block, a ladder,
+the player as a spectator, sneaking, in water, mobs spawned and removed mid-case, other players
+(creative, spectator, game mode changes), and the team collision rules (`never` on either side,
+`pushOtherTeams`, `pushOwnTeam`, rule and member changes). Quirks:
+
+- Interpolation: living entities and other players move to a teleport or relative move target
+  over 3 ticks, boats over 10; a teleport within 1/32 block (1/64 vertically) of the client
+  position keeps that position and ends the interpolation; shulkers ignore position packets.
+- `Entity.pushAwayFrom` takes the root with `MathHelper.sqrt(double)`, which rounds to `float`.
+- The rule names read inverted in `method_13025`: `pushOtherTeams` (HIDE_FOR_OTHER_TEAMS) lets only
+  the same team push, `pushOwnTeam` (HIDE_FOR_OWN_TEAM) stops pushes within the team.
+- A boat removed by a packet before the tick still collides with the player in that tick (it is
+  still in its chunk's entity list until the world's entity loop reaches it).
+- A boat's tick (`checkBlockCollision`) breaks the lily pads its box touches in the client's
+  world (`LilyPadBlock.onEntityCollision`).
+- More than 23 entities in one box would make `tickCramming` draw from the pusher's random (the
+  cramming damage); the cases stay below that.
+
+Big runs (git-ignored, replayed by the Rust large-fuzz test and by the ignored engine test
+`entities_cache_match_the_oracle_1_12_2`):
+
+```sh
+for s in 51 52 53 54 55 56 57 58 59 60; do MC=1.12.2 oracle/run.sh fuzz --entities true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-entities/entities_s$s.jsonl.gz"; done
+```
 
 ### 1.12.2 quirks (observed in the vectors)
 

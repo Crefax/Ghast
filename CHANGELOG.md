@@ -6,6 +6,51 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.5 — unreleased
+
+### Added
+
+- **1.12.2: entities push the player and boats / shulkers are solid, as on the vanilla
+  client** (`ghast-physics`, `ghast-client`). Vanilla 1.12.2 pushes the local player on the
+  client (`LivingEntity.tickCramming`, `OtherClientPlayerEntity.tickMovement`, `BoatEntity.tick`;
+  only the main player is pushable there) and collides it with boats and live shulkers in
+  `World.doesBoxCollide`; ghast did neither on 1.12.2. With entity tracking on, the 1.12.2 sim
+  now keeps the client-side positions of the entities that matter (interpolation over 3 ticks,
+  10 for boats, teleports under 1/32 block ignored), pushes the player after its tick in spawn
+  order (bats, parrots, armor stands and spectator players do not push; team collision rules
+  from the `teams` packet, by profile name for players), adds boat and shulker boxes to the
+  player's collision query (a boat destroyed by a packet still collides for that tick) and
+  breaks the lily pads a boat touches. New in `ghast-physics::v1_12`: `tick_in`, `push_by`,
+  `Pusher`, `PushKind`, `push_kind`, `collides`, `lily_pads_broken_by_boat`.
+  `Capabilities::client_entity_push` is now true for 1.12.2 (so `Interests::ENTITIES` alone also
+  keeps the names-only tab list there). Proof: the new oracle case kind `entities` (23 hand
+  cases + 60 fuzz cases, `tests/golden/1.12.2/entities.jsonl.gz`) replays with 0 differences
+  through the physics and through the engine, and a 2.0 M tick cached fuzz with 0 differences
+  through both. Cost: none without tracked entities (engine bench 18,324 → 18,325
+  instructions per tick); about 100 instructions per tick per tracked entity near the player.
+  Riding (the bot or the other entity) and open shulkers are not modelled.
+- **1.16.5: entities push the player and boats / shulkers are solid, as on the vanilla
+  client** (`ghast-physics`, `ghast-entity`, `ghast-client`). Vanilla 1.16.5 pushes the local
+  player on the client (`LivingEntity.tickCramming`, `OtherClientPlayerEntity.tickMovement`,
+  `BoatEntity.tick`) and collides it with boats and live shulkers (`Entity.isCollidable`);
+  ghast did neither on 1.16.5. With entity tracking on, the 1.16.5 tracker now keeps the
+  client-side positions and boxes of the entities (interpolation over 3 ticks, 10 for boats,
+  none for shulkers; boxes anchored as the client resizes them) and their order in the client
+  world's entity map, and the sim pushes the player in that order, before or after its own
+  tick as on the client (bats, parrots, armor stands, vexes, ender dragons and spectator
+  players do not push; team collision rules by profile name), adds boat and shulker boxes to
+  every collision query (movement, sneaking at an edge, pose changes, auto-jump) and applies
+  them in the client's order relative to blocks. New in `ghast-physics::v1_16_5`: `tick_in`,
+  `push_by`, `Pusher`, `PushKind`, `push_kind`, `collides`.
+  `Capabilities::client_entity_push` is now true for 1.16.5 (so `Interests::ENTITIES` alone
+  also keeps the names-only tab list there). Proof: the new oracle case kind `entities` (74
+  cases, 3,989 ticks, `tests/golden/1.16.5/entities.jsonl.gz`) replays with 0 differences
+  through the physics and through the engine (tick order, client boxes, velocity and packets,
+  with and without the metadata store), and a 1.0 M tick cached fuzz with 0 differences
+  through the physics. Not modelled: riding (the bot or the other entity), an opening shulker
+  moving the player, and entities that move themselves on the client (squids, ghasts,
+  phantoms are left out of the oracle cases).
+
 ## 0.4.4 — 2026-11-15
 
 Additive only: every 0.4.3 API stays. Many bots in one process (`Swarm`, `SharedChunks`) and less

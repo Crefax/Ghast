@@ -127,6 +127,7 @@ final class ScenarioReader {
         for (JsonElement e : s.getAsJsonArray("effects")) {
             sc.effect(e.getAsJsonArray().get(0).getAsInt(), e.getAsJsonArray().get(1).getAsInt());
         }
+        Ent.readHeader(s, sc);
         return sc;
     }
 
@@ -173,7 +174,13 @@ final class ScenarioReader {
                         }
                         events.add(new Scenario.Effects(List.copyOf(fx)));
                     }
-                    default -> throw new IllegalArgumentException("unknown event " + ev);
+                    default -> {
+                        Scenario.Event x = Ent.read(ev);
+                        if (x == null) {
+                            throw new IllegalArgumentException("unknown event " + ev);
+                        }
+                        events.add(x);
+                    }
                 }
             }
         }

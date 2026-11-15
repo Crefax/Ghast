@@ -13,14 +13,15 @@ use super::blocks::{
     ShapeCtx, bamboo_box, collision_boxes, flags, is_bed, is_climbable_at, jump_multiplier,
     should_suffocate, slipperiness, state_at, velocity_multiplier,
 };
-use super::collide::{BorderShape, Collider, bx, contract, offset};
+use super::collide::{BorderShape, Collider, EntityBoxes, NoEntities, bx, contract, offset};
+use super::entity::Surroundings;
 use super::fluid::{
     FluidContact, V3, ceil, fluid_at_point, height, region_loaded, update_in_fluid,
 };
 use crate::attribute::Modifiers;
 use crate::input::{Abilities, Keys, Packet, Packets, TickInput};
 use crate::math::{self, Aabb, floor};
-use crate::world::{BlockView, TickCache};
+use crate::world::{BlockView, TickCache, WorldBorder};
 
 /// Step-up height (`float`).
 pub const STEP_HEIGHT: f32 = 0.6;
@@ -415,6 +416,54 @@ pub fn tick<W: BlockView<State = BlockState>>(
     world: &W,
     out: &mut Packets,
 ) {
+    tick_among(p, NoEntities, input, world, out);
+}
+
+/// [`tick`] with other entities around: the player collides with the boxes in `around` (see
+/// [`super::entity`]; their pushes are [`super::push_by`], outside the player's tick).
+pub fn tick_in<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    around: &Surroundings<'_>,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    tick_among(p, around.entities, input, &Beside(world), out);
+}
+
+/// The world of the tick next to entities: its own type, so that tick is compiled apart from
+/// the plain one (sharing the block helpers would change how the plain tick is inlined).
+struct Beside<'a, W>(&'a W);
+
+impl<W: BlockView> BlockView for Beside<'_, W> {
+    type State = W::State;
+
+    #[inline(always)]
+    fn block(&self, x: i32, y: i32, z: i32) -> Self::State {
+        self.0.block(x, y, z)
+    }
+
+    #[inline(always)]
+    fn is_chunk_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.0.is_chunk_loaded(chunk_x, chunk_z)
+    }
+
+    #[inline(always)]
+    fn world_border(&self) -> WorldBorder {
+        self.0.world_border()
+    }
+}
+
+// Always inlined: each entry point keeps its own copy of the tick (the one without entities is
+// then the plain block-only tick).
+#[inline(always)]
+fn tick_among<W: BlockView<State = BlockState>, E: EntityBoxes>(
+    p: &mut PlayerState,
+    entities: E,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
     p.yaw = input.yaw;
     p.pitch = input.pitch;
     // The 1.16 client keeps ticking its own player even after `remove()` (below y = -64), and
@@ -426,19 +475,22 @@ pub fn tick<W: BlockView<State = BlockState>>(
         p,
         w: &cache,
         border: BorderShape::new(&world.world_border()),
+        entities,
     };
     t.player_tick(&input.keys, input.using_item, out);
     t.send_movement(out);
 }
 
-struct Ctx<'a, W> {
+struct Ctx<'a, W, E> {
     p: &'a mut PlayerState,
     w: &'a W,
     border: BorderShape,
+    /// Boxes of the entities the player collides with.
+    entities: E,
 }
 
-impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
-    fn collider(&self) -> Collider<'_, W> {
+impl<W: BlockView<State = BlockState>, E: EntityBoxes> Ctx<'_, W, E> {
+    fn collider(&self) -> Collider<'_, W, E> {
         Collider {
             w: self.w,
             border: &self.border,
@@ -446,6 +498,7 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
                 min_y: self.p.pos[1],
                 descending: self.p.input.sneaking,
             },
+            entities: self.entities,
         }
     }
 
@@ -1293,6 +1346,17 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
             }
             true
         });
+        // getCollisions: the entity boxes come after the blocks.
+        if !E::NONE && hit.is_none() && !self.entities.boxes().is_empty() {
+            hit = self
+                .entities
+                .boxes()
+                .iter()
+                .find(|e| {
+                    super::entity::collision_hit(&search, e) && (seg(e, a0, a1) || seg(e, b0, b1))
+                })
+                .copied();
+        }
         if let Some(bb) = hit {
             top = bb.max_y as f32;
             let c = V3::new(

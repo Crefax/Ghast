@@ -295,9 +295,9 @@ impl Client {
     }
 
     /// Whether other entities push the player (default on, like vanilla). Pushes happen only
-    /// with [`Interests::ENTITIES`] (26.1+: mobs, players and boats around the player push it
-    /// in the client's entity tick; 1.8.9 – 1.16.5 clients are never pushed by the client, so
-    /// the switch is a no-op there). **Off is not vanilla**: a vanilla client always applies
+    /// with [`Interests::ENTITIES`] (1.12.2 and 26.1+: mobs, players and boats around the
+    /// player push it in the client's entity tick; the 1.8.9 client is never pushed by the
+    /// client, and on 1.16.5 the switch is a no-op so far). **Off is not vanilla**: a vanilla client always applies
     /// these pushes itself; off keeps entity tracking (crosshair, attack, interact) without
     /// them. A behaviour can switch it at run time with [`TickContext::set_entity_push`](crate::TickContext::set_entity_push).
     #[must_use]
@@ -1537,7 +1537,7 @@ mod tests {
     }
 
     /// The tab-list packets pass the filter with `Interests::ENTITIES` alone only where the
-    /// sim uses them (client-side pushes, 26.1+); with `PLAYER_LIST` everywhere.
+    /// sim uses them (client-side pushes: 1.12.2, 26.1+); with `PLAYER_LIST` everywhere.
     #[test]
     fn tab_list_packets_follow_the_version() {
         use crate::sim::Sim;

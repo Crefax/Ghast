@@ -24,6 +24,25 @@ pub(crate) enum TeamLayout {
     /// 26.2: display name, prefix, suffix, name tag visibility, collision rule, optional
     /// colour (`TeamColor`), options byte.
     AffixesFirst,
+    /// 1.12.2 `teams`: display name, prefix and suffix as plain strings, options byte, name tag
+    /// visibility and collision rule as names, colour byte.
+    Legacy1_12,
+    /// 1.13 – 1.16.5 `teams`: display name (chat JSON), options byte, name tag visibility and
+    /// collision rule as names, colour (VarInt), prefix and suffix (chat JSON).
+    Legacy1_16,
+}
+
+/// A collision rule by its network name (`always`, `never`, `pushOtherTeams`, `pushOwnTeam`),
+/// as the 1.9 – 1.16 `teams` packet sends it. `None` for an unknown name: the client then
+/// keeps the team's rule (a new team's is `always`).
+pub(crate) fn rule_by_name(name: &str) -> Option<u8> {
+    Some(match name {
+        "always" => ALWAYS,
+        "never" => NEVER,
+        "pushOtherTeams" => PUSH_OTHER_TEAMS,
+        "pushOwnTeam" => PUSH_OWN_TEAM,
+        _ => return None,
+    })
 }
 
 /// The client scoreboard's teams as far as collision rules go.
@@ -102,7 +121,29 @@ impl Teams {
         } else {
             *self.by_name.get(&*name)?
         };
-        if mode == 0 || mode == 2 {
+        if (mode == 0 || mode == 2) && layout == TeamLayout::Legacy1_12 {
+            r.read_string().ok()?; // display name
+            r.read_string().ok()?; // prefix
+            r.read_string().ok()?; // suffix
+            r.read_u8().ok()?; // options
+            r.read_string().ok()?; // name tag visibility
+            let rule = r.read_string().ok()?;
+            r.read_u8().ok()?; // colour
+            if let Some(rule) = rule_by_name(&rule) {
+                self.set_rule(slot, rule);
+            }
+        } else if (mode == 0 || mode == 2) && layout == TeamLayout::Legacy1_16 {
+            r.read_string().ok()?; // display name
+            r.read_u8().ok()?; // options
+            r.read_string().ok()?; // name tag visibility
+            let rule = r.read_string().ok()?;
+            r.read_varint().ok()?; // colour
+            r.read_string().ok()?; // prefix
+            r.read_string().ok()?; // suffix
+            if let Some(rule) = rule_by_name(&rule) {
+                self.set_rule(slot, rule);
+            }
+        } else if mode == 0 || mode == 2 {
             AnonNbt::read(&mut r).ok()?; // display name
             let rule = match layout {
                 TeamLayout::RuleBeforeAffixes => {
@@ -114,6 +155,8 @@ impl Teams {
                     AnonNbt::read(&mut r).ok()?; // suffix
                     rule
                 }
+                // Read above.
+                TeamLayout::Legacy1_12 | TeamLayout::Legacy1_16 => return None,
                 TeamLayout::AffixesFirst => {
                     AnonNbt::read(&mut r).ok()?; // prefix
                     AnonNbt::read(&mut r).ok()?; // suffix
@@ -386,4 +429,60 @@ fn tests_packet(team: &str, mode: i8, rule: Option<i32>, players: &[&str]) -> By
         }
     }
     b.freeze()
+}
+
+/// The 1.12.2 `teams` layout: rules by name, an unknown name keeps the team's rule.
+#[cfg(test)]
+mod legacy_tests {
+    use super::*;
+    use bytes::BufMut;
+    use ghast_protocol::McWrite;
+
+    fn packet(team: &str, mode: i8, rule: &str, players: &[&str]) -> Bytes {
+        let mut b = bytes::BytesMut::new();
+        b.put_string(team).unwrap();
+        b.put_i8(mode);
+        if mode == 0 || mode == 2 {
+            b.put_string(team).unwrap(); // display name
+            b.put_string("").unwrap(); // prefix
+            b.put_string("").unwrap(); // suffix
+            b.put_u8(0); // options
+            b.put_string("always").unwrap(); // name tag visibility
+            b.put_string(rule).unwrap();
+            b.put_i8(-1); // colour
+        }
+        if mode == 0 || mode == 3 || mode == 4 {
+            b.put_varint(players.len() as i32);
+            for p in players {
+                b.put_string(p).unwrap();
+            }
+        }
+        b.freeze()
+    }
+
+    #[test]
+    fn legacy_1_12_layout() {
+        let mut t = Teams::default();
+        assert!(t.apply(
+            &packet("a", 0, "never", &["bot", "zed"]),
+            TeamLayout::Legacy1_12
+        ));
+        assert!(!t.may_push("zed", "bot"));
+        // An unknown rule name keeps the rule (ClientPlayNetworkHandler.onTeam).
+        assert!(t.apply(&packet("a", 2, "sometimes", &[]), TeamLayout::Legacy1_12));
+        assert_eq!(t.of("bot").1, NEVER);
+        // pushOtherTeams: only the same team pushes.
+        assert!(t.apply(
+            &packet("a", 2, "pushOtherTeams", &[]),
+            TeamLayout::Legacy1_12
+        ));
+        assert!(t.may_push("zed", "bot"));
+        assert!(!t.may_push("mob", "bot"));
+        assert!(t.apply(&packet("a", 4, "", &["bot"]), TeamLayout::Legacy1_12));
+        assert!(!t.may_push("zed", "bot"));
+        assert!(t.apply(&packet("a", 1, "", &[]), TeamLayout::Legacy1_12));
+        assert!(!t.any_rule() && t.may_push("zed", "bot"));
+        assert_eq!(rule_by_name("pushOwnTeam"), Some(PUSH_OWN_TEAM));
+        assert_eq!(rule_by_name("bogus"), None);
+    }
 }

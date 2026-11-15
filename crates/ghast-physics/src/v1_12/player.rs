@@ -380,7 +380,88 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
     p: &mut PlayerState,
     input: &TickInput,
     world: &W,
+    options: &Options,
+    out: &mut Packets,
+) {
+    tick_solid(p, input, world, options, NoSolids, out);
+}
+
+/// [`tick_with`] next to other entities the player collides with: `entities` are the boxes of
+/// the boats and live shulkers around it as they are when the player ticks (see
+/// [`super::entity`]). Vanilla's world collision query (`World.doesBoxCollide`) adds every one of
+/// them that intersects the queried box after the block boxes, for the move, the step-up, the
+/// sneak edge guard and the water / lava jump-out test (the sneaking size change tests blocks
+/// only). With an empty slice the result is [`tick_with`]'s (which is cheaper).
+pub fn tick_in<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    input: &TickInput,
+    world: &W,
+    options: &Options,
+    entities: &[Aabb],
+    out: &mut Packets,
+) {
+    tick_solid(p, input, &Beside(world), options, entities, out);
+}
+
+/// The world of the tick next to entities: its own type, so that tick is compiled apart from
+/// the plain one (sharing the block helpers would change how the plain tick is inlined).
+struct Beside<'a, W>(&'a W);
+
+impl<W: BlockView> BlockView for Beside<'_, W> {
+    type State = W::State;
+
+    #[inline(always)]
+    fn block(&self, x: i32, y: i32, z: i32) -> Self::State {
+        self.0.block(x, y, z)
+    }
+
+    #[inline(always)]
+    fn is_chunk_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.0.is_chunk_loaded(chunk_x, chunk_z)
+    }
+
+    #[inline(always)]
+    fn world_border(&self) -> WorldBorder {
+        self.0.world_border()
+    }
+}
+
+/// Entity boxes added to the world collision query. A type parameter, so the tick without
+/// entities compiles to the plain block query.
+trait Solids: Copy {
+    /// Adds the boxes intersecting `query` to `out`.
+    fn add(self, query: &Aabb, out: &mut BoxList);
+}
+
+/// No entity boxes.
+#[derive(Clone, Copy)]
+struct NoSolids;
+
+impl Solids for NoSolids {
+    #[inline(always)]
+    fn add(self, _query: &Aabb, _out: &mut BoxList) {}
+}
+
+impl Solids for &[Aabb] {
+    #[inline]
+    fn add(self, query: &Aabb, out: &mut BoxList) {
+        for b in self {
+            if b.intersects(query) {
+                out.push(*b);
+            }
+        }
+    }
+}
+
+// Always inlined: each entry point keeps its own copy of the tick (the one without entities is
+// then the plain block-only tick).
+#[inline(always)]
+fn tick_solid<W: BlockView<State = BlockState>, E: Solids>(
+    p: &mut PlayerState,
+    input: &TickInput,
+    world: &W,
     _options: &Options,
+    solids: E,
     out: &mut Packets,
 ) {
     p.yaw = input.yaw;
@@ -409,6 +490,7 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
         w: &cache,
         border: world.world_border(),
         boxes: BoxList::new(),
+        solids,
     };
     cx.base_tick();
     cx.movement(&input.keys, input.using_item, out);
@@ -417,14 +499,16 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
     cx.send_movement(out);
 }
 
-struct Ctx<'a, W> {
+struct Ctx<'a, W, E> {
     p: &'a mut PlayerState,
     w: &'a W,
     border: WorldBorder,
     boxes: BoxList,
+    /// Entity boxes of the collision query.
+    solids: E,
 }
 
-impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
+impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
     #[inline]
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         state_at(self.w, x, y, z)
@@ -773,8 +857,9 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
         self.p.vel[2] += f64::from(f * cos + s * sin);
     }
 
-    /// World collision query for the player (vanilla `World.method_13689` without entities):
-    /// fills `self.boxes` with every block box intersecting `query`. 1.9+ scans one block wider
+    /// World collision query for the player (vanilla `World.doesBoxCollide`): fills
+    /// `self.boxes` with every block box intersecting `query` (`World.method_13689`), then the
+    /// entity boxes intersecting it. 1.9+ scans one block wider
     /// on x / z, skipping the four corner columns and the top layer of the edge columns. With
     /// `first_only` it stops at the first box. Updates the world-border flag like vanilla.
     fn gather(&mut self, query: Aabb, first_only: bool) -> bool {
@@ -819,6 +904,8 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
                 }
             }
         }
+        // `doesBoxCollide` then adds the entity boxes intersecting the query.
+        self.solids.add(&query, &mut self.boxes);
         if visited {
             if was_outside && inside {
                 self.p.outside_world_border = false;

@@ -191,6 +191,66 @@ fn run<S: Sim>(
     {
         mobs!(n, ghast_protocol::v26_2, ghast_data::v26_2);
     }
+    // GHAST_BENCH_ENTITIES=N on 1.12.2: the same crowd as 1.12.2 spawn packets (cows by
+    // `spawn_entity_living`, every fifth a boat by `spawn_entity`), entity tracking on.
+    #[cfg(feature = "v1_12_2")]
+    if version == GameVersion::V1_12_2
+        && let Some(n) = bench_entities
+    {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
+        e.sim.set_entities(Some(
+            ghast_entity::Config::default()
+                .with_metadata(true)
+                .with_equipment(false)
+                .with_effects(false)
+                .with_events(false),
+        ));
+        let cow = i32::from(ghast_data::v1_12::entity_by_name("cow").unwrap().id);
+        for k in 0..n {
+            let a = f64::from(k) * 2.399;
+            let r = 1.0 + f64::from(k % 7);
+            let mut b: Vec<u8> = Vec::new();
+            let varint = |b: &mut Vec<u8>, v: i32| {
+                let mut u = v as u32;
+                loop {
+                    if u < 0x80 {
+                        b.push(u as u8);
+                        break;
+                    }
+                    b.push((u as u8 & 0x7f) | 0x80);
+                    u >>= 7;
+                }
+            };
+            varint(&mut b, 1000 + k);
+            b.extend_from_slice(&0x6265_6e63_u64.to_be_bytes());
+            b.extend_from_slice(&(k as u64).to_be_bytes());
+            let boat = k % 5 == 4;
+            if boat {
+                b.push(1);
+            } else {
+                varint(&mut b, cow);
+            }
+            for v in [8.5 + r * a.cos(), 64.0, 8.5 + r * a.sin()] {
+                b.extend_from_slice(&v.to_be_bytes());
+            }
+            if boat {
+                // pitch, yaw, object data, velocity
+                b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            } else {
+                // yaw, pitch, head pitch, velocity, no metadata
+                b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff]);
+            }
+            let raw = ghast_protocol::RawPacket {
+                id: if boat {
+                    cb::id::SPAWN_ENTITY
+                } else {
+                    cb::id::SPAWN_ENTITY_LIVING
+                },
+                body: bytes::Bytes::from(b),
+            };
+            e.sim.world_packet(&raw).unwrap();
+        }
+    }
     let _ = bench_entities;
     let chat = ChatMessage {
         rendered: None,

@@ -99,6 +99,8 @@ pub struct Tracker {
     store: Entities,
     world_name: String,
     wanted: IdMask,
+    /// The client's own entity state ([`Tracker::track_client_motion`]).
+    client: Option<Box<crate::client16::Client16>>,
 }
 
 impl Deref for Tracker {
@@ -130,7 +132,126 @@ impl Tracker {
             },
             world_name: String::new(),
             wanted,
+            client: None,
         }
+    }
+
+    /// Keeps the vanilla client's own view of the entities from now on (off by default): the
+    /// client world's tick order ([`Tracker::ticks_before_self`]), the positions the client
+    /// interpolates to and the boxes it holds ([`Tracker::client_box`]), each player's profile
+    /// name and the living entities' health. What the local player's pushes and entity
+    /// collisions read (`ghast-physics` `v1_16_5::push_by`); see the `client16` notes in the
+    /// crate docs for what is not modelled. Turn it on before the login packet: the tick order
+    /// depends on every entity id the client world has held.
+    pub fn track_client_motion(&mut self, on: bool) {
+        if on == self.client.is_some() {
+            return;
+        }
+        self.client = on.then(|| {
+            let mut c = Box::<crate::client16::Client16>::default();
+            c.new_world(self.store.self_id);
+            for e in self.store.map.values() {
+                c.map.insert(e.id);
+                c.spawned(e, None);
+            }
+            c
+        });
+    }
+
+    /// `true` while [`Tracker::track_client_motion`] is on.
+    #[must_use]
+    pub fn tracks_client_motion(&self) -> bool {
+        self.client.is_some()
+    }
+
+    /// The position the vanilla client holds for entity `id` (interpolated; `None` without
+    /// [`Tracker::track_client_motion`] or for types the client view does not keep: only living
+    /// entities, boats and shulkers).
+    #[must_use]
+    pub fn client_position(&self, id: i32) -> Option<[f64; 3]> {
+        self.client.as_ref()?.motion.get(&id).map(|m| m.pos)
+    }
+
+    /// The bounding box the vanilla client holds for entity `id` (see
+    /// [`Tracker::client_position`]), `[min_x, min_y, min_z, max_x, max_y, max_z]`.
+    #[must_use]
+    pub fn client_box(&self, id: i32) -> Option<[f64; 6]> {
+        self.client.as_ref()?.motion.get(&id).map(|m| m.bb)
+    }
+
+    /// `isAlive` as far as the client view knows it: `false` once the last health the server
+    /// sent a living entity is not above 0 (`true` without the client view).
+    #[must_use]
+    pub fn client_alive(&self, id: i32) -> bool {
+        self.client
+            .as_ref()
+            .and_then(|c| c.motion.get(&id))
+            .is_none_or(|m| !m.dead)
+    }
+
+    /// `true` when entity `id` ticks before the bot's own player in the client world's tick
+    /// order (needs [`Tracker::track_client_motion`]).
+    #[must_use]
+    pub fn ticks_before_self(&self, id: i32) -> bool {
+        match (&self.client, self.store.self_id) {
+            (Some(c), Some(me)) => c.map.before(id, me),
+            _ => false,
+        }
+    }
+
+    /// Entity `id`'s place in the client world's tick order as a sort key (smaller ticks
+    /// earlier; `None` when the client world does not hold it or without
+    /// [`Tracker::track_client_motion`]).
+    #[must_use]
+    pub fn client_tick_rank(&self, id: i32) -> Option<u32> {
+        self.client.as_ref()?.map.rank(id)
+    }
+
+    /// The client world's tick order: every entity id the client world holds, the bot's own
+    /// included (empty without [`Tracker::track_client_motion`]).
+    pub fn client_tick_order(&self) -> impl Iterator<Item = i32> + '_ {
+        self.client.iter().flat_map(|c| c.map.order())
+    }
+
+    /// One client tick of the client view (`ClientWorld.tickEntities`): every kept entity that
+    /// ticks takes one interpolation step. `column_loaded(chunk_x, chunk_z)` says which columns
+    /// the client has (an entity elsewhere does not tick; players always do). Passengers are
+    /// left alone. Call it once per client tick, where the bot's world ticks its entities.
+    pub fn tick_client(&mut self, column_loaded: impl Fn(i32, i32) -> bool) {
+        let Some(c) = &mut self.client else { return };
+        c.tick(&self.store, |e| {
+            !e.rides && (e.is_player() || entity_ticks_at(e, &column_loaded))
+        });
+    }
+
+    /// `true` when the client would tick `e` this tick: not riding, and a player or in a
+    /// loaded column (`ClientChunkManager.shouldTickEntity` at its client position).
+    #[must_use]
+    pub fn client_ticks(&self, e: &Entity, column_loaded: impl Fn(i32, i32) -> bool) -> bool {
+        !e.rides
+            && (e.is_player()
+                || match self.client_position(e.id) {
+                    Some(p) => column_loaded(chunk(p[0]), chunk(p[2])),
+                    None => entity_ticks_at(e, &column_loaded),
+                })
+    }
+
+    /// `isSpectator` of a player entity: its tab-list game mode is spectator (needs the tab
+    /// list or [`Config::player_names`]).
+    #[must_use]
+    pub fn is_spectator(&self, e: &Entity) -> bool {
+        e.is_player() && self.store.tab_game_mode(&e.uuid) == Some(3)
+    }
+
+    /// `getEntityName`, what team rules match: a player's profile name (from the tab-list
+    /// entry it spawned with; needs [`Tracker::track_client_motion`] and the tab list or
+    /// [`Config::player_names`]), else `None`; vanilla uses the UUID string for other entities.
+    #[must_use]
+    pub fn scoreboard_name(&self, e: &Entity) -> Option<&str> {
+        if !e.is_player() {
+            return None;
+        }
+        self.client.as_ref()?.motion.get(&e.id)?.name.as_deref()
     }
 
     /// The shared store, mutable for [`Entities::drain_events`].
@@ -168,12 +289,13 @@ impl Tracker {
         }
         let r = &mut Reader::new(body);
         let s = &mut self.store;
+        let mut client = self.client.as_deref_mut();
         let changed = match packet_id {
-            id::REL_ENTITY_MOVE => relative(s, r, true, false)?,
-            id::ENTITY_MOVE_LOOK => relative(s, r, true, true)?,
-            id::ENTITY_LOOK => relative(s, r, false, true)?,
-            id::ENTITY => relative(s, r, false, false)?,
-            id::ENTITY_TELEPORT => teleport(s, r)?,
+            id::REL_ENTITY_MOVE => relative(s, client, r, true, false)?,
+            id::ENTITY_MOVE_LOOK => relative(s, client, r, true, true)?,
+            id::ENTITY_LOOK => relative(s, client, r, false, true)?,
+            id::ENTITY => relative(s, client, r, false, false)?,
+            id::ENTITY_TELEPORT => teleport(s, client, r)?,
             id::ENTITY_VELOCITY => {
                 let eid = r.read_varint()?;
                 let v = vel3(r)?;
@@ -199,7 +321,14 @@ impl Tracker {
             }
             id::ENTITY_DESTROY => {
                 let mut any = false;
-                for_each_varint(r, |eid| any |= s.remove(eid))?;
+                for_each_varint(r, |eid| {
+                    if let Some(c) = client.as_deref_mut()
+                        && Some(eid) != s.self_id
+                    {
+                        c.remove(eid);
+                    }
+                    any |= s.remove(eid);
+                })?;
                 any
             }
             id::ENTITY_STATUS => {
@@ -218,7 +347,14 @@ impl Tracker {
                 e.yaw = angle(r.read_i8()?);
                 e.pitch = angle(r.read_i8()?);
                 e.head_yaw = e.yaw;
+                // The client builds the player from its tab-list entry (none: the spawn fails).
+                let name = s.tab_name(&e.uuid).map(Box::<str>::from);
+                let listed = name.is_some() || !s.config.reads_tab_list();
+                let eid = e.id;
                 s.spawn(e);
+                if listed {
+                    client_spawned(s, client, eid, name);
+                }
                 true
             }
             id::SPAWN_ENTITY => {
@@ -242,6 +378,7 @@ impl Tracker {
                 e.data = data;
                 e.velocity = v.map(|c| f64::from(c) / 8000.0);
                 s.spawn(e);
+                client_spawned(s, client, eid, None);
                 true
             }
             id::SPAWN_ENTITY_LIVING => {
@@ -265,13 +402,16 @@ impl Tracker {
                 e.head_yaw = angle(head);
                 e.velocity = v.map(|c| f64::from(f32::from(c) / 8000.0));
                 s.spawn(e);
+                client_spawned(s, client, eid, None);
                 true
             }
             id::SPAWN_ENTITY_EXPERIENCE_ORB => {
                 let mut e = Entity::new(r.read_varint()?, EntityType::Registry(24));
                 e.pos = [r.read_f64()?, r.read_f64()?, r.read_f64()?];
                 e.data = i32::from(r.read_i16()?);
+                let eid = e.id;
                 s.spawn(e);
+                client_spawned(s, client, eid, None);
                 true
             }
             id::SPAWN_ENTITY_PAINTING => {
@@ -285,6 +425,7 @@ impl Tracker {
                 e.pos = [f64::from(p.x), f64::from(p.y), f64::from(p.z)];
                 e.data = i32::from(dir);
                 s.spawn(e);
+                client_spawned(s, client, eid, None);
                 true
             }
             id::ATTACH_ENTITY => {
@@ -324,6 +465,9 @@ impl Tracker {
                         });
                         if gone {
                             s.remove(collected);
+                            if let Some(c) = client {
+                                c.remove(collected);
+                            }
                         }
                         true
                     }
@@ -337,13 +481,23 @@ impl Tracker {
                     // pickup counts.
                     Some(e) => s.config.metadata || e.ty == EntityType::Registry(ty::ITEM),
                 };
-                if !wanted {
+                // The client view reads the size, health and attachment entries.
+                let viewed = client.as_ref().is_some_and(|c| c.motion.contains_key(&eid));
+                if !wanted && !viewed {
                     return Ok(Applied::Ignored);
                 }
                 let mut scratch = std::mem::take(&mut s.scratch);
                 scratch.clear();
                 let res = read_metadata(r, &mut scratch);
                 if res.is_ok()
+                    && viewed
+                    && let Some(c) = client
+                    && let Some(e) = s.map.get(&eid)
+                {
+                    c.data(e, &scratch);
+                }
+                if res.is_ok()
+                    && wanted
                     && let Some(e) = s.map.get_mut(&eid)
                 {
                     let all = s.config.metadata;
@@ -408,6 +562,10 @@ impl Tracker {
                 s.clear();
                 s.set_self(p.entity_id);
                 self.world_name = p.world_name.to_string();
+                // A new client world holding the new player.
+                if let Some(c) = client {
+                    c.new_world(Some(p.entity_id));
+                }
                 true
             }
             id::RESPAWN => {
@@ -420,6 +578,13 @@ impl Tracker {
                 if *p.world_name != *self.world_name {
                     s.clear();
                     self.world_name = p.world_name.to_string();
+                    if let Some(c) = client {
+                        c.new_world(s.self_id);
+                    }
+                } else if let (Some(c), Some(me)) = (client, s.self_id) {
+                    // The same world: the new player replaces the old one (`addEntityPrivate`).
+                    c.map.remove(me);
+                    c.map.insert(me);
                 }
                 true
             }
@@ -527,8 +692,30 @@ fn controlled(s: &Entities, e: &Entity) -> bool {
         && e.passengers().first().copied() == s.self_id
 }
 
+/// The client view's side of a spawn: `addEntityPrivate` and the spawn position.
+fn client_spawned(
+    s: &Entities,
+    client: Option<&mut crate::client16::Client16>,
+    id: i32,
+    name: Option<Box<str>>,
+) {
+    let Some(c) = client else { return };
+    if Some(id) == s.self_id {
+        return;
+    }
+    let Some(e) = s.map.get(&id) else { return };
+    c.add(id);
+    c.spawned(e, name);
+}
+
 #[inline]
-fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bool> {
+fn relative(
+    s: &mut Entities,
+    client: Option<&mut crate::client16::Client16>,
+    r: &mut Reader<'_>,
+    pos: bool,
+    look: bool,
+) -> R<bool> {
     let eid = r.read_varint()?;
     let d = if pos {
         [r.read_i16()?, r.read_i16()?, r.read_i16()?]
@@ -565,11 +752,22 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
+    if let Some(c) = client {
+        if pos {
+            c.moved(eid, e.pos);
+        } else if look {
+            c.looked(eid);
+        }
+    }
     s.event(Event::Moved(eid));
     Ok(true)
 }
 
-fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
+fn teleport(
+    s: &mut Entities,
+    client: Option<&mut crate::client16::Client16>,
+    r: &mut Reader<'_>,
+) -> R<bool> {
     let eid = r.read_varint()?;
     let p = [r.read_f64()?, r.read_f64()?, r.read_f64()?];
     let (y, pi) = (r.read_i8()?, r.read_i8()?);
@@ -590,6 +788,9 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
         e.yaw = angle(y);
         e.pitch = angle(pi);
         e.on_ground = on_ground;
+        if let Some(c) = client {
+            c.moved(eid, p);
+        }
     }
     s.event(Event::Moved(eid));
     Ok(true)
@@ -646,6 +847,15 @@ fn pos(p: BlockPos) -> [i32; 3] {
     [p.x, p.y, p.z]
 }
 
+#[inline]
+fn chunk(v: f64) -> i32 {
+    (v.floor() as i32) >> 4
+}
+
+fn entity_ticks_at(e: &Entity, column_loaded: &impl Fn(i32, i32) -> bool) -> bool {
+    column_loaded(chunk(e.pos[0]), chunk(e.pos[2]))
+}
+
 /// The vanilla 1.16.5 size entry for an entity (`None` for hanging entities).
 pub(crate) fn vanilla_size(e: &Entity) -> Option<&'static ghast_data::VanillaEntitySize> {
     let id = match e.ty {
@@ -664,8 +874,35 @@ pub(crate) fn dimensions(
     e: &Entity,
     vs: &'static ghast_data::VanillaEntitySize,
 ) -> Option<ghast_data::EntityDimensions> {
-    use ghast_data::EntityDimensions;
     let m = &e.meta;
+    let pose = match m.get(meta::POSE) {
+        Some(MetaValue::Pose(p)) => *p,
+        _ => 0,
+    };
+    let slime = match m.get(15) {
+        Some(MetaValue::VarInt(n)) => Some(*n),
+        _ => None,
+    };
+    let idx = if e.ty == EntityType::Registry(60) {
+        16
+    } else {
+        15
+    };
+    let baby = matches!(m.get(idx), Some(MetaValue::Bool(true)));
+    dims_with(e.ty, vs, pose, slime, m.byte(14).unwrap_or(0) as u8, baby)
+}
+
+/// [`dimensions`] from the size data itself: the pose (players), the slime size (slimes and
+/// magma cubes; `None` keeps the spawn size), the armor stand flags and the baby flag.
+pub(crate) fn dims_with(
+    ty: EntityType,
+    vs: &'static ghast_data::VanillaEntitySize,
+    pose: i32,
+    slime: Option<i32>,
+    stand: u8,
+    baby: bool,
+) -> Option<ghast_data::EntityDimensions> {
+    use ghast_data::EntityDimensions;
     let base = vs.default_dimensions().or_else(|| {
         vs.registered.map(|(width, height)| EntityDimensions {
             width,
@@ -673,12 +910,8 @@ pub(crate) fn dimensions(
             eye_height: height * 0.85,
         })
     })?;
-    let EntityType::Registry(id) = e.ty else {
+    let EntityType::Registry(id) = ty else {
         // Player: pose table.
-        let pose = match m.get(meta::POSE) {
-            Some(MetaValue::Pose(p)) => *p,
-            _ => 0,
-        };
         let name = [
             "standing",
             "fall_flying",
@@ -696,13 +929,13 @@ pub(crate) fn dimensions(
     match id {
         // slime, magma cube: size VarInt at 15.
         75 | 44 => {
-            if let Some(MetaValue::VarInt(n)) = m.get(15) {
-                return Some(ghast_data::v1_16_5::slime_dimensions(*n));
+            if let Some(n) = slime {
+                return Some(ghast_data::v1_16_5::slime_dimensions(n));
             }
         }
         // armor stand flags byte at 14: 0x01 small, 0x10 marker.
         1 => {
-            let f = m.byte(14).unwrap_or(0) as u8;
+            let f = stand;
             let name = match (f & 0x01 != 0, f & 0x10 != 0) {
                 (true, true) => "small_marker",
                 (false, true) => "marker",
@@ -714,10 +947,7 @@ pub(crate) fn dimensions(
         _ => {}
     }
     // Baby flag: Bool at 15 (ageable mobs, zombies), 16 for piglins.
-    let idx = if id == 60 { 16 } else { 15 };
-    if matches!(m.get(idx), Some(MetaValue::Bool(true)))
-        && let Some(b) = vs.baby()
-    {
+    if baby && let Some(b) = vs.baby() {
         return Some(b);
     }
     Some(base)

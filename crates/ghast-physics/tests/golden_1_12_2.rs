@@ -43,3 +43,8 @@ fn fuzz_seed1_1_12_2() {
 fn fuzz_edges_seed1_1_12_2() {
     check("fuzz_edges_seed1.jsonl.gz");
 }
+
+#[test]
+fn entities_1_12_2() {
+    check("entities.jsonl.gz");
+}
