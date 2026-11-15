@@ -6,9 +6,10 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## 0.4.4 — unreleased
+## 0.4.4 — 2026-11-15
 
-Additive only: every 0.4.3 API stays; nothing changes for code that does not use the new type.
+Additive only: every 0.4.3 API stays. Many bots in one process (`Swarm`, `SharedChunks`) and less
+memory per bot for everyone; the fixes below change behaviour on 26.1 / 26.2 only.
 
 ### Added
 
@@ -66,9 +67,6 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
   - New API: `SharedChunks::columns`, `paletted::Section::get_at`. `Shared::holders` counts
     handles (section arrays), not worlds. `ColumnMap::table_bytes` counts the table's buckets
     (it counted the usable capacity).
-- Fixed (26.1 / 26.2, only with `WorldConfig::block_entities`): a stored block entity's NBT was
-  a slice of the packet it came in, which kept the whole chunk packet (or read buffer) alive.
-  It is a copy of its own now, as documented and as in the older worlds.
 - The block read chain of the modern worlds and the physics' per-tick block cache are always
   inlined (they were left to the compiler's size heuristic). Engine bench, instructions per
   tick: 1.8.9 12,494 → 11,792; 1.12.2 19,593 → 18,361; 1.16.5 40,462 → 39,771; 26.1
@@ -115,11 +113,23 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
   all clients that received the same content (matched by content at join; lookups take no
   lock). The session future no longer carries a 16 KB stack array (the close drain buffer is
   allocated when closing). The kept login / respawn packets and the last-seen chat
-  signatures are copies, the 26.x command tree (kept compressed) is shared per process too, and
-  the per-tick event lists give back burst capacity every 1024 ticks. New module
-  `ghast_protocol::intern` (`shared`, `bytes`). About 180 KB less per 26.x bot; engine bench
-  unchanged.
-- **Fixed (26.1, 26.2)**: with `Interests::ENTITIES` but without `Interests::PLAYER_LIST`, a
+  signatures are copies, and the 26.x command tree (kept compressed) is shared per process
+  too. New module `ghast_protocol::intern` (`shared`, `bytes`).
+- At most 64 dialog events are kept between two behaviour ticks (the open dialog stays current).
+- **`Interests::ENTITY_TRACKING`** (`ghast-client`): entity tracking without the generic
+  metadata store, roughly 450 bytes less per tracked entity. Only the generic metadata
+  accessors (health, flags, custom names, raw values) return nothing; item entities keep their
+  stack, and what physics, pushes and picking read is unchanged (the 26.1 entity oracle replay
+  passes with it). `Interests::ENTITIES` is unchanged and keeps the metadata.
+- `swarm` example: N wandering bots in one process (`--count`, `--workers`, `--join-delay-ms`).
+- README: "Running many bots".
+
+### Fixed
+
+- 26.1 / 26.2 (only with `WorldConfig::block_entities`): a stored block entity's NBT was
+  a slice of the packet it came in, which kept the whole chunk packet (or read buffer) alive.
+  It is a copy of its own now, as documented and as in the older worlds.
+- 26.1 / 26.2: with `Interests::ENTITIES` but without `Interests::PLAYER_LIST`, a
   player pushing the local player was judged by the teams of its UUID instead of its profile
   name, so a team collision rule other than `always` was misapplied, and a spectator player
   pushed. The 26.x tracker now keeps the names-only tab list of `ghast-entity`
@@ -129,16 +139,8 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
   check uses the profile name, spectator players no longer push (vanilla: `noPhysics`), and a
   player spawn without a tab-list profile is skipped as in vanilla. `TickContext::entities`
   still lists no tab list unless `PLAYER_LIST` is asked for.
-- At most 64 dialog events are kept between two behaviour ticks (the open dialog stays current).
-- **`Interests::ENTITY_TRACKING`** (`ghast-client`): entity tracking without the generic
-  metadata store, roughly 450 bytes less per tracked entity. Only the generic metadata
-  accessors (health, flags, custom names, raw values) return nothing; item entities keep their
-  stack, and what physics, pushes and picking read is unchanged (the 26.1 entity oracle replay
-  passes with it). `Interests::ENTITIES` is unchanged and keeps the metadata.
-- **Fixed (26.1, 26.2)**: a shulker whose health is NaN collided with the player; it now
+- 26.1 / 26.2: a shulker whose health is NaN collided with the player; it now
   follows vanilla's `isAlive` (`ghast_entity::v26_x::alive`).
-- `swarm` example: N wandering bots in one process (`--count`, `--workers`, `--join-delay-ms`).
-- README: "Running many bots".
 
 ## 0.4.3 — 2026-11-13
 
