@@ -128,6 +128,29 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   constructor and `entities.jsonl.gz` changed from run to run (only the item records; the
   player's states and packets are unchanged, so every replay result stays the same).
 
+### Fixed
+
+- **26.1 / 26.2: a break the server refuses no longer leaves "ghost air"** (`ghast-client`).
+  A block broken on the client stayed air until a block update said otherwise, but a server
+  does not have to send one when it refuses or delays a break: it can answer with
+  `block_changed_ack` alone, and the vanilla client then puts its remembered state back. ghast did not
+  read that packet, so a long-running digger could end up with permanent air in its own world
+  (the crosshair passed through blocks that were there; reconnecting fixed it). Now the sim
+  keeps vanilla's `BlockStatePredictionHandler`: each broken block remembers the server's state
+  under the prediction sequence of its dig packet; `block_update` and `section_blocks_update`
+  for a predicted block only replace that remembered state (other positions change at once);
+  `block_changed_ack` ends every prediction up to its sequence and restores the remembered
+  state (`ClientLevel.syncBlockState`), moving the player back to where it was at the prediction
+  when the restored block would hold it (not after a later server teleport). A new level (join,
+  respawn into another dimension) starts with no predictions.
+- **1.16.5: the server's dig answers are applied** (`ghast-client`). The vanilla client
+  records every dig start / abort / finish with the player's position and applies the server's
+  `acknowledge_player_digging` (`ClientPlayerInteractionManager.processPlayerActionResponse`):
+  when the block differs from the answer's state, the answer's state is set unless it approves a
+  start the client recorded, and the player moves back if the block would hold it. ghast ignored
+  the packet, so a refused break stayed air here too. 1.8.9 and 1.12.2 have no such answer (the
+  server sends a block change) and are unchanged.
+
 ## 0.4.4 — 2026-11-15
 
 Additive only: every 0.4.3 API stays. Many bots in one process (`Swarm`, `SharedChunks`) and less

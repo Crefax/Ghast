@@ -13,6 +13,8 @@ use crate::common::{
 use crate::hands::{BlockQuery, HeldItem};
 use crate::version::DataSet;
 
+#[cfg(any(ghast_modern, feature = "v1_16_5"))]
+mod predict;
 #[cfg(any(ghast_modern, feature = "v1_12_2", feature = "v1_16_5"))]
 mod teams;
 #[cfg(feature = "v1_12_2")]
@@ -398,6 +400,44 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn drain_block_updates(&mut self, out: &mut Vec<(BlockPos, u32)>) -> usize;
     /// The block was broken on the client (air until the server says otherwise).
     fn predict_air(&mut self, x: i32, y: i32, z: i32);
+    /// A dig action packet of this tick, in packet order, with the player's position when it
+    /// was sent (before the tick's movement). `broken`: the client broke the block with it
+    /// (`breakBlock` / `destroyBlock`: air until the server says otherwise). `sequence`: the
+    /// packet's 1.19+ prediction sequence (26.x remembers the server's state per predicted
+    /// block until `block_changed_ack`; 1.16.5 remembers start / abort / finish until
+    /// `acknowledge_player_digging`). 1.8.9 and 1.12.2 keep no records (the server sends a
+    /// block change).
+    #[inline]
+    fn dig_sent(
+        &mut self,
+        pos: BlockPos,
+        status: crate::common::DigStatus,
+        broken: bool,
+        sequence: i32,
+        player: Vec3,
+    ) {
+        let _ = (status, sequence, player);
+        if broken {
+            self.predict_air(pos.x, pos.y, pos.z);
+        }
+    }
+    /// [`Sim::dig_sent`] wants the dig packets that broke nothing too (1.16.5 records them).
+    #[inline(always)]
+    fn records_digs(&self) -> bool {
+        false
+    }
+    /// A server teleport arrived while `sequence` was the last prediction sequence sent
+    /// (26.x `BlockStatePredictionHandler.onTeleport`).
+    #[inline(always)]
+    fn teleport_sequence(&mut self, sequence: Option<i32>) {
+        let _ = sequence;
+    }
+    /// After a prediction answer (`block_changed_ack`, 1.16.5 `acknowledge_player_digging`):
+    /// the position the player was moved back to when a restored block would hold it.
+    #[inline(always)]
+    fn take_snap(&mut self) -> Option<Vec3> {
+        None
+    }
     /// A held item's version facts (tool speeds, block item, usable) from its id.
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem;
     /// The crosshair target as vanilla picks it at the start of this tick (before the key
@@ -1070,6 +1110,25 @@ impl Sim for Box<dyn Sim> {
     }
     fn predict_air(&mut self, x: i32, y: i32, z: i32) {
         (**self).predict_air(x, y, z);
+    }
+    fn dig_sent(
+        &mut self,
+        pos: BlockPos,
+        status: crate::common::DigStatus,
+        broken: bool,
+        sequence: i32,
+        player: Vec3,
+    ) {
+        (**self).dig_sent(pos, status, broken, sequence, player);
+    }
+    fn records_digs(&self) -> bool {
+        (**self).records_digs()
+    }
+    fn teleport_sequence(&mut self, sequence: Option<i32>) {
+        (**self).teleport_sequence(sequence);
+    }
+    fn take_snap(&mut self) -> Option<Vec3> {
+        (**self).take_snap()
     }
     fn movement_speed(&mut self, base: f64, modifiers: &[(u128, f64, u8)]) {
         (**self).movement_speed(base, modifiers);

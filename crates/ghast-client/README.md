@@ -346,7 +346,10 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
   potion, milk, bow, sword) set `using_item` until right is released (`block_dig` release),
   the server's entity status 9, a slot change, or the used hand no longer holding that item
   (1.16.5 `tickActiveItemStack`, 26.1 `updatingUsingItem`; 1.8 / 1.12 also end it on any slot
-  update of that hand, which is not modelled). A broken block is predicted air.
+  update of that hand, which is not modelled). A broken block is predicted air until the
+  server answers: 26.x restores the server's state at its `block_changed_ack` (block updates
+  for the block wait until then), 1.16.5 applies `acknowledge_player_digging` like vanilla;
+  1.8.9 / 1.12.2 wait for the server's block change.
 - `ctx.drop_held(whole_stack)` / `ctx.swap_hands()`: the drop and swap-hands keys outside a
   screen (`MinecraftClient.handleInputEvents`), a `block_dig` drop item (4) / drop stack (3) /
   swap (6, 1.9+) at the origin facing down, written now in call order. 1.16.5 and 26.x

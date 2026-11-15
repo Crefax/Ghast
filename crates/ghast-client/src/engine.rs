@@ -365,7 +365,7 @@ pub(crate) struct Core {
     effects: std::collections::BTreeMap<i8, i8>,
     /// Aqua affinity on the helmet (dig speed under water).
     aqua_affinity: bool,
-    /// Blocks broken on the client this tick (predicted air).
+    /// Blocks broken on the client this tick (predicted air until the server answers).
     broken_now: Vec<ghast_protocol::BlockPos>,
     /// The crosshair pick's entity list (kept to reuse the allocation).
     pick: PickList,
@@ -792,6 +792,23 @@ impl<S: Sim> Engine<S> {
         self.core.sequence = sequence;
     }
 
+    /// After a world packet: a prediction answer that moved the player back
+    /// ([`Sim::take_snap`]) moves the engine's pose with it.
+    #[inline]
+    pub(crate) fn sync_snap(&mut self) {
+        if let Some(p) = self.sim.take_snap() {
+            log::debug!(
+                "[{}] t{} moved back to {:.3} {:.3} {:.3}: a restored block holds the player",
+                self.core.opts.name,
+                self.core.tick,
+                p.x,
+                p.y,
+                p.z
+            );
+            self.core.pose.pos = p;
+        }
+    }
+
     /// The bot's name (for logs).
     pub(crate) fn name(&self) -> &str {
         &self.core.opts.name
@@ -922,6 +939,7 @@ impl<S: Sim> Engine<S> {
                 }
                 let (sent_before, pose_before) = (c.sent, c.pose);
                 sim.teleport(&mut c.pose, &t);
+                sim.teleport_sequence(c.sequence);
                 if c.pending.teleports.len() < MAX_PENDING_TELEPORTS {
                     c.pending.teleports.push(TeleportEvent {
                         teleport: t,
@@ -1428,8 +1446,14 @@ impl<S: Sim> Engine<S> {
             let _ = placed;
             predict_planting(c, sim, first);
         }
-        for p in c.broken_now.drain(..) {
-            self.sim.predict_air(p.x, p.y, p.z);
+        // The tick's dig packets (behaviour actions and buttons): broken blocks turn to air
+        // and the version keeps its records of them for the server's answers.
+        if c.hands.dug {
+            c.hands.dug = false;
+            // Only 1.16.5 records the digs that broke nothing.
+            if !c.broken_now.is_empty() || self.sim.records_digs() {
+                sent_digs(c, &mut self.sim);
+            }
         }
         // ClientPlayerEntity.tickMovement: a flight toggle is told to the server before the move.
         if let Some(f) = c.want_flying.take() {
@@ -1726,6 +1750,49 @@ impl TickContext<'_> {
     pub(crate) fn test_rotation(&self) -> Rotation {
         self.core.rotation
     }
+}
+
+/// Hands the tick's dig packets to the sim in packet order ([`Sim::dig_sent`]): whether each
+/// broke its block on the client, its 1.19+ prediction sequence (counted from the wire's last
+/// sequence the way the wire will number this tick's predicting packets: dig start / finish,
+/// place, use item) and the player's position before the tick's movement.
+#[cold]
+#[inline(never)]
+fn sent_digs<S: Sim>(c: &mut Core, sim: &mut S) {
+    use crate::common::DigStatus;
+    let player = c.pose.pos;
+    let mut sequence = c.sequence.unwrap_or(0);
+    let mut broken = 0;
+    for o in &c.out {
+        match *o {
+            Outbound::Dig { status, pos, .. } => {
+                let predicting = matches!(status, DigStatus::Start | DigStatus::Finish);
+                if predicting {
+                    sequence = sequence.wrapping_add(1);
+                } else if status != DigStatus::Abort {
+                    continue;
+                }
+                let b = predicting && c.broken_now.get(broken) == Some(&pos);
+                if b {
+                    broken += 1;
+                }
+                sim.dig_sent(pos, status, b, sequence, player);
+            }
+            Outbound::Place { .. } | Outbound::UseItem { .. } => {
+                sequence = sequence.wrapping_add(1);
+            }
+            _ => {}
+        }
+    }
+    debug_assert_eq!(
+        broken,
+        c.broken_now.len(),
+        "a broken block without its dig packet"
+    );
+    for p in &c.broken_now[broken..] {
+        sim.predict_air(p.x, p.y, p.z);
+    }
+    c.broken_now.clear();
 }
 
 /// 1.8 `SeedItem.use` / `CropItem.use` on the client: planting on the top of
@@ -2453,7 +2520,8 @@ impl TickContext<'_> {
     /// 1.19+ (26.1, 26.2): the block-prediction sequence number of the last predicting packet
     /// written so far (`block_dig` start / finish, `block_place`, `use_item` each take the
     /// next one; it restarts at 0 in a new level), the number the server's
-    /// `block_changed_ack` answers with. `None` on 1.8.9 – 1.16.5. The packets this tick
+    /// `block_changed_ack` answers with (the client then restores the blocks it broke in those
+    /// predictions to the server's state). `None` on 1.8.9 – 1.16.5. The packets this tick
     /// writes are not counted yet ([`TickView::outbound`] lists them).
     #[must_use]
     pub fn prediction_sequence(&self) -> Option<i32> {
@@ -2761,6 +2829,17 @@ mod tests_1_12;
 ))]
 #[path = "engine_tests_1_16_5.rs"]
 mod tests_1_16_5;
+
+/// Block predictions and the server's answers (26.x acks, 1.16.5 dig answers).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_predict.rs"]
+mod tests_predict;
 
 #[cfg(all(
     test,

@@ -1242,6 +1242,8 @@ where
                     continue;
                 }
             }
+            // A prediction answer may have moved the player back (a restored block held it).
+            self.engine.sync_snap();
             // 26.1 handleMoveVehicle answers at once (sent with this read's replies).
             if let Some(o) = self.engine.sim.take_reply() {
                 self.engine.outbound().push(o);
@@ -1285,6 +1287,11 @@ where
                 source,
             })?;
             V::write_wire_replies(&mut self.enc, &mut self.wire)?;
+            // A new level restarts the prediction sequence: the tick's predictions count from it.
+            if matches!(p, Some(Inbound::JoinGame(_) | Inbound::Respawn { .. })) {
+                self.engine
+                    .note_sequence(V::prediction_sequence(&self.wire));
+            }
             match p {
                 None => {}
                 Some(Inbound::Disconnect(json)) => {

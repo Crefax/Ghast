@@ -785,6 +785,9 @@ pub struct Hands {
     right_was: bool,
     /// Blocks broken (finish sent).
     pub broken: u64,
+    /// A dig start / abort / finish was written since the engine last looked (it then tells the
+    /// sim about this tick's dig packets).
+    pub(crate) dug: bool,
     /// 1.9+: ticks since the last swing / attack (`ticksSinceLastSwing`, attack cooldown).
     pub ticks_since_swing: u32,
 }
@@ -792,9 +795,10 @@ pub struct Hands {
 impl Hands {
     /// A new player: nothing held, nothing in progress.
     pub fn reset(&mut self) {
-        let broken = self.broken;
+        let (broken, dug) = (self.broken, self.dug);
         *self = Hands::default();
         self.broken = broken;
+        self.dug = dug;
     }
 
     /// The block being broken and its progress 0..1.
@@ -1026,6 +1030,7 @@ impl Hands {
             pos,
             face,
         });
+        self.dug = true;
         if let Some(b) = io.solid(pos)
             && relative_hardness(&b, io.held.as_ref(), io.factors) >= 1.0
         {
@@ -1060,6 +1065,7 @@ impl Hands {
                 pos,
                 face,
             });
+            self.dug = true;
             self.destroyed(pos, io);
             self.damage = 0.0;
             self.hit_delay = 5;
@@ -1087,6 +1093,7 @@ impl Hands {
                 pos: cur,
                 face: Face::Down,
             });
+            self.dug = true;
         }
         self.hitting = false;
         self.damage = 0.0;

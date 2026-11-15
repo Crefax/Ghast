@@ -41,6 +41,11 @@ pub(crate) struct Sim16 {
     slow: bool,
     /// Riptide: the tridents in the hands, the rain, the use (see [`Riptide16`]).
     rt: Riptide16,
+    /// `ClientPlayerInteractionManager.unacknowledgedPlayerActions`: the dig actions the
+    /// server has not answered yet.
+    unacked: crate::sim::predict::Unacked,
+    /// An answer moved the player back ([`Sim::take_snap`]).
+    snapped: bool,
 }
 
 /// What the engine's look at the held items ([`Sim::item_use_facts`], through `&self`) leaves
@@ -301,6 +306,8 @@ impl Sim16 {
             ext: ghast_physics::v1_16_5::PlayerExt::new(),
             slow: false,
             rt: Riptide16::default(),
+            unacked: Default::default(),
+            snapped: false,
         }
     }
 
@@ -967,6 +974,8 @@ impl Sim for Sim16 {
                 if let Some(t) = &mut self.teams {
                     t.clear();
                 }
+                // onGameJoin: a new interaction manager (respawns keep it).
+                self.unacked.clear();
             }
             cb::id::RESPAWN => {
                 let p: cb::Respawn = raw.decode_as()?;
@@ -1013,6 +1022,9 @@ impl Sim for Sim16 {
             }
             cb::id::EXPLOSION => {
                 w.apply_explosion(&raw.decode_as()?);
+            }
+            cb::id::ACKNOWLEDGE_PLAYER_DIGGING => {
+                self.action_answer(&raw.decode_as()?);
             }
             cb::id::WORLD_BORDER => {
                 w.apply_world_border(&raw.decode_as()?);
@@ -1156,6 +1168,8 @@ impl Sim for Sim16 {
     fn world_packet_ids(&self) -> Vec<i32> {
         use ghast_protocol::v1_16_5::play::clientbound as cb;
         let mut ids: Vec<i32> = self.world.packet_ids().collect();
+        // The server's answers to the dig actions.
+        ids.push(cb::id::ACKNOWLEDGE_PLAYER_DIGGING);
         // Our own entity data (the riptide spin flag), once a riptide trident was held.
         if self.rt.held.watch.get() {
             ids.push(cb::id::ENTITY_METADATA);
@@ -1259,6 +1273,41 @@ impl Sim for Sim16 {
             .set_block_state(x, y, z, ghast_data::v1_16_5::BlockState::AIR);
     }
 
+    fn dig_sent(
+        &mut self,
+        pos: BlockPos,
+        status: crate::common::DigStatus,
+        broken: bool,
+        _sequence: i32,
+        player: Vec3,
+    ) {
+        use crate::common::DigStatus;
+        // sendPlayerAction (start, abort, stop) records the action, then breakBlock.
+        if matches!(
+            status,
+            DigStatus::Start | DigStatus::Abort | DigStatus::Finish
+        ) {
+            self.unacked
+                .put(pos, status.id() as u8, [player.x, player.y, player.z]);
+        }
+        if broken {
+            self.predict_air(pos.x, pos.y, pos.z);
+        }
+    }
+
+    #[inline(always)]
+    fn records_digs(&self) -> bool {
+        true
+    }
+
+    fn take_snap(&mut self) -> Option<Vec3> {
+        if !std::mem::take(&mut self.snapped) {
+            return None;
+        }
+        let p = self.player.pos;
+        Some(Vec3::new(p[0], p[1], p[2]))
+    }
+
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         held_item_facts(DataSet::V1_16_5, id, count, efficiency)
     }
@@ -1319,6 +1368,69 @@ impl Sim for Sim16 {
         sync_pose_16(pose, &self.player);
         self.world.advance_time(50);
     }
+}
+
+impl Sim16 {
+    /// `acknowledge_player_digging` (`ClientPlayerInteractionManager.processPlayerActionResponse`):
+    /// the server's state of the block replaces the client's when they differ, unless the server
+    /// approved a start the client recorded; the player returns to where it was when the action
+    /// was sent if the block would hold it. Oldest records go from 50 on.
+    #[cold]
+    #[inline(never)]
+    fn action_answer(
+        &mut self,
+        p: &ghast_protocol::v1_16_5::play::clientbound::AcknowledgePlayerDigging,
+    ) {
+        use ghast_data::v1_16_5::BlockState;
+        let pos = p.location;
+        let at = u8::try_from(p.status)
+            .ok()
+            .and_then(|a| self.unacked.remove(pos, a));
+        let state = u16::try_from(p.block)
+            .ok()
+            .and_then(BlockState::from_id)
+            .unwrap_or(BlockState::AIR);
+        let now = self
+            .world
+            .block_state(pos.x, pos.y, pos.z)
+            .unwrap_or(BlockState::AIR);
+        let start = p.status == crate::common::DigStatus::Start.id();
+        if now != state && (at.is_none() || !p.successful || !start) {
+            self.world.set_block_state(pos.x, pos.y, pos.z, state);
+            if let Some(at) = at
+                && holds_player(state, pos, &self.player.bb)
+            {
+                // Entity.updatePosition: the position and the previous position.
+                self.player.set_position(at[0], at[1], at[2]);
+                self.snapped = true;
+            }
+        }
+        self.unacked.trim();
+    }
+}
+
+/// 1.16.5 `Entity.collidesWithStateAtPos`: the state's collision shape at `pos` overlaps `bb`.
+fn holds_player(
+    state: ghast_data::v1_16_5::BlockState,
+    pos: BlockPos,
+    bb: &ghast_physics::math::Aabb,
+) -> bool {
+    use ghast_data::v1_16_5::VoxelClass;
+    use ghast_physics::voxel::{Points, VoxelShape};
+    let r = state.voxel_shape();
+    let axis = |n: u8, pts: &'static [f64]| match r.class {
+        VoxelClass::Simple => Points::Fractional(u32::from(n)),
+        VoxelClass::Array => Points::Explicit(pts),
+    };
+    let shape = VoxelShape {
+        axes: [
+            axis(r.sizes[0], r.xs),
+            axis(r.sizes[1], r.ys),
+            axis(r.sizes[2], r.zs),
+        ],
+        cells: r.cells,
+    };
+    crate::sim::predict::shape_overlaps(shape, pos, bb)
 }
 
 fn sync_pose_16(pose: &mut Pose, p: &ghast_physics::v1_16_5::PlayerState) {

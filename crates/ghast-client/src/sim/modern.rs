@@ -78,6 +78,11 @@ pub(crate) struct ModernSim {
     filter_dirty: bool,
     /// Entities push the player (vanilla; off only by the client's non-vanilla opt-in).
     entity_push: bool,
+    /// The level's `BlockStatePredictionHandler`: blocks broken on the client and the server's
+    /// state of them until its `block_changed_ack`.
+    predictions: crate::sim::predict::Sequenced<BlockState>,
+    /// An ack moved the player back ([`Sim::take_snap`]).
+    snapped: bool,
 }
 
 /// A vehicle the player rides.
@@ -982,6 +987,8 @@ impl ModernSim {
             session: SessionPackets::default(),
             gate: modern::LoadGate::waiting(),
             entity_push: true,
+            predictions: Default::default(),
+            snapped: false,
         }
     }
 
@@ -1075,6 +1082,109 @@ impl ModernSim {
     fn state(&self, x: i32, y: i32, z: i32) -> Option<BlockState> {
         self.world.block_state(x, y, z)
     }
+
+    /// `block_update` / `section_blocks_update` while predictions wait
+    /// (`ClientLevel.setServerVerifiedBlockState`): a predicted position only remembers the
+    /// server's state; the others change at once. The block-update buffer gets every change
+    /// the server sent.
+    #[cold]
+    #[inline(never)]
+    fn verified_block_updates(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use super::proto::play::clientbound as cb;
+        if raw.id == cb::id::BLOCK_CHANGE {
+            let p: cb::BlockChange = raw.decode_as()?;
+            self.updates.push(p.location, p.r#type as u32);
+            if !self
+                .predictions
+                .update(p.location, state_from_wire(i64::from(p.r#type)))
+            {
+                self.world.apply_block_change(&p);
+            }
+            return Ok(());
+        }
+        let mut p: cb::MultiBlockChange = raw.decode_as()?;
+        let (cx, cy, cz) = (
+            p.chunk_coordinates.x,
+            p.chunk_coordinates.y,
+            p.chunk_coordinates.z,
+        );
+        let sy = (cy << 12) >> 12;
+        let (updates, predictions) = (&mut self.updates, &mut self.predictions);
+        p.records.retain(|&r| {
+            let local = (r & 0xFFF) as i32;
+            let pos = BlockPos::new(
+                cx * 16 + ((local >> 8) & 15),
+                sy.wrapping_mul(16).wrapping_add(local & 15),
+                cz * 16 + ((local >> 4) & 15),
+            );
+            let state = ((r as u64) >> 12) as u32;
+            updates.push(pos, state);
+            !predictions.update(pos, state_from_wire(i64::from(state)))
+        });
+        self.world.apply_multi_block_change(&p);
+        Ok(())
+    }
+
+    /// `block_changed_ack` (`BlockStatePredictionHandler.endPredictionsUpTo`): every prediction
+    /// up to `ack` ends; `ClientLevel.syncBlockState` puts the server's state back and moves the
+    /// player to where it was at the prediction when the restored block would hold it.
+    #[cold]
+    #[inline(never)]
+    fn end_predictions(&mut self, ack: i32) {
+        let (world, player) = (&mut self.world, &mut self.player);
+        let mut snap = None;
+        self.predictions.end_up_to(ack, |pos, state, at| {
+            // getBlockState of a column that is not loaded is air.
+            let now = world
+                .block_state(pos.x, pos.y, pos.z)
+                .unwrap_or(BlockState::AIR);
+            if now == state {
+                return;
+            }
+            world.set_block_state(pos.x, pos.y, pos.z, state);
+            if let Some(at) = at
+                && holds_player(state, pos, &player.bb)
+            {
+                // Entity.absSnapTo: the position and the old position, velocity kept.
+                player.set_pos(at[0], at[1], at[2]);
+                snap = Some(at);
+            }
+        });
+        if let Some(at) = snap {
+            self.old_pos = at;
+            self.snapped = true;
+        }
+    }
+}
+
+/// A wire block state id as the world stores it (unknown ids read as air).
+fn state_from_wire(v: i64) -> BlockState {
+    u16::try_from(v)
+        .ok()
+        .and_then(BlockState::from_id)
+        .unwrap_or(BlockState::AIR)
+}
+
+/// `Entity.isColliding(pos, state)`: the state's collision shape at `pos` overlaps `bb`.
+fn holds_player(state: BlockState, pos: BlockPos, bb: &ghast_physics::math::Aabb) -> bool {
+    use ghast_physics::voxel::{Points, VoxelShape};
+    let r = state.voxel_shape();
+    if r.empty {
+        return false;
+    }
+    let axis = |n: u8, pts: &'static [f64]| match r.class {
+        super::data::VoxelClass::Simple => Points::Fractional(u32::from(n)),
+        super::data::VoxelClass::Array => Points::Explicit(pts),
+    };
+    let shape = VoxelShape {
+        axes: [
+            axis(r.sizes[0], r.xs),
+            axis(r.sizes[1], r.ys),
+            axis(r.sizes[2], r.zs),
+        ],
+        cells: r.cells,
+    };
+    crate::sim::predict::shape_overlaps(shape, pos, bb)
 }
 
 /// The union of a shape's boxes as a ray box (block-local).
@@ -1247,6 +1357,16 @@ impl Sim for ModernSim {
         match raw.id {
             // Batch timing needs the arrival time: the engine routes these (Inbound).
             cb::id::CHUNK_BATCH_START | cb::id::CHUNK_BATCH_FINISHED => return Ok(()),
+            // ClientLevel.setServerVerifiedBlockState: a predicted block keeps the client's
+            // state until the ack.
+            cb::id::BLOCK_CHANGE | cb::id::MULTI_BLOCK_CHANGE if !self.predictions.is_empty() => {
+                return self.verified_block_updates(raw);
+            }
+            cb::id::ACKNOWLEDGE_PLAYER_DIGGING => {
+                let p: cb::AcknowledgePlayerDigging = raw.decode_as()?;
+                self.end_predictions(p.sequence_id);
+                return Ok(());
+            }
             cb::id::BLOCK_CHANGE if self.updates.on => {
                 let p: cb::BlockChange = raw.decode_as()?;
                 self.updates.push(p.location, p.r#type as u32);
@@ -1307,6 +1427,11 @@ impl Sim for ModernSim {
         };
         if matches!(raw.id, cb::id::LOGIN | cb::id::RESPAWN) {
             self.sync_level();
+            // A new ClientLevel (join; respawn into another dimension): a new prediction
+            // handler.
+            if raw.id == cb::id::LOGIN || matches!(applied, Ok(ghast_world::Applied::Changed)) {
+                self.predictions.clear();
+            }
         }
         applied?;
         Ok(())
@@ -1650,6 +1775,8 @@ impl Sim for ModernSim {
             // The vehicle the player rides.
             cb::id::SET_PASSENGERS,
             cb::id::VEHICLE_MOVE,
+            // block_changed_ack: the server's answer to the client's block predictions.
+            cb::id::ACKNOWLEDGE_PLAYER_DIGGING,
         ];
         // Moves of the boats the player may board, only while some are known without the
         // tracker (entity moves are frequent: not decoded otherwise).
@@ -1841,6 +1968,46 @@ impl Sim for ModernSim {
 
     fn predict_air(&mut self, x: i32, y: i32, z: i32) {
         self.world.set_block_state(x, y, z, BlockState::AIR);
+    }
+
+    fn dig_sent(
+        &mut self,
+        pos: BlockPos,
+        _status: crate::common::DigStatus,
+        broken: bool,
+        sequence: i32,
+        player: Vec3,
+    ) {
+        if !broken {
+            return;
+        }
+        // MultiPlayerGameMode.destroyBlock (nothing for air), ClientLevel.setBlock while
+        // predicting: the block's state before is the server's until the ack.
+        let Some(old) = self.world.block_state(pos.x, pos.y, pos.z) else {
+            return;
+        };
+        if old.is_air() {
+            return;
+        }
+        if self
+            .world
+            .set_block_state(pos.x, pos.y, pos.z, BlockState::AIR)
+        {
+            self.predictions
+                .retain(pos, old, sequence, [player.x, player.y, player.z]);
+        }
+    }
+
+    fn teleport_sequence(&mut self, sequence: Option<i32>) {
+        self.predictions.on_teleport(sequence.unwrap_or(0));
+    }
+
+    fn take_snap(&mut self) -> Option<Vec3> {
+        if !std::mem::take(&mut self.snapped) {
+            return None;
+        }
+        let p = self.player.pos;
+        Some(Vec3::new(p[0], p[1], p[2]))
     }
 
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
