@@ -1024,7 +1024,7 @@ impl Inventory {
         #[cfg(modern)]
         {
             self.reg26
-                .enchantments
+                .enchantments()
                 .iter()
                 .position(|n| n == "minecraft:binding_curse")
                 .map(|i| i as i32)
@@ -1038,8 +1038,10 @@ impl Inventory {
     /// enchanted items send hashes the server corrects, and taking enchanted armor off is not
     /// predicted.
     #[cfg(modern)]
+    ///
+    /// Clients of one process that receive the same names share one copy of them.
     pub fn set_registries_modern(&mut self, reg: crate::item26::HashRegistries) {
-        self.reg26 = reg;
+        self.reg26 = reg.shared();
     }
 
     /// 26.1: the registry names set with [`Inventory::set_registries_modern`].
@@ -1108,7 +1110,7 @@ impl Inventory {
                 | crate::sim26::Kind::Loom
                 | crate::sim26::Kind::Mount(_)
         ) {
-            self.d26.ensure(self.mv(), &self.reg26.enchantments);
+            self.d26.ensure(self.mv(), self.reg26.enchantments());
         }
         let w = usize::from(matches!(self.screen, ScreenState::Window(_)));
         let mut m = self.m.clone();
@@ -1323,7 +1325,7 @@ impl Inventory {
         if filtered.chars().count() > 50 || self.s26[1].anvil_name.as_deref() == Some(&filtered) {
             return Ok(None);
         }
-        self.d26.ensure(self.mv(), &self.reg26.enchantments);
+        self.d26.ensure(self.mv(), self.reg26.enchantments());
         let n = filtered.clone();
         let r = self.screen_action_modern(|sim| {
             sim.s.anvil_name = Some(n);
@@ -1352,7 +1354,7 @@ impl Inventory {
         if list.is_empty() {
             return Some(0.0);
         }
-        self.d26.ensure(self.mv(), &self.reg26.enchantments);
+        self.d26.ensure(self.mv(), self.reg26.enchantments());
         let mut v = 0.0f32;
         for (id, level) in list {
             match &self.d26.enchantment(id)?.spin {
@@ -1378,7 +1380,7 @@ impl Inventory {
         if self.kind_26() != crate::sim26::Kind::Loom {
             return Err(ClickError::NoScreen);
         }
-        self.d26.ensure(self.mv(), &self.reg26.enchantments);
+        self.d26.ensure(self.mv(), self.reg26.enchantments());
         let ok = self
             .screen_action_modern(|sim| sim.loom_button(index))
             .map_err(|_| ClickError::Unpredictable)?;
@@ -1659,7 +1661,7 @@ impl Inventory {
         use crate::sim26::Kind;
         let kind = self.kind_26();
         if matches!(kind, Kind::Anvil | Kind::Grindstone | Kind::Loom) {
-            self.d26.ensure(self.mv(), &self.reg26.enchantments);
+            self.d26.ensure(self.mv(), self.reg26.enchantments());
         }
         let new = std::mem::replace(&mut self.m.container, old);
         let mut scr = self.s26[1].clone();

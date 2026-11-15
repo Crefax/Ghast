@@ -245,6 +245,8 @@ const MAX_PENDING_TELEPORTS: usize = 64;
 
 /// Most raw packets kept between two behaviour ticks.
 const MAX_PENDING_RAW: usize = 4096;
+/// Most dialog events kept between two behaviour ticks (the open dialog is always current).
+const MAX_PENDING_DIALOGS: usize = 64;
 
 /// What happened since the behaviour's previous tick.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1129,10 +1131,12 @@ impl<S: Sim> Engine<S> {
             Inbound::ShowDialog(d) => {
                 log::debug!("[{}] t{} dialog \"{}\"", c.opts.name, c.tick, d.title);
                 c.dialog = Some(d.clone());
-                c.dialogs_pending.push(crate::dialog::DialogEvent::Shown(d));
+                if c.dialogs_pending.len() < MAX_PENDING_DIALOGS {
+                    c.dialogs_pending.push(crate::dialog::DialogEvent::Shown(d));
+                }
             }
             Inbound::ClearDialog => {
-                if c.dialog.take().is_some() {
+                if c.dialog.take().is_some() && c.dialogs_pending.len() < MAX_PENDING_DIALOGS {
                     c.dialogs_pending.push(crate::dialog::DialogEvent::Cleared);
                 }
             }

@@ -26,23 +26,117 @@ Additive only: every 0.4.3 API stays; nothing changes for code that does not use
 - **`SharedChunks`: one copy of identical chunk sections for many bots** (`ghast-world`,
   `Client::shared_chunks`, opt-in, 26.1 / 26.2). Bots in one area share each identical
   16×16×16 section's block storage instead of holding one copy each. Sharing is per section and
-  copy on write: a block change (server update or local prediction) first copies that one
-  section for that bot, so no bot sees another bot's packets. The key is a 128-bit keyed hash of
+  copy on write: a block change (server update or local prediction) never writes to storage
+  another bot reads, so no bot sees another bot's packets (see the next entry for what a
+  changed section becomes). The key is a 128-bit keyed hash of
   the section's exact chunk-packet bytes (a skip pass finds them); a section already in the store
   is not decoded at all. The store holds weak references and removes an entry when the last
   holder drops it. Reads stay one pointer hop with no lock; the store's lock is taken while a
   chunk is decoded and when a last holder lets go. Uniform sections, biomes and block entities
-  stay per world (the modern worlds keep no light). Diverged sections never merge back. New
+  stay per world (the modern worlds keep no light). New
   API: `SharedChunks` (`new`, `sections`, `heap_bytes`, `same_store`), `v26_x::World::
   set_shared_chunks` / `shared_chunks`, `paletted::Section::{Shared1, Shared2, Shared4, Shared8,
   SharedDirect}` with `paletted::Shared` and `Section::is_shared` (the enum is
   `#[non_exhaustive]`; a shared section's `heap_bytes` is 0, the store counts it once).
   The 1.8.9 / 1.12.2 / 1.16.5 worlds ignore the option.
+- **`SharedChunks` keeps changed sections and whole columns shared; less memory per world**
+  (`ghast-world`, 26.1 / 26.2).
+  - A block change in a shared section moves that world to the section with the new content,
+    looked up in the store by a content key and copied only when no world holds it yet. Bots
+    that receive the same block updates keep one copy (before, each got its own copy of every
+    section the server touched). The content key is the XOR over the 4096 blocks of a keyed
+    128-bit hash of (protocol, index, state): a change moves it by two hashes, the order of the
+    changes does not matter, and a `section_blocks_update` is applied in one step. A world that
+    is the only holder changes the storage in place and moves it to its new key. A uniform
+    section that gets a block joins the store the same way. Sections a world decoded without a
+    store, or holds through another store, stay its own.
+  - The per-column array of section handles is shared between worlds whose columns hold the
+    same sections (`Arc<[Section]>`, never written while another handle exists). A chunk
+    packet for a column another world already holds costs one store lookup.
+  - Without a store too: the column table's slot shrank from 72 to 32 bytes (the position is
+    no longer stored next to the key, in every version's world; biomes and block entities of
+    the modern columns are behind one pointer that most columns do not have), and the decode
+    scratch table (two bytes per block state) is one per thread instead of one per world.
+  - Reads: `View` and `World::block_state` take one unsigned compare for both ends of the
+    height, and a uniform section answers without computing the block index. Engine bench,
+    instructions per tick, same tree with and without this entry: 1.8.9 11,800 → 11,783;
+    1.12.2 18,372 → 18,323; 1.16.5 39,775 → 39,738; 26.1 36,236 → 35,890; 26.2 36,320 →
+    35,969 (the same with sharing on). Chunk decode does not allocate for biomes it does not
+    keep.
+  - New API: `SharedChunks::columns`, `paletted::Section::get_at`. `Shared::holders` counts
+    handles (section arrays), not worlds. `ColumnMap::table_bytes` counts the table's buckets
+    (it counted the usable capacity).
+- Fixed (26.1 / 26.2, only with `WorldConfig::block_entities`): a stored block entity's NBT was
+  a slice of the packet it came in, which kept the whole chunk packet (or read buffer) alive.
+  It is a copy of its own now, as documented and as in the older worlds.
 - The block read chain of the modern worlds and the physics' per-tick block cache are always
   inlined (they were left to the compiler's size heuristic). Engine bench, instructions per
   tick: 1.8.9 12,494 → 11,792; 1.12.2 19,593 → 18,361; 1.16.5 40,462 → 39,771; 26.1
   36,317 → 36,234; 26.2 36,396 → 36,318 (the same with sharing on). Outbound packet digests
   unchanged.
+- **Smaller tracked entities** (`ghast-entity`, every version; no API change). An entity's
+  metadata is one exact-size block instead of a vector with spare room (a vector's first
+  growth reserved four 112-byte entries); passengers, leash and effects sit behind one pointer
+  that most entities never allocate; the vehicle id is packed. `Entity` is 168 bytes instead
+  of 232, its map slot 176 instead of 240. A 26.1 player with the two metadata entries a server
+  sends at spawn costs 520 bytes instead of 808 (slot + heap), a zombie with one entry 408; a
+  test pins both (296 bytes for the player with `Config::metadata` off). The entity map, the
+  tick-order map, the loaded-column set and the tab list give memory back once they hold under a
+  quarter of their capacity (a crowd left), and a growth forced only by deletion markers (a
+  steady crowd with fresh ids used to double the entity map) is undone at once; tick-order
+  numbers are stored as `u32` (renumbered, order kept, after 2³² − 1 entries).
+- **Names-only tab list** (`ghast-entity`, every version): `Config::player_names` (with
+  `player_list` off) reads the tab-list packets but keeps only each entry's profile name, game
+  mode and (26.x) tab-list object generation, inline: a 48-byte map slot, about 62 bytes per
+  entry at 100 entries, against a 120-byte slot plus heap strings for a full `PlayerInfo`.
+  `Config::reads_tab_list`. Answered from either list: `Entities::player_name`, new
+  `Entities::tab_name` / `tab_game_mode` / `tab_len`, and on 26.x the new
+  `Tracker::scoreboard_name` (the profile name the player entity spawned with, kept after its
+  entry leaves the tab list, as vanilla keeps the `GameProfile`), `Tracker::game_mode` and
+  `Tracker::is_spectator` (vanilla `getPlayerInfo`: an entity that looked its entry up keeps its
+  last game mode). With either list, 26.x refuses a player spawn whose profile is not in the tab
+  list (vanilla); with both off every spawn is kept, as before.
+- `v26_1::alive` / `v26_2::alive` (`ghast-entity`): vanilla `LivingEntity.isAlive` from the
+  health the server sent (NaN and ≤ 0 are dead), also with `Config::metadata` off. Instructions
+  per packet on the entity benches are the same or lower (26.1 stream −1.3%, 26.1 metadata
+  −2.3%, 1.16.5 stream −0.8%); engine bench unchanged (26.1 with 100 entities −0.2%).
+- **Less memory per connection** (`ghast-protocol`, `ghast-inventory`, `ghast-client`; no
+  behaviour change). The zlib inflater (~47 KB) and the compressor states are per thread
+  instead of per `FrameDecoder` / `FrameEncoder` (they are reset before each use). The receive
+  buffer is 8 KB instead of growing to 32 KB: reads ask only for the room they need, and a
+  buffer grown for a large frame (a 2 MB chunk packet) goes back to 8 KB once 64 frames in a
+  row fit again; the send buffers start at 256 bytes. Login and configuration frames are
+  copied out of the receive buffer (`FrameDecoder::set_detach_frames`, `FrameDecoder::rehome`
+  at the switch to play), and the stack of a single-slot packet copies its components / NBT
+  (`ComponentPatch::detach`, `RawNbt::detach`), so data kept from them no longer keeps a whole
+  receive buffer alive. New `FrameDecoder::reserve_read` (the read path of the client and of
+  `io::FramedReader`). 26.x: the click-hash registry names (`HashRegistries`, now one `Arc`),
+  the kept tags, the enchantment registry and the recipe bytes are stored once per process for
+  all clients that received the same content (matched by content at join; lookups take no
+  lock). The session future no longer carries a 16 KB stack array (the close drain buffer is
+  allocated when closing). The kept login / respawn packets and the last-seen chat
+  signatures are copies, the 26.x command tree (kept compressed) is shared per process too, and
+  the per-tick event lists give back burst capacity every 1024 ticks. New module
+  `ghast_protocol::intern` (`shared`, `bytes`). About 180 KB less per 26.x bot; engine bench
+  unchanged.
+- **Fixed (26.1, 26.2)**: with `Interests::ENTITIES` but without `Interests::PLAYER_LIST`, a
+  player pushing the local player was judged by the teams of its UUID instead of its profile
+  name, so a team collision rule other than `always` was misapplied, and a spectator player
+  pushed. The 26.x tracker now keeps the names-only tab list of `ghast-entity`
+  (`Config::player_names`: name and game mode per entry) when the full one is off (new
+  capability `Capabilities::client_entity_push`; 1.8.9 – 1.16.5, whose clients do not push the
+  player, still decode no `player_info` without `PLAYER_LIST`); the team
+  check uses the profile name, spectator players no longer push (vanilla: `noPhysics`), and a
+  player spawn without a tab-list profile is skipped as in vanilla. `TickContext::entities`
+  still lists no tab list unless `PLAYER_LIST` is asked for.
+- At most 64 dialog events are kept between two behaviour ticks (the open dialog stays current).
+- **`Interests::ENTITY_TRACKING`** (`ghast-client`): entity tracking without the generic
+  metadata store, roughly 450 bytes less per tracked entity. Only the generic metadata
+  accessors (health, flags, custom names, raw values) return nothing; item entities keep their
+  stack, and what physics, pushes and picking read is unchanged (the 26.1 entity oracle replay
+  passes with it). `Interests::ENTITIES` is unchanged and keeps the metadata.
+- **Fixed (26.1, 26.2)**: a shulker whose health is NaN collided with the player; it now
+  follows vanilla's `isAlive` (`ghast_entity::v26_x::alive`).
 - `swarm` example: N wandering bots in one process (`--count`, `--workers`, `--join-delay-ms`).
 - README: "Running many bots".
 

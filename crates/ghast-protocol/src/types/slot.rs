@@ -291,6 +291,15 @@ pub mod v775 {
             codec: Codec::P775,
         };
 
+        /// Moves the patch's bytes to an allocation of their own. A read patch is a view into
+        /// the received packet, which may share its buffer with other packets: a stack kept
+        /// for long (one `set_slot`) would keep all of that alive.
+        pub fn detach(&mut self) {
+            if !self.bytes.is_empty() {
+                self.bytes = Bytes::copy_from_slice(&self.bytes);
+            }
+        }
+
         /// Reads `added` components and `removed` types (protocol 775) by skipping over them.
         #[cfg(feature = "v26_1")]
         pub fn read(r: &mut Reader<'_>, added: i32, removed: i32) -> DecodeResult<Self> {

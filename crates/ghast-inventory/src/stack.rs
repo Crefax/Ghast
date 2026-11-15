@@ -163,6 +163,20 @@ impl Stack {
         }
     }
 
+    /// The stack with its NBT / components in an allocation of their own instead of a view
+    /// into the packet (for single-slot packets, whose frame shares the receive buffer with
+    /// other packets: a stack kept in the inventory would keep that buffer alive).
+    #[must_use]
+    pub(crate) fn detached(mut self) -> Stack {
+        match &mut self.data {
+            ItemData::None => {}
+            ItemData::Nbt(n) => n.detach(),
+            #[cfg(modern)]
+            ItemData::Components(c) => c.detach(),
+        }
+        self
+    }
+
     /// Converts a 26.1 wire stack (an empty patch becomes [`ItemData::None`]).
     #[cfg(modern)]
     #[must_use]

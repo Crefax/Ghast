@@ -12,9 +12,6 @@ use crate::error::{EncodeError, FrameError};
 use crate::frame::{FrameDecoder, FrameEncoder};
 use crate::packet::{Packet, PacketSet, RawPacket};
 
-/// Minimum free space requested from the socket per read.
-const READ_CHUNK: usize = 16 * 1024;
-
 /// Reads packets from an `AsyncRead`.
 #[derive(Debug)]
 pub struct FramedReader<R> {
@@ -50,9 +47,7 @@ impl<R: AsyncRead + Unpin> FramedReader<R> {
             if let Some(p) = self.decoder.next_packet()? {
                 return Ok(Some(p));
             }
-            let want = self.decoder.needed().unwrap_or(0).max(READ_CHUNK);
-            let buf = self.decoder.buffer_mut();
-            buf.reserve(want);
+            let buf = self.decoder.reserve_read();
             let old = buf.len();
             let n = self.inner.read_buf(buf).await?;
             if n == 0 {

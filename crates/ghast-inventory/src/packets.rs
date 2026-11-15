@@ -167,7 +167,7 @@ impl Inventory {
                 self.on_set_slot(
                     i32::from(s.window_id),
                     s.slot,
-                    from_legacy_slot(s.item.clone()),
+                    from_legacy_slot(s.item.clone()).map(crate::Stack::detached),
                 );
             }
             P::Transaction(t) => return self.on_transaction(t.window_id, t.action, t.accepted),
@@ -198,7 +198,7 @@ impl Inventory {
                 self.on_set_slot(
                     i32::from(s.window_id),
                     s.slot,
-                    from_legacy_slot(s.item.clone()),
+                    from_legacy_slot(s.item.clone()).map(crate::Stack::detached),
                 );
             }
             P::Transaction(t) => return self.on_transaction(t.window_id, t.action, t.accepted),
@@ -240,7 +240,7 @@ impl Inventory {
                 self.on_set_slot(
                     i32::from(s.window_id),
                     s.slot,
-                    from_modern_slot(s.item.clone()),
+                    from_modern_slot(s.item.clone()).map(crate::Stack::detached),
                 );
             }
             P::Transaction(t) => return self.on_transaction(t.window_id, t.action, t.accepted),
@@ -541,16 +541,16 @@ macro_rules! modern_packets {
                         let window = r.read_varint()?;
                         let state = r.read_varint()?;
                         let s = r.read_i16()?;
-                        let item = slot(&mut r)?;
+                        let item = slot(&mut r)?.map(Stack::detached);
                         inv.on_set_slot_modern(window, state, s, item);
                     }
                     cb::id::SET_CURSOR_ITEM => {
-                        let item = slot(&mut r)?;
+                        let item = slot(&mut r)?.map(Stack::detached);
                         inv.on_set_cursor(item);
                     }
                     cb::id::SET_PLAYER_INVENTORY => {
                         let k = r.read_varint()?;
-                        let item = slot(&mut r)?;
+                        let item = slot(&mut r)?.map(Stack::detached);
                         inv.on_set_player_inventory(k, item);
                     }
                     // decoded as their own type: no whole-protocol decoder is linked
@@ -578,7 +578,7 @@ macro_rules! modern_packets {
                     // large and sent at every join: kept as bytes, parsed when a menu first
                     // needs its item sets (`ensure_recipes`)
                     cb::id::DECLARE_RECIPES => {
-                        inv.set_recipes_raw_modern(bytes::Bytes::copy_from_slice(&raw.body));
+                        inv.set_recipes_raw_modern(ghast_protocol::intern::bytes(&raw.body));
                     }
                     cb::id::TAGS => {
                         inv.on_update_tags_modern(bytes::Bytes::copy_from_slice(&raw.body))

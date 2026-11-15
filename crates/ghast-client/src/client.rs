@@ -32,8 +32,6 @@ use crate::version::{ClientVersion, GameVersion, HasSim};
 
 /// Length of one client tick.
 pub const TICK: Duration = Duration::from_millis(50);
-/// Minimum free space requested from the socket per read.
-const READ_CHUNK: usize = 16 * 1024;
 
 /// The account a client logs in with.
 #[derive(Clone)]
@@ -404,9 +402,7 @@ async fn read_more<R: AsyncRead + Unpin>(
     rd: &mut R,
     dec: &mut FrameDecoder,
 ) -> std::io::Result<usize> {
-    let want = dec.needed().unwrap_or(0).max(READ_CHUNK);
-    let buf = dec.buffer_mut();
-    buf.reserve(want);
+    let buf = dec.reserve_read();
     let old = buf.len();
     let n = rd.read_buf(buf).await?;
     dec.commit(old);
@@ -492,6 +488,9 @@ where
 {
     let name: Arc<str> = client.account.name().into();
     let mut dec = FrameDecoder::new();
+    // Login and configuration packets (registries, profile) are partly kept for the session:
+    // copied, they do not keep the receive buffers of those states alive.
+    dec.set_detach_frames(true);
     let mut enc = FrameEncoder::new();
     let mut wire = V::Wire::default();
     let transfer = hop.is_some();
@@ -507,7 +506,9 @@ where
     // The connection is encrypted (vanilla starts a chat session only then).
     let mut encrypted = false;
 
-    let login = async {
+    // Boxed while it runs: its state would otherwise keep a slot in the session future for
+    // the whole session.
+    let login = Box::pin(async {
         let stream = client.connector.connect(&address).await?;
         let (mut rd, mut wr) = stream.into_split();
         login::<V, _, _, B>(
@@ -524,7 +525,7 @@ where
         )
         .await
         .map(|end| (rd, wr, end))
-    };
+    });
     let (rd, wr, end) = tokio::select! {
         r = tokio::time::timeout(client.login_timeout, login) => match r {
             Ok(r) => r?,
@@ -541,6 +542,9 @@ where
         ));
     }
     log::info!("[{name}] logged in to {address} ({})", V::GAME);
+    // Play packets already received go to a buffer of their own.
+    dec.set_detach_frames(false);
+    dec.rehome();
 
     let opts = CoreOptions {
         name,
@@ -564,7 +568,7 @@ where
             V::new_sim(&crate::sim::SimOptions {
                 record: client.record.clone(),
                 force_step_position: client.force_step_position,
-                entities: entity_config(behavior.interests()),
+                entities: entity_config(behavior.interests(), V::GAME.caps()),
                 world: client.world_config,
                 shared_chunks: client.shared_chunks.clone(),
                 profile_name: Some(client.account.name().to_string()),
@@ -982,13 +986,23 @@ type KeysTask<'c> = Pin<Box<dyn Future<Output = Result<ProfileKeys, String>> + S
 
 /// The entity tracking the interests ask for: positions and metadata (item stacks, sneak /
 /// pose flags); equipment and other entities' effects are not decoded (cheaper).
-fn entity_config(interests: Interests) -> Option<ghast_entity::Config> {
-    interests.contains(Interests::ENTITIES).then(|| {
+pub(crate) fn entity_config(
+    interests: Interests,
+    caps: &crate::version::Capabilities,
+) -> Option<ghast_entity::Config> {
+    let metadata = interests.contains(Interests::ENTITIES);
+    (metadata || interests.contains(Interests::ENTITY_TRACKING)).then(|| {
+        let list = interests.contains(Interests::PLAYER_LIST);
         ghast_entity::Config::default()
-            .with_metadata(true)
+            .with_metadata(metadata)
             .with_equipment(false)
             .with_effects(false)
-            .with_player_list(interests.contains(Interests::PLAYER_LIST))
+            .with_player_list(list)
+            // Without the tab list, still each player's name and game mode where the client
+            // pushes the player itself: pushes are judged by the pusher's team under its
+            // profile name, spectators do not push, and vanilla skips a player spawn whose
+            // profile is not in the tab list. Older versions decode no player_info then.
+            .with_player_names(!list && caps.client_entity_push)
             .with_events(false)
             .with_skins(interests.contains(Interests::PLAYER_SKINS))
     })
@@ -1120,7 +1134,9 @@ where
             .collect_block_updates(interests.contains(Interests::BLOCK_UPDATES));
         // Entity tracking follows the interests at run time (a tracker started late begins
         // empty: entities spawned before are not known until the server sends them again).
-        self.engine.sim.set_entities(entity_config(interests));
+        self.engine
+            .sim
+            .set_entities(entity_config(interests, V::GAME.caps()));
         let mut filter: PacketFilter = V::play_filter(interests);
         for id in self.engine.sim.entity_packet_ids() {
             filter.insert(id);
@@ -1312,6 +1328,7 @@ where
         flush(&mut self.wr, &mut self.enc).await?;
         let play_filter = *self.dec.filter();
         self.dec.set_filter(PacketFilter::all());
+        self.dec.set_detach_frames(true);
         let mut registries = Vec::new();
         let end = configure::<V, _, _, B>(
             self.client,
@@ -1327,6 +1344,8 @@ where
         if let ConfigEnd::Transfer { host, port } = end {
             return Ok(Some(SessionEnd::Transferred { host, port }));
         }
+        self.dec.set_detach_frames(false);
+        self.dec.rehome();
         for raw in &registries {
             self.engine.sim.registry_data(raw);
         }
@@ -1343,7 +1362,8 @@ where
     /// server logs as "Connection reset by peer" instead of a normal disconnect.
     async fn close(&mut self) {
         let _ = self.wr.shutdown().await;
-        let mut buf = [0u8; 16 * 1024];
+        // On the heap: an array here would be part of the session future for its whole life.
+        let mut buf = vec![0u8; 16 * 1024];
         let drain = async {
             loop {
                 match self.rd.read(&mut buf).await {
@@ -1492,12 +1512,114 @@ mod tests {
     /// The interests map to the tracker configuration (none without `ENTITIES`).
     #[test]
     fn entity_config_follows_the_interests() {
-        assert_eq!(entity_config(Interests::PLAYER_LIST), None);
-        let c = entity_config(Interests::ENTITIES).unwrap();
-        assert!(c.metadata && !c.player_list && !c.skins);
-        let c =
-            entity_config(Interests::ENTITIES | Interests::PLAYER_LIST | Interests::PLAYER_SKINS)
-                .unwrap();
+        let caps = GameVersion::V26_2.caps();
+        assert_eq!(entity_config(Interests::PLAYER_LIST, caps), None);
+        let c = entity_config(Interests::ENTITIES, caps).unwrap();
+        assert!(c.metadata && !c.player_list && c.player_names && !c.skins);
+        let c = entity_config(
+            Interests::ENTITIES | Interests::PLAYER_LIST | Interests::PLAYER_SKINS,
+            caps,
+        )
+        .unwrap();
         assert!(c.player_list && c.skins);
+        // Lean tracking: the tracker without the generic store; with ENTITIES it is kept.
+        let c = entity_config(Interests::ENTITY_TRACKING, caps).unwrap();
+        assert!(!c.metadata && c.reads_tab_list());
+        assert!(
+            entity_config(Interests::ENTITIES | Interests::ENTITY_TRACKING, caps)
+                .unwrap()
+                .metadata
+        );
+        // Versions whose client does not push the player: no tab list without PLAYER_LIST.
+        let old = GameVersion::V1_8_9.caps();
+        let c = entity_config(Interests::ENTITIES, old).unwrap();
+        assert!(!c.reads_tab_list());
+    }
+
+    /// The tab-list packets pass the filter with `Interests::ENTITIES` alone only where the
+    /// sim uses them (client-side pushes, 26.1+); with `PLAYER_LIST` everywhere.
+    #[test]
+    fn tab_list_packets_follow_the_version() {
+        use crate::sim::Sim;
+        fn check(mut sim: impl Sim, v: GameVersion, ids: &[i32]) {
+            let caps = v.caps();
+            for (interests, want) in [
+                (Interests::ENTITIES, caps.client_entity_push),
+                (Interests::ENTITY_TRACKING, caps.client_entity_push),
+                (Interests::ENTITIES | Interests::PLAYER_LIST, true),
+            ] {
+                sim.set_entities(entity_config(interests, caps));
+                let passed = sim.entity_packet_ids();
+                for id in ids {
+                    assert_eq!(passed.contains(id), want, "{v:?} {interests:?} 0x{id:02x}");
+                }
+            }
+        }
+        #[cfg(feature = "v1_8")]
+        check(
+            crate::sim::Sim18::new(),
+            GameVersion::V1_8_9,
+            ghast_entity::v1_8::PLAYER_LIST_IDS,
+        );
+        #[cfg(feature = "v1_12_2")]
+        check(
+            crate::sim::Sim12::new(),
+            GameVersion::V1_12_2,
+            ghast_entity::v1_12::PLAYER_LIST_IDS,
+        );
+        #[cfg(feature = "v1_16_5")]
+        check(
+            crate::sim::Sim16::new(),
+            GameVersion::V1_16_5,
+            ghast_entity::v1_16_5::PLAYER_LIST_IDS,
+        );
+        #[cfg(feature = "v26_1")]
+        check(
+            crate::sim::Sim26::test_overworld(),
+            GameVersion::V26_1,
+            ghast_entity::v26_1::PLAYER_LIST_IDS,
+        );
+        #[cfg(feature = "v26_2")]
+        check(
+            crate::sim::Sim262::test_overworld(),
+            GameVersion::V26_2,
+            ghast_entity::v26_2::PLAYER_LIST_IDS,
+        );
+    }
+}
+
+/// The session future is allocated per bot for its whole life: beyond the session's state
+/// (`Play`) it must stay small (a stack array or a long-dead local there costs every bot).
+#[cfg(all(test, feature = "v26_2"))]
+mod future_size {
+    use super::*;
+
+    fn size_of_output<Fut>(_: impl FnOnce() -> Fut) -> usize {
+        std::mem::size_of::<Fut>()
+    }
+
+    #[test]
+    fn the_session_future_holds_little_beyond_the_session_state() {
+        type V = ghast_protocol::v26_2::V26_2;
+        type P<'a> = Play<'a, V, tokio::net::tcp::OwnedReadHalf, tokio::net::tcp::OwnedWriteHalf>;
+        let client = Client::new(
+            TargetAddr::new("localhost", 25565).unwrap(),
+            GameVersion::V26_2,
+            Account::offline("probe").unwrap(),
+        );
+        let mut idle = crate::engine::Idle;
+        let session = std::mem::size_of_val(&client.run_until(&mut idle, std::future::pending()));
+        let play = std::mem::size_of::<P<'static>>();
+        // Only the type is looked at: the closure never runs.
+        #[allow(unreachable_code, clippy::diverging_sub_expression)]
+        let run = size_of_output(|| {
+            let p: &mut P<'_> = unreachable!();
+            p.run(&mut idle, std::pin::pin!(std::future::pending::<()>()))
+        });
+        assert!(
+            session < play + 6 * 1024,
+            "session {session} B, play state {play} B"
+        );
+        assert!(run < 2 * 1024, "Play::run {run} B");
     }
 }

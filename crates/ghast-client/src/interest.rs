@@ -33,6 +33,14 @@ impl Interests {
     /// [`crate::TickEvents::block_updates`]. The world applies them either way; this only
     /// collects them for the behaviour.
     pub const BLOCK_UPDATES: Interests = Interests(1 << 3);
+    /// Lean entity tracking: what [`Interests::ENTITIES`] gives (positions, boxes, the crosshair
+    /// / attack / interact, entity pushes and collisions) without the generic metadata store,
+    /// roughly 450 bytes less per tracked entity. Only the generic metadata accessors of
+    /// [`crate::TickContext::entities`] (`Entity::metadata` and what reads it: health, flags,
+    /// custom names, raw values) return nothing; item entities keep their stack, and the values
+    /// physics, pushes and picking read are taken from the packets either way. With
+    /// [`Interests::ENTITIES`] as well, the metadata is kept.
+    pub const ENTITY_TRACKING: Interests = Interests(1 << 6);
     /// Server dialogs (26.1+ `show_dialog` / `clear_dialog`, see [`crate::dialog`]):
     /// [`crate::TickContext::dialog_events`], [`crate::TickContext::dialog`] and the answers, and in the
     /// configuration state [`crate::Behavior::configuration_dialog`]. Without it play-state

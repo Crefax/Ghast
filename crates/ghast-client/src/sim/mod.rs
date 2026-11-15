@@ -169,11 +169,14 @@ pub(super) struct SessionPackets {
 ))]
 impl SessionPackets {
     fn note(&mut self, raw: &RawPacket, login: i32, respawn: i32) {
+        // Copies: a body shares the receive buffer it arrived in (or the whole inflated
+        // packet), which a clone would keep alive for the session.
+        let own = || RawPacket::new(raw.id, bytes::Bytes::copy_from_slice(&raw.body));
         if raw.id == login {
-            self.login = Some(raw.clone());
+            self.login = Some(own());
             self.respawn = None;
         } else if raw.id == respawn {
-            self.respawn = Some(raw.clone());
+            self.respawn = Some(own());
         }
     }
 

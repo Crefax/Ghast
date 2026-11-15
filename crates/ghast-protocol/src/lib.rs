@@ -41,6 +41,7 @@ pub mod codec;
 pub mod crypto;
 pub mod error;
 pub mod frame;
+pub mod intern;
 #[cfg(feature = "tokio")]
 pub mod io;
 pub mod nbt;

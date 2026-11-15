@@ -994,6 +994,34 @@ fn entities_match_the_oracle() {
     assert!(cases >= 13 && fuzz >= 5, "{cases} {fuzz}");
 }
 
+/// [`entities_match_the_oracle`] as `Interests::ENTITY_TRACKING` alone sets the tracker up
+/// (no generic metadata store): the values physics,
+/// pushes and collisions read do not come from the generic metadata store.
+#[test]
+fn entities_match_the_oracle_without_metadata() {
+    let (cases, fuzz) = ext_replay_cfg(
+        "entities.jsonl.gz",
+        &[
+            "push_zombie",
+            "push_crowd",
+            "push_walk_into_mobs",
+            "no_push_armor_stand_bat_parrot",
+            "boat_collide",
+            "boat_push",
+            "shulker_block",
+            "minecart_near",
+            "push_moving_zombie",
+            "push_ladder",
+            "push_spectator",
+            "boat_stand_on",
+            "push_spawned_in",
+        ],
+        true,
+        false,
+    );
+    assert!(cases >= 13 && fuzz >= 5, "{cases} {fuzz}");
+}
+
 /// 26.1 world border through the engine: `initialize` / `set_border_center` /
 /// `set_border_size` / `set_border_lerp_size` packets into the world, the border stepping
 /// after the entities (`tests/golden/<version>/border.jsonl.gz`).
@@ -1086,6 +1114,12 @@ fn ext_replay(file: &str, hand: &[&str]) -> (usize, usize) {
 
 /// [`ext_replay`] with or without entity tracking.
 pub(super) fn ext_replay_with(file: &str, hand: &[&str], tracking: bool) -> (usize, usize) {
+    ext_replay_cfg(file, hand, tracking, true)
+}
+
+/// [`ext_replay_with`], the tracker with or without the generic metadata store
+/// (`Interests::ENTITY_TRACKING` alone: without).
+fn ext_replay_cfg(file: &str, hand: &[&str], tracking: bool, metadata: bool) -> (usize, usize) {
     use golden::{ext_of, player_of};
     use proto::play::clientbound as cb;
     use serde_json::Value;
@@ -1360,7 +1394,7 @@ pub(super) fn ext_replay_with(file: &str, hand: &[&str], tracking: bool) -> (usi
         e.sim.test_set_own_id(7);
         e.sim.set_entities(tracking.then(|| {
             ghast_entity::Config::default()
-                .with_metadata(true)
+                .with_metadata(metadata)
                 .with_equipment(false)
                 .with_effects(false)
                 .with_events(false)

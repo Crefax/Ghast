@@ -154,8 +154,11 @@ fn spin_spec(effects: Option<&Tag>) -> String {
 impl Data26 {
     /// `update_tags` (configuration or play): replaces the tags.
     pub(crate) fn set_tags_raw(&mut self, body: Bytes) {
-        // Only the registries `parse_tags` reads are kept (a vanilla body is ~32 KB, these ~4).
-        self.tags_raw = Some(kept_tags(&body).unwrap_or(body));
+        // Only the registries `parse_tags` reads are kept (a vanilla body is ~32 KB, these ~4),
+        // and one copy of them per process for every client that received the same.
+        self.tags_raw = Some(ghast_protocol::intern::bytes(
+            &kept_tags(&body).unwrap_or(body),
+        ));
         self.tags = None;
     }
 
@@ -163,7 +166,7 @@ impl Data26 {
     pub(crate) fn set_registry_raw(&mut self, body: Bytes) {
         let mut r = Reader::new(&body);
         if r.read_string().ok().as_deref().and_then(reg_of) == Some(Reg::Enchantment) {
-            self.ench_raw = Some(body);
+            self.ench_raw = Some(ghast_protocol::intern::bytes(&body));
             self.ench = None;
         }
     }

@@ -232,8 +232,8 @@ fn collect_colliders(
         {
             continue;
         }
-        // isAlive: a dying shulker (health 0) no longer collides.
-        if super::entity::health(e).is_some_and(|h| h <= 0.0) {
+        // isAlive: a dying shulker (health not above 0, NaN included) no longer collides.
+        if !super::entity::alive(e) {
             continue;
         }
         found.push((section_order(pos), b, bits & COLLIDES != 0));
@@ -916,14 +916,15 @@ impl ModernSim {
             if !t.is_ticking(e) {
                 continue;
             }
+            // Entity.push: a spectator player has noPhysics (set in its tick) and pushes
+            // nothing. A dead or dying pusher still pushes (its aiStep runs until removed).
+            if t.is_spectator(e) {
+                continue;
+            }
             // EntitySelector.pushableBy: the pusher's and the player's team collision rules.
             if let Some(teams) = self.teams.as_deref().filter(|t| t.any_rule()) {
                 let mut buf = [0u8; 36];
-                let name = match t.player_name(e.id()) {
-                    Some(n) if e.is_player() => n,
-                    _ => e.uuid().hyphenated().encode_lower(&mut buf),
-                };
-                if !teams.may_push(name, &self.profile_name) {
+                if !teams.may_push(scoreboard_name(t, e, &mut buf), &self.profile_name) {
                     continue;
                 }
             }
@@ -2119,6 +2120,18 @@ pub(crate) fn dig_progress(
     dig::destroy_progress_with(state, item, &c)
 }
 
+/// `Entity.getScoreboardName`: a player's profile name (from the tab list), else the UUID.
+fn scoreboard_name<'a>(
+    t: &'a super::entity::Tracker,
+    e: &'a ghast_entity::Entity,
+    buf: &'a mut [u8; 36],
+) -> &'a str {
+    match t.scoreboard_name(e) {
+        Some(n) => n,
+        None => e.uuid().hyphenated().encode_lower(buf),
+    }
+}
+
 /// The resolved entity ids (the per-version table tests).
 #[cfg(test)]
 pub(super) fn entity_ids_for_test() -> ([i32; 7], [i32; 2], [i32; 2], i32) {
@@ -2128,6 +2141,177 @@ pub(super) fn entity_ids_for_test() -> ([i32; 7], [i32; 2], [i32; 2], i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `spawn_entity` of type `ty` at `pos` (no rotation, no velocity).
+    fn spawn_raw(eid: i32, uuid: u128, ty: &str, pos: [f64; 3]) -> RawPacket {
+        use super::super::proto::play::clientbound as cb;
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        let ty = super::super::data::entity_by_name(ty).unwrap().id;
+        let mut b = bytes::BytesMut::new();
+        b.put_varint(eid);
+        b.put_u128(uuid);
+        b.put_varint(i32::from(ty));
+        for v in pos {
+            b.put_f64(v);
+        }
+        b.put_u8(0);
+        b.put_i8(0);
+        b.put_i8(0);
+        b.put_i8(0);
+        b.put_varint(0);
+        RawPacket::new(cb::id::SPAWN_ENTITY, b.freeze())
+    }
+
+    /// `isAlive` decides whether a shulker collides: a health that is not above 0 (NaN
+    /// included) makes it dead.
+    #[test]
+    fn dead_shulkers_do_not_collide() {
+        use super::super::proto::play::clientbound as cb;
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        for (health, collides) in [
+            (None, true),
+            (Some(10.0f32), true),
+            (Some(0.0), false),
+            (Some(f32::NAN), false),
+        ] {
+            let mut s = ModernSim::test_overworld();
+            s.set_entities(Some(ghast_entity::Config::default()));
+            s.world_packet(&spawn_raw(7, 0x77, "shulker", [1.5, 0.0, 0.5]))
+                .unwrap();
+            if let Some(h) = health {
+                // entity_metadata: LivingEntity health (index 9, float serializer 3).
+                let mut b = bytes::BytesMut::new();
+                b.put_varint(7);
+                b.put_u8(super::super::entity::meta::HEALTH);
+                b.put_varint(3);
+                b.put_f32(h);
+                b.put_u8(0xFF);
+                s.world_packet(&RawPacket::new(cb::id::ENTITY_METADATA, b.freeze()))
+                    .unwrap();
+            }
+            let (mut boxes, mut boat) = (Vec::new(), Vec::new());
+            let player = modern::PlayerState::new([0.5, 0.0, 0.5], 0.0, 0.0);
+            collect_colliders(
+                s.entities.as_ref(),
+                None,
+                &player,
+                None,
+                &mut boxes,
+                &mut boat,
+            );
+            assert_eq!(boxes.len(), usize::from(collides), "health {health:?}");
+        }
+    }
+
+    /// `Entity.push`: a spectator player (noPhysics) pushes nothing, a survival one does, and a
+    /// dying mob still does (its aiStep runs until it is removed).
+    #[test]
+    fn spectators_do_not_push_dying_mobs_do() {
+        use super::super::proto::play::clientbound as cb;
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        let pushed = |ty: &str, game_mode: Option<i32>, health: Option<f32>| {
+            let mut s = ModernSim::test_overworld();
+            s.set_entities(crate::client::entity_config(
+                crate::Interests::ENTITIES,
+                super::super::GAME.caps(),
+            ));
+            let uuid = 0x55u128;
+            if let Some(gm) = game_mode {
+                // player_info: add_player + update_game_mode.
+                let mut b = bytes::BytesMut::new();
+                b.put_u8(0b101);
+                b.put_varint(1);
+                b.put_u128(uuid);
+                b.put_string("Alex").unwrap();
+                b.put_varint(0);
+                b.put_varint(gm);
+                s.world_packet(&RawPacket::new(cb::id::PLAYER_INFO, b.freeze()))
+                    .unwrap();
+            }
+            s.world_packet(&spawn_raw(9, uuid, ty, [0.8, 64.0, 0.5]))
+                .unwrap();
+            if let Some(h) = health {
+                let mut b = bytes::BytesMut::new();
+                b.put_varint(9);
+                b.put_u8(super::super::entity::meta::HEALTH);
+                b.put_varint(3);
+                b.put_f32(h);
+                b.put_u8(0xFF);
+                s.world_packet(&RawPacket::new(cb::id::ENTITY_METADATA, b.freeze()))
+                    .unwrap();
+            }
+            let t = s.entities.as_mut().unwrap();
+            assert!(t.get(9).is_some(), "{ty} spawned");
+            t.mark_column_loaded(0, 0);
+            s.player = modern::PlayerState::new([0.5, 64.0, 0.5], 0.0, 0.0);
+            let mut pose = Pose::default();
+            s.push_player(&mut pose, false);
+            s.player.vel[0] != 0.0
+        };
+        assert!(pushed("player", Some(0), None));
+        assert!(!pushed("player", Some(3), None));
+        assert!(pushed("zombie", None, None));
+        assert!(pushed("zombie", None, Some(0.0)));
+    }
+
+    /// A player that pushes the local player is judged by its team under its profile name,
+    /// which comes from the tab list: with entity tracking as the client sets it up for
+    /// `Interests::ENTITIES` alone the name must still be known.
+    #[test]
+    fn pushing_players_are_judged_by_their_profile_name() {
+        use super::super::proto::play::clientbound as cb;
+        use bytes::BufMut;
+        use ghast_protocol::codec::McWrite;
+        let mut s = ModernSim::test_overworld();
+        s.set_entities(crate::client::entity_config(
+            crate::Interests::ENTITIES,
+            super::super::GAME.caps(),
+        ));
+        let uuid = 0x1234_5678_9abc_def0_1122_3344_5566_7788u128;
+        // player_info: add_player (action bit 0) for one profile, no properties.
+        let mut b = bytes::BytesMut::new();
+        b.put_u8(1);
+        b.put_varint(1);
+        b.put_u128(uuid);
+        b.put_string("Steve").unwrap();
+        b.put_varint(0);
+        let info = RawPacket::new(cb::id::PLAYER_INFO, b.freeze());
+        // spawn_entity: a player next to the local one.
+        let player = super::super::data::entity_by_name("player").unwrap().id;
+        let mut b = bytes::BytesMut::new();
+        b.put_varint(42);
+        b.put_u128(uuid);
+        b.put_varint(i32::from(player));
+        b.put_f64(0.5);
+        b.put_f64(64.0);
+        b.put_f64(0.5);
+        b.put_u8(0);
+        b.put_i8(0);
+        b.put_i8(0);
+        b.put_i8(0);
+        b.put_varint(0);
+        let spawn = RawPacket::new(cb::id::SPAWN_ENTITY, b.freeze());
+        // What the client lets through to the sim.
+        let wanted = s.entity_packet_ids();
+        for raw in [&info, &spawn] {
+            if wanted.contains(&raw.id) {
+                s.world_packet(raw).unwrap();
+            }
+        }
+        let t = s.entities.as_ref().unwrap();
+        let e = t.get(42).expect("the player spawned");
+        let mut buf = [0u8; 36];
+        assert_eq!(scoreboard_name(t, e, &mut buf), "Steve");
+        // The names-only list is not the tab list the behaviour sees (it did not ask for it).
+        assert_eq!(t.players().count(), 0);
+        // Vanilla skips a player spawn whose profile is not in the tab list.
+        s.world_packet(&spawn_raw(43, 0x99, "player", [0.5, 64.0, 0.5]))
+            .unwrap();
+        assert!(s.entities.as_ref().unwrap().get(43).is_none());
+    }
 
     /// Grim compatibility: a status-only move whose feet height differs from the sent one gets
     /// the position (and the sent bookkeeping follows); off, or with the same height, nothing

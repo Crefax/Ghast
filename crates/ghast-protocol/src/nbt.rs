@@ -62,6 +62,15 @@ impl RawNbt {
         self.0.first() == Some(&tag::END)
     }
 
+    /// Moves the bytes to an allocation of their own. Read NBT is a view into the received
+    /// packet, which may share its buffer with other packets: NBT kept for long would keep all
+    /// of that alive.
+    pub fn detach(&mut self) {
+        if self.0.len() > 1 {
+            self.0 = Bytes::copy_from_slice(&self.0);
+        }
+    }
+
     /// Validates `bytes` as exactly one root tag and wraps them.
     pub fn from_bytes(bytes: Bytes) -> DecodeResult<Self> {
         let mut r = Reader::new(&bytes);

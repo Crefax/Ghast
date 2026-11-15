@@ -127,8 +127,11 @@ Bots that stand in the same area receive the same chunks, and at view distance 1
 storage of those chunks is most of a bot's memory. Give every client one `world::SharedChunks`
 store (`Client::shared_chunks(&cache)`, opt-in) and each identical 16×16×16 section is held
 once for all of them. Reads cost what they cost without it (no lock on the read path); a block
-change copies only the section it touches, for that bot only; memory is freed with the last bot
-that holds a section. 26.1 and 26.2 only (the older versions ignore the option).
+change moves only that bot to the section with the new content, which bots that receive the same
+update then share again; memory is freed with the last bot that holds a section. A block change
+costs more with a store than without (a store lookup instead of a write in place), which only
+matters where blocks change constantly. 26.1 and 26.2 only (the older versions ignore the
+option).
 
 ## Versions
 

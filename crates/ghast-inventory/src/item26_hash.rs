@@ -22,10 +22,20 @@ use crate::tables::{Mv, Names};
 /// in order (data-driven registries such as enchantments, damage types, entity variants).
 ///
 /// Feed it every configuration `registry_data` packet with [`HashRegistries::add`].
+///
+/// Cheap to clone (the names are behind one `Arc`); [`Inventory::set_registries_modern`]
+/// shares equal sets between the clients of a process.
+///
+/// [`Inventory::set_registries_modern`]: crate::Inventory::set_registries_modern
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HashRegistries {
+    names: std::sync::Arc<RegistryNames>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+struct RegistryNames {
     /// `minecraft:enchantment` entry names by id (`"minecraft:sharpness"`).
-    pub(crate) enchantments: Vec<String>,
+    enchantments: Vec<String>,
     /// Every other registry received, by registry id (`"minecraft:damage_type"`).
     others: BTreeMap<String, Vec<String>>,
 }
@@ -34,16 +44,17 @@ impl HashRegistries {
     /// `minecraft:enchantment` entry names by registry id.
     #[must_use]
     pub fn enchantments(&self) -> &[String] {
-        &self.enchantments
+        &self.names.enchantments
     }
 
     /// Records one `registry_data` packet (`registry` id and entry keys in order).
     pub fn add<'a>(&mut self, registry: &str, keys: impl IntoIterator<Item = &'a str>) {
         let keys: Vec<String> = keys.into_iter().map(str::to_string).collect();
+        let names = std::sync::Arc::make_mut(&mut self.names);
         if registry == "minecraft:enchantment" {
-            self.enchantments = keys;
+            names.enchantments = keys;
         } else {
-            self.others.insert(registry.to_string(), keys);
+            names.others.insert(registry.to_string(), keys);
         }
     }
 
@@ -51,9 +62,16 @@ impl HashRegistries {
     #[must_use]
     pub fn names(&self, registry: &str) -> Option<&[String]> {
         if registry == "minecraft:enchantment" {
-            return Some(&self.enchantments);
+            return Some(&self.names.enchantments);
         }
-        self.others.get(registry).map(Vec::as_slice)
+        self.names.others.get(registry).map(Vec::as_slice)
+    }
+
+    /// The process's shared copy of these names (equal sets built by other clients).
+    pub(crate) fn shared(self) -> Self {
+        HashRegistries {
+            names: ghast_protocol::intern::shared(std::sync::Arc::unwrap_or_clone(self.names)),
+        }
     }
 }
 

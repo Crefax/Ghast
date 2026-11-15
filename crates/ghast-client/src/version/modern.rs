@@ -60,7 +60,8 @@ pub struct Wire {
     inv_config: Vec<(bool, Bytes)>,
     /// The last `declare_commands` packet as one compressed frame (a vanilla tree is ~35 KB
     /// raw, a few KB compressed); inflated and parsed only when a command is sent.
-    commands_raw: Option<Box<[u8]>>,
+    /// One copy per process for every client that received the same tree.
+    commands_raw: Option<Bytes>,
     /// The tree parsed from `commands_raw`.
     commands: Option<crate::version::commands::CommandTree>,
     /// The chat session (online mode with profile keys): signs chat and command arguments.
@@ -116,6 +117,9 @@ impl LastSeen {
         if self.last.as_ref() == Some(&sig) {
             return;
         }
+        // A copy: the signature is a view into the chat packet's receive buffer, which a kept
+        // slice would keep alive (up to 20 of them).
+        let sig = Bytes::copy_from_slice(&sig);
         self.last = Some(sig.clone());
         self.entries[self.tail] = shown.then_some(sig);
         self.tail = (self.tail + 1) % LAST_SEEN;
@@ -701,6 +705,9 @@ impl ClientVersion for Marker {
     }
 
     fn feed_inventory_config(inv: &mut ghast_inventory::Inventory, wire: &mut Wire) {
+        // The inventory holds the process's shared copy of the names (`configure_inventory`
+        // ran just before); the wire layer's click packets use the same one.
+        wire.hash_registries = inv.registries_modern().clone();
         for (tags, body) in wire.inv_config.drain(..) {
             if tags {
                 super::inv_on_update_tags(inv, body);
@@ -1133,7 +1140,7 @@ impl ClientVersion for Marker {
             cb::id::CLEAR_DIALOG => Inbound::ClearDialog,
             cb::id::DECLARE_COMMANDS => {
                 // Kept raw: parsed only when a command is sent.
-                wire.commands_raw = Some(deflate(raw));
+                wire.commands_raw = Some(ghast_protocol::intern::bytes(&deflate(raw)));
                 wire.commands = None;
                 return Ok(None);
             }

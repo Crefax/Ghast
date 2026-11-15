@@ -101,6 +101,11 @@ pub struct Capabilities {
     pub block_sequence: bool,
     /// Chat packets carry a timestamp, salt and message acknowledgements (1.19.3+).
     pub chat_acknowledgements: bool,
+    /// The client itself pushes the player away from other entities in its entity tick
+    /// (26.1+; older clients leave it to the server). Judging those pushes needs each player
+    /// entity's tab-list name (team collision rules) and game mode (spectators do not push),
+    /// so entity tracking then also keeps a names-only tab list.
+    pub client_entity_push: bool,
 }
 
 const fn f(v: f32) -> f64 {
@@ -131,6 +136,7 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     chunk_batch_ack: false,
     block_sequence: false,
     chat_acknowledgements: false,
+    client_entity_push: false,
 };
 
 /// 1.12.2 (protocol 340).
@@ -174,6 +180,7 @@ pub(crate) const V26_1: Capabilities = Capabilities {
     chunk_batch_ack: true,
     block_sequence: true,
     chat_acknowledgements: true,
+    client_entity_push: true,
     ..V1_16_5
 };
 
