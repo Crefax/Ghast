@@ -167,6 +167,16 @@ impl Stack {
     /// into the packet (for single-slot packets, whose frame shares the receive buffer with
     /// other packets: a stack kept in the inventory would keep that buffer alive).
     #[must_use]
+    #[cfg_attr(
+        not(any(
+            feature = "v1_8",
+            feature = "v1_12",
+            feature = "v1_16_5",
+            feature = "v26_1",
+            feature = "v26_2"
+        )),
+        allow(dead_code)
+    )]
     pub(crate) fn detached(mut self) -> Stack {
         match &mut self.data {
             ItemData::None => {}
