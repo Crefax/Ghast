@@ -144,10 +144,11 @@ pub enum MetaValue {
 
 /// The metadata of one entity: `(index, value)` pairs, at most one per index, in arrival order.
 ///
-/// Scalar updates overwrite in place (no allocation).
+/// Scalar updates overwrite in place (no allocation). The pairs live in one exact-size heap
+/// block (no spare capacity): an entity typically has a handful of entries, set once at spawn.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Metadata {
-    entries: Vec<(u8, MetaValue)>,
+    entries: Box<[(u8, MetaValue)]>,
 }
 
 impl Metadata {
@@ -164,8 +165,71 @@ impl Metadata {
     pub fn set(&mut self, index: u8, value: MetaValue) {
         match self.entries.iter_mut().find(|(i, _)| *i == index) {
             Some(slot) => slot.1 = value,
-            None => self.entries.push((index, value)),
+            None => self.push_new(index, value),
         }
+    }
+
+    /// Appends a new index (the block grows by exactly one entry).
+    #[cold]
+    #[inline(never)]
+    fn push_new(&mut self, index: u8, value: MetaValue) {
+        let mut v = Vec::with_capacity(self.entries.len() + 1);
+        v.extend(std::mem::take(&mut self.entries));
+        v.push((index, value));
+        self.entries = v.into_boxed_slice();
+    }
+
+    /// Applies `src` (drained) in order, as [`Metadata::set`] would one by one, skipping indices
+    /// `keep` refuses; grows the block at most once, to the exact size.
+    #[inline]
+    pub(crate) fn set_from(&mut self, src: &mut Vec<(u8, MetaValue)>, keep: impl Fn(u8) -> bool) {
+        let mut it = src.drain(..);
+        // Overwrites in place until the first index this entity does not have yet.
+        while let Some((i, v)) = it.next() {
+            if !keep(i) {
+                continue;
+            }
+            match self.entries.iter_mut().find(|(k, _)| *k == i) {
+                Some(slot) => slot.1 = v,
+                None => return self.grow_from((i, v), it, keep),
+            }
+        }
+    }
+
+    /// The rest of [`Metadata::set_from`] once a new index occurs: one exact-size block.
+    #[cold]
+    #[inline(never)]
+    fn grow_from(
+        &mut self,
+        first: (u8, MetaValue),
+        rest: std::vec::Drain<'_, (u8, MetaValue)>,
+        keep: impl Fn(u8) -> bool,
+    ) {
+        let tail = rest.as_slice();
+        let mut new = 1;
+        for (j, (i, _)) in tail.iter().enumerate() {
+            if keep(*i)
+                && *i != first.0
+                && !self.entries.iter().any(|(k, _)| k == i)
+                && !tail[..j].iter().any(|(k, _)| k == i)
+            {
+                new += 1;
+            }
+        }
+        let mut out = Vec::with_capacity(self.entries.len() + new);
+        out.extend(std::mem::take(&mut self.entries));
+        out.push(first);
+        for (i, v) in rest {
+            if !keep(i) {
+                continue;
+            }
+            match out.iter_mut().find(|(k, _)| *k == i) {
+                Some(slot) => slot.1 = v,
+                None => out.push((i, v)),
+            }
+        }
+        debug_assert_eq!(out.len(), out.capacity());
+        self.entries = out.into_boxed_slice();
     }
 
     /// All entries.
@@ -213,12 +277,30 @@ impl Metadata {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.entries.clear();
+        self.entries = Box::default();
     }
 
     pub(crate) fn entries_mut(&mut self) -> impl Iterator<Item = &mut (u8, MetaValue)> {
         self.entries.iter_mut()
     }
+
+    /// Heap bytes held (for the size tests).
+    #[cfg(test)]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        std::mem::size_of_val::<[(u8, MetaValue)]>(&self.entries)
+    }
+}
+
+/// The rarely set parts of an entity (passengers, leash, effects), behind one pointer: most
+/// entities never have any of them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Links {
+    /// 26.x players: the profile name the entity was created with, once its tab-list entry is
+    /// gone (vanilla's player keeps its `GameProfile`).
+    pub(crate) profile_name: Option<Box<str>>,
+    pub(crate) leash_holder: Option<i32>,
+    pub(crate) passengers: Vec<i32>,
+    pub(crate) effects: Vec<Effect>,
 }
 
 /// The protocol family an entity was tracked with (selects metadata indices and size rules).
@@ -268,12 +350,13 @@ pub struct Entity {
     pub(crate) velocity: [f64; 3],
     pub(crate) on_ground: bool,
     pub(crate) data: i32,
-    pub(crate) vehicle: Option<i32>,
-    pub(crate) passengers: Vec<i32>,
-    pub(crate) leash_holder: Option<i32>,
     pub(crate) meta: Metadata,
     pub(crate) equipment: Option<Box<[Option<Item>; EQUIPMENT_SLOTS]>>,
-    pub(crate) effects: Vec<Effect>,
+    /// The vehicle's id (valid with `rides`; an `Option<i32>` would take 8 bytes here).
+    pub(crate) vehicle_id: i32,
+    pub(crate) rides: bool,
+    /// Passengers, leash and effects (`None` = none of them).
+    pub(crate) links: Option<Box<Links>>,
     /// 26.1 client state (codec base, interpolation, size keys), boxed: one pointer for the
     /// other versions.
     #[cfg(any(feature = "v26_1", feature = "v26_2"))]
@@ -297,15 +380,124 @@ impl Entity {
             velocity: [0.0; 3],
             on_ground: false,
             data: 0,
-            vehicle: None,
-            passengers: Vec::new(),
-            leash_holder: None,
             meta: Metadata::default(),
             equipment: None,
-            effects: Vec::new(),
+            links: None,
+            vehicle_id: 0,
+            rides: false,
             #[cfg(any(feature = "v26_1", feature = "v26_2"))]
             m: crate::modern_state::Ext::default(),
         }
+    }
+
+    /// The links, allocated on first use.
+    #[inline]
+    pub(crate) fn links_mut(&mut self) -> &mut Links {
+        self.links.get_or_insert_with(Box::default)
+    }
+
+    /// Sets the vehicle (dismounting allocates nothing).
+    #[inline]
+    pub(crate) fn set_vehicle(&mut self, v: Option<i32>) {
+        self.rides = v.is_some();
+        self.vehicle_id = v.unwrap_or(0);
+    }
+
+    /// Takes the vehicle.
+    #[inline]
+    pub(crate) fn take_vehicle(&mut self) -> Option<i32> {
+        let v = self.vehicle();
+        self.set_vehicle(None);
+        v
+    }
+
+    /// Sets the leash holder.
+    #[inline]
+    pub(crate) fn set_leash_holder(&mut self, h: Option<i32>) {
+        match (&mut self.links, h) {
+            (Some(l), h) => l.leash_holder = h,
+            (None, None) => {}
+            (None, Some(_)) => self.links_mut().leash_holder = h,
+        }
+        self.tidy_links();
+    }
+
+    /// Takes the passenger list (no allocation when there is none).
+    #[inline]
+    pub(crate) fn take_passengers(&mut self) -> Vec<i32> {
+        let p = self
+            .links
+            .as_mut()
+            .map(|l| std::mem::take(&mut l.passengers))
+            .unwrap_or_default();
+        self.tidy_links();
+        p
+    }
+
+    /// Removes `id` from the passengers.
+    #[inline]
+    pub(crate) fn remove_passenger(&mut self, id: i32) {
+        if let Some(l) = &mut self.links {
+            l.passengers.retain(|&p| p != id);
+        }
+        self.tidy_links();
+    }
+
+    /// Replaces the passenger list.
+    #[inline]
+    pub(crate) fn set_passengers(&mut self, p: Vec<i32>) {
+        if !p.is_empty() || self.links.is_some() {
+            self.links_mut().passengers = p;
+        }
+        self.tidy_links();
+    }
+
+    /// Adds a passenger.
+    #[inline]
+    pub(crate) fn push_passenger(&mut self, id: i32) {
+        self.links_mut().passengers.push(id);
+    }
+
+    /// Clears the effects.
+    #[inline]
+    pub(crate) fn clear_effects(&mut self) {
+        if let Some(l) = &mut self.links {
+            l.effects = Vec::new();
+        }
+        self.tidy_links();
+    }
+
+    /// Frees the links once they are all empty.
+    #[inline]
+    pub(crate) fn tidy_links(&mut self) {
+        if self.links.as_ref().is_some_and(|l| {
+            l.leash_holder.is_none()
+                && l.profile_name.is_none()
+                && l.passengers.is_empty()
+                && l.effects.is_empty()
+        }) {
+            self.links = None;
+        }
+    }
+
+    /// Heap bytes this entity holds (metadata block, equipment, links with their buffers, the
+    /// modern state; for the size tests).
+    #[cfg(test)]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let mut n = self.meta.heap_bytes();
+        if self.equipment.is_some() {
+            n += std::mem::size_of::<[Option<Item>; EQUIPMENT_SLOTS]>();
+        }
+        if let Some(l) = &self.links {
+            n += std::mem::size_of::<Links>()
+                + l.passengers.capacity() * 4
+                + l.effects.capacity() * std::mem::size_of::<Effect>();
+        }
+        #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+        if self.m.0.is_some() {
+            n += std::mem::size_of::<crate::modern_state::State>();
+        }
+        n
     }
 
     /// Network entity id.
@@ -495,19 +687,19 @@ impl Entity {
     /// Entity this one rides.
     #[must_use]
     pub fn vehicle(&self) -> Option<i32> {
-        self.vehicle
+        self.rides.then_some(self.vehicle_id)
     }
 
     /// Entities riding this one (1.8: at most one).
     #[must_use]
     pub fn passengers(&self) -> &[i32] {
-        &self.passengers
+        self.links.as_ref().map_or(&[], |l| &l.passengers)
     }
 
     /// Entity holding this one's leash.
     #[must_use]
     pub fn leash_holder(&self) -> Option<i32> {
-        self.leash_holder
+        self.links.as_ref().and_then(|l| l.leash_holder)
     }
 
     /// Metadata (empty unless metadata tracking is enabled).
@@ -525,12 +717,72 @@ impl Entity {
     /// Active effects as last reported.
     #[must_use]
     pub fn effects(&self) -> &[Effect] {
-        &self.effects
+        self.links.as_ref().map_or(&[], |l| &l.effects)
     }
 
     /// The effect with this id, if active.
     #[must_use]
     pub fn effect(&self, id: u8) -> Option<&Effect> {
-        self.effects.iter().find(|e| e.id == id)
+        self.effects().iter().find(|e| e.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `set_from` is `set` applied in order: overwrites, new indices appended once, the last
+    /// duplicate wins, refused indices are skipped; the block is exact-size.
+    #[test]
+    fn metadata_set_from_matches_set() {
+        let batches: [&[(u8, i8)]; 4] = [
+            &[(0, 1), (9, 2), (0, 3)],
+            &[(9, 4)],
+            &[(5, 5), (2, 6), (5, 7), (9, 8)],
+            &[(7, 9), (3, 10)],
+        ];
+        let keep = |i: u8| i != 3;
+        let (mut a, mut b) = (Metadata::default(), Metadata::default());
+        for batch in batches {
+            let mut src: Vec<(u8, MetaValue)> = batch
+                .iter()
+                .map(|&(i, v)| (i, MetaValue::Byte(v)))
+                .collect();
+            for (i, v) in src.clone() {
+                if keep(i) {
+                    a.set(i, v);
+                }
+            }
+            b.set_from(&mut src, keep);
+            assert!(src.is_empty());
+            assert_eq!(a, b);
+        }
+        let got: Vec<(u8, i8)> = b
+            .iter()
+            .map(|(i, v)| match v {
+                MetaValue::Byte(x) => (i, *x),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(got, [(0, 3), (9, 8), (5, 7), (2, 6), (7, 9)]);
+        assert_eq!(b.heap_bytes(), 5 * std::mem::size_of::<(u8, MetaValue)>());
+        b.clear();
+        assert!(b.is_empty() && b.heap_bytes() == 0);
+    }
+
+    #[test]
+    fn links_are_freed_when_empty() {
+        let mut e = Entity::new(1, EntityType::Player);
+        e.set_vehicle(None);
+        e.set_leash_holder(None);
+        e.clear_effects();
+        assert!(e.links.is_none());
+        e.set_vehicle(Some(2));
+        e.push_passenger(3);
+        assert_eq!((e.vehicle(), e.passengers()), (Some(2), &[3][..]));
+        e.set_vehicle(None);
+        e.remove_passenger(3);
+        assert!(e.links.is_none());
+        assert_eq!(e.take_passengers(), Vec::<i32>::new());
     }
 }

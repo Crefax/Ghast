@@ -120,7 +120,7 @@ impl Tracker {
         if config.effects {
             wanted.add(EFFECT_IDS);
         }
-        if config.player_list {
+        if config.reads_tab_list() {
             wanted.add(PLAYER_LIST_IDS);
         }
         Tracker {
@@ -347,11 +347,7 @@ impl Tracker {
                     && let Some(e) = s.map.get_mut(&eid)
                 {
                     let all = s.config.metadata;
-                    for (i, v) in scratch.drain(..) {
-                        if all || i == meta::ITEM {
-                            e.meta.set(i, v);
-                        }
-                    }
+                    e.meta.set_from(&mut scratch, |i| all || i == meta::ITEM);
                     s.event(Event::Metadata(eid));
                 }
                 s.scratch = scratch;
@@ -418,7 +414,7 @@ impl Tracker {
                 let p = Respawn::decode(r)?;
                 // A new player entity: effects reset, metadata is copied over by vanilla.
                 if let Some(me) = s.self_id.and_then(|i| s.map.get_mut(&i)) {
-                    me.effects.clear();
+                    me.clear_effects();
                     me.equipment = None;
                 }
                 if *p.world_name != *self.world_name {
@@ -528,7 +524,7 @@ fn vel3(r: &mut Reader<'_>) -> R<[i16; 3]> {
 fn controlled(s: &Entities, e: &Entity) -> bool {
     e.ty == EntityType::Registry(ty::BOAT)
         && s.self_id.is_some()
-        && e.passengers.first().copied() == s.self_id
+        && e.passengers().first().copied() == s.self_id
 }
 
 #[inline]

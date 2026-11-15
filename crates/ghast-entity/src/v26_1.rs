@@ -134,8 +134,10 @@ pub struct Tracker {
     ghosts: Fast<i32, ()>,
     /// The client's tick list (`EntityTickList`, a linked map by id): each member's insertion
     /// number. Re-adding an id that is still a member keeps its place.
-    order: Fast<i32, u64>,
-    next_seq: u64,
+    order: Fast<i32, u32>,
+    next_seq: u32,
+    /// `order`'s capacity after its last insert (see `store::after_insert`).
+    order_cap: usize,
     /// Entities [`Tracker::tick_early`] already ticked this client tick (the next
     /// [`Tracker::tick_with`] skips them once).
     early: Vec<i32>,
@@ -306,8 +308,12 @@ fn move_or_interpolate(e: &mut Entity, p: Option<[f64; 3]>, y: Option<f32>, x: O
 /// `true` when the bot (`me`) steers `e` (a boat whose first passenger is the bot).
 #[inline]
 fn controlled(me: Option<i32>, e: &Entity) -> bool {
+    // Entities without links (nearly all) leave at the first test.
+    let Some(l) = &e.links else {
+        return false;
+    };
     me.is_some()
-        && e.passengers.first().copied() == me
+        && l.passengers.first().copied() == me
         && e.m
             .td
             .is_some_and(|t| t.name.ends_with("_boat") || t.name.ends_with("_raft"))
@@ -325,7 +331,7 @@ impl Tracker {
         if config.effects {
             wanted.add(EFFECT_IDS);
         }
-        if config.player_list {
+        if config.reads_tab_list() {
             wanted.add(PLAYER_LIST_IDS);
         }
         Tracker {
@@ -339,6 +345,7 @@ impl Tracker {
             ghosts: Fast::default(),
             order: Fast::default(),
             next_seq: 0,
+            order_cap: 0,
             early: Vec::new(),
             order_dirty: false,
         }
@@ -347,10 +354,39 @@ impl Tracker {
     /// `EntityTickList.add`: an id that is already a member keeps its place.
     fn start_ticking(&mut self, id: i32) {
         let next = &mut self.next_seq;
+        let mut added = false;
         self.order.entry(id).or_insert_with(|| {
             *next += 1;
+            added = true;
             *next
         });
+        if added {
+            self.added_to_order();
+        }
+    }
+
+    /// After a new tick list entry: undoes a growth forced by deletion markers, renumbers when
+    /// the numbers ran out.
+    #[cold]
+    #[inline(never)]
+    fn added_to_order(&mut self) {
+        crate::store::after_insert(&mut self.order, self.order_cap);
+        self.order_cap = self.order.capacity();
+        if self.next_seq == u32::MAX {
+            self.renumber();
+        }
+    }
+
+    /// Renumbers the tick list from 1, keeping its order (the numbers are stored as `u32`; this
+    /// runs once per four billion entries).
+    #[cold]
+    fn renumber(&mut self) {
+        let mut v: Vec<(u32, i32)> = self.order.iter().map(|(&id, &q)| (q, id)).collect();
+        v.sort_unstable();
+        for (n, (_, id)) in v.iter().enumerate() {
+            self.order.insert(*id, n as u32 + 1);
+        }
+        self.next_seq = v.len() as u32;
     }
 
     /// The entity's place in the client's tick list (`ClientLevel.tickingEntities`, the order
@@ -361,10 +397,14 @@ impl Tracker {
     /// column unloads, and re-enter at the end. The local player (its id from the login packet)
     /// enters first at login and at a dimension change, and last at a respawn in the same
     /// dimension. Several entities entering at the same moment for a column load or a move are
-    /// ordered by id (vanilla's order there follows its section storage).
+    /// ordered by id (vanilla's order there follows its section storage). After 2³² − 1 entries
+    /// the numbers restart from 1 with the order kept.
     #[must_use]
     pub fn tick_seq(&self, id: i32) -> Option<u64> {
-        self.order.get(&id).copied().filter(|_| self.member(id))
+        self.order
+            .get(&id)
+            .map(|&q| u64::from(q))
+            .filter(|_| self.member(id))
     }
 
     /// Still in the level (removed entities leave the tick list; [`Tracker::tick`] purges them).
@@ -378,7 +418,7 @@ impl Tracker {
     /// (see [`Tracker::tick_seq`]).
     #[must_use]
     pub fn tick_order(&self) -> Vec<i32> {
-        let mut v: Vec<(u64, i32)> = self
+        let mut v: Vec<(u32, i32)> = self
             .order
             .iter()
             .filter(|&(&id, _)| self.member(id))
@@ -393,12 +433,27 @@ impl Tracker {
     fn member_chunk(&self, e: &Entity) -> u64 {
         let mut root = e;
         for _ in 0..16 {
-            match root.vehicle.and_then(|v| self.store.map.get(&v)) {
+            match root.vehicle().and_then(|v| self.store.map.get(&v)) {
                 Some(v) => root = v,
                 None => break,
             }
         }
         chunk_of(root.pos)
+    }
+
+    /// [`Tracker::member_chunk`] for the per-packet path: the common no-vehicle case inline,
+    /// the vehicle walk out of line.
+    #[inline]
+    fn member_chunk_one(&self, e: &Entity) -> u64 {
+        if e.vehicle().is_none() {
+            return chunk_of(e.pos);
+        }
+        self.member_chunk_cold(e)
+    }
+
+    #[inline(never)]
+    fn member_chunk_cold(&self, e: &Entity) -> u64 {
+        self.member_chunk(e)
     }
 
     /// Re-checks tick list membership after positions changed (a move into or out of a loaded
@@ -408,6 +463,8 @@ impl Tracker {
         let (map, ghosts) = (&self.store.map, &self.ghosts);
         self.order
             .retain(|id, _| Some(*id) == me || map.contains_key(id) || ghosts.contains_key(id));
+        crate::store::shrink_map(&mut self.order);
+        self.order_cap = self.order.capacity();
         let mut enter: Vec<i32> = Vec::new();
         let mut leave: Vec<i32> = Vec::new();
         for e in self.store.map.values() {
@@ -458,7 +515,10 @@ impl Tracker {
     pub fn mark_column_loaded(&mut self, x: i32, z: i32) {
         self.order_dirty = true;
         let k = chunk_key(x, z);
-        if self.chunks.insert(k, ()).is_none() {
+        let cap = self.chunks.capacity();
+        let new = self.chunks.insert(k, ()).is_none();
+        crate::store::after_insert(&mut self.chunks, cap);
+        if new {
             let mut ids: Vec<i32> = self
                 .store
                 .map
@@ -501,6 +561,9 @@ impl Tracker {
         for id in leave {
             self.order.remove(&id);
         }
+        crate::store::shrink_map(&mut self.order);
+        self.order_cap = self.order.capacity();
+        crate::store::shrink_map(&mut self.chunks);
     }
 
     /// `ClientLevel.isTickingEntity`: players always tick, other entities while their chunk
@@ -523,7 +586,49 @@ impl Tracker {
         if t.flags_meta.is_some() && e.m.stand_flags & 0x10 != 0 {
             return false;
         }
-        !(e.is_player() && game_mode(&self.store.players, e) == Some(3))
+        !(e.is_player() && self.player_spectator(e))
+    }
+
+    /// [`Tracker::is_spectator`] of a player entity, out of line: callers that test every
+    /// entity pay only the player check.
+    #[inline(never)]
+    fn player_spectator(&self, e: &Entity) -> bool {
+        game_mode(self.store.tabs(), e) == Some(3)
+    }
+
+    /// The game mode vanilla's client knows for player entity `e`
+    /// (`AbstractClientPlayer.getPlayerInfo`): its tab-list entry (full list or
+    /// [`Config::player_names`]); an entity that already looked its entry up keeps that entry's
+    /// last game mode after the entry left the tab list. `None` for other entities, or without a
+    /// tab list.
+    #[must_use]
+    pub fn game_mode(&self, e: &Entity) -> Option<i32> {
+        if !e.is_player() {
+            return None;
+        }
+        game_mode(self.store.tabs(), e)
+    }
+
+    /// `isSpectator` of a player entity (game mode 3, see [`Tracker::game_mode`]): spectators are
+    /// not pickable, not pushable and never on the ground. `false` for other entities.
+    #[must_use]
+    pub fn is_spectator(&self, e: &Entity) -> bool {
+        e.is_player() && self.player_spectator(e)
+    }
+
+    /// `getScoreboardName` (what team rules match): a player's profile name (the tab-list entry
+    /// it spawned with, kept after the entry left), else `None`; vanilla uses the UUID string
+    /// for other entities. Needs the full tab list or [`Config::player_names`].
+    #[must_use]
+    pub fn scoreboard_name<'a>(&'a self, e: &'a Entity) -> Option<&'a str> {
+        if !e.is_player() {
+            return None;
+        }
+        if let Some(n) = e.links.as_ref().and_then(|l| l.profile_name.as_deref()) {
+            return Some(n);
+        }
+        let t = self.store.tab(&e.uuid)?;
+        (e.m.info_gen == 0 || t.generation == e.m.info_gen).then_some(t.name)
     }
 
     /// One client tick of the tracked entities (`ClientLevel.tickEntities`): every entity in a
@@ -553,19 +658,18 @@ impl Tracker {
         // Vehicles whose first passenger is a mob (their body control skips the idle turn).
         let mut carrying: Vec<i32> = Vec::new();
         for e in self.store.map.values() {
-            if let Some(v) = e.vehicle
+            if let Some(v) = e.vehicle()
                 && e.m.td.is_some_and(|t| t.flags & type_flags::MOB != 0)
                 && self
                     .store
                     .map
                     .get(&v)
-                    .is_some_and(|v| v.passengers.first() == Some(&e.id))
+                    .is_some_and(|v| v.passengers().first() == Some(&e.id))
             {
                 carrying.push(v);
             }
         }
         let mut discard: Vec<i32> = Vec::new();
-        let players = &self.store.players;
         for e in self.store.map.values_mut() {
             if e.m.flag(st::SETTLED)
                 || Some(e.id) == me
@@ -585,22 +689,19 @@ impl Tracker {
                 continue;
             }
             if e.is_player() {
-                if e.m.info_gen == 0
-                    && let Some(p) = players.get(&e.uuid)
-                {
-                    e.m.info_gen = p.generation;
-                }
-                // Player.tick: spectators and passengers are never on the ground.
-                if e.vehicle.is_some() || game_mode(players, e) == Some(3) {
-                    e.on_ground = false;
-                }
+                let tabs = crate::store::Tabs {
+                    players: &self.store.players,
+                    lite: &self.store.lite,
+                    long_names: &self.store.long_names,
+                };
+                player_tick(e, tabs);
             }
             let c = !carrying.is_empty() && carrying.contains(&e.id);
             let before = chunk_of(e.pos);
             tick_entity(e, c, &mut no_collision);
             if chunk_of(e.pos) != before {
                 moved.push(e.id);
-                moved_vehicle |= !e.passengers.is_empty();
+                moved_vehicle |= !e.passengers().is_empty();
             }
         }
         for id in discard {
@@ -682,7 +783,7 @@ impl Tracker {
         if Some(id) == self.store.self_id || e.is_player() || self.ghosts.contains_key(&id) {
             return;
         }
-        if self.chunks.contains_key(&self.member_chunk(e)) {
+        if self.chunks.contains_key(&self.member_chunk_one(e)) {
             self.start_ticking(id);
         } else {
             self.order.remove(&id);
@@ -888,14 +989,26 @@ impl Tracker {
                 let n = r.check_count(i64::from(n), 16)?;
                 for _ in 0..n {
                     let uuid = r.read_uuid()?;
-                    if let Some(p) = s.players.remove(&uuid) {
-                        // Player entities holding this tab list object keep it, frozen.
-                        for e in s.map.values_mut() {
-                            if e.m.info_gen == p.generation {
-                                e.m.frozen_game_mode = p.game_mode as i8;
-                            }
+                    let Some(t) = s.tab(&uuid) else {
+                        continue;
+                    };
+                    let (gm, generation) = (t.game_mode, t.generation);
+                    let name: Box<str> = Box::from(t.name);
+                    // Player entities keep their profile (the name) and, once they looked the
+                    // entry up, the tab list object (frozen game mode).
+                    for e in s.map.values_mut() {
+                        if e.m.info_gen == generation {
+                            e.m.frozen_game_mode = gm as i8;
+                        }
+                        if e.is_player()
+                            && e.uuid == uuid
+                            && (e.m.info_gen == 0 || e.m.info_gen == generation)
+                            && e.links.as_ref().is_none_or(|l| l.profile_name.is_none())
+                        {
+                            e.links_mut().profile_name = Some(name.clone());
                         }
                     }
+                    s.tab_remove(&uuid);
                 }
                 s.event(Event::PlayerList);
                 true
@@ -927,7 +1040,7 @@ impl Tracker {
                 // A new client player: effects and equipment reset; metadata is copied only with
                 // the keep-entity-data flag (2).
                 if let Some(me) = s.self_id.and_then(|i| s.map.get_mut(&i)) {
-                    me.effects.clear();
+                    me.clear_effects();
                     me.equipment = None;
                     if p.copy_metadata & 2 == 0 {
                         me.meta.clear();
@@ -1077,10 +1190,25 @@ fn tick_entity(
     e.m.set_flag(st::SETTLED, settled);
 }
 
+/// The tab-list part of `Player.tick` for a remote player: the entity caches its tab-list
+/// object on first use; spectators and passengers are never on the ground. Out of line: the
+/// tick loop over all entities only pays the player check.
+#[inline(never)]
+fn player_tick(e: &mut Entity, tabs: crate::store::Tabs<'_>) {
+    if e.m.info_gen == 0
+        && let Some(p) = tabs.get(&e.uuid)
+    {
+        e.m.info_gen = p.generation;
+    }
+    if e.vehicle().is_some() || game_mode(tabs, e) == Some(3) {
+        e.on_ground = false;
+    }
+}
+
 /// The game mode a player entity sees (`AbstractClientPlayer.getPlayerInfo` caches the tab list
 /// object on first use; it stays frozen once the server removes the entry).
-fn game_mode(players: &Fast<uuid::Uuid, PlayerInfo>, e: &Entity) -> Option<i32> {
-    let cur = players.get(&e.uuid);
+fn game_mode(tabs: crate::store::Tabs<'_>, e: &Entity) -> Option<i32> {
+    let cur = tabs.get(&e.uuid);
     if e.m.info_gen == 0 {
         return cur.map(|p| p.game_mode);
     }
@@ -1159,7 +1287,7 @@ fn spawn(s: &mut Entities, r: &mut Reader<'_>, chunks: &Fast<u64, ()>) -> R<(App
         return Ok((Applied::Ignored, TickSlot::None));
     };
     let ty = if td.id == data::PLAYER {
-        if s.config.player_list && !s.players.contains_key(&uuid) {
+        if s.config.reads_tab_list() && !s.tab_has(&uuid) {
             // "Server attempted to add player prior to sending player info".
             return Ok((Applied::Ignored, TickSlot::None));
         }
@@ -1374,6 +1502,7 @@ struct Keys {
     bed: Option<Option<[i32; 3]>>,
     count: Option<i32>,
     stack: Option<Option<ItemStack>>,
+    health: Option<f32>,
 }
 
 fn block_pos(v: i64) -> [i32; 3] {
@@ -1418,7 +1547,14 @@ fn read_value(
             MetaValue::VarInt(n)
         }
         2 => MetaValue::Long(r.read_varlong()?),
-        3 => MetaValue::Float(r.read_f32()?),
+        3 => {
+            let f = r.read_f32()?;
+            if !keep && live && index == meta::HEALTH {
+                // Without the store, `alive` keeps this one fact.
+                keys.health = Some(f);
+            }
+            MetaValue::Float(f)
+        }
         4 => {
             if !keep {
                 skip_string(r)?;
@@ -1576,6 +1712,7 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
         bed: None,
         count: None,
         stack: None,
+        health: None,
     };
     let mut scratch = std::mem::take(&mut s.scratch);
     scratch.clear();
@@ -1594,9 +1731,7 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     if res.is_ok()
         && let Some(e) = s.map.get_mut(&eid)
     {
-        for (i, v) in scratch.drain(..) {
-            e.meta.set(i, v);
-        }
+        e.meta.set_from(&mut scratch, |_| true);
         e.m.set_flag(st::SETTLED, false);
         let resize = keys.pose.is_some()
             || keys.baby.is_some()
@@ -1636,6 +1771,11 @@ fn metadata(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
                     f64::from(b[2]) + 0.5,
                 ];
             }
+        }
+        if let Some(h) = keys.health {
+            // LivingEntity.isAlive: getHealth() > 0 (NaN is not alive).
+            let alive = h > 0.0;
+            e.m.set_flag(st::DEAD, !alive);
         }
         if let Some(c) = keys.count {
             e.m.item_count = c;
@@ -1736,7 +1876,7 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
     for _ in 0..n {
         let uuid = r.read_uuid()?;
         if has(0) {
-            let name = own_str(r)?;
+            let name = r.read_string()?;
             let props = r.read_varint()?;
             let props = r.check_count(i64::from(props), 3)?;
             let mut textures = None;
@@ -1756,21 +1896,25 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 }
             }
             let next = s.generations.wrapping_add(1).max(1);
-            let fresh = !s.players.contains_key(&uuid);
+            let fresh = !s.tab_has(&uuid);
             if fresh {
                 s.generations = next;
             }
-            s.players.entry(uuid).or_insert(PlayerInfo {
-                name,
-                game_mode: 0,
-                ping: 0,
-                display_name: None,
-                textures,
-                display_name_nbt: None,
-                listed: false,
-                list_order: 0,
-                generation: next,
-            });
+            if s.lite_mode() {
+                s.lite_add(uuid, &name, 0, next, false);
+            } else {
+                s.players.entry(uuid).or_insert(PlayerInfo {
+                    name: Box::from(&*name),
+                    game_mode: 0,
+                    ping: 0,
+                    display_name: None,
+                    textures,
+                    display_name_nbt: None,
+                    listed: false,
+                    list_order: 0,
+                    generation: next,
+                });
+            }
         }
         if has(1) && r.read_bool()? {
             // Chat session: id, key expiry, key bytes, key signature.
@@ -1807,6 +1951,9 @@ fn player_info(s: &mut Entities, r: &mut Reader<'_>) -> R<()> {
         let order = if has(6) { Some(r.read_varint()?) } else { None };
         if has(7) {
             r.read_bool()?;
+        }
+        if let Some(g) = gm {
+            s.lite_game_mode(&uuid, g);
         }
         if let Some(p) = s.players.get_mut(&uuid) {
             if let Some(g) = gm {
@@ -1895,6 +2042,20 @@ pub fn item_stack(e: &Entity) -> Option<&ItemStack> {
 #[must_use]
 pub fn health(e: &Entity) -> Option<f32> {
     e.metadata().float(meta::HEALTH)
+}
+
+/// Vanilla `LivingEntity.isAlive` as far as the packets tell (removed entities are not
+/// tracked): `false` once the server sent a health that is not above 0 (NaN included), `true`
+/// for other entities and before any health arrived. Kept with and without [`Config::metadata`].
+#[must_use]
+pub fn alive(e: &Entity) -> bool {
+    if !living(e) {
+        return true;
+    }
+    match health(e) {
+        Some(h) => h > 0.0,
+        None => !e.m.flag(st::DEAD),
+    }
 }
 
 /// 26.1 entity flags byte (0 when unknown).
@@ -1998,6 +2159,320 @@ mod tests {
         assert_eq!(d[0], (1365.0 + 4096.0) / 4096.0);
         assert_eq!(d[1].to_bits(), b[1].to_bits());
         assert_eq!(d[2], -1.0 / 4096.0);
+    }
+
+    fn varint(out: &mut Vec<u8>, v: i32) {
+        let mut v = v as u32;
+        loop {
+            if v < 0x80 {
+                out.push(v as u8);
+                return;
+            }
+            out.push((v as u8 & 0x7F) | 0x80);
+            v >>= 7;
+        }
+    }
+
+    /// Spawns `eid` (type `ty`) and sends it `entries` as one metadata packet.
+    fn spawn_with(t: &mut Tracker, eid: i32, ty: u16, entries: &[u8]) {
+        let mut b = Vec::new();
+        varint(&mut b, eid);
+        b.extend_from_slice(&(0x1000_u128 + eid as u128).to_be_bytes());
+        varint(&mut b, i32::from(ty));
+        for c in [0.5, 64.0, 0.5_f64] {
+            b.extend_from_slice(&c.to_be_bytes());
+        }
+        b.extend_from_slice(&[0, 0, 0, 0]); // zero LpVec3, pitch, yaw, head
+        varint(&mut b, 0);
+        let spawned = t.apply_body(id::SPAWN_ENTITY, &Bytes::from(b)).unwrap();
+        assert_eq!(spawned, Applied::Changed);
+        let mut m = Vec::new();
+        varint(&mut m, eid);
+        m.extend_from_slice(entries);
+        m.push(0xFF);
+        assert_eq!(
+            t.apply_body(id::ENTITY_METADATA, &Bytes::from(m)).unwrap(),
+            Applied::Changed
+        );
+    }
+
+    /// Pins what one tracked entity costs (map slot + heap) so a change cannot silently grow
+    /// it. A player with what a server sends at spawn (health, skin parts), a zombie with its
+    /// health.
+    #[test]
+    fn bytes_per_tracked_entity() {
+        // Health (index 9, float 20.0) and the skin parts byte (index 16).
+        let mut player = vec![9, 3];
+        player.extend_from_slice(&20.0_f32.to_be_bytes());
+        player.extend_from_slice(&[16, 0, 0x7F]);
+        let mut zombie = vec![9, 3];
+        zombie.extend_from_slice(&20.0_f32.to_be_bytes());
+        let mut t = Tracker::new(Config::default().with_player_list(false));
+        spawn_with(&mut t, 10, data::PLAYER, &player);
+        let ty = |n| data::entity_by_name(n).unwrap().id;
+        spawn_with(&mut t, 11, ty("zombie"), &zombie);
+        let slot = std::mem::size_of::<(i32, Entity)>();
+        let p = t.get(10).unwrap();
+        let z = t.get(11).unwrap();
+        assert_eq!(p.metadata().len(), 2);
+        let (pb, zb) = (slot + p.heap_bytes(), slot + z.heap_bytes());
+        eprintln!(
+            "slot {slot} B; player {pb} B ({} heap), zombie {zb} B ({} heap)",
+            p.heap_bytes(),
+            z.heap_bytes()
+        );
+        // 0.4.3: slot 240 B, metadata block 448 B (four-entry capacity), state 120 B: 808 B.
+        assert!(slot <= 176, "{slot}");
+        assert!(pb <= 520, "player {pb}");
+        assert!(zb <= 408, "zombie {zb}");
+        // Without the metadata store (`Config::metadata` off): slot and state only.
+        let mut t = Tracker::new(
+            Config::default()
+                .with_player_list(false)
+                .with_metadata(false),
+        );
+        spawn_with(&mut t, 10, data::PLAYER, &player);
+        let p = t.get(10).unwrap();
+        assert!(p.metadata().is_empty());
+        let lean = slot + p.heap_bytes();
+        eprintln!("without the metadata store: player {lean} B");
+        assert!(lean <= 296, "player {lean}");
+    }
+
+    fn destroy(t: &mut Tracker, ids: &[i32]) {
+        let mut b = Vec::new();
+        varint(&mut b, ids.len() as i32);
+        for &id in ids {
+            varint(&mut b, id);
+        }
+        t.apply_body(id::ENTITY_DESTROY, &Bytes::from(b)).unwrap();
+    }
+
+    /// A steady crowd with fresh ids does not grow the tables (deletion markers would double
+    /// them), and a crowd that leaves gives the memory back.
+    #[test]
+    fn tables_follow_the_live_crowd() {
+        let zombie = data::entity_by_name("zombie").unwrap().id;
+        let mut t = Tracker::new(Config::default().with_metadata(false));
+        for x in -2..=2 {
+            for z in -2..=2 {
+                t.mark_column_loaded(x, z);
+            }
+        }
+        let health = [9, 3, 0x41, 0xA0, 0, 0];
+        for id in 0..150 {
+            spawn_with(&mut t, 100 + id, zombie, &health);
+        }
+        for id in 150..6000 {
+            spawn_with(&mut t, 100 + id, zombie, &health);
+            destroy(&mut t, &[100 + id - 150]);
+            if id % 97 == 0 {
+                t.tick();
+            }
+        }
+        t.tick();
+        assert_eq!(t.len(), 150);
+        assert!(t.map.capacity() <= 224, "entity map {}", t.map.capacity());
+        assert!(
+            t.order.capacity() <= 224,
+            "tick order {}",
+            t.order.capacity()
+        );
+        for id in 6000..8000 {
+            spawn_with(&mut t, 100 + id, zombie, &health);
+        }
+        let gone: Vec<i32> = (5850..7899).map(|i| 100 + i).collect();
+        destroy(&mut t, &gone);
+        t.tick();
+        assert_eq!(t.len(), 101);
+        assert!(t.map.capacity() <= 224, "entity map {}", t.map.capacity());
+        assert!(
+            t.order.capacity() <= 224,
+            "tick order {}",
+            t.order.capacity()
+        );
+    }
+
+    /// `alive` follows the health with the metadata store off; the store stays empty.
+    #[test]
+    fn alive_without_metadata_store() {
+        let zombie = data::entity_by_name("zombie").unwrap().id;
+        let mut t = Tracker::new(Config::default().with_metadata(false));
+        spawn_with(&mut t, 7, zombie, &[9, 3, 0x41, 0xA0, 0, 0]); // 20.0
+        assert!(alive(t.get(7).unwrap()));
+        let mut zero = vec![9, 3];
+        zero.extend_from_slice(&0.0_f32.to_be_bytes());
+        let mut m = Vec::new();
+        varint(&mut m, 7);
+        m.extend_from_slice(&zero);
+        m.push(0xFF);
+        t.apply_body(id::ENTITY_METADATA, &Bytes::from(m)).unwrap();
+        let e = t.get(7).unwrap();
+        assert!(!alive(e));
+        assert_eq!(health(e), None);
+        assert!(e.metadata().is_empty());
+        let mut t = Tracker::new(Config::default());
+        spawn_with(&mut t, 7, zombie, &zero);
+        assert!(!alive(t.get(7).unwrap()));
+        assert_eq!(health(t.get(7).unwrap()), Some(0.0));
+    }
+
+    fn mc_string(out: &mut Vec<u8>, v: &str) {
+        varint(out, v.len() as i32);
+        out.extend_from_slice(v.as_bytes());
+    }
+
+    /// `player_info` adding `(uuid, name, game mode)` entries (actions: add player, game mode).
+    fn tab_add(t: &mut Tracker, entries: &[(u128, &str, i32)]) {
+        let mut b = vec![0b101];
+        varint(&mut b, entries.len() as i32);
+        for &(u, name, gm) in entries {
+            b.extend_from_slice(&u.to_be_bytes());
+            mc_string(&mut b, name);
+            varint(&mut b, 0); // no properties
+            varint(&mut b, gm);
+        }
+        t.apply_body(id::PLAYER_INFO, &Bytes::from(b)).unwrap();
+    }
+
+    fn tab_game_mode(t: &mut Tracker, u: u128, gm: i32) {
+        let mut b = vec![0b100];
+        varint(&mut b, 1);
+        b.extend_from_slice(&u.to_be_bytes());
+        varint(&mut b, gm);
+        t.apply_body(id::PLAYER_INFO, &Bytes::from(b)).unwrap();
+    }
+
+    fn tab_remove(t: &mut Tracker, u: u128) {
+        let mut b = Vec::new();
+        varint(&mut b, 1);
+        b.extend_from_slice(&u.to_be_bytes());
+        t.apply_body(id::PLAYER_REMOVE, &Bytes::from(b)).unwrap();
+    }
+
+    /// What the entity and tab-list accessors answer, for comparing two trackers.
+    fn tab_view(t: &Tracker) -> Vec<String> {
+        let mut v = vec![format!("len {} tab {}", t.len(), t.tab_len())];
+        for id in [10, 11, 12, 13] {
+            v.push(match t.get(id) {
+                Some(e) => format!(
+                    "{id}: name {:?} sb {:?} gm {:?} spec {} pick {} ground {}",
+                    t.player_name(id),
+                    t.scoreboard_name(e),
+                    t.game_mode(e),
+                    t.is_spectator(e),
+                    t.pickable(e),
+                    e.on_ground()
+                ),
+                None => format!("{id}: none"),
+            });
+        }
+        for u in [0x100A_u128, 0x100B, 0x100C, 0x100D] {
+            let u = uuid::Uuid::from_u128(u);
+            v.push(format!(
+                "{u}: {:?} {:?}",
+                t.tab_name(&u),
+                t.tab_game_mode(&u)
+            ));
+        }
+        v
+    }
+
+    /// The names-only tab list answers every entity question the full list answers.
+    #[test]
+    fn names_only_tab_list_matches_the_full_one() {
+        let long = "a_very_long_offline_mode_name_x";
+        let full = Config::default().with_metadata(false);
+        let lite = full.with_player_list(false).with_player_names(true);
+        let mut views = Vec::new();
+        for config in [full, lite] {
+            let mut t = Tracker::new(config);
+            assert!(t.wants(id::PLAYER_INFO) && t.wants(id::PLAYER_REMOVE));
+            tab_add(&mut t, &[(0x100A, "Alice", 0), (0x100B, long, 1)]);
+            spawn_with(&mut t, 10, data::PLAYER, &[]);
+            spawn_with(&mut t, 11, data::PLAYER, &[]);
+            // No tab entry: vanilla refuses the spawn.
+            let mut b = Vec::new();
+            varint(&mut b, 12);
+            b.extend_from_slice(&0x100C_u128.to_be_bytes());
+            varint(&mut b, i32::from(data::PLAYER));
+            b.extend_from_slice(&[0; 28]);
+            varint(&mut b, 0);
+            t.apply_body(id::SPAWN_ENTITY, &Bytes::from(b)).unwrap();
+            let mut steps = vec![tab_view(&t)];
+            tab_game_mode(&mut t, 0x100A, 3);
+            t.tick();
+            steps.push(tab_view(&t));
+            tab_remove(&mut t, 0x100A);
+            tab_remove(&mut t, 0x100B);
+            steps.push(tab_view(&t));
+            // A new entry with the same UUID: the entity keeps its profile and old entry.
+            tab_add(&mut t, &[(0x100A, "Bob", 0)]);
+            t.tick();
+            steps.push(tab_view(&t));
+            views.push(steps);
+        }
+        for (a, b) in views[0].iter().zip(&views[1]) {
+            assert_eq!(a, b);
+        }
+        let s = &views[1];
+        assert!(s[0][3].contains("12: none"), "{:?}", s[0]);
+        assert!(s[1][1].contains("spec true pick false"), "{:?}", s[1]);
+        assert!(
+            s[2][1].contains("sb Some(\"Alice\") gm Some(3)"),
+            "{:?}",
+            s[2]
+        );
+        assert!(s[2][2].contains(long), "{:?}", s[2]);
+        assert!(
+            s[3][1].contains("name Some(\"Bob\") sb Some(\"Alice\") gm Some(3)"),
+            "{:?}",
+            s[3]
+        );
+    }
+
+    /// Bytes per names-only tab entry (map slot, with the table's spare room at 100 entries).
+    #[test]
+    fn bytes_per_names_only_tab_entry() {
+        let slot = std::mem::size_of::<(uuid::Uuid, crate::store::TabLite)>();
+        let full = std::mem::size_of::<(uuid::Uuid, PlayerInfo)>();
+        let mut t = Tracker::new(
+            Config::default()
+                .with_player_list(false)
+                .with_player_names(true),
+        );
+        let names: Vec<String> = (0..100).map(|i| format!("Player_{i:04}")).collect();
+        let entries: Vec<(u128, &str, i32)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (0x5000 + i as u128, n.as_str(), 0))
+            .collect();
+        tab_add(&mut t, &entries);
+        assert_eq!(t.tab_len(), 100);
+        assert!(t.store.long_names.is_empty() && t.store.players.is_empty());
+        let buckets = (t.store.lite.capacity() * 8 / 7).next_power_of_two();
+        let per = (buckets * (slot + 1) + 16) / 100;
+        eprintln!(
+            "names-only slot {slot} B (full list slot {full} B + heap), {per} B per entry at 100"
+        );
+        assert!(slot <= 48, "{slot}");
+        assert!(per <= 64, "{per}");
+    }
+
+    #[test]
+    fn tick_order_renumbers_without_reordering() {
+        let mut t = Tracker::new(Config::default());
+        for id in [5, 3, 9] {
+            t.start_ticking(id);
+        }
+        t.next_seq = u32::MAX - 2;
+        t.start_ticking(1);
+        t.start_ticking(7); // takes the last number: renumbers after
+        let mut v: Vec<(u32, i32)> = t.order.iter().map(|(&i, &q)| (q, i)).collect();
+        v.sort_unstable();
+        assert_eq!(v, [(1, 5), (2, 3), (3, 9), (4, 1), (5, 7)]);
+        t.start_ticking(3); // a member keeps its place
+        assert_eq!(t.order[&3], 2);
     }
 
     #[test]

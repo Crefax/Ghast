@@ -105,7 +105,7 @@ impl Tracker {
         if config.effects {
             wanted.add(EFFECT_IDS);
         }
-        if config.player_list {
+        if config.reads_tab_list() {
             wanted.add(PLAYER_LIST_IDS);
         }
         Tracker {
@@ -254,6 +254,7 @@ impl Tracker {
                 if res.is_ok()
                     && let Some(e) = s.map.get_mut(&eid)
                 {
+                    // Updates mostly overwrite: `set` keeps that path tight.
                     for (i, v) in scratch.drain(..) {
                         e.meta.set(i, v);
                     }
@@ -308,7 +309,7 @@ impl Tracker {
                 let dim = r.read_i32()?;
                 // A new player entity: effects and metadata start empty.
                 if let Some(me) = s.self_id.and_then(|i| s.map.get_mut(&i)) {
-                    me.effects.clear();
+                    me.clear_effects();
                     me.meta.clear();
                     me.equipment = None;
                 }
@@ -508,9 +509,7 @@ fn spawn_metadata(s: &mut Entities, r: &mut Reader<'_>, mut e: Entity) -> R<bool
         let mut scratch = std::mem::take(&mut s.scratch);
         scratch.clear();
         let res = read_metadata(r, &mut scratch);
-        for (i, v) in scratch.drain(..) {
-            e.meta.set(i, v);
-        }
+        e.meta.set_from(&mut scratch, |_| true);
         s.scratch = scratch;
         res?;
     }

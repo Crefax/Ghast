@@ -20,6 +20,9 @@ pub(crate) mod st {
     pub const BABY: u8 = 16;
     /// `dims` holds the cached dimensions.
     pub const HAS_DIMS: u8 = 32;
+    /// Living, without the metadata store: the last health the server sent is not above 0
+    /// (`isAlive` is false; with the store, `alive` reads the health there).
+    pub const DEAD: u8 = 64;
 }
 
 /// The modern client state of an entity (`InterpolationHandler`, `VecDeltaCodec`, size keys),

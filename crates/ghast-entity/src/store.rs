@@ -33,6 +33,13 @@ pub struct Config {
     /// Keep the base64 `"textures"` profile property (skin / cape URLs) of tab-list entries in
     /// [`PlayerInfo::textures`]. Default `false`: properties are skipped without allocating.
     pub skins: bool,
+    /// With [`Config::player_list`] off: still read the tab list, but keep only each entry's
+    /// profile name and game mode (inline, about 50 bytes per entry; no [`PlayerInfo`]). That is
+    /// what vanilla needs from it for entities: [`Entities::player_name`] (team rules use the
+    /// scoreboard name), spectators (not pickable, not pushed, never on the ground) and, on
+    /// 26.x, refusing a player spawn whose profile is not in the tab list. Ignored when
+    /// [`Config::player_list`] is on (the full list answers the same questions). Default `false`.
+    pub player_names: bool,
 }
 
 impl Config {
@@ -77,6 +84,20 @@ impl Config {
         self.skins = on;
         self
     }
+
+    /// Sets [`Config::player_names`].
+    #[must_use]
+    pub const fn with_player_names(mut self, on: bool) -> Self {
+        self.player_names = on;
+        self
+    }
+
+    /// `true` when the tracker reads the tab list (full or names only): its packets
+    /// (`PLAYER_LIST_IDS` of the version module) must reach the tracker.
+    #[must_use]
+    pub const fn reads_tab_list(&self) -> bool {
+        self.player_list || self.player_names
+    }
 }
 
 impl Default for Config {
@@ -88,6 +109,7 @@ impl Default for Config {
             player_list: true,
             events: false,
             skins: false,
+            player_names: false,
         }
     }
 }
@@ -201,6 +223,100 @@ impl Hasher for IdHasher {
 
 pub(crate) type Fast<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
+/// Gives memory back once a map holds less than a quarter of its capacity (a crowd left):
+/// shrinks to twice the live entries, so it neither keeps a peak's table forever nor rehashes
+/// back and forth around one size. Small maps are left alone.
+#[inline]
+pub(crate) fn shrink_map<K: Eq + std::hash::Hash, V>(m: &mut Fast<K, V>) {
+    let cap = m.capacity();
+    if cap > 64 && m.len() * 4 < cap {
+        m.shrink_to(m.len() * 2);
+    }
+}
+
+/// Call after an insert into `m`, with its `capacity()` before the insert (or after the last
+/// insert). hashbrown grows a table whose free slots ran out even when many of them are only
+/// deletion markers (ids that came and went), so a steady crowd with fresh ids doubles the
+/// table. A growth at least doubles `capacity()`; a real one leaves the table just over half
+/// full, one that leaves it at most half full was forced by markers and is undone at once: the
+/// table is rebuilt at its live size, which also drops the markers.
+#[inline]
+pub(crate) fn after_insert<K: Eq + std::hash::Hash, V>(m: &mut Fast<K, V>, old_cap: usize) {
+    let cap = m.capacity();
+    if cap >= 2 * old_cap.max(1) && m.len() * 2 <= cap {
+        compact(m);
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn compact<K: Eq + std::hash::Hash, V>(m: &mut Fast<K, V>) {
+    m.shrink_to(m.len());
+}
+
+/// A tab-list entry as [`Config::player_names`] keeps it: the profile name inline (a name longer
+/// than [`TabLite::INLINE`] bytes lives in `Entities::long_names`), the game mode and the tab
+/// list object generation (26.x).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TabLite {
+    name: [u8; TabLite::INLINE],
+    /// Name length, or [`TabLite::LONG`].
+    len: u8,
+    pub(crate) game_mode: i32,
+    pub(crate) generation: u32,
+}
+
+impl TabLite {
+    /// Inline name bytes (vanilla profile names are at most 16 characters).
+    const INLINE: usize = 23;
+    const LONG: u8 = u8::MAX;
+}
+
+/// What the tab list says about one profile (full or names-only list).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TabRef<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) game_mode: i32,
+    pub(crate) generation: u32,
+}
+
+/// The tab lists of an [`Entities`] (borrowed field by field, so a caller can hold them while
+/// it changes entities).
+#[derive(Clone, Copy)]
+pub(crate) struct Tabs<'a> {
+    pub(crate) players: &'a Fast<Uuid, PlayerInfo>,
+    pub(crate) lite: &'a Fast<Uuid, TabLite>,
+    pub(crate) long_names: &'a Fast<Uuid, Box<str>>,
+}
+
+impl<'a> Tabs<'a> {
+    /// The entry of `uuid`.
+    #[inline]
+    pub(crate) fn get(self, uuid: &Uuid) -> Option<TabRef<'a>> {
+        if let Some(p) = self.players.get(uuid) {
+            return Some(TabRef {
+                name: &p.name,
+                game_mode: p.game_mode,
+                generation: p.generation,
+            });
+        }
+        if self.lite.is_empty() {
+            return None;
+        }
+        let t = self.lite.get(uuid)?;
+        let name = if t.len == TabLite::LONG {
+            self.long_names.get(uuid).map_or("", |n| &**n)
+        } else {
+            std::str::from_utf8(&t.name[..usize::from(t.len)]).unwrap_or("")
+        };
+        Some(TabRef {
+            name,
+            game_mode: t.game_mode,
+            generation: t.generation,
+        })
+    }
+}
+
 /// The tracked entities and tab list (queries are the same for every version).
 #[derive(Clone, Debug, Default)]
 pub struct Entities {
@@ -209,6 +325,10 @@ pub struct Entities {
     pub(crate) config: Config,
     pub(crate) events: Vec<Event>,
     pub(crate) players: Fast<Uuid, PlayerInfo>,
+    /// The names-only tab list ([`Config::player_names`] without [`Config::player_list`]).
+    pub(crate) lite: Fast<Uuid, TabLite>,
+    /// Names-only entries whose name does not fit inline.
+    pub(crate) long_names: Fast<Uuid, Box<str>>,
     pub(crate) scratch: Vec<(u8, MetaValue)>,
     /// Set once any leash link exists (skips the leash scan on removal otherwise).
     pub(crate) any_leash: bool,
@@ -289,13 +409,116 @@ impl Entities {
         self.players.iter()
     }
 
-    /// Name of a player entity (from the tab list).
+    /// Name of a player entity (from the tab list: the full one, or the names-only one of
+    /// [`Config::player_names`]).
     #[must_use]
     pub fn player_name(&self, id: i32) -> Option<&str> {
         let e = self.map.get(&id)?;
         e.is_player()
-            .then(|| self.players.get(&e.uuid).map(|p| &*p.name))
+            .then(|| self.tab(&e.uuid).map(|t| t.name))
             .flatten()
+    }
+
+    /// Profile name of a tab-list entry (full list or names only).
+    #[must_use]
+    pub fn tab_name(&self, uuid: &Uuid) -> Option<&str> {
+        self.tab(uuid).map(|t| t.name)
+    }
+
+    /// Game mode of a tab-list entry (full list or names only).
+    #[must_use]
+    pub fn tab_game_mode(&self, uuid: &Uuid) -> Option<i32> {
+        self.tab(uuid).map(|t| t.game_mode)
+    }
+
+    /// Number of tab-list entries kept (full list or names only).
+    #[must_use]
+    pub fn tab_len(&self) -> usize {
+        self.players.len() + self.lite.len()
+    }
+
+    /// The names-only list is in use.
+    #[inline]
+    pub(crate) fn lite_mode(&self) -> bool {
+        !self.config.player_list && self.config.player_names
+    }
+
+    /// The tab-list entry of `uuid` (full or names only).
+    #[inline]
+    pub(crate) fn tab(&self, uuid: &Uuid) -> Option<TabRef<'_>> {
+        self.tabs().get(uuid)
+    }
+
+    /// The tab lists, borrowed apart from the entity map.
+    #[inline]
+    pub(crate) fn tabs(&self) -> Tabs<'_> {
+        Tabs {
+            players: &self.players,
+            lite: &self.lite,
+            long_names: &self.long_names,
+        }
+    }
+
+    /// `true` when the tab list (full or names only) has `uuid`.
+    #[inline]
+    pub(crate) fn tab_has(&self, uuid: &Uuid) -> bool {
+        self.players.contains_key(uuid) || self.lite.contains_key(uuid)
+    }
+
+    /// Adds a names-only entry unless `uuid` has one (vanilla's `putIfAbsent`; 1.8 – 1.16
+    /// replace, `replace` = true). Returns `true` when an entry was added.
+    pub(crate) fn lite_add(
+        &mut self,
+        uuid: Uuid,
+        name: &str,
+        game_mode: i32,
+        generation: u32,
+        replace: bool,
+    ) -> bool {
+        if !replace && self.lite.contains_key(&uuid) {
+            return false;
+        }
+        let mut t = TabLite {
+            name: [0; TabLite::INLINE],
+            len: TabLite::LONG,
+            game_mode,
+            generation,
+        };
+        if name.len() <= TabLite::INLINE {
+            t.name[..name.len()].copy_from_slice(name.as_bytes());
+            t.len = name.len() as u8;
+            if self.long_names.remove(&uuid).is_some() {
+                shrink_map(&mut self.long_names);
+            }
+        } else {
+            self.long_names.insert(uuid, Box::from(name));
+        }
+        let cap = self.lite.capacity();
+        self.lite.insert(uuid, t);
+        after_insert(&mut self.lite, cap);
+        true
+    }
+
+    /// Removes `uuid` from the tab list (full or names only): its game mode and generation.
+    pub(crate) fn tab_remove(&mut self, uuid: &Uuid) -> Option<(i32, u32)> {
+        if let Some(p) = self.players.remove(uuid) {
+            shrink_map(&mut self.players);
+            return Some((p.game_mode, p.generation));
+        }
+        let t = self.lite.remove(uuid)?;
+        if t.len == TabLite::LONG && self.long_names.remove(uuid).is_some() {
+            shrink_map(&mut self.long_names);
+        }
+        shrink_map(&mut self.lite);
+        Some((t.game_mode, t.generation))
+    }
+
+    /// Sets the game mode of a names-only entry.
+    #[inline]
+    pub(crate) fn lite_game_mode(&mut self, uuid: &Uuid, game_mode: i32) {
+        if let Some(t) = self.lite.get_mut(uuid) {
+            t.game_mode = game_mode;
+        }
     }
 
     /// The configuration.
@@ -322,10 +545,14 @@ impl Entities {
         }
         let me = self.self_id.and_then(|id| self.map.remove(&id));
         self.map.clear();
+        shrink_map(&mut self.map);
         if let Some(mut me) = me {
-            me.vehicle = None;
-            me.passengers.clear();
-            me.leash_holder = None;
+            me.set_vehicle(None);
+            if let Some(l) = &mut me.links {
+                l.passengers.clear();
+                l.leash_holder = None;
+            }
+            me.tidy_links();
             self.map.insert(me.id, me);
         }
     }
@@ -377,7 +604,9 @@ impl Entities {
         if self.map.contains_key(&id) {
             self.unlink(id);
         }
+        let cap = self.map.capacity();
         self.map.insert(id, e);
+        after_insert(&mut self.map, cap);
         self.event(Event::Spawned(id));
     }
 
@@ -389,6 +618,7 @@ impl Entities {
         if let Some(e) = self.map.remove(&id) {
             self.event(Event::Removed { id, ty: e.ty });
         }
+        shrink_map(&mut self.map);
         true
     }
 
@@ -397,24 +627,27 @@ impl Entities {
         let Some(e) = self.map.get_mut(&id) else {
             return;
         };
-        let vehicle = e.vehicle.take();
-        let passengers = std::mem::take(&mut e.passengers);
+        if e.links.is_none() && !e.rides && !self.any_leash {
+            return;
+        }
+        let vehicle = e.take_vehicle();
+        let passengers = e.take_passengers();
         if let Some(v) = vehicle
             && let Some(v) = self.map.get_mut(&v)
         {
-            v.passengers.retain(|&p| p != id);
+            v.remove_passenger(id);
         }
         for p in passengers {
             if let Some(p) = self.map.get_mut(&p)
-                && p.vehicle == Some(id)
+                && p.vehicle() == Some(id)
             {
-                p.vehicle = None;
+                p.set_vehicle(None);
             }
         }
         if self.any_leash {
             for other in self.map.values_mut() {
-                if other.leash_holder == Some(id) {
-                    other.leash_holder = None;
+                if other.leash_holder() == Some(id) {
+                    other.set_leash_holder(None);
                 }
             }
         }
@@ -432,7 +665,7 @@ impl Entities {
             if guard > 64 {
                 return true;
             }
-            cur = self.map.get(&c).and_then(|e| e.vehicle);
+            cur = self.map.get(&c).and_then(Entity::vehicle);
         }
         false
     }
@@ -449,31 +682,31 @@ impl Entities {
             return false;
         }
         // Leave the old vehicle.
-        let old = self.map.get_mut(&rider).and_then(|e| e.vehicle.take());
+        let old = self.map.get_mut(&rider).and_then(Entity::take_vehicle);
         if let Some(o) = old
             && let Some(o) = self.map.get_mut(&o)
         {
-            o.passengers.retain(|&p| p != rider);
+            o.remove_passenger(rider);
         }
         if let Some(v) = vehicle {
             let prev: Vec<i32> = if single {
                 self.map
                     .get_mut(&v)
-                    .map(|e| std::mem::take(&mut e.passengers))
+                    .map(Entity::take_passengers)
                     .unwrap_or_default()
             } else {
                 Vec::new()
             };
             for p in prev {
                 if let Some(p) = self.map.get_mut(&p) {
-                    p.vehicle = None;
+                    p.set_vehicle(None);
                 }
             }
             if let Some(ve) = self.map.get_mut(&v) {
-                ve.passengers.push(rider);
+                ve.push_passenger(rider);
             }
             if let Some(r) = self.map.get_mut(&rider) {
-                r.vehicle = Some(v);
+                r.set_vehicle(Some(v));
             }
         }
         self.event(Event::Mounted { id: rider, vehicle });
@@ -485,19 +718,19 @@ impl Entities {
         let Some(v) = self.map.get_mut(&vehicle) else {
             return false;
         };
-        let old = std::mem::take(&mut v.passengers);
+        let old = v.take_passengers();
         for p in &old {
             if let Some(p) = self.map.get_mut(p)
-                && p.vehicle == Some(vehicle)
+                && p.vehicle() == Some(vehicle)
             {
-                p.vehicle = None;
+                p.set_vehicle(None);
             }
         }
         // Reuse the old buffer for the new list (no allocation in steady state).
         let mut old = old;
         old.clear();
         if let Some(v) = self.map.get_mut(&vehicle) {
-            v.passengers = old;
+            v.set_passengers(old);
         }
         for id in ids {
             self.mount(id, Some(vehicle), false);
@@ -508,7 +741,7 @@ impl Entities {
     pub(crate) fn leash(&mut self, id: i32, holder: Option<i32>) -> bool {
         match self.map.get_mut(&id) {
             Some(e) => {
-                e.leash_holder = holder;
+                e.set_leash_holder(holder);
                 self.any_leash |= holder.is_some();
                 true
             }
@@ -537,9 +770,10 @@ mod tests {
     fn entity_size() {
         let n = std::mem::size_of::<Entity>();
         eprintln!("size_of::<Entity>() = {n}");
-        // 0.3.0: 232 bytes. The 26.1 state is boxed: one pointer in the entity.
+        // 0.3.0 – 0.4.3: 232 bytes. Riding, leash and effects sit behind one pointer, the
+        // metadata is an exact-size block (pointer + length); the 26.x state is boxed.
         let modern = cfg!(any(feature = "v26_1", feature = "v26_2"));
-        assert!(n <= if modern { 232 } else { 224 }, "{n}");
+        assert!(n <= if modern { 168 } else { 160 }, "{n}");
         #[cfg(any(feature = "v26_1", feature = "v26_2"))]
         {
             let b = std::mem::size_of::<crate::modern_state::State>();

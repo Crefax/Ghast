@@ -53,7 +53,7 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
         let uuid = r.read_uuid()?;
         match action {
             0 => {
-                let name = own_str(r)?;
+                let name = r.read_string()?;
                 let props = r.read_varint()?;
                 let props = r.check_count(i64::from(props), 3)?;
                 let mut textures = None;
@@ -74,6 +74,13 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 }
                 let game_mode = r.read_varint()?;
                 let ping = r.read_varint()?;
+                if store.lite_mode() {
+                    if r.read_bool()? {
+                        skip_string(r)?;
+                    }
+                    store.lite_add(uuid, &name, game_mode, 0, true);
+                    continue;
+                }
                 let display_name = if r.read_bool()? {
                     Some(own_str(r)?)
                 } else {
@@ -82,7 +89,7 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 store.players.insert(
                     uuid,
                     PlayerInfo {
-                        name,
+                        name: Box::from(&*name),
                         game_mode,
                         ping,
                         display_name,
@@ -99,6 +106,7 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 if let Some(p) = store.players.get_mut(&uuid) {
                     p.game_mode = g;
                 }
+                store.lite_game_mode(&uuid, g);
             }
             2 => {
                 let ping = r.read_varint()?;
@@ -117,7 +125,7 @@ pub(crate) fn player_info(store: &mut Entities, r: &mut Reader<'_>) -> R<()> {
                 }
             }
             4 => {
-                store.players.remove(&uuid);
+                store.tab_remove(&uuid);
             }
             _ => return Err(DecodeError::Invalid("unknown player_info action")),
         }
@@ -168,9 +176,10 @@ impl IdMask {
 pub(crate) fn set_effect(s: &mut Entities, eid: i32, effect: Effect) -> bool {
     match s.map.get_mut(&eid) {
         Some(e) => {
-            match e.effects.iter_mut().find(|x| x.id == effect.id) {
+            let effects = &mut e.links_mut().effects;
+            match effects.iter_mut().find(|x| x.id == effect.id) {
                 Some(x) => *x = effect,
-                None => e.effects.push(effect),
+                None => effects.push(effect),
             }
             s.event(Event::Effects(eid));
             true
@@ -183,7 +192,10 @@ pub(crate) fn set_effect(s: &mut Entities, eid: i32, effect: Effect) -> bool {
 pub(crate) fn remove_effect(s: &mut Entities, eid: i32, effect: u8) -> bool {
     match s.map.get_mut(&eid) {
         Some(e) => {
-            e.effects.retain(|x| x.id != effect);
+            if let Some(l) = &mut e.links {
+                l.effects.retain(|x| x.id != effect);
+            }
+            e.tidy_links();
             s.event(Event::Effects(eid));
             true
         }

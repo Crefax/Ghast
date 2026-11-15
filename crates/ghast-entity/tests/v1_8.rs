@@ -628,3 +628,33 @@ fn skin_textures_opt_in() {
         );
     }
 }
+
+/// `Config::player_names`: the names-only tab list (no `PlayerInfo`) answers names and game
+/// modes like the full list.
+#[test]
+fn names_only_tab_list() {
+    let mut t = tracker(
+        Config::default()
+            .with_player_list(false)
+            .with_player_names(true),
+    );
+    assert!(t.wants(id::PLAYER_INFO));
+    let uuid = 0x1234_5678_9abc_def0_1122_3344_5566_7788u128;
+    let u = Uuid::from_u128(uuid);
+    t.apply(&player_add(uuid, "Bob", true).raw(id::PLAYER_INFO))
+        .unwrap();
+    assert!(t.player_info(&u).is_none());
+    assert_eq!(
+        (t.tab_name(&u), t.tab_game_mode(&u)),
+        (Some("Bob"), Some(1))
+    );
+    let w = W::new().varint(1).varint(1).uuid(uuid).varint(3);
+    t.apply(&w.raw(id::PLAYER_INFO)).unwrap();
+    assert_eq!(t.tab_game_mode(&u), Some(3));
+    let w = W::new().varint(4).varint(1).uuid(uuid);
+    t.apply(&w.raw(id::PLAYER_INFO)).unwrap();
+    assert_eq!((t.tab_name(&u), t.tab_len()), (None, 0));
+    // Off by default: the packets are not wanted.
+    let t = tracker(Config::default().with_player_list(false));
+    assert!(!t.wants(id::PLAYER_INFO));
+}

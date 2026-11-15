@@ -44,8 +44,12 @@ for e in entities.within([0.5, 64.0, 0.5], 6.0) {
   `Entities::near` is an alias of `within`.
 - Per-version helpers: `health`, `item`, `flags`, `custom_name`, `meta::*` indices.
 - `Config` (`#[non_exhaustive]`; build it with `Config::default().with_metadata(..)` etc.):
-  `metadata`, `equipment`, `effects`, `player_list`, `events`, `skins`. Everything is on by
-  default except `events` and `skins`. `PlayerInfo` is `#[non_exhaustive]` too (read-only). With `skins`, `PlayerInfo::textures` keeps the base64
+  `metadata`, `equipment`, `effects`, `player_list`, `events`, `skins`, `player_names`.
+  Everything is on by default except `events`, `skins` and `player_names`. `player_names`
+  (with `player_list` off) keeps only each tab-list entry's name and game mode (~62 bytes per
+  entry), enough for `player_name`, `tab_name` / `tab_game_mode` and the 26.x
+  `scoreboard_name` / `game_mode` / `is_spectator`; the tab-list packets (`PLAYER_LIST_IDS`)
+  must reach the tracker whenever `Config::reads_tab_list()`. `PlayerInfo` is `#[non_exhaustive]` too (read-only). With `skins`, `PlayerInfo::textures` keeps the base64
   `"textures"` profile property (skin / cape URLs) of tab-list entries. `Event` covers spawned / removed / moved / velocity / status / metadata /
   equipment / effects / mounted / collected / player list.
 - Packet id lists per version: `CORE_IDS`, `METADATA_IDS`, `EQUIPMENT_IDS`, `EFFECT_IDS`,
@@ -193,10 +197,14 @@ store target, rotation and the previous position / rotation, as `InterpolationHa
 does), about 7 ns the second cache line of the boxed 26.1 state. Syncs read 64 bytes instead of
 1.16's 34-byte teleport and look up the chunk. LpVec3 velocities cost what 1.16's shorts do.
 
-Memory: `size_of::<Entity>()` is 232 bytes with every version compiled in (as in 0.3.0) and 224
-without `v26_1`; a 26.1 entity adds one 120-byte heap block (interpolation target and previous
-step, head / body turn, cached dimensions, size keys; the `VecDeltaCodec` base lives inline in
-the entity's version slot). The hash map slot adds the key.
+Memory: `size_of::<Entity>()` is 168 bytes with every version compiled in and 160 without
+the 26.x versions (232 / 224 up to 0.4.3); the hash map slot adds the key (176 bytes). The
+metadata is one exact-size heap block (112 bytes per entry), passengers, leash and effects one
+more block that only entities with any of them allocate. A 26.x entity adds one 120-byte heap
+block (interpolation target and previous step, head / body turn, cached dimensions, size keys;
+the `VecDeltaCodec` base lives inline in the entity's version slot). A 26.1 player with the two
+metadata entries a server sends at spawn takes 520 bytes in all (`bytes_per_tracked_entity`
+pins it). Maps give memory back once they hold under a quarter of their capacity.
 
 ## Tests
 
