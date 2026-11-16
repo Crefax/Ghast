@@ -3,6 +3,13 @@
 use std::sync::Arc;
 
 use ghast_client::inventory::{Click, ClickError, ClickOutcome, Stack, WindowKind};
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
 use ghast_client::version::DataSet;
 use ghast_client::{BlockPos, ClickRefused, GameVersion, TickContext};
 
