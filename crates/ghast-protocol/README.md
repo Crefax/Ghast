@@ -6,8 +6,9 @@ types per protocol version, framing, compression, encryption, NBT. No game logic
 | Module / feature | What it is |
 |---|---|
 | `v1_8` (feature `v1_8`) | Protocol 47 (1.8 – 1.8.9) |
+| `v1_12_1` (feature `v1_12_2`) | Protocol 338 (1.12.1): the 1.12.2 definitions except the keep-alive packets (VarInt ids, as in 1.8) |
 | `v1_12_2` (feature `v1_12_2`) | Protocol 340 (1.12.2) |
-| `v1_16_5` (feature `v1_16_5`) | Protocol 754 (1.16.4 – 1.16.5) |
+| `v1_16_5` (feature `v1_16_5`) | Protocol 754 (1.16.4 – 1.16.5); also the layout of 751 (1.16.2) and 753 (1.16.3), which have table rows but no module of their own: write the handshake with their number |
 | `v26_1` (feature `v26_1`) | Protocol 775 (26.1 – 26.1.2), with the configuration state |
 | `defs` | every generated definition once, shared by the versions whose code for it is identical (see below) |
 | `versions` | the protocol table: number → module, feature, game versions, layout, configuration state |

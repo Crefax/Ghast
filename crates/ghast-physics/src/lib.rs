@@ -9,9 +9,9 @@
 //!
 //! | module | version | status |
 //! |---|---|---|
-//! | [`v1_8`] | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle |
-//! | [`v1_12`] | 1.12.2 (protocol 340) | bit-exact against the vanilla oracle |
-//! | [`v1_16_5`] | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle |
+//! | [`v1_8`] | 1.8.9 (protocol 47; also 1.8.2 – 1.8.8) | bit-exact against the vanilla oracle |
+//! | [`v1_12`] | 1.12.2 (protocol 340; also 1.12.1) | bit-exact against the vanilla oracle |
+//! | [`v1_16_5`] | 1.16.5 (protocol 754; also 1.16.2 – 1.16.4) | bit-exact against the vanilla oracle |
 //! | [`modern`] (`V26_1`) | 26.1 (protocol 775) | bit-exact against the vanilla oracle |
 //!
 //! Code that is generic over versions uses the [`Ruleset`] trait (static dispatch, no runtime

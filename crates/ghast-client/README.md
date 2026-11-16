@@ -3,9 +3,10 @@
 Headless Minecraft Java Edition client for the ghast library: connection, login, the fixed
 50 ms tick loop and a version-agnostic bot API. Supports **1.8.9** (protocol 47),
 **1.12.2** (protocol 340), **1.16.5** (protocol 754), **26.1 â€“ 26.1.2** (protocol 775) and **26.2**
-(protocol 776). Each version is a cargo feature (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`;
-default: all) and builds
-alone; what a version can do is its `version::Capabilities` row (`GameVersion::caps()`), which
+(protocol 776), plus the sub-versions 1.12.1 (338), 1.16.2 (751) and 1.16.3 (753), which run
+the 1.12.2 / 1.16.5 code with their own protocol number (and 1.12.1's VarInt keep-alive ids).
+Each version is a cargo feature (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`; default: all;
+a sub-version comes with its row's feature) and builds alone; what a version can do is its `version::Capabilities` row (`GameVersion::caps()`), which
 the core reads instead of comparing version numbers.
 
 ```rust,no_run
@@ -52,7 +53,8 @@ Examples (facade crate): `cargo run -p ghast --release --example afk -- --host â
 | `interest` | `Interests`: optional packet groups a behaviour opts into |
 
 Dispatch is compile-time: `Client::run` matches the run-time `GameVersion` once and runs a
-session monomorphised for that version; the engine and the behaviour are version-free.
+session monomorphised for that version (a sub-version runs its row's instance with its own
+capability row); the engine and the behaviour are version-free.
 
 ## Tick model (1.8.9 `MinecraftClient.tick`)
 

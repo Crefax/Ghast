@@ -7,9 +7,9 @@ vanilla's constant 65536-entry sine table, built once).
 
 | module | version | verification |
 |---|---|---|
-| `v1_8` | 1.8.9 (protocol 47) | bit-exact against the vanilla oracle (see below) |
-| `v1_12` | 1.12.2 (protocol 340; the rules hold for every 1.12 release) | bit-exact against the vanilla oracle (see below) |
-| `v1_16_5` | 1.16.5 (protocol 754) | bit-exact against the vanilla oracle (see below) |
+| `v1_8` | 1.8.9 (protocol 47; also 1.8.2 – 1.8.8) | bit-exact against the vanilla oracle (see below; 1.8.2 – 1.8.8: the same records on their jars) |
+| `v1_12` | 1.12.2 (protocol 340; also 1.12.1) | bit-exact against the vanilla oracle (see below; 1.12.1: the same records on its jar) |
+| `v1_16_5` | 1.16.5 (protocol 754; also 1.16.2 – 1.16.4) | bit-exact against the vanilla oracle (see below; 1.16.2 – 1.16.4: the same records on their jars) |
 | `modern` with `V26_1` (feature `v26_1`, default) | 26.1 (protocol 775) | bit-exact against the vanilla oracle (see "Modern core") |
 | `modern` with `V26_2` (feature `v26_2`, default) | 26.2 (protocol 776) | bit-exact against the vanilla oracle (see "26.2") |
 

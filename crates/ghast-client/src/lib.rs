@@ -16,7 +16,7 @@
 //!
 //! Supported versions: 1.8.9 (protocol 47), 1.12.2 (340), 1.16.5 (754), 26.1 – 26.1.2 (775) and
 //! 26.2 (776), one cargo feature each (`v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2`; default:
-//! all). What a version can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
+//! all), and 1.12.1 (338), 1.16.2 (751), 1.16.3 (753) with their row's feature. What a version can do is its [`version::Capabilities`] row ([`GameVersion::caps`]).
 //! Server dialogs (26.1+) are in [`dialog`]. Many bots in one process: [`Swarm`].
 //!
 //! ```no_run

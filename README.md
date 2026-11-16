@@ -137,17 +137,23 @@ option).
 
 | game versions | protocol | status |
 |---|---|---|
-| 1.8 – 1.8.9 | 47 | oracle-verified, lab-tested (Paper 1.8.8 + Grim) |
+| 1.8.9 | 47 | oracle-verified, lab-tested (Paper 1.8.8 + Grim) |
+| 1.8.2 – 1.8.8 | 47 | oracle-verified (the 1.8.9 row: same records on each jar) |
+| 1.8, 1.8.1 | 47 | protocol only (served by the 1.8.9 code; movement not checked against those jars) |
+| 1.12.1 | 338 | oracle-verified (the 1.12.2 row: same records; the keep-alive id is a VarInt) |
 | 1.12.2 | 340 | oracle-verified, lab-tested (Paper 1.12.2 + Grim) |
-| 1.16.4 – 1.16.5 | 754 | oracle-verified, lab-tested (Paper 1.16.5 + Grim) |
+| 1.16.2, 1.16.3 | 751, 753 | oracle-verified (the 1.16.5 row: same records, own handshake number) |
+| 1.16.4 – 1.16.5 | 754 | oracle-verified (1.16.4: the 1.16.5 row), lab-tested (Paper 1.16.5 + Grim) |
 | 26.1, 26.1.1, 26.1.2 | 775 | oracle-verified (physics, crosshair, block breaking), lab-tested (Paper 26.1.2 + Grim 2.3.74) |
 | 26.2 | 776 | oracle-verified (physics incl. collision restitution, crosshair, block breaking, clicks), lab-tested (Paper 26.2 + Grim 2.3.74) |
 
 *Oracle-verified*: the behaviour is replayed against the real client code of that version
 (26.1, 26.1.1 and 26.1.2 share one protocol number and give identical oracle records, so they
-are one row). *Lab-tested*: sessions on a local Paper server with the Grim anticheat, 0 flags.
-Name the exact version you connect with (`GameVersion`, `"26.1.2".parse()`); versions sharing a
-protocol are served by the same code.
+are one row; 1.8.2 – 1.8.8, 1.12.1 and 1.16.2 – 1.16.4 give the records of their row on their
+own jars, so they run its code). *Lab-tested*: sessions on a local Paper server with the Grim
+anticheat, 0 flags. Name the exact version you connect with (`GameVersion`, `"26.1.2".parse()`); versions sharing a
+protocol are served by the same code, and 1.12.1 / 1.16.2 / 1.16.3 by their row's code with
+their own protocol number (the "1.12.2" and "1.16.5" columns below apply to them).
 
 ## Features per version
 
