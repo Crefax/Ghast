@@ -68,7 +68,35 @@ pub(crate) struct Sim12 {
     profile_name: Box<str>,
     /// Entities push the player (`Client::entity_push`).
     entity_push: bool,
+    /// Movement state beyond the player: gliding.
+    ext: ghast_physics::v1_12::PlayerExt,
+    /// Gliding: the server's flag 7 and the firework rockets attached to us.
+    glide: Box<Glide12>,
+    /// The extension state can act (an elytra, gliding, rockets): the tick takes
+    /// [`Sim12::step_ext`] and the rockets tick after it.
+    glide_on: bool,
 }
+
+/// What the 1.12.2 glide reads beyond the physics state, decoded once an elytra was seen in the
+/// chest slot: our shared flags (the server starts and ends the glide) and the rockets attached
+/// to us.
+#[derive(Debug, Default)]
+struct Glide12 {
+    /// Our entity data, rocket spawns and entity removals are read.
+    watch: bool,
+    /// The packet filter must change ([`Sim::take_filter_dirty`]).
+    filter_dirty: bool,
+    /// Our entity id (the tick's).
+    own_id: i32,
+    /// Firework rockets spawned but not (yet) known as attached to us: id, spawn height.
+    pending: Vec<(i32, f64)>,
+    /// The rockets attached to us, in the client world's entity list order (they tick after
+    /// us): id, height (the spawn height, then ours after each of its ticks).
+    rockets: Vec<(i32, f64)>,
+}
+
+/// The 1.12.2 spawn-object type of a firework rocket.
+const FIREWORK_ROCKET_12: i8 = 76;
 
 impl std::fmt::Debug for Sim12 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -116,6 +144,32 @@ impl Sim12 {
         self.profile_name = name.into();
     }
 
+    /// Test hook: our flags and rockets are read from now on (as after a jump press in the air
+    /// with an elytra on).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_watch_glide(&mut self) {
+        self.glide.watch = true;
+        self.glide.own_id = 1;
+    }
+
+    /// Test hook: the bits of our shared flags byte movement reads.
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_shared_flags_1_12(&self) -> u8 {
+        self.ext.shared_flags(&self.player)
+    }
+
     pub(crate) fn new() -> Self {
         Sim12 {
             world: ghast_world::v1_12::World::new(config()),
@@ -129,6 +183,9 @@ impl Sim12 {
             near: None,
             profile_name: "".into(),
             entity_push: true,
+            ext: ghast_physics::v1_12::PlayerExt::new(),
+            glide: Box::default(),
+            glide_on: false,
         }
     }
 
@@ -160,6 +217,122 @@ impl Sim12 {
 }
 
 impl Sim12 {
+    /// Recomputes [`Sim12::glide_on`].
+    fn update_glide(&mut self) {
+        self.glide_on = !self.ext.is_inert() || !self.glide.rockets.is_empty();
+    }
+
+    /// The tick with the extension state (gliding, rockets): out of line, so the plain tick
+    /// stays as it was.
+    #[cold]
+    #[inline(never)]
+    fn step_ext(&mut self, pose: &Pose, controls: Controls, using_item: bool) {
+        let input = ghast_physics::TickInput {
+            keys: keys(controls),
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            using_item,
+        };
+        let solids: &[ghast_physics::math::Aabb] =
+            match (self.near.as_deref_mut(), self.entities.as_ref()) {
+                (Some(n), Some(t)) if !n.idle() => {
+                    n.solids(t, &self.world, &self.player);
+                    &n.solids
+                }
+                _ => &[],
+            };
+        ghast_physics::v1_12::tick_ext(
+            &mut self.player,
+            &mut self.ext,
+            &input,
+            &self.world,
+            &ghast_physics::v1_12::Options::default(),
+            solids,
+            &mut self.packets,
+        );
+    }
+
+    /// The attached rockets' ticks after ours (in the world's entity list after the entities
+    /// spawned before them; the pushes of other entities come first here).
+    #[cold]
+    #[inline(never)]
+    fn tick_rockets(&mut self, pose: &mut Pose) {
+        for r in &mut self.glide.rockets {
+            ghast_physics::v1_12::rocket_boost(&mut self.player, &self.ext);
+            // Entity.baseTick: below y = -64 the rocket is removed, after this tick.
+            if r.1 < -64.0 {
+                r.0 = i32::MIN;
+            }
+            r.1 = self.player.pos[1];
+        }
+        self.glide.rockets.retain(|r| r.0 != i32::MIN);
+        self.update_glide();
+        let p = &self.player;
+        pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+    }
+
+    /// A rocket spawn, removal or entity data, or our own entity data: decoded only when it
+    /// can concern us.
+    #[cold]
+    #[inline(never)]
+    fn glide_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::defs::p340::types::EntityMetadataValue as V;
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
+        let g = &mut self.glide;
+        match raw.id {
+            cb::id::SPAWN_ENTITY => {
+                let p: cb::SpawnEntity = raw.decode_as()?;
+                g.pending.retain(|r| r.0 != p.entity_id);
+                g.rockets.retain(|r| r.0 != p.entity_id);
+                if p.r#type == FIREWORK_ROCKET_12 {
+                    if g.pending.len() >= 32 {
+                        g.pending.remove(0);
+                    }
+                    g.pending.push((p.entity_id, p.y));
+                }
+            }
+            cb::id::ENTITY_DESTROY => {
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                for id in &p.entity_ids {
+                    g.pending.retain(|r| r.0 != *id);
+                    g.rockets.retain(|r| r.0 != *id);
+                }
+            }
+            cb::id::ENTITY_METADATA => {
+                let mut r = ghast_protocol::Reader::new(&raw.body);
+                let id = r.read_varint()?;
+                let own = id == g.own_id;
+                let pending = g.pending.iter().position(|r| r.0 == id);
+                if !own && pending.is_none() {
+                    return Ok(());
+                }
+                let p: cb::EntityMetadata = raw.decode_as()?;
+                for e in &p.metadata {
+                    match (e.key, &e.value) {
+                        // The shared flags: sprinting, fall flying.
+                        (0, V::Byte(b)) if own => {
+                            self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                        }
+                        // A rocket's shooter (an entity id, 0 for none).
+                        (7, V::VarInt(v)) if !own => {
+                            if let Some(k) = pending {
+                                let (rid, y) = g.pending.remove(k);
+                                if *v == g.own_id {
+                                    g.rockets.push((rid, y));
+                                    log::debug!("firework rocket {rid} attached to us");
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.update_glide();
+        Ok(())
+    }
+
     /// The player's tick next to tracked entities: with the boxes of the boats and shulkers
     /// around it. Out of line, so the tick without entities stays the plain one.
     #[cold]
@@ -312,6 +485,14 @@ impl Sim for Sim12 {
         {
             use ghast_protocol::v1_12_2::play::clientbound::id;
             self.session.note(raw, id::LOGIN, id::RESPAWN);
+            if self.glide.watch
+                && matches!(
+                    raw.id,
+                    id::SPAWN_ENTITY | id::ENTITY_DESTROY | id::ENTITY_METADATA
+                )
+            {
+                self.glide_packet(raw)?;
+            }
         }
         if let Some(t) = &mut self.entities
             && t.wants(raw.id)
@@ -347,7 +528,10 @@ impl Sim for Sim12 {
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
-                w.apply_login(&raw.decode_as()?);
+                let p: cb::Login = raw.decode_as()?;
+                // Our entity id (our entity data names us by it).
+                self.glide.own_id = p.entity_id;
+                w.apply_login(&p);
             }
             cb::id::RESPAWN => {
                 w.apply_respawn(&raw.decode_as()?);
@@ -393,6 +577,11 @@ impl Sim for Sim12 {
         self.player = fresh_player_1_12();
         self.player.abilities = abilities;
         self.player.food_level = food;
+        // A new client player: not gliding, no rockets.
+        self.ext.fall_flying = false;
+        self.glide.rockets.clear();
+        self.glide.pending.clear();
+        self.update_glide();
     }
 
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
@@ -471,7 +660,46 @@ impl Sim for Sim12 {
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
-        self.world.packet_ids().collect()
+        let mut ids: Vec<i32> = self.world.packet_ids().collect();
+        if self.glide.watch {
+            // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.
+            use ghast_protocol::v1_12_2::play::clientbound as cb;
+            ids.extend([
+                cb::id::SPAWN_ENTITY,
+                cb::id::ENTITY_DESTROY,
+                cb::id::ENTITY_METADATA,
+            ]);
+        }
+        ids
+    }
+
+    fn take_filter_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.glide.filter_dirty)
+    }
+
+    #[inline(always)]
+    fn modern_inputs(&self) -> bool {
+        // The elytra is read on jump presses in the air (the request needs that).
+        !self.player.on_ground
+    }
+
+    fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &crate::sim::PreTick) -> bool {
+        if t.controls.jump {
+            // ElytraItem.isUsable: damage below 431 (elytra, item 443).
+            self.ext.elytra = inv.armor(1).is_some_and(|s| {
+                s.id() == 443 && s.damage_value(ghast_inventory::Version::V1_12) < 432 - 1
+            });
+            if self.ext.elytra && !self.glide.watch {
+                self.glide.watch = true;
+                self.glide.filter_dirty = true;
+            }
+            self.update_glide();
+        }
+        true
+    }
+
+    fn gliding(&self) -> bool {
+        self.ext.fall_flying
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {
@@ -507,6 +735,9 @@ impl Sim for Sim12 {
     fn tick_entities(&mut self, pose: &mut Pose) {
         if self.near.is_some() {
             self.tick_near(pose);
+        }
+        if self.glide_on && !self.glide.rockets.is_empty() {
+            self.tick_rockets(pose);
         }
     }
 
@@ -559,6 +790,7 @@ impl Sim for Sim12 {
             return;
         };
         if let Some(s) = BlockState::from_raw(raw) {
+            log::debug!("predicted {} at {at:?}", s.block().name());
             self.world.set_block_state(at.x, at.y, at.z, s);
         }
     }
@@ -581,7 +813,9 @@ impl Sim for Sim12 {
         out: &mut Vec<Outbound>,
     ) {
         self.packets.clear();
-        if self.near.as_deref().is_some_and(|n| !n.idle()) {
+        if self.glide_on {
+            self.step_ext(pose, controls, using_item);
+        } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
             self.step_near(pose, controls, using_item);
         } else {
             let input = ghast_physics::TickInput {
@@ -777,7 +1011,6 @@ pub(crate) struct Near12 {
 }
 
 /// The first VarInt of a body (the entity id of spawn and move packets).
-            log::debug!("predicted {} at {at:?}", s.block().name());
 fn first_varint(body: &[u8]) -> Option<i32> {
     let mut v: u32 = 0;
     for (k, &b) in body.iter().take(5).enumerate() {

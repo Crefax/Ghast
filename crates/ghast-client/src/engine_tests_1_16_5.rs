@@ -313,7 +313,7 @@ fn ours(o: &Outbound) -> Option<Value> {
                 EntityAction::StopSprinting => "stop_sprinting",
                 EntityAction::StartSneaking => "press_shift_key",
                 EntityAction::StopSneaking => "release_shift_key",
-                _ => "other",
+                EntityAction::StartFallFlying => "start_fall_flying",
             }
         ]),
         Outbound::UseItem { off_hand, .. } => serde_json::json!(["use_item", u8::from(off_hand)]),
@@ -426,8 +426,68 @@ fn driven(ev: &Value) -> bool {
                 | "speed_attribute"
                 | "living_flags"
                 | "effects"
+                | "shared_flags"
+                | "equip"
+                | "firework"
         )
     )
+}
+
+/// A 1.16.5 `entity_metadata` for our entity (id 1): the shared flags byte (index 0).
+fn shared_flags_packet(flags: u8) -> RawPacket {
+    Body::default()
+        .varint(1)
+        .i8(0)
+        .varint(0)
+        .i8(flags as i8)
+        .i8(-1)
+        .raw(cb::id::ENTITY_METADATA)
+}
+
+/// The chest item of an elytra case (`item` with `Damage` in its NBT) as the player's
+/// inventory window has it (slot 6).
+fn chest_stack(item: Option<&str>, damage: i32) -> Option<ghast_inventory::Stack> {
+    let id = ghast_data::v1_16_5::Item::from_name(item?).unwrap().id();
+    let mut s = ghast_inventory::Stack::new(i32::from(id), 1, 0);
+    if damage != 0 {
+        let mut b = vec![10, 0, 0, 3, 0, 6];
+        b.extend_from_slice(b"Damage");
+        b.extend_from_slice(&damage.to_be_bytes());
+        b.push(0);
+        s = s.with_nbt(Some(
+            ghast_protocol::nbt::RawNbt::from_bytes(bytes::Bytes::from(b)).unwrap(),
+        ));
+    }
+    Some(s)
+}
+
+/// What the server sends for a rocket it spawns for us (`firework` event): the spawn packet at
+/// our position (type 27, no motion) and its entity data naming us as the shooter (index 8,
+/// `OptionalInt`: id + 1).
+fn firework_packets(id: i32, pos: [f64; 3]) -> Vec<RawPacket> {
+    vec![
+        Body::default()
+            .varint(id)
+            .uuid(uuid::Uuid::from_u64_pair(0x6669_7265, id as u64))
+            .varint(27)
+            .f64(pos[0])
+            .f64(pos[1])
+            .f64(pos[2])
+            .i8(0)
+            .i8(0)
+            .i32(0)
+            .i16(0)
+            .i16(0)
+            .i16(0)
+            .raw(cb::id::SPAWN_ENTITY),
+        Body::default()
+            .varint(id)
+            .i8(8)
+            .varint(17)
+            .varint(2)
+            .i8(-1)
+            .raw(cb::id::ENTITY_METADATA),
+    ]
 }
 
 /// Replays the cases of an entities file through the engine with entity tracking (`metadata`:
@@ -550,7 +610,8 @@ pub(super) fn replay_file_with(
         let ext = setup.get("ext");
         let dimension = ext.and_then(|x| x.get("dimension")).and_then(Value::as_str);
         let hand = ext.and_then(|x| x.get("hand")).and_then(Value::as_str);
-        let joined = dimension.is_some() || hand.is_some();
+        let glide = ext.and_then(|x| x.get("glide")).and_then(Value::as_bool) == Some(true);
+        let joined = dimension.is_some() || hand.is_some() || glide;
         if joined {
             let d = dimension.unwrap_or("overworld");
             let ultrawarm = match d {
@@ -626,8 +687,46 @@ pub(super) fn replay_file_with(
                 }
             }
         }
+        // Elytra: the chest item, a rocket in the hand, the server's flag 7 at setup.
+        if glide {
+            let x = ext.unwrap();
+            let chest = x.get("chest").and_then(Value::as_str);
+            let damage = x
+                .get("chest_damage")
+                .map_or(0, |v| v.as_i64().unwrap() as i32);
+            e.inventory_mut()
+                .on_set_slot(0, 6, chest_stack(chest, damage));
+            if hand == Some("firework_rocket") {
+                e.inventory_mut().on_set_slot(0, 36, chest_stack(hand, 0));
+            }
+            // A client that saw its elytra before (the sim reads our flags and rockets from
+            // the first jump press in the air with an elytra on).
+            e.sim.test_watch_glide();
+            if x.get("fall_flying").and_then(Value::as_bool) == Some(true) {
+                let cur = e.sim.test_ext().shared_flags(e.sim.test_player());
+                e.sim
+                    .world_packet(&shared_flags_packet(cur | 0x80))
+                    .unwrap();
+            }
+            // The inventory drives the boots' enchantments: the oracle's boots in the armour slot.
+            let boots: Vec<(&str, u8)> = ["depth_strider", "soul_speed"]
+                .iter()
+                .filter_map(|n| {
+                    let l = setup[*n].as_u64().unwrap_or(0) as u8;
+                    (l > 0).then_some((*n, l))
+                })
+                .collect();
+            if !boots.is_empty() {
+                let id = ghast_data::v1_16_5::Item::from_name("diamond_boots")
+                    .unwrap()
+                    .id();
+                let stack = ghast_inventory::Stack::new(i32::from(id), 1, 0)
+                    .with_nbt(Some(enchantments_nbt(&boots)));
+                e.inventory_mut().on_set_slot(0, 8, Some(stack));
+            }
+        }
         // Riptide: the trident in the selected hotbar slot, the rain as game state packets.
-        if let Some(h) = hand {
+        if let Some(h) = hand.filter(|_| !glide) {
             assert_eq!(h, "trident", "{name}");
             let id = ghast_data::v1_16_5::Item::from_name(h).unwrap().id();
             let level = ext
@@ -791,6 +890,29 @@ pub(super) fn replay_file_with(
                         living = (living & !clear) | set;
                         e.sim.world_packet(&living_flags_packet(living)).unwrap();
                     }
+                    "shared_flags" => {
+                        let set = ev["set"].as_u64().unwrap() as u8;
+                        let clear = ev["clear"].as_u64().unwrap() as u8;
+                        let cur = e.sim.test_ext().shared_flags(e.sim.test_player());
+                        e.sim
+                            .world_packet(&shared_flags_packet((cur & !clear) | set))
+                            .unwrap();
+                    }
+                    "equip" => {
+                        // Our own equipment: the server's slot update of the inventory window.
+                        let item = ev.get("item").and_then(Value::as_str);
+                        let damage = ev["damage"].as_i64().unwrap() as i32;
+                        e.inventory_mut()
+                            .on_set_slot(0, 6, chest_stack(item, damage));
+                    }
+                    "firework" => {
+                        // At our position when the server handles the use (after our last tick).
+                        let s = &ticks[k - 1]["state"]["pos"];
+                        let pos = [f64v(&s[0]), f64v(&s[1]), f64v(&s[2])];
+                        for raw in firework_packets(ev["id"].as_i64().unwrap() as i32, pos) {
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                    }
                     _ => {
                         for raw in event_packets(ev) {
                             e.sim.world_packet(&raw).unwrap();
@@ -854,7 +976,11 @@ pub(super) fn replay_file_with(
                 .filter_map(theirs)
                 .collect();
             if got != want {
-                failed.push(format!("{name} tick {k}: got {got:?} want {want:?}"));
+                failed.push(format!(
+                    "{name} tick {k}: got {got:?} want {want:?} (velocity {:?} want {})",
+                    e.sim.test_player().vel,
+                    rec["state"]["vel"]
+                ));
                 break;
             }
             // The player's velocity after the tick (pushes included).
@@ -885,7 +1011,7 @@ pub(super) fn replay_file_with(
                 };
                 // Only what pushes or collides: bats, armor stands and parrots place themselves.
                 let ty = x["type"].as_str().unwrap();
-                let living = !matches!(ty, "boat" | "minecart" | "item");
+                let living = !matches!(ty, "boat" | "minecart" | "item" | "firework_rocket");
                 if ghast_physics::v1_16_5::push_kind(ty, living).is_none()
                     && !ghast_physics::v1_16_5::collides(ty)
                 {
@@ -1045,6 +1171,47 @@ fn dimension_type_from_join_and_respawn_1_16_5() {
     sim.world_packet(&login_packet("minecraft:the_nether", true))
         .unwrap();
     assert!(sim.test_ext().ultrawarm);
+}
+
+fn elytra_file() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5/elytra.jsonl.gz")
+}
+
+/// The elytra goldens through the engine: the chest item in the inventory window, the
+/// server's shared flags (flag 7) as our entity data, rockets as the server's spawn packet and
+/// entity data, rockets from the hand with the use key; every movement and `entity_action`
+/// packet (the glide start) and the velocity of every tick must equal the real client's. With
+/// entity tracking (the rockets' tick order around the player comes from it).
+#[test]
+fn elytra_matches_the_oracle_1_16_5() {
+    let (cases, ticks, skipped) = replay_file_with(&elytra_file(), false, true);
+    assert!(
+        cases >= 120 && ticks > 4000 && skipped == 0,
+        "{cases} cases, {ticks} ticks, {skipped} skipped"
+    );
+}
+
+/// The cached elytra fuzz (`oracle/cache/1.16.5/fuzz-elytra/*.jsonl.gz`, not committed)
+/// through the engine. Skipped when absent.
+#[test]
+#[ignore = "cache run: cargo test --release -p ghast-client --lib -- --ignored elytra_cache_1_16_5"]
+fn elytra_cache_1_16_5() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../oracle/cache/1.16.5/fuzz-elytra");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {} not found", dir.display());
+        return;
+    };
+    let mut files: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in files {
+        let (c, t, _) = replay_file_with(&f, false, true);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.16.5 elytra cache through the engine: {cases} cases, {ticks} ticks");
 }
 
 fn riptide_file() -> std::path::PathBuf {

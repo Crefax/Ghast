@@ -239,7 +239,7 @@ fn ours(o: &Outbound) -> Option<Value> {
                 EntityAction::StopSprinting => "stop_sprinting",
                 EntityAction::StartSneaking => "start_sneaking",
                 EntityAction::StopSneaking => "stop_sneaking",
-                _ => "other",
+                EntityAction::StartFallFlying => "start_fall_flying",
             }
         ]),
         _ => return None,
@@ -276,7 +276,7 @@ fn theirs(p: &Value) -> Option<Value> {
     })
 }
 
-struct Keys(Controls);
+struct Keys(Controls, bool);
 
 impl Behavior for Keys {
     fn name(&self) -> &str {
@@ -284,7 +284,83 @@ impl Behavior for Keys {
     }
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
         ctx.set_controls(self.0);
+        ctx.set_buttons(crate::hands::Buttons {
+            left: false,
+            right: self.1,
+        });
     }
+}
+
+/// A 1.12.2 `entity_metadata` for our entity (id 1): the shared flags byte (index 0).
+fn shared_flags_packet(flags: u8) -> RawPacket {
+    Body::default()
+        .varint(1)
+        .i8(0)
+        .varint(0)
+        .i8(flags as i8)
+        .i8(-1)
+        .raw(cb::id::ENTITY_METADATA)
+}
+
+/// A 1.12 stack of item `id` with a damage value (and the depth strider level of boots).
+fn stack_1_12(id: i32, damage: i16, depth_strider: u8) -> ghast_inventory::Stack {
+    let s = ghast_inventory::Stack::new(id, 1, damage);
+    if depth_strider == 0 {
+        return s;
+    }
+    // {ench: [{id: 8s, lvl: <level>s}]}
+    let mut b = vec![10, 0, 0, 9, 0, 4];
+    b.extend_from_slice(b"ench");
+    b.push(10);
+    b.extend_from_slice(&1i32.to_be_bytes());
+    b.extend_from_slice(&[2, 0, 2]);
+    b.extend_from_slice(b"id");
+    b.extend_from_slice(&8i16.to_be_bytes());
+    b.extend_from_slice(&[2, 0, 3]);
+    b.extend_from_slice(b"lvl");
+    b.extend_from_slice(&i16::from(depth_strider).to_be_bytes());
+    b.extend_from_slice(&[0, 0]);
+    s.with_nbt(Some(
+        ghast_protocol::nbt::RawNbt::from_bytes(bytes::Bytes::from(b)).unwrap(),
+    ))
+}
+
+/// The chest item of an elytra case (elytra 443, a chestplate 311).
+fn chest_1_12(item: Option<&str>, damage: i64) -> Option<ghast_inventory::Stack> {
+    let id = match item? {
+        "elytra" => 443,
+        "diamond_chestplate" => 311,
+        other => panic!("chest item {other}"),
+    };
+    Some(stack_1_12(id, damage as i16, 0))
+}
+
+/// What the server sends for a rocket it spawns for us: the spawn-object packet (type 76, no
+/// motion) and its entity data naming us as the shooter (index 7, a VarInt).
+fn firework_packets(id: i32, pos: [f64; 3]) -> Vec<RawPacket> {
+    vec![
+        Body::default()
+            .varint(id)
+            .uuid(0x6669_7265, id as u64)
+            .i8(76)
+            .f64(pos[0])
+            .f64(pos[1])
+            .f64(pos[2])
+            .i8(0)
+            .i8(0)
+            .i32(0)
+            .i16(0)
+            .i16(0)
+            .i16(0)
+            .raw(cb::id::SPAWN_ENTITY),
+        Body::default()
+            .varint(id)
+            .i8(7)
+            .varint(1)
+            .varint(1)
+            .i8(-1)
+            .raw(cb::id::ENTITY_METADATA),
+    ]
 }
 
 /// Replays every case of `entities.jsonl.gz` through the engine with entity tracking (`metadata`:
@@ -390,13 +466,60 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
         for ev in setup["entities"].as_array().into_iter().flatten() {
             e.sim.world_packet(&packet(ev)).unwrap();
         }
+        // Elytra cases: the chest item and boots in the inventory window, rockets in the hand,
+        // the server's flag 7 at setup.
+        if let Some(x) = setup.get("ext") {
+            e.sim.test_watch_glide();
+            let damage = x.get("chest_damage").map_or(0, |v| v.as_i64().unwrap());
+            e.inventory_mut().on_set_slot(
+                0,
+                6,
+                chest_1_12(x.get("chest").and_then(Value::as_str), damage),
+            );
+            let ds = setup["depth_strider"].as_u64().unwrap_or(0) as u8;
+            if ds > 0 {
+                e.inventory_mut()
+                    .on_set_slot(0, 8, Some(stack_1_12(313, 0, ds)));
+            }
+            if x.get("hand").and_then(Value::as_str) == Some("fireworks") {
+                e.inventory_mut()
+                    .on_set_slot(0, 36, Some(stack_1_12(401, 0, 0)));
+            }
+            if x.get("fall_flying").and_then(Value::as_bool) == Some(true) {
+                let cur = e.sim.test_shared_flags_1_12();
+                e.sim
+                    .world_packet(&shared_flags_packet(cur | 0x80))
+                    .unwrap();
+            }
+        }
         e.core.pose.pos = Vec3::new(p.pos[0], p.bb.min_y, p.pos[2]);
         e.core.pose.yaw = p.yaw;
         e.core.pose.pitch = p.pitch;
         e.core.ready = true;
         e.outbound().clear();
         let t0 = Instant::now();
+        // The engine does not tick the player outside the loaded columns (on purpose; a
+        // vanilla 1.12 client ticks it there): a case ends where the oracle's player leaves
+        // them.
+        let rects: Vec<[i32; 4]> = sc["loaded_chunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| std::array::from_fn(|k| r[k].as_i64().unwrap() as i32))
+            .collect();
+        let column_loaded = |s: &Value| {
+            let (cx, cz) = (
+                (f64v(&s["pos"][0]).floor() as i32) >> 4,
+                (f64v(&s["pos"][2]).floor() as i32) >> 4,
+            );
+            rects
+                .iter()
+                .any(|r| r[0] <= cx && cx <= r[2] && r[1] <= cz && cz <= r[3])
+        };
         for (k, rec) in ticks.iter().enumerate().skip(1) {
+            if !column_loaded(&ticks[k - 1]["state"]) {
+                break;
+            }
             let input = &rec["input"];
             for ev in input["events"].as_array().into_iter().flatten() {
                 match ev["type"].as_str().unwrap() {
@@ -407,20 +530,45 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
                             motion: Vec3::new(c("x"), c("y"), c("z")),
                         });
                     }
+                    "shared_flags" => {
+                        let set = ev["set"].as_u64().unwrap() as u8;
+                        let clear = ev["clear"].as_u64().unwrap() as u8;
+                        let cur = e.sim.test_shared_flags_1_12();
+                        e.sim
+                            .world_packet(&shared_flags_packet((cur & !clear) | set))
+                            .unwrap();
+                    }
+                    "equip" => {
+                        let item = ev.get("item").and_then(Value::as_str);
+                        let damage = ev["damage"].as_i64().unwrap();
+                        e.inventory_mut()
+                            .on_set_slot(0, 6, chest_1_12(item, damage));
+                    }
+                    "firework" => {
+                        // At our position when the server handles the use (after our last tick).
+                        let s = &ticks[k - 1]["state"]["pos"];
+                        let pos = [f64v(&s[0]), f64v(&s[1]), f64v(&s[2])];
+                        for raw in firework_packets(ev["id"].as_i64().unwrap() as i32, pos) {
+                            e.sim.world_packet(&raw).unwrap();
+                        }
+                    }
                     _ => e.sim.world_packet(&packet(ev)).unwrap(),
                 }
             }
             let keys = input["keys"].as_str().unwrap();
             let has = |k: &str| keys.split(',').any(|n| n == k);
-            let mut b = Keys(Controls {
-                forward: has("forward"),
-                back: has("back"),
-                left: has("left"),
-                right: has("right"),
-                jump: has("jump"),
-                sneak: has("sneak"),
-                sprint: has("sprint"),
-            });
+            let mut b = Keys(
+                Controls {
+                    forward: has("forward"),
+                    back: has("back"),
+                    left: has("left"),
+                    right: has("right"),
+                    jump: has("jump"),
+                    sneak: has("sneak"),
+                    sprint: has("sprint"),
+                },
+                has("use"),
+            );
             e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
             e.note_inbound(t0);
             e.tick(&mut b, t0);
@@ -463,6 +611,47 @@ fn entities_match_the_oracle_1_12_2() {
 #[test]
 fn entities_match_the_oracle_1_12_2_without_metadata() {
     replay(false);
+}
+
+/// The 1.12.2 elytra goldens through the engine: the chest item in the inventory window, the
+/// server's flag 7 as our entity data, rockets as the server's spawn and entity data packets;
+/// every movement and `entity_action` packet (the glide request) must equal the real client's.
+#[test]
+fn elytra_match_the_oracle_1_12_2() {
+    let (cases, ticks) = replay_file(
+        &format!(
+            "{}/../../tests/golden/1.12.2/elytra.jsonl.gz",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+        false,
+    );
+    assert!(cases >= 120 && ticks > 7000, "{cases} cases, {ticks} ticks");
+}
+
+/// The cached elytra fuzz (`oracle/cache/1.12.2/fuzz-elytra/`, git-ignored) through the engine.
+#[test]
+#[ignore = "needs the oracle cache"]
+fn elytra_cache_match_the_oracle_1_12_2() {
+    let dir = format!(
+        "{}/../../oracle/cache/1.12.2/fuzz-elytra",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {dir} not found");
+        return;
+    };
+    let mut files: Vec<_> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz"))
+        .collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in &files {
+        let (c, t) = replay_file(&f.to_string_lossy(), false);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.12.2 elytra fuzz cache through the engine: {cases} cases, {ticks} ticks");
 }
 
 /// The cached entity fuzz (`oracle/cache/1.12.2/fuzz-entities/`, git-ignored; see the oracle

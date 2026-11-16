@@ -310,6 +310,18 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   store, fed the same way (teleports with relative flags, abilities, food, velocity). Its packet
   rules are 1.16's: teleport confirm + `position_look`, no packet at all on idle ticks
   (`flying` only when on-ground changes), a position at least every 20 ticks.
+- **Elytra on 1.12.2 / 1.16.5** (`ghast_physics::v1_12::PlayerExt`, `v1_16_5::PlayerExt`):
+  `TickContext::start_gliding` / `is_gliding` as on 26.x. The chest slot is read on jump presses
+  in the air; 1.16.5 starts the glide itself (and sends `start_fall_flying`), 1.12.2 only sends
+  the request and glides once the server sets shared flag 7. From the first such press with an
+  elytra on, the sim reads our entity data (flag 7, set and cleared by the server) and the
+  firework rockets the server attaches to us (spawn + shooter entity data, destroy); a rocket
+  boosts a gliding player each tick it ticks. 1.16.5 rockets tick before or after the player in
+  the client world's entity map order: exact with entity tracking, without it they count as
+  after the player. Using a rocket from the hand while gliding sends `use_item` (and on 1.16.5
+  a swing). Proven against the oracles through the engine (`elytra.jsonl.gz` of both versions
+  and their 1 M tick cached fuzz, 0 differences; the replay starts with the sim already
+  reading the glide packets).
 - `ctx.world()` (`WorldView`): loaded columns and raw block states; `None` = not loaded.
 
 ## What the physics is fed

@@ -2575,19 +2575,22 @@ impl TickContext<'_> {
         self.world.vehicle().is_some()
     }
 
-    /// Gliding with an elytra (26.1; shared flag 7: set by the client when a glide starts,
-    /// cleared by the server on landing, in water or when the elytra breaks).
+    /// Gliding with an elytra (1.12.2, 1.16.5, 26.x; shared flag 7: set by the client when a
+    /// glide starts (on 1.12.2 by the server, after the client asked), cleared by the server on
+    /// landing, in water or when the elytra breaks).
     #[must_use]
     pub fn is_gliding(&self) -> bool {
         self.world.gliding()
     }
 
-    /// Starts gliding the way a player does (26.1): presses jump for this tick (the controls'
-    /// `jump`, as [`TickContext::set_controls`] would; release it on the next tick). The client
-    /// starts a glide on a fresh jump press in the air with an elytra equipped (not on the
-    /// ground, not flying, not in water, not on a climbable): jump must have been released on the
-    /// tick before (a held key is not a press). Nothing happens when those conditions do not
-    /// hold.
+    /// Starts gliding the way a player does (1.12.2, 1.16.5, 26.x): presses jump for this tick
+    /// (the controls' `jump`, as [`TickContext::set_controls`] would; release it on the next
+    /// tick). The client starts a glide on a fresh jump press in the air with an elytra
+    /// equipped (not on the ground, not flying, not in water, not on a climbable): jump must
+    /// have been released on the tick before (a held key is not a press). Nothing happens when
+    /// those conditions do not hold. 1.12.2 only asks (`start_fall_flying`, while falling); the
+    /// server starts the glide. On 1.12.2 / 1.16.5 the server's glide flag and the rockets it
+    /// attaches are read from the first such press with an elytra on.
     pub fn start_gliding(&mut self) {
         self.core.controls.jump = true;
     }

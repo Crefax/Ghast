@@ -46,7 +46,39 @@ pub(crate) struct Sim16 {
     unacked: crate::sim::predict::Unacked,
     /// An answer moved the player back ([`Sim::take_snap`]).
     snapped: bool,
+    /// Gliding: the server's flag 7 and the firework rockets attached to us (see [`Glide16`]).
+    glide: Box<Glide16>,
 }
+
+/// What the 1.16.5 glide reads beyond the physics state: our shared flags and the firework
+/// rockets attached to us, decoded once an elytra was seen in the chest slot.
+#[derive(Debug, Default)]
+struct Glide16 {
+    /// Our entity data, rocket spawns and entity removals are read (an elytra was equipped on a
+    /// jump press in the air).
+    watch: bool,
+    /// Firework rockets spawned but not (yet) known as attached to us: id, spawn position.
+    pending: Vec<(i32, [f64; 3])>,
+    /// The rockets attached to us (`FireworkRocketEntity` with us as its shooter).
+    rockets: Vec<Rocket16>,
+}
+
+/// A firework rocket attached to us, as the client world has it.
+#[derive(Clone, Copy, Debug)]
+struct Rocket16 {
+    id: i32,
+    /// Its position: the spawn position, then ours after each of its ticks.
+    pos: [f64; 3],
+    /// In its chunk's entity section (`updateNeeded`): it ticks while that chunk is loaded.
+    filed: bool,
+    /// It ticks before us in the client world's entity map (with entity tracking; else after).
+    before: bool,
+}
+
+/// Rockets spawned near us that may still get attached (a bound against a flood of rockets).
+const MAX_PENDING_ROCKETS_16: usize = 32;
+/// The 1.16.5 entity type id of `firework_rocket`.
+const FIREWORK_ROCKET_16: i32 = 27;
 
 /// What the engine's look at the held items ([`Sim::item_use_facts`], through `&self`) leaves
 /// for the tick. Boxed: interior mutability inline in [`Sim16`] would cost every `&Sim16`
@@ -308,13 +340,104 @@ impl Sim16 {
             rt: Riptide16::default(),
             unacked: Default::default(),
             snapped: false,
+            glide: Box::default(),
         }
     }
 
     /// Whether the tick needs the slow path (entities, a non-default extension state, a use
     /// the riptide follows).
     fn update_slow(&mut self) {
-        self.slow = self.entities.is_some() || !self.ext.is_inert() || self.rt.using.is_some();
+        self.slow = self.entities.is_some()
+            || !self.ext.is_inert()
+            || self.rt.using.is_some()
+            || !self.glide.rockets.is_empty();
+    }
+
+    /// The chest slot holds a usable elytra (`ElytraItem.isUsable`: damage below 431).
+    fn elytra_equipped(inv: &ghast_inventory::Inventory) -> bool {
+        inv.armor(1).is_some_and(|s| {
+            u16::try_from(s.id())
+                .ok()
+                .and_then(ghast_data::v1_16_5::Item::from_id)
+                .is_some_and(|i| i.info().name == "elytra")
+                && s.damage_value(ghast_inventory::Version::V1_16_5) < 432 - 1
+        })
+    }
+
+    /// The attached rockets that tick on this side of us in the client world's entity map
+    /// (`FireworkRocketEntity.tick` with us as the shooter): a boost while we glide, then the
+    /// rocket moves to our position. A rocket ticks only while the chunk at its position is
+    /// loaded and it is filed in that chunk (`ClientWorld.tickEntity`, `checkEntityChunkPos`).
+    #[cold]
+    #[inline(never)]
+    fn tick_rockets(&mut self, before: bool, yaw: f32, pitch: f32) {
+        let w = &self.world;
+        let loaded = |p: [f64; 3]| {
+            w.is_column_loaded((p[0].floor() as i32) >> 4, (p[2].floor() as i32) >> 4)
+        };
+        let mut gone = false;
+        for r in self.glide.rockets.iter_mut().filter(|r| r.before == before) {
+            if !loaded(r.pos) {
+                continue;
+            }
+            if r.filed {
+                // Entity.baseTick: below y = -64 the rocket is removed, after this tick.
+                if r.pos[1] < -64.0 {
+                    r.id = i32::MIN;
+                    gone = true;
+                }
+                ghast_physics::v1_16_5::rocket_boost(&mut self.player, &self.ext, yaw, pitch);
+                r.pos = self.player.pos;
+            }
+            r.filed = loaded(r.pos);
+        }
+        if gone {
+            self.glide.rockets.retain(|r| r.id != i32::MIN);
+            self.update_slow();
+        }
+    }
+
+    /// Which side of us each attached rocket ticks on this tick (the client world's entity map
+    /// order, known with entity tracking; without it every rocket counts as after us).
+    fn order_rockets(&mut self) {
+        let t = self.entities.as_ref();
+        for r in &mut self.glide.rockets {
+            r.before = t.is_some_and(|t| t.ticks_before_self(r.id));
+        }
+    }
+
+    /// A rocket spawn, removal or entity data: decoded only when it can concern us.
+    #[cold]
+    #[inline(never)]
+    fn rocket_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        match raw.id {
+            cb::id::SPAWN_ENTITY => {
+                let p: cb::SpawnEntity = raw.decode_as()?;
+                // ClientWorld.addEntity: an entity with the same id leaves the world first.
+                self.drop_rocket(p.entity_id);
+                if p.r#type == FIREWORK_ROCKET_16 {
+                    if self.glide.pending.len() >= MAX_PENDING_ROCKETS_16 {
+                        self.glide.pending.remove(0);
+                    }
+                    self.glide.pending.push((p.entity_id, [p.x, p.y, p.z]));
+                }
+            }
+            cb::id::ENTITY_DESTROY => {
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                for &id in &p.entity_ids {
+                    self.drop_rocket(id);
+                }
+            }
+            _ => {}
+        }
+        self.update_slow();
+        Ok(())
+    }
+
+    fn drop_rocket(&mut self, id: i32) {
+        self.glide.pending.retain(|r| r.0 != id);
+        self.glide.rockets.retain(|r| r.id != id);
     }
 
     /// The join / respawn packet's dimension type and seed (a new client world).
@@ -450,6 +573,19 @@ impl Sim16 {
     ))]
     pub(crate) fn test_ext(&self) -> ghast_physics::v1_16_5::PlayerExt {
         self.ext
+    }
+
+    /// Test hook: our flags and rockets are read from now on (as after a jump press in the air
+    /// with an elytra on).
+    #[cfg(all(
+        test,
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    ))]
+    pub(crate) fn test_watch_glide(&mut self) {
+        self.glide.watch = true;
     }
 
     /// A tracker for this sim: with the vanilla client's own entity view (tick order,
@@ -700,14 +836,57 @@ impl Sim16 {
         use ghast_protocol::defs::p754::types::EntityMetadataValue as V;
         use ghast_protocol::v1_16_5::play::clientbound as cb;
         let mut r = ghast_protocol::Reader::new(&raw.body);
-        if r.read_varint()? != self.rt.own_id {
+        let id = r.read_varint()?;
+        if id != self.rt.own_id {
+            if self.glide.pending.iter().any(|r| r.0 == id) {
+                self.rocket_metadata(raw, id)?;
+            }
             return Ok(());
         }
         let p: cb::EntityMetadata = raw.decode_as()?;
         for e in &p.metadata {
-            if let (7, V::Byte(b)) = (e.key, &e.value) {
-                self.ext.apply_living_flags(*b as u8);
+            match (e.key, &e.value) {
+                (7, V::Byte(b)) => self.ext.apply_living_flags(*b as u8),
+                // The shared flags (sprinting, swimming, fall flying), read while gliding can
+                // happen.
+                (0, V::Byte(b)) if self.glide.watch => {
+                    self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                }
+                _ => {}
             }
+        }
+        self.update_slow();
+        Ok(())
+    }
+
+    /// A pending rocket's entity data: the shooter id (index 8, `OptionalInt` as id + 1) names
+    /// us: the rocket is attached.
+    #[cold]
+    #[inline(never)]
+    fn rocket_metadata(&mut self, raw: &RawPacket, id: i32) -> Result<(), SimError> {
+        use ghast_protocol::defs::p754::types::EntityMetadataValue as V;
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        let p: cb::EntityMetadata = raw.decode_as()?;
+        let shooter = p.metadata.iter().find_map(|e| match (e.key, &e.value) {
+            (8, V::OptVarInt(v)) => Some(*v),
+            _ => None,
+        });
+        let Some(v) = shooter else { return Ok(()) };
+        let Some(k) = self.glide.pending.iter().position(|r| r.0 == id) else {
+            return Ok(());
+        };
+        let (rid, pos) = self.glide.pending.remove(k);
+        if v != 0 && v - 1 == self.rt.own_id {
+            let w = &self.world;
+            let filed =
+                w.is_column_loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4);
+            self.glide.rockets.push(Rocket16 {
+                id: rid,
+                pos,
+                filed,
+                before: false,
+            });
+            log::debug!("firework rocket {rid} attached to us");
         }
         self.update_slow();
         Ok(())
@@ -757,6 +936,11 @@ impl Sim16 {
         }
         if spinning {
             self.spin_contacts(true);
+        }
+        if !self.glide.rockets.is_empty() {
+            // The rockets that tick before us (after the pushes of the entities before us).
+            self.order_rockets();
+            self.tick_rockets(true, input.yaw, input.pitch);
         }
         let around = ghast_physics::v1_16_5::Surroundings::new()
             .with_entities(&self.around.boxes)
@@ -961,6 +1145,12 @@ impl Sim for Sim16 {
         if raw.id == cb::id::ENTITY_METADATA {
             return self.own_metadata(raw);
         }
+        if matches!(raw.id, cb::id::SPAWN_ENTITY | cb::id::ENTITY_DESTROY) {
+            if self.glide.watch {
+                self.rocket_packet(raw)?;
+            }
+            return Ok(());
+        }
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
@@ -1044,9 +1234,13 @@ impl Sim for Sim16 {
         self.filed_pos = [0.0; 3];
         self.player.abilities = abilities;
         self.player.food_level = food;
-        // A new client player: no spin, no use.
+        // A new client player: no spin, no use, not gliding, no rockets.
         self.ext.spin_attack = false;
         self.ext.riptide_ticks = 0;
+        self.ext.fall_flying = false;
+        self.ext.glide_pose = false;
+        self.glide.rockets.clear();
+        self.glide.pending.clear();
         self.rt.using = None;
         self.rt.held.hands.set([(0, false, -1); 2]);
         self.update_slow();
@@ -1171,8 +1365,12 @@ impl Sim for Sim16 {
         // The server's answers to the dig actions.
         ids.push(cb::id::ACKNOWLEDGE_PLAYER_DIGGING);
         // Our own entity data (the riptide spin flag), once a riptide trident was held.
-        if self.rt.held.watch.get() {
+        if self.rt.held.watch.get() || self.glide.watch {
             ids.push(cb::id::ENTITY_METADATA);
+        }
+        // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.
+        if self.glide.watch {
+            ids.extend([cb::id::SPAWN_ENTITY, cb::id::ENTITY_DESTROY]);
         }
         ids
     }
@@ -1218,6 +1416,13 @@ impl Sim for Sim16 {
                 self.rt.held.filter_dirty.set(true);
             }
         }
+        // FireworkItem.use: SUCCESS with a swing while gliding (the server spawns the rocket);
+        // otherwise PASS.
+        held.swing_on_use = self.ext.fall_flying
+            && u16::try_from(stack.id())
+                .ok()
+                .and_then(ghast_data::v1_16_5::Item::from_id)
+                .is_some_and(|i| i.info().name == "firework_rocket");
         let starts =
             held.usable && (!held.food || held.always_edible || self.player.food_level < 20);
         let mut h = self.rt.held.hands.get();
@@ -1262,6 +1467,39 @@ impl Sim for Sim16 {
         if self.entities.is_some() {
             self.tick_tracked(pose);
         }
+        // Attached rockets make the tick slow: the common tick reads one inline flag.
+        if self.slow && !self.glide.rockets.is_empty() {
+            // The rockets that tick after us (after the pushes of the entities after us).
+            let (yaw, pitch) = (self.player.yaw, self.player.pitch);
+            self.tick_rockets(false, yaw, pitch);
+            let p = &self.player;
+            pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+        }
+    }
+
+    #[inline(always)]
+    fn modern_inputs(&self) -> bool {
+        // The elytra is read on jump presses in the air (a glide never starts on the ground).
+        !self.player.on_ground
+    }
+
+    fn pre_tick(&mut self, inv: &ghast_inventory::Inventory, t: &crate::sim::PreTick) -> bool {
+        if t.controls.jump {
+            let e = Self::elytra_equipped(inv);
+            if e != self.ext.elytra {
+                self.ext.elytra = e;
+                self.update_slow();
+            }
+            if e && !self.glide.watch {
+                self.glide.watch = true;
+                self.rt.held.filter_dirty.set(true);
+            }
+        }
+        true
+    }
+
+    fn gliding(&self) -> bool {
+        self.ext.fall_flying
     }
 
     fn set_entity_push(&mut self, on: bool) {
@@ -1303,6 +1541,11 @@ impl Sim for Sim16 {
                 Some(FluidKind::Lava) => Block::LAVA.default_state(),
                 None => BlockState::AIR,
             };
+            log::debug!(
+                "predicted the break of {} at {pos:?}: {}",
+                old.block().name(),
+                left.block().name()
+            );
             self.world.set_block_state(pos.x, pos.y, pos.z, left);
         }
     }
@@ -1311,6 +1554,7 @@ impl Sim for Sim16 {
         // interactBlock → BlockItem.place on the client world; the server's block updates for
         // the clicked block and its neighbour settle it (no records).
         if let Some((at, state)) = self.plain_placement(p) {
+            log::debug!("predicted {} at {at:?}", state.block().name());
             self.world.set_block_state(at.x, at.y, at.z, state);
         }
     }
@@ -1421,6 +1665,13 @@ impl Sim16 {
             .unwrap_or(BlockState::AIR);
         let start = p.status == crate::common::DigStatus::Start.id();
         if now != state && (at.is_none() || !p.successful || !start) {
+            log::debug!(
+                "dig answer {} ({}): {pos:?} {} back to the server's {}",
+                p.status,
+                if p.successful { "approved" } else { "refused" },
+                now.block().name(),
+                state.block().name()
+            );
             self.world.set_block_state(pos.x, pos.y, pos.z, state);
             if let Some(at) = at
                 && holds_player(state, pos, &self.player.bb)
@@ -1540,11 +1791,6 @@ fn holds_player(
             axis(r.sizes[1], r.ys),
             axis(r.sizes[2], r.zs),
         ],
-            log::debug!(
-                "predicted the break of {} at {pos:?}: {}",
-                old.block().name(),
-                left.block().name()
-            );
         cells: r.cells,
     };
     crate::sim::predict::shape_overlaps(shape, pos, bb)
@@ -1553,7 +1799,6 @@ fn holds_player(
 fn sync_pose_16(pose: &mut Pose, p: &ghast_physics::v1_16_5::PlayerState) {
     pose.pos = Vec3::new(p.pos[0], p.pos[1], p.pos[2]);
     pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
-            log::debug!("predicted {} at {at:?}", state.block().name());
     pose.yaw = p.yaw;
     pose.pitch = p.pitch;
     pose.on_ground = p.on_ground;
@@ -1586,10 +1831,3 @@ mod tests {
         }
     }
 }
-            log::debug!(
-                "dig answer {} ({}): {pos:?} {} back to the server's {}",
-                p.status,
-                if p.successful { "approved" } else { "refused" },
-                now.block().name(),
-                state.block().name()
-            );
