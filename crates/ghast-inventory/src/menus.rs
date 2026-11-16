@@ -14,7 +14,7 @@ use crate::window::WindowKind;
 /// [`SlotKind::Special`](crate::SlotKind::Special) and clicks reading them are refused).
 pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
     match kind {
-        WindowKind::BrewingStand => v == Version::V1_8,
+        WindowKind::BrewingStand => matches!(v, Version::V1_8 | Version::V1_12),
         _ => false,
     }
 }
@@ -25,40 +25,55 @@ const BREWING_1_8: &[i32] = &[
     289, 331, 348, 353, 370, 372, 375, 376, 377, 378, 382, 396, 414,
 ];
 
+/// 1.12.2 brewing ingredients (`PotionHelper.isReagent`: the registered mixes' ingredients),
+/// damage 0 only. Sorted.
+const BREWING_1_12: &[i32] = &[
+    289, 331, 348, 353, 370, 372, 375, 376, 377, 378, 382, 396, 414, 437,
+];
+
 impl Version {
-    /// The brewing stand's bottle slots (`PotionSlot.matches`): 1.8 potion (373) and glass
-    /// bottle (374), any damage.
+    /// The brewing stand's bottle slots (`PotionSlot.matches`): potion (373) and glass bottle
+    /// (374), 1.12 also splash (438) and lingering (441) potions; any damage.
     pub(crate) fn potion_slot_accepts(self, s: &Stack) -> bool {
         match self {
             Version::V1_8 => matches!(s.id, 373 | 374),
+            Version::V1_12 => matches!(s.id, 373 | 374 | 438 | 441),
             _ => false,
         }
     }
 
     /// The brewing stand's ingredient slot (1.8 `Item.hasStatusEffectString`: the list above,
-    /// plus raw and cooked pufferfish, fish 349 / 350 with damage 3).
+    /// plus raw and cooked pufferfish, fish 349 / 350 with damage 3; 1.12 the list above with
+    /// damage 0, plus the raw pufferfish).
     pub(crate) fn brewing_ingredient(self, s: &Stack) -> bool {
         match self {
             Version::V1_8 => match s.id {
                 349 | 350 => s.damage == 3,
                 id => BREWING_1_8.binary_search(&id).is_ok(),
             },
+            Version::V1_12 => match s.id {
+                349 => s.damage == 3,
+                id => s.damage == 0 && BREWING_1_12.binary_search(&id).is_ok(),
+            },
             _ => false,
         }
     }
 
-    /// 1.12+ brewing stand fuel slot (blaze powder).
+    /// 1.12+ brewing stand fuel slot: blaze powder (1.12: 377, any damage).
     pub(crate) fn brewing_fuel(self, s: &Stack) -> bool {
-        let _ = s;
-        false
+        match self {
+            Version::V1_12 => s.id == 377,
+            _ => false,
+        }
     }
 }
 
 impl Sim<'_> {
-    /// `BrewingScreenHandler.transferSlot`'s routes (1.8: 0..=2 bottles, 3 ingredient, then the
-    /// player's 27 + 9 at 4..40): a menu slot goes to the player part (last slot first); a player
-    /// stack goes to an empty ingredient slot if it is an ingredient, else to the bottle slots if
-    /// it is a bottle, else between main inventory and hotbar. 1.8's `insertItem` ignores the
+    /// `BrewingScreenHandler.transferSlot`'s routes (0..=2 bottles, 3 ingredient, 1.12+ 4 fuel,
+    /// then the player's 27 + 9): a menu slot goes to the player part (last slot first); a player
+    /// stack goes to the ingredient slot if it is an ingredient (1.8: only into an empty one),
+    /// else to the bottle slots if it is a bottle (1.12: a single one), else (1.12) to the fuel
+    /// slot if it is fuel, else between main inventory and hotbar. 1.8's `insertItem` ignores the
     /// slots' rules and limits, so a stack of glass bottles lands whole in one bottle slot.
     pub(crate) fn transfer_brewing(&mut self, i: usize, st: &mut Stack, orig: &Stack) -> R<bool> {
         let v = self.v;
@@ -68,10 +83,13 @@ impl Sim<'_> {
             return self.insert(st, n, len, true);
         }
         let main_end = n + 27;
-        if self.get(3).is_none() && v.brewing_ingredient(orig) {
+        let legacy = v == Version::V1_8;
+        if (!legacy || self.get(3).is_none()) && v.brewing_ingredient(orig) {
             self.insert(st, 3, 4, false)
-        } else if v.potion_slot_accepts(orig) {
+        } else if v.potion_slot_accepts(orig) && (legacy || orig.count == 1) {
             self.insert(st, 0, 3, false)
+        } else if !legacy && v.brewing_fuel(orig) {
+            self.insert(st, 4, 5, false)
         } else if (n..main_end).contains(&i) {
             self.insert(st, main_end, len, false)
         } else if (main_end..len).contains(&i) {
@@ -83,7 +101,7 @@ impl Sim<'_> {
 }
 
 /// `Slot.canInsert` of a special menu slot kind (`None`: not a special menu slot).
-#[cfg(all(test, feature = "v1_8"))]
+#[cfg(all(test, any(feature = "v1_8", feature = "v1_12")))]
 fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
     use crate::SlotKind as K;
     Some(match kind {
@@ -100,7 +118,7 @@ mod tests {
 
     /// The `{"facts":menu,...}` lines of a version's golden menu clicks: the real slots'
     /// `canInsert` over every item id and damage 0..15, and `getMaxStackAmount`.
-    #[cfg(feature = "v1_8")]
+    #[cfg(any(feature = "v1_8", feature = "v1_12"))]
     fn check_facts(v: Version, dir: &str) {
         use std::io::BufRead;
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -157,8 +175,15 @@ mod tests {
         check_facts(Version::V1_8, "1.8.9");
     }
 
+    #[cfg(feature = "v1_12")]
+    #[test]
+    fn facts_1_12_2() {
+        check_facts(Version::V1_12, "1.12.2");
+    }
+
     #[test]
     fn tables_sorted() {
         assert!(BREWING_1_8.windows(2).all(|w| w[0] < w[1]));
+        assert!(BREWING_1_12.windows(2).all(|w| w[0] < w[1]));
     }
 }

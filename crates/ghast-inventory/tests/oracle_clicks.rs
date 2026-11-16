@@ -8,7 +8,7 @@
 //!
 //! Committed vectors: `tests/golden/<ver>/clicks_seed1.jsonl.gz` (all windows) and
 //! `clicks_craft_seed1.jsonl.gz` (crafting), `clicks_menus_seed1.jsonl.gz` (special menus:
-//! brewing stand, ...). Bigger runs: `GHAST_MENU_VECTORS_1_8` (`oracle/run.sh clicks --menu M`), `GHAST_CLICK_VECTORS_1_8`,
+//! brewing stand, ...). Bigger runs: `GHAST_MENU_VECTORS_1_8`, `GHAST_MENU_VECTORS_1_12` (`oracle/run.sh clicks --menu M`), `GHAST_CLICK_VECTORS_1_8`,
 //! `GHAST_CLICK_VECTORS_1_12`, `GHAST_CLICK_VECTORS_1_16`, `GHAST_CRAFT_VECTORS_1_8`,
 //! `GHAST_CRAFT_VECTORS_1_12`, `GHAST_CRAFT_VECTORS_1_16` = path, then
 //! `cargo test -p ghast-inventory --release --test oracle_clicks -- --nocapture`.
@@ -440,6 +440,18 @@ fn vanilla_menus_1_8_9() {
         vectors(
             "GHAST_MENU_VECTORS_1_8",
             "1.8.9",
+            "clicks_menus_seed1.jsonl.gz",
+        ),
+    );
+}
+
+#[test]
+fn vanilla_menus_1_12_2() {
+    check(
+        Version::V1_12,
+        vectors(
+            "GHAST_MENU_VECTORS_1_12",
+            "1.12.2",
             "clicks_menus_seed1.jsonl.gz",
         ),
     );

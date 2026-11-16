@@ -6,13 +6,26 @@
 
 use super::tests::{Script, engine, join};
 use super::*;
-use crate::version::{ClientVersion, V1_8};
+use crate::version::{ClientVersion, V1_8, V1_12_2};
 use ghast_inventory::{Click, SlotKind, Stack};
 use ghast_protocol::RawPacket;
 
 /// A 1.8 `open_window` as the server sends it.
 fn open_1_8(id: u8, ty: &str, slots: u8) -> RawPacket {
     use ghast_protocol::v1_8::play::clientbound as cb;
+    RawPacket::from_packet(&cb::OpenWindow {
+        window_id: id,
+        inventory_type: ty.into(),
+        window_title: "{\"text\":\"\"}".into(),
+        slot_count: slots,
+        entity_id: None,
+    })
+    .unwrap()
+}
+
+/// A 1.12.2 `open_window` as the server sends it.
+fn open_1_12(id: u8, ty: &str, slots: u8) -> RawPacket {
+    use ghast_protocol::v1_12_2::play::clientbound as cb;
     RawPacket::from_packet(&cb::OpenWindow {
         window_id: id,
         inventory_type: ty.into(),
@@ -113,4 +126,59 @@ fn brewing_stand_1_8_9() {
     let inv = &e.core.inv;
     assert_eq!(inv.slot(0).map(|s| (s.id(), s.count())), Some((374, 10)));
     assert!(inv.slot(32).is_none());
+}
+
+/// 1.12.2 brewing stand: blaze powder is an ingredient first (slot 3 takes it even when not
+/// empty); a stack of more than one glass bottle skips the bottle slots; a single splash potion
+/// goes to the first bottle slot.
+#[test]
+fn brewing_stand_1_12_2() {
+    let mut e = opened::<V1_12_2>(
+        GameVersion::V1_12_2,
+        &open_1_12(4, "minecraft:brewing_stand", 5),
+        4,
+        vec![None, None, None, None, None],
+        &[
+            (0, Stack::new(377, 3, 0)),
+            (1, Stack::new(374, 10, 0)),
+            (2, Stack::new(438, 1, 0)),
+        ],
+    );
+    assert_eq!(e.core.inv.slot_kind(4), Some(SlotKind::BrewingFuel));
+    // hotbar k is screen slot 5 + 27 + k
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 32,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(
+        e.core.inv.slot(3).map(|s| (s.id(), s.count())),
+        Some((377, 3))
+    );
+    let _ = e.inventory_mut().on_transaction(4, 1, true);
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 33,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    let inv = &e.core.inv;
+    assert!(inv.slot(0).is_none());
+    // hotbar -> main inventory (first free slot: screen 5)
+    assert_eq!(inv.slot(5).map(|s| (s.id(), s.count())), Some((374, 10)));
+    let _ = e.inventory_mut().on_transaction(4, 2, true);
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 34,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.slot(0).map(|s| s.id()), Some(438));
 }
