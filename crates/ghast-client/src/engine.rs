@@ -1025,9 +1025,9 @@ impl<S: Sim> Engine<S> {
                     sim.spectator(c.game_mode == GameMode::Spectator);
                     // 26.x ServerPlayer.setGameMode(SPECTATOR) calls stopUsingItem and the living
                     // flags clear the client's use: stopping at once stands in for that. 1.8.9 –
-                    // 1.16.5 stop nothing (the use runs until release or finish). The 26.x rows are
-                    // the versions with block-prediction sequences here.
-                    if c.game_mode == GameMode::Spectator && c.opts.caps.block_sequence {
+                    // 1.16.5 stop nothing (the use runs until release or finish).
+                    if c.game_mode == GameMode::Spectator && c.opts.caps.spectator_switch_stops_use
+                    {
                         c.hands.stop_using();
                     }
                     c.pending.game_mode_changed = true;
@@ -1446,7 +1446,7 @@ impl<S: Sim> Engine<S> {
                 broken: &mut c.broken_now,
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
-                spectator_swings: !c.opts.caps.block_sequence,
+                spectator_swings: c.opts.caps.spectator_block_click_swings,
                 place_blocked: &blocked,
             };
             c.hands.tick(left, right, &mut io);
@@ -2515,7 +2515,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
-            spectator_swings: !c.opts.caps.block_sequence,
+            spectator_swings: c.opts.caps.spectator_block_click_swings,
             place_blocked: &blocked,
         };
         if !modern {
@@ -2711,7 +2711,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
-            spectator_swings: !c.opts.caps.block_sequence,
+            spectator_swings: c.opts.caps.spectator_block_click_swings,
             place_blocked: &blocked,
         };
         c.hands.click_block(pos, face, &mut io);
@@ -2761,7 +2761,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
-            spectator_swings: !c.opts.caps.block_sequence,
+            spectator_swings: c.opts.caps.spectator_block_click_swings,
             place_blocked: &blocked,
         };
         c.hands

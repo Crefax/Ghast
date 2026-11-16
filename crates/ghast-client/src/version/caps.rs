@@ -114,6 +114,14 @@ pub struct Capabilities {
     /// each player entity's tab-list name (team collision rules) and game mode (spectators do
     /// not push), so entity tracking then also keeps a names-only tab list.
     pub client_entity_push: bool,
+    /// A spectator's right click on a block (the block packet, then the click ends) swings the
+    /// arm: 1.8 – 1.16 `interactBlock` returns true / SUCCESS for spectators; 26.1 / 26.2
+    /// `MultiPlayerGameMode.performUseItemOn` returns CONSUME, which swings nothing.
+    pub spectator_block_click_swings: bool,
+    /// Switching to spectator ends an item use at once: 26.1 / 26.2
+    /// `ServerPlayer.setGameMode(SPECTATOR)` calls `stopUsingItem` and the client's use ends
+    /// with the living flags; 1.8 – 1.16.5 stop nothing (the use runs until release or finish).
+    pub spectator_switch_stops_use: bool,
 }
 
 const fn f(v: f32) -> f64 {
@@ -169,6 +177,8 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     chat_acknowledgements: false,
     client_entity_push: false,
     drop_prediction: false,
+    spectator_block_click_swings: true,
+    spectator_switch_stops_use: false,
 };
 
 /// 1.12.2 (protocol 340).
@@ -216,6 +226,8 @@ pub(crate) const V26_1: Capabilities = Capabilities {
     block_sequence: true,
     chat_acknowledgements: true,
     client_entity_push: true,
+    spectator_block_click_swings: false,
+    spectator_switch_stops_use: true,
     ..V1_16_5
 };
 

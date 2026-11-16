@@ -752,8 +752,8 @@ pub(crate) struct HandsIo<'a> {
     /// right click on a block sends the block packet and ends the click there.
     pub spectator: bool,
     /// That spectator block click swings the arm: 1.8 – 1.16 (`interactBlock` true / SUCCESS);
-    /// 26.x answers CONSUME, whose swing source is none. Both 26.x rows are the versions with
-    /// block-prediction sequences here, which is how the engine sets it.
+    /// 26.x answers CONSUME, whose swing source is none
+    /// ([`crate::version::Capabilities::spectator_block_click_swings`]).
     pub spectator_swings: bool,
     /// 1.8.9 / 1.12.2: the client writes no `block_place` for this click with this block item
     /// ([`crate::sim::Sim::place_suppressed`]).

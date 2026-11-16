@@ -615,6 +615,18 @@ mod tests {
         }
     }
 
+    /// The two spectator facts as the jars have them (checked 2026-11-16: 1.12.2 / 1.16.5
+    /// `interactBlock` SUCCESS for spectators, 26.1 `performUseItemOn` CONSUME; only 26.1's
+    /// `ServerPlayer.setGameMode` calls `stopUsingItem`; 26.2's bytecode of both equals 26.1's).
+    #[test]
+    fn spectator_rows() {
+        for &v in GameVersion::ALL {
+            let modern = v.caps().configuration_state;
+            assert_eq!(v.caps().spectator_block_click_swings, !modern, "{v}");
+            assert_eq!(v.caps().spectator_switch_stops_use, modern, "{v}");
+        }
+    }
+
     #[test]
     fn protocol_rows() {
         for &v in GameVersion::ALL {
