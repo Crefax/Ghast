@@ -288,3 +288,74 @@ fn enchanting_table_legacy() {
     assert_eq!(item.map(|s| s.id()), Some(pick));
     assert_eq!(lapis.map(|s| s.count()), Some(10));
 }
+
+/// Runs `click` on the first tick; returns the refusal, if any.
+fn try_click(e: &mut Engine<Box<dyn Sim>>, click: Click) -> Result<(), ClickRefused> {
+    let t0 = std::time::Instant::now();
+    e.note_inbound(t0);
+    let mut r = None;
+    let mut b = Script(|ctx: &mut TickContext<'_>| {
+        if r.is_none() {
+            r = Some(ctx.click(click).map(|_| ()));
+        }
+    });
+    e.tick(&mut b, t0);
+    let _ = b;
+    e.outbound().clear();
+    r.unwrap()
+}
+
+/// 1.8.9 anvil: an input click is predicted; the output the client computes is unknown to ghast
+/// (refused) until the server's `set_slot`, and taking it (level cost) is always refused.
+#[test]
+fn anvil_1_8_9() {
+    let mut e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_1_8(8, "minecraft:anvil", 0),
+        8,
+        vec![None, None, None],
+        &[(0, Stack::new(276, 1, 30)), (1, Stack::new(264, 3, 0))],
+    );
+    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::AnvilOutput));
+    // hotbar k is screen slot 3 + 27 + k
+    try_click(
+        &mut e,
+        Click::QuickMove {
+            slot: 30,
+            right: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(e.core.inv.slot(0).map(Stack::id), Some(276));
+    assert!(!e.core.inv.result_known());
+    let _ = e.inventory_mut().on_transaction(8, 1, true);
+    let pick = Click::Pickup {
+        slot: 2,
+        right: false,
+    };
+    let refused = try_click(&mut e, pick);
+    assert!(
+        matches!(
+            refused,
+            Err(ClickRefused::Inventory(
+                ghast_inventory::ClickError::Unpredictable
+            ))
+        ),
+        "{refused:?}"
+    );
+    // the server's output
+    e.inventory_mut()
+        .on_set_slot(8, 2, Some(Stack::new(276, 1, 0)));
+    assert!(e.core.inv.result_known());
+    assert!(try_click(&mut e, pick).is_err());
+    // the second input still takes the diamonds
+    try_click(
+        &mut e,
+        Click::QuickMove {
+            slot: 31,
+            right: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(e.core.inv.slot(1).map(Stack::count), Some(3));
+}

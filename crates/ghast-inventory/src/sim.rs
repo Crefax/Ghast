@@ -211,6 +211,12 @@ impl Layout {
                         {
                             SlotKind::Special
                         }
+                        // the anvil's inputs are plain slots once the menu is modelled
+                        SlotKind::Normal | SlotKind::AnvilOutput
+                            if k == WindowKind::Anvil && !crate::menus::modelled(self.v, k) =>
+                        {
+                            SlotKind::Special
+                        }
                         kind => kind,
                     }
                 } else {
@@ -233,7 +239,13 @@ impl Layout {
     /// Whether the location's inventory is a `SimpleInventory` (container part of every window
     /// but the crafting table), whose `setStack` caps counts at 64.
     pub fn clamps(&self, l: Loc) -> bool {
-        matches!(l, Loc::Container(_)) && self.screen != Screen::Container(WindowKind::Crafting)
+        match (self.screen, l) {
+            (Screen::Container(WindowKind::Crafting), _) => false,
+            // the anvil's output is a `CraftingResultInventory`
+            (Screen::Container(WindowKind::Anvil), Loc::Container(k)) => k != 2,
+            (_, Loc::Container(_)) => true,
+            _ => false,
+        }
     }
 
     /// 26.1: whether the location's container caps stacks in `setItem` (`SimpleContainer`,
@@ -400,6 +412,23 @@ impl Sim<'_> {
         if self.v == Version::V1_8 && self.is_grid(l) {
             recompute_1_8(self.m, self.lay);
         }
+        self.anvil_touched(l);
+    }
+
+    /// The anvil's input inventory ran `markDirty` -> `onContentChanged` -> `updateResult`:
+    /// with an empty first input the output is empty (cost 0); otherwise ghast does not know it.
+    fn anvil_touched(&mut self, l: Loc) {
+        if self.lay.screen == Screen::Container(WindowKind::Anvil)
+            && matches!(l, Loc::Container(0 | 1))
+            && self.m.container.len() == 3
+        {
+            if self.m.container[0].is_none() {
+                self.m.container[2] = None;
+                self.m.container_result_known = true;
+            } else {
+                self.m.container_result_known = false;
+            }
+        }
     }
 
     fn slot_mut(&mut self, i: usize) -> &mut Option<Stack> {
@@ -420,6 +449,9 @@ impl Sim<'_> {
     }
 
     fn result_known(&self, i: usize) -> bool {
+        if self.lay.kind(i) == SlotKind::AnvilOutput {
+            return self.m.container_result_known;
+        }
         match self.loc(i) {
             Loc::CraftResult => self.m.craft_result_known,
             Loc::Container(_) => self.m.container_result_known,
@@ -438,6 +470,7 @@ impl Sim<'_> {
             SlotKind::BrewingIngredient => self.v.brewing_ingredient(s),
             SlotKind::BrewingFuel => self.v.brewing_fuel(s),
             SlotKind::EnchantItem => true,
+            SlotKind::AnvilOutput => false,
             SlotKind::Lapis => self.v.is_lapis(s),
             SlotKind::Special => return Err(Unpredictable),
         })
@@ -457,7 +490,8 @@ impl Sim<'_> {
     /// `Slot.canTakeItems` (reads the slot, so an unknown crafting result is unpredictable).
     fn can_take(&self, i: usize) -> R<bool> {
         match self.lay.kind(i) {
-            SlotKind::Special => Err(Unpredictable),
+            // `repairCost > 0 && experienceLevel >= repairCost`: computed with the output
+            SlotKind::Special | SlotKind::AnvilOutput => Err(Unpredictable),
             SlotKind::CraftResult if !self.result_known(i) => Err(Unpredictable),
             SlotKind::Armor(_) if self.v == Version::V1_16_5 => {
                 // binding curse keeps armor on (survival; ghast bots are never creative here)
@@ -487,7 +521,11 @@ impl Sim<'_> {
     }
 
     fn take_raw(&mut self, i: usize, amount: i32) -> Option<Stack> {
-        let whole = self.lay.kind(i) == SlotKind::CraftResult; // CraftingResultInventory
+        // CraftingResultInventory
+        let whole = matches!(
+            self.lay.kind(i),
+            SlotKind::CraftResult | SlotKind::AnvilOutput
+        );
         let v = self.v;
         let slot = self.slot_mut(i);
         let s = slot.as_mut()?;
@@ -527,7 +565,7 @@ impl Sim<'_> {
     /// (`CraftingResultSlot.onTakeItem`).
     fn on_take(&mut self, i: usize) -> R<()> {
         match self.lay.kind(i) {
-            SlotKind::Special => Err(Unpredictable),
+            SlotKind::Special | SlotKind::AnvilOutput => Err(Unpredictable),
             SlotKind::CraftResult => {
                 let (slots, width) = self.grid_slots().ok_or(Unpredictable)?;
                 let stacks: Vec<Option<Stack>> =
@@ -604,7 +642,9 @@ impl Sim<'_> {
         if let Ok(i) = usize::try_from(slot) {
             // Whatever reads an unknown crafting result (its content is computed from recipes)
             // cannot be predicted.
-            if self.lay.is_result(i) && !self.result_known(i) {
+            if (self.lay.is_result(i) || self.lay.kind(i) == SlotKind::AnvilOutput)
+                && !self.result_known(i)
+            {
                 return Err(Unpredictable);
             }
         }
@@ -806,6 +846,8 @@ impl Sim<'_> {
                                 if let Some(t) = self.slot_mut(i) {
                                     t.count += n;
                                 }
+                                let l = self.loc(i);
+                                self.anvil_touched(l);
                             } else if c.count <= self.slot_limit(i)? {
                                 self.set(i, Some(c));
                                 self.m.cursor = Some(s);
@@ -1052,6 +1094,15 @@ impl Sim<'_> {
                             }
                         }
                     }
+                    WindowKind::Anvil if crate::menus::modelled(v, kind) => {
+                        let ok = match i {
+                            // the output (refused before: can_take)
+                            2 => return Err(Unpredictable),
+                            0 | 1 => self.insert(&mut st, 3, 39, false)?,
+                            _ => self.insert(&mut st, 0, 2, false)?,
+                        };
+                        (ok, true)
+                    }
                     WindowKind::Enchanting if crate::menus::modelled(v, kind) => {
                         (self.transfer_enchanting(i, &mut st)?, true)
                     }
@@ -1126,12 +1177,16 @@ impl Sim<'_> {
                     if let Some(t) = self.slot_mut(i) {
                         t.count = j;
                     }
+                    let l = self.loc(i);
+                    self.anvil_touched(l);
                     moved = true;
                 } else if tc < max {
                     st.count -= max - tc;
                     if let Some(t) = self.slot_mut(i) {
                         t.count = max;
                     }
+                    let l = self.loc(i);
+                    self.anvil_touched(l);
                     moved = true;
                 }
             }
@@ -1418,6 +1473,9 @@ impl Sim<'_> {
                 // canInsertIntoSlot(stack, slot) is false for crafting results
                 if self.lay.is_result(x) {
                     continue;
+                }
+                if self.lay.kind(x) == SlotKind::AnvilOutput && !self.result_known(x) {
+                    return Err(Unpredictable);
                 }
                 let Some(t) = self.get(x) else { continue };
                 // canInsertItemIntoSlot(slot, cursor, true)

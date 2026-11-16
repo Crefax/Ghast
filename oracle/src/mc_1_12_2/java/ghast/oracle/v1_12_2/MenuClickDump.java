@@ -9,6 +9,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickWindowC2SPacket;
+import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BrewingScreenHandler;
 import net.minecraft.screen.EnchantingScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -29,14 +30,18 @@ import java.util.function.Consumer;
  * <p>What is faked: the screen handler is built directly over the same inventory class the client
  * uses for the window ({@code ClientNetworkSyncedInventory} for the brewing stand, as
  * {@code ClientPlayNetworkHandler.onOpenScreen} does; the enchanting table's own inventory, over the
- * harness's client world at the origin); no server, no properties (brew time, fuel, enchantment
+ * harness's client world at the origin; the anvil's own inventories, whose output the handler
+ * computes on every input change: the harness has no {@code AnvilScreen}, which would also call
+ * {@code rename} with the item's name and send {@code MC|ItemName} on every first-input change, so
+ * the output differs from a real client's whenever names are involved; ghast does not model the
+ * output, so the replay never compares it once an input changed); no server, no properties (brew time, fuel, enchantment
  * offers and the seed only drive the GUI). Contents are set slot by slot like {@code window_items}
  * does.
  */
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil"};
 
     /**
      * Items that appear in brewing slots or are close to the rules: potion, splash, lingering, glass
@@ -47,6 +52,9 @@ final class MenuClickDump {
 
     /** Enchantable items, books, dyes (damage 4 = lapis), a few others. */
     static final int[] ENCHANTING = {351, 351, 351, 276, 261, 310, 278, 340, 340, 403, 1, 3, 264, 35};
+
+    /** Damaged tools and armor, their repair materials, enchanted books, a few others. */
+    static final int[] ANVIL = {276, 276, 278, 310, 261, 359, 264, 264, 265, 266, 403, 403, 340, 1, 3, 35};
 
     /** All lines for {@code menu}: the facts line, then {@code count} cases. */
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
@@ -71,6 +79,7 @@ final class MenuClickDump {
             case "brewing" -> new BrewingScreenHandler(inv,
                     new ClientNetworkSyncedInventory("minecraft:brewing_stand", new LiteralText("b"), 5));
             case "enchanting" -> new EnchantingScreenHandler(inv, run.world);
+            case "anvil" -> new AnvilScreenHandler(inv, run.world, run.player);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -79,6 +88,7 @@ final class MenuClickDump {
         return switch (menu) {
             case "brewing" -> 5;
             case "enchanting" -> 2;
+            case "anvil" -> 3;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -125,6 +135,13 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("anvil")) {
+            ItemStack s = ClickDump.stack(r, new int[] {r.pick(ANVIL)});
+            if (r.chance(0.3)) {
+                s.setCustomName(r.chance(0.5) ? "a" : "b");
+            }
+            return s;
+        }
         if (menu.equals("enchanting")) {
             int id = r.pick(ENCHANTING);
             ItemStack s = ClickDump.stack(r, new int[] {id});
@@ -176,7 +193,9 @@ final class MenuClickDump {
         h.syncId = sync;
         int n = containerSlots(menu);
         double cfill = r.nextDouble();
-        for (int k = 0; k < n; k++) {
+        // the anvil's output is what the handler computes from the inputs (a server sends the same)
+        int filled = menu.equals("anvil") ? 2 : n;
+        for (int k = 0; k < filled; k++) {
             h.getSlot(k).setStack(r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY);
         }
         player.openScreenHandler = h;

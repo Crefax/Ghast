@@ -870,11 +870,17 @@ impl Inventory {
     /// server sends each new result as `set_slot`. The 1.12 client never computes results: the
     /// slot always holds what the server last sent (taking a result whose grid changed since is
     /// refused, its remainders depend on the recipes). While unknown, result clicks are
-    /// [`ClickError::Unpredictable`].
+    /// [`ClickError::Unpredictable`]. 1.8 – 1.16.5 anvil: whether its output is known (the
+    /// client computes it from the inputs, ghast does not: unknown after an input change until
+    /// the server's `set_slot`; empty, and known, when the first input is empty).
     #[must_use]
     pub fn result_known(&self) -> bool {
         match &self.screen {
             ScreenState::Window(w) if w.kind == WindowKind::Crafting => {
+                self.m.container_result_known
+            }
+            // 1.8 – 1.16.5 anvil: the output the client computed after an input change
+            ScreenState::Window(w) if w.kind == WindowKind::Anvil && !self.version.is_modern() => {
                 self.m.container_result_known
             }
             ScreenState::Window(_) => true,
@@ -2067,6 +2073,8 @@ impl Inventory {
             self.layout().screen,
             Screen::Container(WindowKind::Crafting)
         );
+        let anvil = !self.version.is_modern()
+            && matches!(self.layout().screen, Screen::Container(WindowKind::Anvil));
         match l {
             Loc::CraftResult => {
                 self.m.craft_result_known = true;
@@ -2075,6 +2083,23 @@ impl Inventory {
             Loc::Container(0) if crafting_table => {
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
+            }
+            // the server's anvil output; an input set by the server makes the client compute it
+            Loc::Container(2) if anvil => self.m.container_result_known = true,
+            Loc::Container(0 | 1) if anvil => {
+                let first = if l == Loc::Container(0) {
+                    item.is_none()
+                } else {
+                    self.m.container.first().is_none_or(Option::is_none)
+                };
+                if first {
+                    if let Some(out) = self.m.container.get_mut(2) {
+                        *out = None;
+                    }
+                    self.m.container_result_known = true;
+                } else {
+                    self.m.container_result_known = false;
+                }
             }
             // 1.12: a grid slot changed under the result the client holds
             Loc::Craft(_) if self.version == Version::V1_12 => self.m.craft_fresh = false,

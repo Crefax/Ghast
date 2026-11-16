@@ -14,7 +14,7 @@ use crate::window::WindowKind;
 /// [`SlotKind::Special`](crate::SlotKind::Special) and clicks reading them are refused).
 pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
     match kind {
-        WindowKind::BrewingStand | WindowKind::Enchanting => {
+        WindowKind::BrewingStand | WindowKind::Enchanting | WindowKind::Anvil => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
         _ => false,
@@ -205,6 +205,7 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::BrewingFuel => v.brewing_fuel(s),
         K::EnchantItem => true,
         K::Lapis => v.is_lapis(s),
+        K::AnvilOutput => false,
         _ => return None,
     })
 }
@@ -234,6 +235,7 @@ mod tests {
             let kind = match c["facts"].as_str().unwrap() {
                 "brewing" => WindowKind::BrewingStand,
                 "enchanting" => WindowKind::Enchanting,
+                "anvil" => WindowKind::Anvil,
                 m => panic!("unknown menu {m}"),
             };
             assert!(modelled(v, kind), "{kind:?} facts but not modelled");

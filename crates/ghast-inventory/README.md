@@ -101,6 +101,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 |---|---|---|---|
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
+| anvil (inputs `Normal`, `SlotKind::AnvilOutput`) | inputs; output refused | same | same |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -116,6 +117,13 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   was a single item; 1.16: a copy with NBT). The offered enchantments, their costs and the seed
   are window properties for the GUI only; the enchantment itself (`enchant_item`) is the
   server's.
+- **Anvil**: the two inputs are plain slots (shift-click: player part into both inputs, inputs to
+  the player part). The client computes the output itself on every input change (repair,
+  enchantment combining, renaming, the level cost); ghast does not model that computation yet:
+  after an input change the output is unknown (`result_known()` false; an empty first input
+  empties it) until the server's `set_slot`, and any click that reads it is refused, as is taking
+  it (that needs the level cost and the player's level). Not sent either: the client's
+  `MC|ItemName` / `rename_item` that the anvil screen sends on every first-input change.
   Brew time and fuel are window properties the GUI shows; they never change slots on the client.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):

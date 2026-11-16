@@ -65,6 +65,7 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "furnace" => Some(WindowKind::Furnace),
         "brewing" => Some(WindowKind::BrewingStand),
         "enchanting" => Some(WindowKind::Enchanting),
+        "anvil" => Some(WindowKind::Anvil),
         k => panic!("unknown kind {k}"),
     }
 }
@@ -136,6 +137,9 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
     for (i, w) in want.iter().enumerate() {
         if i == 0 && result_slot && !inv.result_known() {
             continue; // the client computes it from recipes (1.8) / the server sends it (1.16)
+        }
+        if inv.slot_kind(i) == Some(ghast_inventory::SlotKind::AnvilOutput) && !inv.result_known() {
+            continue; // the client computes it from the inputs; ghast does not model it
         }
         if !same(inv.slot(i), w.as_ref()) {
             out.push(format!(

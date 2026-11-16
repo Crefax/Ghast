@@ -81,6 +81,10 @@ pub enum SlotKind {
     EnchantItem,
     /// Enchanting table lapis slot (1): lapis lazuli (1.8 / 1.12: dye damage 4).
     Lapis,
+    /// Anvil output (2): computed by the client from the two inputs (repair, enchantment
+    /// combining, renaming), which ghast does not model: unknown after an input changed until
+    /// the server's `set_slot`; taking it (it needs the level cost) is refused.
+    AnvilOutput,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -214,6 +218,13 @@ impl WindowKind {
                 1 => SlotKind::Special,
                 _ => SlotKind::Output,
             },
+            WindowKind::Anvil => {
+                if i == 2 {
+                    SlotKind::AnvilOutput
+                } else {
+                    SlotKind::Normal
+                }
+            }
             WindowKind::Enchanting => {
                 if i == 0 {
                     SlotKind::EnchantItem

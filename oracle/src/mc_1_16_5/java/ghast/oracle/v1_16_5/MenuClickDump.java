@@ -7,6 +7,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -29,14 +30,17 @@ import java.util.function.Consumer;
  * <p>What is faked: the screen handler is built with the client constructor {@code ScreenHandlerType}
  * uses ({@code BrewingStandScreenHandler(syncId, playerInventory)}: a {@code SimpleInventory} and an
  * unsynced property delegate; {@code EnchantmentScreenHandler(syncId, playerInventory)}: the empty
- * client context); no server, no properties (brew time, fuel, enchantment offers and the seed only
+ * client context; {@code AnvilScreenHandler(syncId, playerInventory)}, whose output the handler
+ * computes on every input change: the harness has no {@code AnvilScreen}, which would also call
+ * {@code setNewItemName} and send {@code rename_item} on every first-input change; ghast does not
+ * model the output, so the replay never compares it once an input changed); no server, no properties (brew time, fuel, enchantment offers and the seed only
  * drive the GUI).
  * Contents are set slot by slot like {@code window_items} does.
  */
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -47,6 +51,11 @@ final class MenuClickDump {
     /** Enchantable items, books, lapis, a dye, a few others. */
     static final String[] ENCHANTING = {"lapis_lazuli", "lapis_lazuli", "lapis_lazuli", "blue_dye", "diamond_sword", "bow",
         "diamond_helmet", "iron_pickaxe", "book", "book", "enchanted_book", "stone", "dirt", "diamond"};
+
+    /** Damaged tools and armor, their repair materials, enchanted books, a few others. */
+    static final String[] ANVIL = {"diamond_sword", "diamond_sword", "iron_pickaxe", "diamond_helmet", "bow", "shears",
+        "diamond", "diamond", "iron_ingot", "gold_ingot", "enchanted_book", "enchanted_book", "book", "stone", "dirt",
+        "white_wool"};
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
@@ -67,6 +76,7 @@ final class MenuClickDump {
         return switch (menu) {
             case "brewing" -> 10;
             case "enchanting" -> 12;
+            case "anvil" -> 7;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -75,6 +85,7 @@ final class MenuClickDump {
         return switch (menu) {
             case "brewing" -> new BrewingStandScreenHandler(sync, inv);
             case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
+            case "anvil" -> new AnvilScreenHandler(sync, inv);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -109,6 +120,13 @@ final class MenuClickDump {
     private static ItemStack menuStack(Rng r, String menu) {
         if (menu.equals("enchanting")) {
             return ClickDump.stack(r, ENCHANTING);
+        }
+        if (menu.equals("anvil")) {
+            ItemStack s = ClickDump.stack(r, ANVIL);
+            if (r.chance(0.3)) {
+                s.setCustomName(new net.minecraft.text.LiteralText(r.chance(0.5) ? "a" : "b"));
+            }
+            return s;
         }
         ItemStack s = ClickDump.stack(r, BREWING);
         String id = Registry.ITEM.getId(s.getItem()).getPath();
@@ -146,7 +164,9 @@ final class MenuClickDump {
         ScreenHandler h = handler(sync, inv, menu);
         int n = h.slots.size() - 36;
         double cfill = r.nextDouble();
-        for (int k = 0; k < n; k++) {
+        // the anvil's output is what the handler computes from the inputs (a server sends the same)
+        int filled = menu.equals("anvil") ? 2 : n;
+        for (int k = 0; k < filled; k++) {
             h.getSlot(k).setStack(r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY);
         }
         player.currentScreenHandler = h;
