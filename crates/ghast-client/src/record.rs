@@ -1,9 +1,12 @@
-//! Movement recorder (1.8.9 and 1.16.5): writes a session in the oracle's replay format so
-//! vanilla can replay exactly what the client did (`oracle/run.sh replay --in <file>`).
+//! Movement recorder (every version: 1.8.9, 1.12.2, 1.16.5, 26.1, 26.2 and the rows they
+//! serve): writes a session in the oracle's replay format so vanilla can replay exactly what the
+//! client did (`MC=<version> oracle/run.sh replay --in <file>`).
 //!
 //! - `setup` is the player at the first movement step (right after the first server
 //!   position, before any move): pose, the exact bounding box (`bb`, so a replay needs no
-//!   box rebuild), and on 1.16.5 the pose, with the abilities and food known then.
+//!   box rebuild), and on 1.16.5 / 26.x the pose, with the abilities and food known then
+//!   (26.x: and the attributes the server sent before, as `attribute_bases` /
+//!   `attribute_modifiers`).
 //! - `loaded_chunks` / `fills`: every chunk column that was loaded within 3 chunks of the
 //!   player at any step of the session, with its blocks as first seen (non-air x-runs). The
 //!   header is therefore written when the session ends (the tick lines are kept in memory).
@@ -16,8 +19,16 @@
 //! representable (`ghast_note` lines). Teleports are written with the
 //! raw values and their `flags` byte (the oracle applies them like the client handler).
 
-// One build may include only one of the two recorded versions.
-#![cfg_attr(not(all(feature = "v1_8", feature = "v1_16_5")), allow(dead_code))]
+// One build may include only some of the recorded versions.
+#![cfg_attr(
+    not(all(
+        feature = "v1_8",
+        feature = "v1_12_2",
+        feature = "v1_16_5",
+        feature = "v26_1"
+    )),
+    allow(dead_code)
+)]
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -56,9 +67,18 @@ type Run = (i32, i32, i32, i32, u32);
 /// Protocol version of a recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ver {
-    V1_8,
+    /// Numeric blocks with metadata (`fills` carry id and meta): 1.8.9 or 1.12.2.
+    Legacy(&'static str),
     V1_16,
+    /// 26.x: global state ids named in `states` (`fills` carry the id).
+    Modern(&'static str),
 }
+
+/// Names a 26.x state id (`minecraft:oak_stairs[...]`).
+pub(crate) type StateName = fn(u32) -> Option<String>;
+
+/// One attribute packet entry: base and modifiers `(id, amount, operation)`.
+type AttributeEntry = (f64, Vec<(String, f64, i8)>);
 
 /// The recorder of one session.
 pub(crate) struct Recorder {
@@ -72,6 +92,15 @@ pub(crate) struct Recorder {
     t: u64,
     events: Vec<String>,
     finished: bool,
+    /// Block rows `min_y..max_y` a column snapshot covers.
+    rows: (i32, i32),
+    /// 26.x: the state names for the header.
+    state_name: Option<StateName>,
+    /// 26.x: the last attribute packet per attribute before the setup (base, modifiers as
+    /// `(id, amount, operation)`).
+    attributes: BTreeMap<&'static str, AttributeEntry>,
+    /// Notes already written once.
+    noted: Vec<&'static str>,
 }
 
 impl std::fmt::Debug for Recorder {
@@ -101,6 +130,10 @@ impl Recorder {
             t: 0,
             events: Vec::new(),
             finished: false,
+            rows: (0, 256),
+            state_name: None,
+            attributes: BTreeMap::new(),
+            noted: Vec::new(),
         })
     }
 
@@ -130,8 +163,145 @@ impl Recorder {
             f64p(p.movement_speed_base),
             p.food_level,
         );
-        self.ver = Some(Ver::V1_8);
+        self.ver = Some(Ver::Legacy("1.8.9"));
         self.events.clear();
+    }
+
+    /// Takes the 1.12.2 setup at the first movement step.
+    #[cfg(feature = "v1_12_2")]
+    pub(crate) fn start_1_12(&mut self, p: &ghast_physics::v1_12::PlayerState) {
+        let a = &p.abilities;
+        self.setup = format!(
+            r#"{{"game_mode":"{}","pos":{},"bb":{},"yaw":{},"pitch":{},"vel":{},"on_ground":{},"fall_distance":{},"sprinting":false,"flying":{},"allow_flying":{},"fly_speed":{},"walk_speed":{},"movement_speed_base":{},"speed_modifiers":[],"food_level":{},"effects":[],"depth_strider":{}}}"#,
+            if a.creative { "creative" } else { "survival" },
+            f64x3(p.pos),
+            bb6(&p.bb),
+            f32p(p.yaw),
+            f32p(p.pitch),
+            f64x3(p.vel),
+            p.on_ground,
+            f32p(p.fall_distance),
+            a.flying,
+            a.allow_flying,
+            f32p(a.fly_speed),
+            f32p(a.walk_speed),
+            f64p(p.movement_speed_base),
+            p.food_level,
+            p.depth_strider,
+        );
+        self.ver = Some(Ver::Legacy("1.12.2"));
+        self.events.clear();
+    }
+
+    /// Takes the 26.x setup at the first movement step. `version` is the row's name (`26.1`,
+    /// `26.2`), `state_name` names the version's state ids for the header.
+    #[cfg(any(feature = "v26_1", feature = "v26_2"))]
+    pub(crate) fn start_modern(
+        &mut self,
+        p: &ghast_physics::modern::PlayerState,
+        version: &'static str,
+        state_name: StateName,
+    ) {
+        let a = &p.abilities;
+        let mut bases = Vec::new();
+        let mut mods = Vec::new();
+        let (mut speed_base, mut speed_mods) = (p.attributes.movement_speed.base(), Vec::new());
+        for (name, (base, m)) in &self.attributes {
+            if *name == "movement_speed" {
+                speed_base = *base;
+                speed_mods = m.clone();
+            }
+            bases.push(format!(r#""minecraft:{name}":{}"#, f64p(*base)));
+            for (id, amount, op) in m {
+                mods.push(format!(
+                    r#"["minecraft:{name}","{id}",{},{op}]"#,
+                    f64p(*amount)
+                ));
+            }
+        }
+        let speed: Vec<String> = speed_mods
+            .iter()
+            .map(|(_, amount, op)| format!("[{},{op}]", f64p(*amount)))
+            .collect();
+        self.setup = format!(
+            r#"{{"game_mode":"{}","pos":{},"bb":{},"pose":"{}","yaw":{},"pitch":{},"vel":{},"on_ground":{},"fall_distance":{},"sprinting":false,"flying":{},"allow_flying":{},"fly_speed":{},"walk_speed":{},"movement_speed_base":{},"speed_modifiers":[{}],"attribute_bases":{{{}}},"attribute_modifiers":[{}],"food_level":{},"effects":[],"auto_jump":{},"soul_speed":0,"depth_strider":0}}"#,
+            if a.creative { "creative" } else { "survival" },
+            f64x3(p.pos),
+            bb6(&p.bb),
+            format!("{:?}", p.pose).to_lowercase(),
+            f32p(p.yaw),
+            f32p(p.pitch),
+            f64x3(p.vel),
+            p.on_ground,
+            f64p(p.fall_distance),
+            a.flying,
+            a.allow_flying,
+            f32p(a.fly_speed),
+            f32p(a.walk_speed),
+            f64p(speed_base),
+            speed.join(","),
+            bases.join(","),
+            mods.join(","),
+            p.food_level,
+            p.auto_jump_enabled,
+        );
+        self.rows = (p.level.min_y, p.level.min_y + p.level.height);
+        self.state_name = Some(state_name);
+        self.ver = Some(Ver::Modern(version));
+        self.events.clear();
+    }
+
+    /// A 26.x attribute packet entry: kept for the setup before it, an `attribute` event after.
+    pub(crate) fn attribute(
+        &mut self,
+        name: &'static str,
+        base: f64,
+        mods: Vec<(String, f64, i8)>,
+    ) {
+        if self.started() {
+            let m: Vec<String> = mods
+                .iter()
+                .map(|(id, amount, op)| format!(r#"["{id}",{},{op}]"#, f64p(*amount)))
+                .collect();
+            self.events.push(format!(
+                r#"{{"type":"attribute","attribute":"minecraft:{name}","base":{},"modifiers":[{}]}}"#,
+                f64p(base),
+                m.join(",")
+            ));
+        } else {
+            self.attributes.insert(name, (base, mods));
+        }
+    }
+
+    /// A 26.x server teleport (`player_position`): raw values with the velocity delta and the
+    /// relative-flag set, and the resolved pose the client then had.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn teleport_modern(
+        &mut self,
+        raw_pos: [f64; 3],
+        delta: [f64; 3],
+        raw_yaw: f32,
+        raw_pitch: f32,
+        relative: i32,
+        teleport_id: i32,
+    ) {
+        if self.started() {
+            self.events.push(format!(
+                r#"{{"type":"teleport","pos":{},"delta":{},"yaw":{},"pitch":{},"flags":{relative},"ghast_teleport_id":{teleport_id}}}"#,
+                f64x3(raw_pos),
+                f64x3(delta),
+                f32p(raw_yaw),
+                f32p(raw_pitch),
+            ));
+        }
+    }
+
+    /// Like [`Recorder::note`], once per session.
+    pub(crate) fn note_once(&mut self, what: &'static str) {
+        if self.started() && !self.noted.contains(&what) {
+            self.noted.push(what);
+            self.note(what);
+        }
     }
 
     /// Takes the 1.16.5 setup at the first movement step.
@@ -175,7 +345,7 @@ impl Recorder {
                 if self.chunks.contains_key(&(x, z)) || block(x * 16, 0, z * 16).is_none() {
                     continue;
                 }
-                self.chunks.insert((x, z), runs(x, z, &block));
+                self.chunks.insert((x, z), runs(x, z, self.rows, &block));
             }
         }
     }
@@ -225,6 +395,15 @@ impl Recorder {
         }
     }
 
+    /// 26.x: our entity motion as exact doubles (`motion` event of the modern harness; the wire
+    /// carries an LpVec3, which 1/8000 units would round).
+    pub(crate) fn motion(&mut self, v: [f64; 3]) {
+        if self.started() {
+            self.events
+                .push(format!(r#"{{"type":"motion","motion":{}}}"#, f64x3(v)));
+        }
+    }
+
     /// Our movement speed attribute (entity properties): base and every modifier.
     pub(crate) fn speed_attribute(&mut self, base: f64, modifiers: &[(u128, f64, u8)]) {
         if self.started() {
@@ -249,9 +428,11 @@ impl Recorder {
     /// Our status effects after a change (id → amplifier), as the full set.
     pub(crate) fn effects(&mut self, effects: &std::collections::BTreeMap<i8, i8>) {
         if self.started() {
+            // 26.x: the oracle takes the `mob_effect` registry id (the engine's number - 1).
+            let shift = i16::from(matches!(self.ver, Some(Ver::Modern(_))));
             let e: Vec<String> = effects
                 .iter()
-                .map(|(id, a)| format!("[{id},{a}]"))
+                .map(|(id, a)| format!("[{},{a}]", i16::from(*id) - shift))
                 .collect();
             self.events.push(format!(
                 r#"{{"type":"effects","effects":[{}]}}"#,
@@ -354,8 +535,8 @@ impl Recorder {
         for runs in self.chunks.values() {
             for &(x0, y, z, x1, r) in runs {
                 fills.push(match ver {
-                    Ver::V1_8 => format!("[{x0},{y},{z},{x1},{y},{z},{},{}]", r >> 4, r & 15),
-                    Ver::V1_16 => {
+                    Ver::Legacy(_) => format!("[{x0},{y},{z},{x1},{y},{z},{},{}]", r >> 4, r & 15),
+                    Ver::V1_16 | Ver::Modern(_) => {
                         ids.push(r);
                         format!("[{x0},{y},{z},{x1},{y},{z},{r}]")
                     }
@@ -363,7 +544,17 @@ impl Recorder {
             }
         }
         let (version, states) = match ver {
-            Ver::V1_8 => ("1.8.9", String::new()),
+            Ver::Legacy(v) => (v, String::new()),
+            Ver::Modern(v) => {
+                ids.sort_unstable();
+                ids.dedup();
+                let name = self.state_name.expect("26.x recordings name their states");
+                let names: Vec<String> = ids
+                    .iter()
+                    .filter_map(|&id| Some(format!("\"{id}\":\"{}\"", name(id)?)))
+                    .collect();
+                (v, format!(r#""states":{{{}}},"#, names.join(",")))
+            }
             Ver::V1_16 => {
                 ids.sort_unstable();
                 ids.dedup();
@@ -408,9 +599,14 @@ impl Drop for Recorder {
 }
 
 /// Non-air x-runs of one chunk column.
-fn runs(cx: i32, cz: i32, block: &impl Fn(i32, i32, i32) -> Option<u32>) -> Vec<Run> {
+fn runs(
+    cx: i32,
+    cz: i32,
+    (y0, y1): (i32, i32),
+    block: &impl Fn(i32, i32, i32) -> Option<u32>,
+) -> Vec<Run> {
     let mut out = Vec::new();
-    for y in 0..256 {
+    for y in y0..y1 {
         for bz in 0..16 {
             let z = cz * 16 + bz;
             let mut run: Option<(i32, u32)> = None;
@@ -468,6 +664,46 @@ pub(crate) fn state_1_16(p: &ghast_physics::v1_16_5::PlayerState) -> String {
         p.horizontal_collision,
         p.vertical_collision,
         f32p(p.fall_distance),
+        p.sprinting,
+        p.swimming,
+        p.touching_water,
+    )
+}
+
+/// The 1.12.2 state fields the oracle writes (subset).
+#[cfg(feature = "v1_12_2")]
+pub(crate) fn state_1_12(p: &ghast_physics::v1_12::PlayerState) -> String {
+    format!(
+        r#"{{"pos":{},"bb":{},"vel":{},"yaw":{},"pitch":{},"on_ground":{},"horizontal_collision":{},"vertical_collision":{},"fall_distance":{},"sprinting":{},"touching_water":{}}}"#,
+        f64x3(p.pos),
+        bb6(&p.bb),
+        f64x3(p.vel),
+        f32p(p.yaw),
+        f32p(p.pitch),
+        p.on_ground,
+        p.horizontal_collision,
+        p.vertical_collision,
+        f32p(p.fall_distance),
+        p.sprinting,
+        p.touching_water,
+    )
+}
+
+/// The 26.x state fields the oracle writes (subset).
+#[cfg(any(feature = "v26_1", feature = "v26_2"))]
+pub(crate) fn state_modern(p: &ghast_physics::modern::PlayerState) -> String {
+    format!(
+        r#"{{"pos":{},"bb":{},"vel":{},"yaw":{},"pitch":{},"on_ground":{},"horizontal_collision":{},"vertical_collision":{},"fall_distance":{},"pose":"{}","sprinting":{},"swimming":{},"touching_water":{}}}"#,
+        f64x3(p.pos),
+        bb6(&p.bb),
+        f64x3(p.vel),
+        f32p(p.yaw),
+        f32p(p.pitch),
+        p.on_ground,
+        p.horizontal_collision,
+        p.vertical_collision,
+        f64p(p.fall_distance),
+        format!("{:?}", p.pose).to_lowercase(),
         p.sprinting,
         p.swimming,
         p.touching_water,

@@ -496,16 +496,24 @@ did not change. Practical advice: behaviours should not stand still through a lo
 tail; any input (or a different height) avoids it. `lab/slime-drops.sh 26.2` runs the sweep and
 reports this case as the expected flag.
 
-## Recording (`Client::record(path)`, 1.8.9 and 1.16.5)
+## Recording (`Client::record(path)`, every version)
 
 Writes the session in the oracle's replay format when it ends: `setup` = the player at the
-first movement step, with its exact bounding box (`bb`; 1.16.5 also `pose`), so replays need no
-box rebuild; `loaded_chunks` / `fills` = every column loaded within 3 chunks of the player at any
-step, with its blocks as first seen; one `tick` line per movement step with the input (keys,
-yaw, pitch, using item) and the inbound events applied before it (teleports — raw packet values
-with their `flags` byte, the reply the client sent in `ghast_reply` — our velocity, abilities), plus
-ghast's own `state` and packets. Compare with `oracle/cache/replay_compare.py`. Block changes
-after a column was first seen and explosion pushes are not representable (`ghast_note`).
+first movement step, with its exact bounding box (`bb`; 1.16.5 and 26.x also `pose`; 26.x also
+the attributes the server sent before, as `attribute_bases` / `attribute_modifiers`), so replays
+need no box rebuild; `loaded_chunks` / `fills` = every column loaded within 3 chunks of the
+player at any step, with its blocks as first seen (26.x: state ids named in `states`); one `tick`
+line per movement step with the input (keys, yaw, pitch, using item) and the inbound events
+applied before it (teleports — raw packet values with their flags, 26.x with the velocity delta;
+the reply the client sent in `ghast_reply` on 1.8 – 1.16 — our velocity (26.x: exact `motion`),
+abilities, effects, the speed attribute / 26.x attributes), plus ghast's own `state` and packets.
+Replay with `MC=<row> oracle/run.sh replay --in <file>` (row: 1.8.9, 1.12.2, 1.16.5, 26.1, 26.2;
+sub-versions use their row) and compare with `oracle/cache/replay_compare.py`. Not representable
+(`ghast_note` once): block changes after a column was first seen, explosion pushes, gliding and
+entity pushes on 1.12.2, entity collisions and riding on 26.x. 1.12.2 starts at the first tick
+the player really ticks (its column has arrived). Checked 2026-11-16: a 40-tick session with an
+effect, a teleport, a velocity and a speed attribute replays in vanilla with identical state on
+every row (`engine_tests_record.rs`; `GHAST_KEEP_RECORDINGS=<dir>` keeps the files).
 
 ## API stability (0.4)
 

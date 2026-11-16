@@ -113,6 +113,12 @@ final class Ext {
     /** Set-border-lerp-size packet: from, to, over {@code ticks} game ticks. */
     record BorderLerp(double from, double to, long ticks) implements Scenario.VersionEvent {}
 
+    /**
+     * Our entity motion as exact doubles (ghast-client recordings: a value that came off the wire
+     * as an LpVec3 survives this, while the classic 1/8000 {@code velocity} event would round it).
+     */
+    record Motion(double x, double y, double z) implements Scenario.VersionEvent {}
+
     /** An add-entity packet: {@code type} (registry name without namespace) at a position, no motion. */
     record Spawn(int id, String type, double x, double y, double z, float yaw) implements Scenario.VersionEvent {}
 
@@ -342,6 +348,11 @@ final class Ext {
             equip(run, q.slot(), q.item(), q.damage());
         } else if (e instanceof Firework f) {
             firework(run, f.id());
+        } else if (e instanceof Motion m) {
+            Harness.listener.handleSetEntityMotion(Harness.roundTrip(
+                    net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket.STREAM_CODEC,
+                    new net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket(Harness.PLAYER_ENTITY_ID,
+                            new net.minecraft.world.phys.Vec3(m.x(), m.y(), m.z()))));
         } else if (e instanceof BorderCenter c) {
             net.minecraft.world.level.border.WorldBorder wb = new net.minecraft.world.level.border.WorldBorder();
             wb.setCenter(c.x(), c.z());
@@ -500,6 +511,8 @@ final class Ext {
             }
         } else if (e instanceof Firework f) {
             j.field("type", "firework").field("id", f.id());
+        } else if (e instanceof Motion m) {
+            j.field("type", "motion").key("motion").beginArray().f64(m.x()).f64(m.y()).f64(m.z()).endArray();
         } else if (e instanceof BorderCenter c) {
             j.field("type", "border_center").fieldF64("x", c.x()).fieldF64("z", c.z());
         } else if (e instanceof BorderSize z) {
@@ -581,6 +594,10 @@ final class Ext {
             case "spawn" -> readSpawn(ev);
             case "border_center" -> new BorderCenter(ScenarioReader.f64(ev.get("x")), ScenarioReader.f64(ev.get("z")));
             case "border_size" -> new BorderSize(ScenarioReader.f64(ev.get("size")));
+            case "motion" -> {
+                com.google.gson.JsonArray m = ev.getAsJsonArray("motion");
+                yield new Motion(ScenarioReader.f64(m.get(0)), ScenarioReader.f64(m.get(1)), ScenarioReader.f64(m.get(2)));
+            }
             case "border_lerp" -> new BorderLerp(ScenarioReader.f64(ev.get("from")), ScenarioReader.f64(ev.get("to")), ev.get("ticks").getAsLong());
             case "entity_move" -> {
                 com.google.gson.JsonArray p = ev.getAsJsonArray("pos");

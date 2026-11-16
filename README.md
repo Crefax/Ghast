@@ -172,7 +172,7 @@ their own protocol number (the "1.12.2" and "1.16.5" columns below apply to them
 | mouse rotation in whole mouse counts (sensitivity GCD) | yes | yes | yes | yes |
 | path finding and following (`ghast-pathfinder`) | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags | lab-tested, 0 Grim flags |
 | bot screen in the browser, recordings and replays (`ghast-viewer`) | yes | not yet | not yet | live view (1.8.9 assets, look-alikes for newer blocks); recordings untested |
-| movement recording / trace replay (`Client::record`) | yes | not yet | yes | not yet |
+| movement recording / trace replay (`Client::record`) | yes | yes | yes | yes |
 
 Planned: more versions from 1.8 up, family by family, each verified the same way. Not
 planned for now: a game client with its own window (`ghast-viewer` only draws the bot's view

@@ -71,6 +71,8 @@ pub(crate) struct ModernSim {
     /// Grim compatibility (not vanilla, off by default): send the position on a tick whose
     /// feet height changed although the move stayed under the resend threshold.
     force_step: ForceStepPosition,
+    /// Movement recording ([`crate::Client::record`]).
+    rec: Option<Box<crate::record::Recorder>>,
     /// 26.2+: a movement attribute of `ext` (friction / air drag modifier, bounciness) is not
     /// at its default, so the extended tick runs (the plain tick reads the defaults).
     movement_attributes: bool,
@@ -982,6 +984,7 @@ impl ModernSim {
             parked: None,
             reply: None,
             force_step: ForceStepPosition::Off,
+            rec: None,
             movement_attributes: false,
             filter_dirty: false,
             session: SessionPackets::default(),
@@ -992,8 +995,8 @@ impl ModernSim {
         }
     }
 
-    /// A sim with options (world contents, entity tracking). Recording and the Grim step
-    /// compatibility are not available on the modern versions yet.
+    /// A sim with options (world contents, entity tracking, Grim step compatibility, movement
+    /// recording).
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
         if let Some(c) = opts.world {
@@ -1003,11 +1006,10 @@ impl ModernSim {
             s.world.set_shared_chunks(Some(cache.clone()));
         }
         if let Some(p) = opts.record.as_deref() {
-            log::warn!(
-                "movement recording is not supported on {}; not recording to {}",
-                super::GAME,
-                p.display()
-            );
+            match crate::record::Recorder::create(p) {
+                Ok(r) => s.rec = Some(Box::new(r)),
+                Err(e) => log::warn!("cannot record to {}: {e}", p.display()),
+            }
         }
         s.entities = opts.entities.map(super::entity::Tracker::new);
         s.teams = s.entities.is_some().then(Box::default);
@@ -1054,7 +1056,13 @@ impl ModernSim {
     /// Test hook: a world in the vanilla overworld (registries as with known packs).
     #[cfg(test)]
     pub(crate) fn test_overworld() -> Self {
-        let mut s = Self::new();
+        Self::test_overworld_with(&SimOptions::default())
+    }
+
+    /// Test hook: [`ModernSim::test_overworld`] with options (a recording).
+    #[cfg(test)]
+    pub(crate) fn test_overworld_with(opts: &SimOptions) -> Self {
+        let mut s = Self::with(opts);
         s.world.apply_registry(
             "minecraft:dimension_type",
             [("minecraft:overworld", None)].into_iter(),
@@ -1777,6 +1785,16 @@ impl Sim for ModernSim {
             t.pitch,
             t.relative,
         );
+        if let Some(r) = &mut self.rec {
+            r.teleport_modern(
+                [t.x, t.y, t.z],
+                [t.delta.x, t.delta.y, t.delta.z],
+                t.yaw,
+                t.pitch,
+                t.relative as i32,
+                t.teleport_id.unwrap_or(0),
+            );
+        }
         let now = self.player.pos;
         for (i, old) in self.old_pos.iter_mut().enumerate() {
             *old = if t.relative & (1 << i) != 0 {
@@ -1789,7 +1807,11 @@ impl Sim for ModernSim {
     }
 
     fn abilities(&mut self, a: Abilities) {
-        self.player.apply_abilities(physics_abilities(a));
+        let a = physics_abilities(a);
+        if let Some(r) = &mut self.rec {
+            r.abilities(&a);
+        }
+        self.player.apply_abilities(a);
     }
 
     fn food(&mut self, food: i32) {
@@ -1797,6 +1819,13 @@ impl Sim for ModernSim {
     }
 
     fn velocity(&mut self, v: Vec3, add: bool) {
+        if let Some(r) = &mut self.rec {
+            if add {
+                r.note("explosion push not representable");
+            } else {
+                r.motion([v.x, v.y, v.z]);
+            }
+        }
         let p = &mut self.player;
         if add {
             p.apply_velocity([p.vel[0] + v.x, p.vel[1] + v.y, p.vel[2] + v.z]);
@@ -1812,6 +1841,14 @@ impl Sim for ModernSim {
 
     fn attributes(&mut self, attributes: &[AttributeUpdate]) {
         for a in attributes {
+            if let Some(r) = &mut self.rec {
+                let mods = a
+                    .modifiers
+                    .iter()
+                    .map(|(id, amount, op)| (id.to_string(), *amount, *op))
+                    .collect();
+                r.attribute(a.name, a.base, mods);
+            }
             let mods: Vec<(ModifierId, f64, u8)> = a
                 .modifiers
                 .iter()
@@ -1850,6 +1887,9 @@ impl Sim for ModernSim {
     fn status_effects(&mut self, effects: &std::collections::BTreeMap<i8, i8>) {
         // The engine keeps classic 1-based effect numbers (the version's `minecraft:mob_effect`
         // registry id + 1).
+        if let Some(r) = &mut self.rec {
+            r.effects(effects);
+        }
         use super::effects as fx;
         let e = &mut self.player.effects;
         e.jump_boost = effects.get(&fx::JUMP_BOOST).map(|a| i32::from(*a));
@@ -2208,6 +2248,9 @@ impl Sim for ModernSim {
         };
         // Entity.setOldPosAndRot at the start of the entity tick.
         self.old_pos = self.player.pos;
+        if self.rec.is_some() {
+            self.record_start();
+        }
         if self.entities.is_some() {
             self.tick_before_player(pose);
         }
@@ -2248,6 +2291,9 @@ impl Sim for ModernSim {
                     &view,
                     &mut self.packets,
                 );
+                if self.rec.is_some() {
+                    self.record_tick(&input, Some("riding not representable"));
+                }
                 push_packets(&self.packets, entity_id, out);
                 sync_pose_26(pose, &self.player);
                 return;
@@ -2286,6 +2332,9 @@ impl Sim for ModernSim {
                 &view,
                 &mut self.packets,
             );
+            if self.rec.is_some() {
+                self.record_tick(&input, Some("riding not representable"));
+            }
             push_packets(&self.packets, entity_id, out);
             sync_pose_26(pose, &self.player);
             return;
@@ -2330,8 +2379,49 @@ impl Sim for ModernSim {
         if self.force_step != ForceStepPosition::Off {
             force_modern_position(&mut self.packets, &mut self.player, self.force_step);
         }
+        if self.rec.is_some() {
+            let note = (!self.around.boxes.is_empty())
+                .then_some("entity collisions and pushes not representable");
+            self.record_tick(&input, note);
+        }
         push_packets(&self.packets, entity_id, out);
         sync_pose_26(pose, &self.player);
+    }
+}
+
+impl ModernSim {
+    /// Recording: the setup at the first movement step, then the columns around the player.
+    #[cold]
+    fn record_start(&mut self) {
+        let Some(r) = self.rec.as_deref_mut() else {
+            return;
+        };
+        if !r.started() {
+            r.start_modern(&self.player, super::GAME.name(), |id| {
+                super::data::BlockState::from_id(u16::try_from(id).ok()?).map(|s| s.to_string())
+            });
+        }
+        let w = &self.world;
+        r.observe(self.player.pos, |x, y, z| {
+            w.is_column_loaded(x >> 4, z >> 4)
+                .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.id())))
+        });
+    }
+
+    /// Recording: this movement step's input and ghast's result.
+    #[cold]
+    fn record_tick(&mut self, input: &ghast_physics::TickInput, note: Option<&'static str>) {
+        let Some(r) = self.rec.as_deref_mut() else {
+            return;
+        };
+        if let Some(n) = note {
+            r.note_once(n);
+        }
+        r.tick(
+            input,
+            &crate::record::state_modern(&self.player),
+            &self.packets,
+        );
     }
 }
 

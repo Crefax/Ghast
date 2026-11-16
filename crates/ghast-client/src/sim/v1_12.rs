@@ -75,6 +75,8 @@ pub(crate) struct Sim12 {
     /// The extension state can act (an elytra, gliding, rockets): the tick takes
     /// [`Sim12::step_ext`] and the rockets tick after it.
     glide_on: bool,
+    /// Movement recording ([`crate::Client::record`]).
+    rec: Option<crate::record::Recorder>,
 }
 
 /// What the 1.12.2 glide reads beyond the physics state, decoded once an elytra was seen in the
@@ -186,11 +188,11 @@ impl Sim12 {
             ext: ghast_physics::v1_12::PlayerExt::new(),
             glide: Box::default(),
             glide_on: false,
+            rec: None,
         }
     }
 
-    /// A sim with options (Grim compatibility, entities, world contents). Movement recording is
-    /// not available on 1.12.2 yet.
+    /// A sim with options (Grim compatibility, entities, world contents, movement recording).
     pub(crate) fn with(opts: &SimOptions) -> Self {
         let mut s = Self::new();
         s.force_step_position = opts.force_step_position;
@@ -207,10 +209,10 @@ impl Sim12 {
             log::debug!("shared chunks are not used on 1.12.2; every section stays owned");
         }
         if let Some(p) = opts.record.as_deref() {
-            log::warn!(
-                "movement recording is not supported on 1.12.2; not recording to {}",
-                p.display()
-            );
+            match crate::record::Recorder::create(p) {
+                Ok(r) => s.rec = Some(r),
+                Err(e) => log::warn!("cannot record to {}: {e}", p.display()),
+            }
         }
         s
     }
@@ -591,11 +593,28 @@ impl Sim for Sim12 {
         let _reply =
             self.player
                 .apply_teleport([t.x, t.y, t.z], t.yaw, t.pitch, rel_flags(t.flags));
+        if let Some(r) = &mut self.rec {
+            let p = &self.player;
+            r.teleport(
+                [t.x, t.y, t.z],
+                t.yaw,
+                t.pitch,
+                t.flags,
+                t.teleport_id,
+                p.pos,
+                p.yaw,
+                p.pitch,
+            );
+        }
         sync_pose_12(pose, &self.player);
     }
 
     fn abilities(&mut self, a: Abilities) {
-        self.player.apply_abilities(physics_abilities(a));
+        let a = physics_abilities(a);
+        if let Some(r) = &mut self.rec {
+            r.abilities(&a);
+        }
+        self.player.apply_abilities(a);
     }
 
     fn food(&mut self, food: i32) {
@@ -603,6 +622,17 @@ impl Sim for Sim12 {
     }
 
     fn velocity(&mut self, v: Vec3, add: bool) {
+        if let Some(r) = &mut self.rec {
+            if add {
+                r.note("explosion push not representable");
+            } else {
+                r.velocity([
+                    (v.x * 8000.0).round() as i32,
+                    (v.y * 8000.0).round() as i32,
+                    (v.z * 8000.0).round() as i32,
+                ]);
+            }
+        }
         let p = &mut self.player;
         if add {
             p.vel[0] += v.x;
@@ -614,10 +644,16 @@ impl Sim for Sim12 {
     }
 
     fn movement_speed(&mut self, base: f64, modifiers: &[(u128, f64, u8)]) {
+        if let Some(r) = &mut self.rec {
+            r.speed_attribute(base, modifiers);
+        }
         self.player.apply_speed_attribute(base, modifiers);
     }
 
     fn status_effects(&mut self, effects: &std::collections::BTreeMap<i8, i8>) {
+        if let Some(r) = &mut self.rec {
+            r.effects(effects);
+        }
         let e = &mut self.player.effects;
         e.jump_boost = effects.get(&8).map(|a| i32::from(*a));
         e.blindness = effects.contains_key(&15);
@@ -852,6 +888,23 @@ impl Sim for Sim12 {
         out: &mut Vec<Outbound>,
     ) {
         self.packets.clear();
+        if let Some(r) = &mut self.rec {
+            // From the first tick the player really ticks: until its column is there it is not
+            // added to the world (no move, no packet), which the replay's setup cannot express.
+            if !r.started() && self.player.added_to_chunk {
+                r.start_1_12(&self.player);
+            }
+            let w = &self.world;
+            r.observe(self.player.pos, |x, y, z| {
+                w.is_column_loaded(x >> 4, z >> 4)
+                    .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.raw())))
+            });
+            if self.glide_on {
+                r.note_once("gliding not representable");
+            } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
+                r.note_once("entity pushes and collisions not representable");
+            }
+        }
         if self.glide_on {
             self.step_ext(pose, controls, using_item);
         } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
@@ -874,6 +927,19 @@ impl Sim for Sim12 {
                 &mut p.sent.pos,
                 &mut p.sent.ticks_since_pos,
                 self.force_step_position,
+            );
+        }
+        if let Some(r) = &mut self.rec {
+            let input = ghast_physics::TickInput {
+                keys: keys(controls),
+                yaw: pose.yaw,
+                pitch: pose.pitch,
+                using_item,
+            };
+            r.tick(
+                &input,
+                &crate::record::state_1_12(&self.player),
+                &self.packets,
             );
         }
         push_packets(&self.packets, entity_id, out);

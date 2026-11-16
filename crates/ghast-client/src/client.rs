@@ -235,9 +235,11 @@ impl Client {
         self
     }
 
-    /// Records every session's movement in the oracle's replay format (1.8.9 and 1.16.5; other
-    /// versions log a warning and record nothing; the file is overwritten by each session).
-    /// For debugging anticheat flags against vanilla.
+    /// Records every session's movement in the oracle's replay format (every version; the file
+    /// is overwritten by each session; `MC=<row> oracle/run.sh replay --in <file>` runs it in
+    /// vanilla). For debugging anticheat flags against vanilla. What the format cannot carry is
+    /// written as `ghast_note` lines (explosion pushes, block changes after a column was first
+    /// seen, gliding on 1.12.2, entity pushes and collisions, riding on 26.x).
     #[must_use]
     pub fn record(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.record = Some(path.into());

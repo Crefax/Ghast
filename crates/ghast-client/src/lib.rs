@@ -91,7 +91,13 @@ pub mod movement;
     missing_docs
 )]
 mod phys_golden;
-#[cfg(any(feature = "v1_8", feature = "v1_16_5"))]
+#[cfg(any(
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
 mod record;
 pub mod rotation;
 mod sim;

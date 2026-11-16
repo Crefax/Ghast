@@ -2869,6 +2869,17 @@ mod tests_26_2;
 #[path = "engine_tests_actions.rs"]
 mod tests_actions;
 
+/// `Client::record` on every version (`engine_tests_record.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_record.rs"]
+mod tests_record;
+
 /// The engine replay of the 1.12.2 entity goldens (`engine_tests_1_12.rs`).
 #[cfg(all(
     test,
