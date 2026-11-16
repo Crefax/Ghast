@@ -987,6 +987,17 @@ pub(super) fn push_packets(
                 on_ground,
             },
             P::PaddleBoat { left, right } => Outbound::SteerBoat { left, right },
+            P::SteerVehicle {
+                sideways,
+                forward,
+                jump,
+                sneak,
+            } => Outbound::SteerVehicle {
+                sideways,
+                forward,
+                jump,
+                sneak,
+            },
             P::PlayerInput(k) => Outbound::PlayerInput(Controls {
                 forward: k.forward,
                 back: k.back,

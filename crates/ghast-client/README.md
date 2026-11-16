@@ -322,6 +322,16 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   a swing). Proven against the oracles through the engine (`elytra.jsonl.gz` of both versions
   and their 1 M tick cached fuzz, 0 differences; the replay starts with the sim already
   reading the glide packets).
+- **Boats on 1.16.5** (`ghast_physics::v1_16_5::{Boat, tick_boat}`, needs
+  `Interests::ENTITIES`): boarded when `set_passengers` names the player and the vehicle is a
+  tracked boat; `TickContext::vehicle` reports it (`controlled: true`). The client moves the
+  boat as vanilla (paddles, water / ice / land, collisions with the other boats, shulkers and
+  living entities as the tracker holds them) and sends `steer_boat`, `look`, `steer_vehicle`
+  and `vehicle_move` every tick; the server's `vehicle_move` is applied and answered at once.
+  Sneak gets off (the client dismounts itself); a boat it left stays where it was driven until
+  the server moves it. Other vehicles are not simulated (the walking tick goes on). Proven
+  through the engine (`boats.jsonl.gz` and the 1 M tick cached boat fuzz, 0 differences).
+  Not modelled: bubble columns under a boat.
 - `ctx.world()` (`WorldView`): loaded columns and raw block states; `None` = not loaded.
 
 ## What the physics is fed

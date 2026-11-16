@@ -1286,6 +1286,8 @@ impl ClientVersion for Marker {
                 left_paddle: *left,
                 right_paddle: *right,
             }),
+            // 1.9 - 1.21.1 only (26.x sends player_input).
+            Outbound::SteerVehicle { .. } => Ok(()),
             Outbound::LookAnswer { yaw, pitch } => {
                 wire.last_look = (*yaw, *pitch);
                 enc.write_packet(&sb::Look {

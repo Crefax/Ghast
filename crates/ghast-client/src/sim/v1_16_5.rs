@@ -48,6 +48,45 @@ pub(crate) struct Sim16 {
     snapped: bool,
     /// Gliding: the server's flag 7 and the firework rockets attached to us (see [`Glide16`]).
     glide: Box<Glide16>,
+    /// The boat we ride and control (`set_passengers` naming us, with entity tracking).
+    ride: Option<Box<Ride16>>,
+    /// The answer to a server packet that goes out at once (`vehicle_move`).
+    reply: Option<Outbound>,
+    /// The boat the player left (see [`Parked16`]).
+    parked: Option<Parked16>,
+}
+
+/// A boat the player drove and left: the client moved it, the server sends no move for it, so
+/// it stays where the player left it until the server moves it.
+#[derive(Debug, Clone, Copy)]
+struct Parked16 {
+    id: i32,
+    pos: [f64; 3],
+    bb: [f64; 6],
+    /// The tracker's position of it when the player left (a different one: the server moved it).
+    tracked: Option<[f64; 3]>,
+}
+
+/// The client position and box of entity `id`: the tracker's, or where a parked boat is.
+fn view(
+    t: &ghast_entity::v1_16_5::Tracker,
+    parked: Option<Parked16>,
+    id: i32,
+) -> (Option<[f64; 3]>, Option<[f64; 6]>) {
+    if let Some(k) = parked
+        && k.id == id
+        && t.client_position(id) == k.tracked
+    {
+        return (Some(k.pos), Some(k.bb));
+    }
+    (t.client_position(id), t.client_box(id))
+}
+
+/// The boat the player rides: its entity id and its client-side state.
+#[derive(Debug)]
+struct Ride16 {
+    id: i32,
+    boat: ghast_physics::v1_16_5::Boat,
 }
 
 /// What the 1.16.5 glide reads beyond the physics state: our shared flags and the firework
@@ -341,6 +380,9 @@ impl Sim16 {
             unacked: Default::default(),
             snapped: false,
             glide: Box::default(),
+            ride: None,
+            reply: None,
+            parked: None,
         }
     }
 
@@ -348,6 +390,7 @@ impl Sim16 {
     /// the riptide follows).
     fn update_slow(&mut self) {
         self.slow = self.entities.is_some()
+            || self.ride.is_some()
             || !self.ext.is_inert()
             || self.rt.using.is_some()
             || !self.glide.rockets.is_empty();
@@ -404,6 +447,154 @@ impl Sim16 {
         for r in &mut self.glide.rockets {
             r.before = t.is_some_and(|t| t.ticks_before_self(r.id));
         }
+    }
+
+    /// A tick in the boat we control (`ghast_physics::v1_16_5::tick_boat`): the boat collides
+    /// with the boxes the player collides with plus the living entities around (their boxes as
+    /// the tracker holds them). On the client's own dismount (sneak) the player ticks in the
+    /// same tick when it comes after the boat in the client world's order.
+    #[cold]
+    #[inline(never)]
+    fn ride_tick(&mut self, input: &ghast_physics::TickInput) {
+        let Some(r) = self.ride.as_deref_mut() else {
+            return;
+        };
+        let mut boat_boxes = self.around.boxes.clone();
+        if let Some(t) = &self.entities {
+            let me = t.self_id();
+            for e in t.iter() {
+                let living = matches!(e.entity_type(), ghast_entity::EntityType::Player)
+                    || e.class() == ghast_entity::EntityClass::Mob;
+                if !living || Some(e.id()) == me || t.is_spectator(e) || !t.client_alive(e.id()) {
+                    continue;
+                }
+                if let Some(b) = t.client_box(e.id()) {
+                    boat_boxes.push(aabb(b));
+                }
+            }
+        }
+        let around = ghast_physics::v1_16_5::Surroundings::new()
+            .with_entities(&self.around.boxes)
+            .with_others(&self.around.others);
+        let still = ghast_physics::v1_16_5::tick_boat(
+            &mut self.player,
+            &mut self.ext,
+            &mut r.boat,
+            &around,
+            &boat_boxes,
+            input,
+            &self.world,
+            &mut self.packets,
+        );
+        if !still {
+            let id = r.id;
+            log::debug!("got off boat {id} (sneak)");
+            let after = self
+                .entities
+                .as_ref()
+                .is_some_and(|t| t.ticks_before_self(id));
+            let bb = r.boat.bb;
+            self.park();
+            if after {
+                let mut boxes = self.around.boxes.clone();
+                boxes.push(bb);
+                let around = ghast_physics::v1_16_5::Surroundings::new()
+                    .with_entities(&boxes)
+                    .with_others(&self.around.others);
+                let mut ti = *input;
+                ti.yaw = self.player.yaw;
+                ti.pitch = self.player.pitch;
+                ghast_physics::v1_16_5::tick_ext(
+                    &mut self.player,
+                    &mut self.ext,
+                    &around,
+                    &ti,
+                    &self.world,
+                    &mut self.packets,
+                );
+            }
+        }
+    }
+
+    /// The player left the boat it drove: the boat stays where it is on the client.
+    fn park(&mut self) {
+        if let Some(r) = self.ride.take() {
+            let b = r.boat.bb;
+            self.parked = Some(Parked16 {
+                id: r.id,
+                pos: r.boat.pos,
+                bb: [b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z],
+                tracked: self.entities.as_ref().and_then(|t| t.client_position(r.id)),
+            });
+        }
+    }
+
+    /// `set_passengers` (boarding / leaving a boat) and `vehicle_move` (the server's correction
+    /// of the boat we control).
+    #[cold]
+    #[inline(never)]
+    fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        if raw.id == cb::id::VEHICLE_MOVE {
+            if let Some(r) = self.ride.as_deref_mut() {
+                let p: cb::VehicleMove = raw.decode_as()?;
+                if let ghast_physics::Packet::MoveVehicle {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } = r.boat.server_move([p.x, p.y, p.z], p.yaw, p.pitch)
+                {
+                    self.reply = Some(Outbound::VehicleMove {
+                        pos: Vec3::new(pos[0], pos[1], pos[2]),
+                        yaw,
+                        pitch,
+                        on_ground,
+                    });
+                }
+            }
+            return Ok(());
+        }
+        let p: cb::SetPassengers = raw.decode_as()?;
+        let me = self.rt.own_id;
+        let on = p.passengers.contains(&me);
+        let riding_it = self.ride.as_ref().is_some_and(|r| r.id == p.entity_id);
+        if on && !riding_it {
+            // startRiding a boat the client knows (its client position; the rotation the
+            // server last sent). Other vehicles: not simulated (the walking tick goes on).
+            let boat = self.entities.as_ref().and_then(|t| {
+                let e = t.get(p.entity_id)?;
+                let is_boat = matches!(e.entity_type(), ghast_entity::EntityType::Registry(6));
+                is_boat.then(|| {
+                    let pos = t.client_position(p.entity_id).unwrap_or(e.position());
+                    ghast_physics::v1_16_5::Boat::new(pos, e.yaw(), 0.0)
+                })
+            });
+            match boat {
+                Some(boat) => {
+                    // Entity.startRiding: the standing pose.
+                    let pl = &mut self.player;
+                    pl.pose = ghast_physics::v1_16_5::Pose::Standing;
+                    let [x, y, z] = pl.pos;
+                    pl.set_position(x, y, z);
+                    log::debug!("riding boat {}", p.entity_id);
+                    self.parked = None;
+                    self.ride = Some(Box::new(Ride16 {
+                        id: p.entity_id,
+                        boat,
+                    }));
+                }
+                None => log::debug!(
+                    "riding {} (not simulated: no entity tracking or not a boat)",
+                    p.entity_id
+                ),
+            }
+        } else if !on && riding_it {
+            log::debug!("left boat {}", p.entity_id);
+            self.park();
+        }
+        self.update_slow();
+        Ok(())
     }
 
     /// A rocket spawn, removal or entity data: decoded only when it can concern us.
@@ -555,9 +746,10 @@ impl Sim16 {
         t.iter()
             .filter(|e| entity_bits(e) & COLLIDES != 0 && t.client_alive(e.id()))
             .filter_map(|e| {
-                let pos = t.client_position(e.id())?;
+                let (pos, b) = view(t, self.parked, e.id());
+                let pos = pos?;
                 w.is_column_loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4)
-                    .then(|| t.client_box(e.id()).map(aabb))
+                    .then(|| b.map(aabb))
                     .flatten()
             })
             .collect()
@@ -660,7 +852,8 @@ impl Sim16 {
     ))]
     pub(crate) fn test_client_box(&self, id: i32) -> Option<([f64; 3], [f64; 6])> {
         let t = self.entities.as_ref()?;
-        Some((t.client_position(id)?, t.client_box(id)?))
+        let (p, b) = view(t, self.parked, id);
+        Some((p?, b?))
     }
 
     /// Test hook: the player state.
@@ -720,6 +913,8 @@ impl Sim16 {
     /// entities before it, before it for the others), and the pushes of the entities after it
     /// are kept for [`Sim::tick_entities`].
     fn entities_around(&mut self) {
+        let parked = self.parked;
+        let vehicle = self.ride.as_ref().map(|r| r.id);
         let a = &mut self.around;
         a.boxes.clear();
         a.after.clear();
@@ -732,7 +927,24 @@ impl Sim16 {
         let p = &self.player;
         // Farther than any move of one tick can reach (the physics filters exactly).
         let reach = |v: f64| v.abs() + 3.0;
-        let m = [reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2])];
+        let mut m = [reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2])];
+        // In a boat: around the boat (the server may have moved it away from the seat), as far
+        // as it can move.
+        let mut at = p.bb;
+        if let Some(r) = &self.ride {
+            let (b, v) = (&r.boat.bb, r.boat.vel);
+            at = ghast_physics::math::Aabb {
+                min_x: at.min_x.min(b.min_x),
+                min_y: at.min_y.min(b.min_y),
+                min_z: at.min_z.min(b.min_z),
+                max_x: at.max_x.max(b.max_x),
+                max_y: at.max_y.max(b.max_y),
+                max_z: at.max_z.max(b.max_z),
+            };
+            for i in 0..3 {
+                m[i] = m[i].max(reach(v[i]));
+            }
+        }
         // The colliders that tick after the player: their boxes before their tick.
         let mut any = false;
         for e in t.iter() {
@@ -741,13 +953,14 @@ impl Sim16 {
                 continue;
             }
             any = true;
-            if bits & COLLIDES == 0 || t.ticks_before_self(e.id()) {
+            if bits & COLLIDES == 0 || t.ticks_before_self(e.id()) || vehicle == Some(e.id()) {
                 continue;
             }
-            if let Some(b) = t.client_box(e.id())
-                && near(&b, &p.bb, m)
+            let (vp, vb) = view(t, parked, e.id());
+            if let Some(b) = vb
+                && near(&b, &at, m)
                 && t.client_alive(e.id())
-                && t.client_position(e.id())
+                && vp
                     .is_some_and(|q| loaded((q[0].floor() as i32) >> 4, (q[2].floor() as i32) >> 4))
             {
                 a.boxes.push(aabb(b));
@@ -758,12 +971,21 @@ impl Sim16 {
         if !any {
             return;
         }
-        // The local player rides: no pushes, no entity collisions (not simulated).
+        // The local player rides: in a boat we control, the other entities still collide and
+        // push (the passenger's velocity is kept, its own boat excluded); on other vehicles
+        // (not simulated) neither.
+        // (The boat we got off by sneaking still lists us until the server says otherwise.)
         if let Some(me) = t.self_id()
-            && t.iter().any(|e| e.passengers().contains(&me))
+            && t.iter()
+                .any(|e| e.passengers().contains(&me) && parked.is_none_or(|k| k.id != e.id()))
         {
-            a.boxes.clear();
-            return;
+            let Some(id) = vehicle else {
+                a.boxes.clear();
+                return;
+            };
+            // Our boat's box is not in the list (its client view is the tracker's).
+            let skip = t.client_box(id).map(aabb);
+            a.boxes.retain(|b| Some(*b) != skip);
         }
         let own: &str = &self.profile_name;
         let teams = self.teams.as_deref().filter(|t| t.any_rule());
@@ -774,12 +996,15 @@ impl Sim16 {
             }
             let id = e.id();
             let before = t.ticks_before_self(id);
-            let (Some(b), Some(pos)) = (t.client_box(id), t.client_position(id)) else {
+            let (Some(pos), Some(b)) = view(t, parked, id) else {
                 continue;
             };
+            if vehicle == Some(id) {
+                continue;
+            }
             if bits & COLLIDES != 0
                 && before
-                && near(&b, &p.bb, m)
+                && near(&b, &at, m)
                 && t.client_alive(id)
                 && loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4)
             {
@@ -790,8 +1015,8 @@ impl Sim16 {
             }
             // Boats reach 0.2 farther; nothing else can touch the player (the ones after it
             // push the moved player: anything its move can reach).
-            let margin = if before { [0.25; 3] } else { m };
-            if !near(&b, &p.bb, margin) || !t.client_ticks(e, loaded) {
+            let (margin, from) = if before { ([0.25; 3], &p.bb) } else { (m, &at) };
+            if !near(&b, from, margin) || !t.client_ticks(e, loaded) {
                 continue;
             }
             // A spectator player has noClip and pushes nothing.
@@ -904,7 +1129,7 @@ impl Sim16 {
             if t.ticks_before_self(id) != before || t.is_spectator(e) {
                 continue;
             }
-            let (Some(b), Some(pos)) = (t.client_box(id), t.client_position(id)) else {
+            let (Some(pos), Some(b)) = view(t, self.parked, id) else {
                 continue;
             };
             if !w.is_column_loaded((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4) {
@@ -941,6 +1166,11 @@ impl Sim16 {
             // The rockets that tick before us (after the pushes of the entities before us).
             self.order_rockets();
             self.tick_rockets(true, input.yaw, input.pitch);
+        }
+        if self.ride.is_some() {
+            self.ride_tick(input);
+            self.update_slow();
+            return;
         }
         let around = ghast_physics::v1_16_5::Surroundings::new()
             .with_entities(&self.around.boxes)
@@ -1145,6 +1375,9 @@ impl Sim for Sim16 {
         if raw.id == cb::id::ENTITY_METADATA {
             return self.own_metadata(raw);
         }
+        if matches!(raw.id, cb::id::SET_PASSENGERS | cb::id::VEHICLE_MOVE) {
+            return self.vehicle_packet(raw);
+        }
         if matches!(raw.id, cb::id::SPAWN_ENTITY | cb::id::ENTITY_DESTROY) {
             if self.glide.watch {
                 self.rocket_packet(raw)?;
@@ -1241,6 +1474,7 @@ impl Sim for Sim16 {
         self.ext.glide_pose = false;
         self.glide.rockets.clear();
         self.glide.pending.clear();
+        self.ride = None;
         self.rt.using = None;
         self.rt.held.hands.set([(0, false, -1); 2]);
         self.update_slow();
@@ -1368,6 +1602,8 @@ impl Sim for Sim16 {
         if self.rt.held.watch.get() || self.glide.watch {
             ids.push(cb::id::ENTITY_METADATA);
         }
+        // Riding: boarding and the server's boat corrections.
+        ids.extend([cb::id::SET_PASSENGERS, cb::id::VEHICLE_MOVE]);
         // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.
         if self.glide.watch {
             ids.extend([cb::id::SPAWN_ENTITY, cb::id::ENTITY_DESTROY]);
@@ -1500,6 +1736,23 @@ impl Sim for Sim16 {
 
     fn gliding(&self) -> bool {
         self.ext.fall_flying
+    }
+
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        let r = self.ride.as_deref()?;
+        let b = &r.boat;
+        Some(crate::common::Vehicle {
+            entity_id: r.id,
+            pos: Vec3::new(b.pos[0], b.pos[1], b.pos[2]),
+            yaw: b.yaw,
+            pitch: b.pitch,
+            on_ground: b.on_ground,
+            controlled: true,
+        })
+    }
+
+    fn take_reply(&mut self) -> Option<Outbound> {
+        self.reply.take()
     }
 
     fn set_entity_push(&mut self, on: bool) {

@@ -1041,6 +1041,18 @@ pub enum Outbound {
         /// The vehicle's on-ground flag.
         on_ground: bool,
     },
+    /// `steer_vehicle` (1.9 - 1.21.1): a passenger's movement input after its tick, every
+    /// tick while riding (1.12.2, 1.16.5 boats).
+    SteerVehicle {
+        /// Sideways input.
+        sideways: f32,
+        /// Forward input.
+        forward: f32,
+        /// Jump key.
+        jump: bool,
+        /// Sneak key.
+        sneak: bool,
+    },
     /// `paddle_boat` / `steer_boat`: the boat's paddle states (26.1, every boat tick).
     SteerBoat {
         /// Left paddle.

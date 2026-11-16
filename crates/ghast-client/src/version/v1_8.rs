@@ -471,6 +471,7 @@ impl ClientVersion for V1_8 {
             | Outbound::LookAnswer { .. }
             | Outbound::VehicleMove { .. }
             | Outbound::SteerBoat { .. }
+            | Outbound::SteerVehicle { .. }
             | Outbound::CustomClickAction { .. }
             | Outbound::DialogCommand(_) => Ok(()),
         }
