@@ -1467,6 +1467,26 @@ events (break particles / sounds) are no-ops in this dump (they need the rendere
 Replayed by `crates/ghast-data/src/v26_1/tests.rs` (`dig_matches_the_client`); a 40k-case run
 (seed 2) also matched.
 
+## `place.jsonl.gz` (26.1, 26.2): right clicks on blocks and the server's answer
+
+`PlaceDump` (`place [--seed --count]`, part of `golden`: 6000 random cases, seed 1, then every
+full-cube state clicked once on its top and once on a side with a stone item). The real client's
+`MultiPlayerGameMode.useItemOn` (main hand) on a flat stone pad with the player at
+`(0.5, 64, 0.5)`. Per case: `clicked` / `face` / `hit`, `clicked_state` and `target_state` (the
+block next to the clicked face; air, water, lava or any non-air state), `held` item and `count`
+(none, a single-state full-cube block item, any block item, any other item), `sneaking`, `mode`
+(game mode), `player`; the outcome `result` (`InteractionResult` class), `sequence` (the
+`use_item_on` packet's sequence relative to before), `count_after`, and `changed`: every position
+the prediction changed, from the level's `BlockStatePredictionHandler` records, as
+`[pos, state now, server state remembered]`. Then the server's answer: `answer` `ack` (only
+`handleBlockChangedAck`), `update` (`setServerVerifiedBlockState` of the target with `update`, then
+the ack) or `accept` (the client's own state, then the ack), with the player moved down by `moved`
+first; `clicked_after`, `target_after` and `player_after` (`ClientLevel.syncBlockState` may move
+the player back). The oracle level has no block entities (a chunk section write), so blocks whose
+right click reads their block entity answer as if it were missing. Replayed by
+`crates/ghast-client/src/engine_tests_predict.rs` (`place_golden`): every placement the client
+predicts must be vanilla's, and the states and position after the answer must match.
+
 ## Dig vectors (1.8.9, 1.12.2, 1.16.5)
 
 `DigDump` in each harness (`dig-facts`, `dig [--seed --count]`, both in `golden`), the 26.1 dump's

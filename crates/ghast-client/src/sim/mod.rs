@@ -13,8 +13,7 @@ use crate::common::{
 use crate::hands::{BlockQuery, HeldItem};
 use crate::version::DataSet;
 
-#[cfg(any(ghast_modern, feature = "v1_16_5"))]
-mod predict;
+pub(crate) mod predict;
 #[cfg(any(ghast_modern, feature = "v1_12_2", feature = "v1_16_5"))]
 mod teams;
 #[cfg(feature = "v1_12_2")]
@@ -420,6 +419,20 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         if broken {
             self.predict_air(pos.x, pos.y, pos.z);
         }
+    }
+    /// A `block_place` of this tick that used the held block item, in packet order with the
+    /// digs ([`Sim::dig_sent`]): the version places the block on the client when it knows the
+    /// result exactly (see [`predict::PlaceSent`]); 26.x keeps the server's state until the ack,
+    /// older versions take the server's block updates for the clicked block and its neighbour.
+    #[inline]
+    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
+        let _ = p;
+    }
+    /// Test hook: moves the sim's player (as a fall between a prediction and its answer would).
+    #[cfg(test)]
+    #[allow(dead_code)] // used by the all-version prediction tests
+    fn set_player_pos(&mut self, p: Vec3) {
+        let _ = p;
     }
     /// [`Sim::dig_sent`] wants the dig packets that broke nothing too (1.16.5 records them).
     #[inline(always)]
@@ -1123,6 +1136,12 @@ impl Sim for Box<dyn Sim> {
     }
     fn records_digs(&self) -> bool {
         (**self).records_digs()
+    }
+    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
+        (**self).place_sent(p);
+    }
+    fn set_player_pos(&mut self, p: Vec3) {
+        (**self).set_player_pos(p);
     }
     fn teleport_sequence(&mut self, sequence: Option<i32>) {
         (**self).teleport_sequence(sequence);

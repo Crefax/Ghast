@@ -1157,6 +1157,137 @@ impl ModernSim {
     }
 }
 
+impl ModernSim {
+    /// `MultiPlayerGameMode.performUseItemOn` → `BlockItem.place` on the client, when its result
+    /// is known exactly ([`crate::sim::predict::PlaceSent`]): the position and the state placed.
+    /// `None` when nothing is predicted (also when vanilla places nothing: the player's box is in
+    /// the way).
+    fn plain_placement(
+        &self,
+        p: &crate::sim::predict::PlaceSent<'_>,
+    ) -> Option<(BlockPos, BlockState)> {
+        let at = p.face.offset(p.pos);
+        let state = plain_placement_rule(
+            p,
+            |q| self.world.block_state(q.x, q.y, q.z),
+            self.world
+                .dimension()
+                .map(|d| (d.kind.min_y, d.kind.height))?,
+            &ghast_physics::BlockView::world_border(&self.world),
+        )?;
+        if holds_player(state, at, &self.player) {
+            // BlockItem.canPlace: Level.isUnobstructed fails, nothing is placed.
+            return None;
+        }
+        Some((at, state))
+    }
+}
+
+/// The block part of [`ModernSim::plain_placement`] (without the player's box): the state
+/// placed.
+fn plain_placement_rule(
+    p: &crate::sim::predict::PlaceSent<'_>,
+    block_at: impl Fn(BlockPos) -> Option<BlockState>,
+    (min_y, height): (i32, i32),
+    border: &ghast_physics::WorldBorder,
+) -> Option<BlockState> {
+    use super::data::{Block, Item};
+    use crate::common::GameMode;
+    use ghast_data::modern::state_flags as sf;
+    // ItemStack.useOn: adventure needs can_place_on; spectators never place.
+    if !matches!(p.game_mode, GameMode::Survival | GameMode::Creative) {
+        return None;
+    }
+    let stack = p.held?;
+    // A component patch may carry block_state / block_entity_data (BlockItem.updateBlockStateFromTag).
+    if stack.components().is_some() {
+        return None;
+    }
+    let block = Item::from_id(u16::try_from(stack.id()).ok()?)?.block()?;
+    let state = block.default_state();
+    if block.layout().state_count != 1
+        || !state.phys().has(sf::FULL_CUBE)
+        || not_plain_placement(block.name())
+    {
+        return None;
+    }
+    // useItemOn: the clicked position inside the world border.
+    if !crate::sim::predict::border_contains(border, p.pos) {
+        return None;
+    }
+    // A full collision cube is never replaceable (BlockPlaceContext.replaceClicked is false):
+    // the block goes next to it.
+    let clicked = block_at(p.pos)?;
+    if !clicked.phys().has(sf::FULL_CUBE) {
+        return None;
+    }
+    // useItemOn / useWithoutItem of the clicked block, unless sneaking with an item.
+    if !(p.sneaking && p.any_item) && activated_full_cube(clicked.block().name()) {
+        return None;
+    }
+    let at = p.face.offset(p.pos);
+    if at.y < min_y || at.y >= min_y + height {
+        return None;
+    }
+    // BlockPlaceContext.canPlace: air and fluids are replaceable by any block item.
+    let there = block_at(at)?;
+    if !(there.is_air() || matches!(there.block(), Block::WATER | Block::LAVA)) {
+        return None;
+    }
+    Some(state)
+}
+
+/// Single-state full-cube blocks whose item places them with logic of its own
+/// (oracle: `tests/golden/<version>/place.jsonl.gz`): concrete powder hardens next to water,
+/// the game-master block needs operator rights.
+fn not_plain_placement(name: &str) -> bool {
+    name.ends_with("_concrete_powder") || name == "test_instance_block"
+}
+
+/// Full-cube blocks a right click may activate (`useItemOn` / `useWithoutItem` consume the click
+/// for a block item, then the item is not used). The menus, note blocks, crafters, respawn
+/// anchors and vaults are oracle-proven (`place.jsonl.gz`: every full-cube state clicked on its
+/// top and a side); blocks whose answer depends on their block entity (which the oracle's level
+/// does not have: jukebox records, chiseled bookshelf books, spawners, beehives, operator
+/// blocks) are listed without proof and never predicted.
+fn activated_full_cube(name: &str) -> bool {
+    const LIST: &[&str] = &[
+        // Oracle-proven.
+        "barrel",
+        "beacon",
+        "blast_furnace",
+        "cartography_table",
+        "chiseled_bookshelf",
+        "crafter",
+        "crafting_table",
+        "dispenser",
+        "dropper",
+        "furnace",
+        "loom",
+        "note_block",
+        "respawn_anchor",
+        "smithing_table",
+        "smoker",
+        "vault",
+        // Block entities the answer may read.
+        "bee_nest",
+        "beehive",
+        "chain_command_block",
+        "command_block",
+        "creaking_heart",
+        "jigsaw",
+        "jukebox",
+        "repeating_command_block",
+        "sculk_catalyst",
+        "spawner",
+        "structure_block",
+        "test_block",
+        "test_instance_block",
+        "trial_spawner",
+    ];
+    name.ends_with("shulker_box") || LIST.contains(&name)
+}
+
 /// What a broken block leaves (`FluidState.createLegacyBlock` of its fluid): a waterlogged
 /// block (and kelp, seagrass, bubble columns) leaves a water source, anything else air.
 fn fluid_left_behind(old: BlockState) -> BlockState {
@@ -2003,6 +2134,25 @@ impl Sim for ModernSim {
             self.predictions
                 .retain(pos, old, sequence, [player.x, player.y, player.z]);
         }
+    }
+
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+        let Some((at, state)) = self.plain_placement(p) else {
+            return;
+        };
+        // BlockItem.place: ClientLevel.setBlock while predicting keeps the server's state.
+        let Some(old) = self.world.block_state(at.x, at.y, at.z) else {
+            return;
+        };
+        if self.world.set_block_state(at.x, at.y, at.z, state) {
+            self.predictions
+                .retain(at, old, p.sequence, [p.player.x, p.player.y, p.player.z]);
+        }
+    }
+
+    #[cfg(test)]
+    fn set_player_pos(&mut self, p: Vec3) {
+        self.player.set_pos(p.x, p.y, p.z);
     }
 
     fn teleport_sequence(&mut self, sequence: Option<i32>) {

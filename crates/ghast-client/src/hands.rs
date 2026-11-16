@@ -789,6 +789,9 @@ pub struct Hands {
     /// A dig start / abort / finish was written since the engine last looked (it then tells the
     /// sim about this tick's dig packets).
     pub(crate) dug: bool,
+    /// The indices (in the tick's outbound list) of the `block_place` packets that used the
+    /// held block item since the engine last looked (the placed-block prediction).
+    pub(crate) placing: Vec<u32>,
     /// 1.9+: ticks since the last swing / attack (`ticksSinceLastSwing`, attack cooldown).
     pub ticks_since_swing: u32,
 }
@@ -797,9 +800,11 @@ impl Hands {
     /// A new player: nothing held, nothing in progress.
     pub fn reset(&mut self) {
         let (broken, dug) = (self.broken, self.dug);
+        let placing = std::mem::take(&mut self.placing);
         *self = Hands::default();
         self.broken = broken;
         self.dug = dug;
+        self.placing = placing;
     }
 
     /// The block being broken and its progress 0..1.
@@ -1196,6 +1201,7 @@ impl Hands {
                     if !off_hand {
                         *io.placed = true;
                     }
+                    self.placing.push(io.out.len() as u32 - 1);
                     io.out.push(swing);
                     return;
                 }
@@ -1245,6 +1251,7 @@ impl Hands {
         match io.held {
             Some(h) if h.places_block && h.count > 0 => {
                 *io.placed = true;
+                self.placing.push(io.out.len() as u32 - 1);
                 true
             }
             _ => false,

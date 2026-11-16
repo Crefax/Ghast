@@ -16,6 +16,109 @@
 
 use ghast_protocol::BlockPos;
 
+/// A `block_place` (use item on block) of this tick that used the held block item (the clicked
+/// block was not activated), in packet order: the input of the versions' placed-block
+/// prediction ([`super::Sim::place_sent`]).
+///
+/// Predicted (exactly, on every version): a block whose placement is its only state with a full
+/// collision cube (stone, planks, ores, wool on 1.13+, …: the per-version `plain` rules)
+/// placed from a stack without block state data, on the face of a block with a full collision
+/// cube that the click does not activate, into air or a fluid, inside the build height and the
+/// world border, not into the player's own box, in survival or creative. Everything else is
+/// left to the server's block updates (vanilla runs the item's own placement logic there:
+/// facing, waterlogging, half / axis / shape properties, replaceable clicked blocks, multi-block
+/// items, neighbour shape updates).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PlaceSent<'a> {
+    /// The clicked block.
+    pub pos: BlockPos,
+    /// The clicked face.
+    pub face: crate::common::Face,
+    /// The stack in the hand that placed.
+    pub held: Option<&'a ghast_inventory::Stack>,
+    /// Sneaking (`isSecondaryUseActive`): the clicked block is not activated when a hand holds
+    /// something.
+    pub sneaking: bool,
+    /// Either hand holds something.
+    pub any_item: bool,
+    /// The local game mode.
+    pub game_mode: crate::common::GameMode,
+    /// The packet's 1.19+ prediction sequence.
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
+    pub sequence: i32,
+    /// The player's position when the packet was sent (26.x: where an ack may move it back).
+    #[cfg_attr(not(ghast_modern), allow(dead_code))]
+    pub player: crate::common::Vec3,
+}
+
+/// `WorldBorder.isWithinBounds(BlockPos)` (1.16.5 `contains`) of a static border.
+pub(crate) fn border_contains(b: &ghast_physics::WorldBorder, pos: BlockPos) -> bool {
+    let h = b.size / 2.0;
+    let (x, z) = (f64::from(pos.x), f64::from(pos.z));
+    x + 1.0 > b.center_x - h && x < b.center_x + h && z + 1.0 > b.center_z - h && z < b.center_z + h
+}
+
+/// 1.8.9 / 1.12.2 `ClientPlayerInteractionManager` right click on a block → `BlockItem.use` on the
+/// client world, when its result is known exactly ([`PlaceSent`]; single-state full-cube blocks
+/// placed from their plain block item: `plain` block ids, from the version's classes). States
+/// are raw `id << 4 | meta`. `full_cube(raw)`: the state's collision is the unit cube.
+/// `activated`: full-cube block ids whose `use` may accept the click.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legacy_plain_placement(
+    p: &PlaceSent<'_>,
+    plain: &[u16],
+    activated: &[u16],
+    raw_at: impl Fn(BlockPos) -> Option<u16>,
+    full_cube: impl Fn(u16) -> bool,
+    player: &ghast_physics::math::Aabb,
+    border: &ghast_physics::WorldBorder,
+) -> Option<(BlockPos, u16)> {
+    use crate::common::GameMode;
+    // PlayerEntity.canModify: adventure needs CanPlaceOn; spectators never place.
+    if !matches!(p.game_mode, GameMode::Survival | GameMode::Creative) {
+        return None;
+    }
+    let stack = p.held?;
+    // A plain BlockItem places its block's state for data 0 (getMeta), whatever the damage.
+    let id = u16::try_from(stack.id()).ok()?;
+    if stack.count() <= 0 || !plain.contains(&id) {
+        return None;
+    }
+    if !border_contains(border, p.pos) {
+        return None;
+    }
+    // A full cube is never replaceable: the block goes next to it.
+    let clicked = raw_at(p.pos)?;
+    if !full_cube(clicked) {
+        return None;
+    }
+    if !(p.sneaking && p.any_item) && activated.contains(&(clicked >> 4)) {
+        return None;
+    }
+    let at = p.face.offset(p.pos);
+    // World.canBlockBePlaced / BlockItem.use: below the top layer (255 refuses solid blocks).
+    if !(0..255).contains(&at.y) {
+        return None;
+    }
+    // Air, water, lava (replaceable materials every block may replace).
+    if !matches!(raw_at(at)? >> 4, 0 | 8..=11) {
+        return None;
+    }
+    // World.hasEntityIn / checkNoEntityCollision: the player's own box (Box.intersects).
+    let (x, y, z) = (f64::from(at.x), f64::from(at.y), f64::from(at.z));
+    if player.max_x > x
+        && player.min_x < x + 1.0
+        && player.max_y > y
+        && player.min_y < y + 1.0
+        && player.max_z > z
+        && player.min_z < z + 1.0
+    {
+        return None;
+    }
+    Some((at, id << 4))
+}
+
 /// One prediction of [`Sequenced`] (`ServerVerifiedState`).
 #[cfg(ghast_modern)]
 #[derive(Clone, Copy, Debug)]

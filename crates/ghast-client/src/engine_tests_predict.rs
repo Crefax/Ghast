@@ -583,3 +583,400 @@ mod v1_16_5 {
         assert_eq!(e.core.pose.pos, FEET);
     }
 }
+
+/// Holds 16 of `item` in hotbar slot 0, right-clicks the top of the floor block two blocks in
+/// front with [`TickContext::place`] and returns the engine with the placement written.
+fn place_on_floor(v: GameVersion, item_id: i32) -> (Engine<Box<dyn Sim>>, BlockPos) {
+    let mut e = engine(v);
+    join(&mut e);
+    let support = BlockPos::new(8, 63, 10);
+    if v == GameVersion::V1_16_5 {
+        // The 1.16.5 test chunks are empty: a floor under the player and the support.
+        for z in 7..=10 {
+            legacy_set(&mut e, v, BlockPos::new(8, 63, z), 1);
+        }
+    }
+    e.inventory_mut()
+        .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(item_id, 16, 0)));
+    let t0 = Instant::now();
+    e.note_inbound(t0);
+    let hit = Vec3::new(8.5, 64.0, 10.5);
+    let mut placed = false;
+    for _ in 0..40 {
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            ctx.set_aim(0.0, 39.0);
+            if ctx.place(support, crate::common::Face::Up, hit) {
+                ctx.set_aim(0.0, 39.0);
+            }
+        });
+        e.tick(&mut b, t0);
+        placed = e
+            .outbound()
+            .iter()
+            .any(|o| matches!(o, Outbound::Place { pos, .. } if *pos == support));
+        e.outbound().clear();
+        if placed {
+            break;
+        }
+    }
+    assert!(placed, "no placement: {v:?}");
+    (e, BlockPos::new(8, 64, 10))
+}
+
+/// A placement the server refuses with its ack alone: the block shows at once and goes when
+/// the ack comes; an accepted one (the server's update, then the ack) never flickers.
+#[test]
+fn placed_block_is_predicted_and_settled_by_the_ack() {
+    for v in modern_versions() {
+        let stone_item = match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => {
+                i32::from(ghast_data::v26_2::Item::from_name("stone").unwrap().id())
+            }
+            _ => i32::from(ghast_data::v26_1::Item::from_name("stone").unwrap().id()),
+        };
+        let stone = state(v, "stone");
+        let (mut e, at) = place_on_floor(v, stone_item);
+        assert_eq!(block(&e, at), Some(u32::from(stone)), "predicted: {v:?}");
+        // Refused: the ack alone restores the air.
+        e.sim.world_packet(&ack(v, 1)).unwrap();
+        assert_eq!(block(&e, at), Some(0), "{v:?}");
+
+        let (mut e, at) = place_on_floor(v, stone_item);
+        e.sim.world_packet(&block_update(v, at, stone)).unwrap();
+        assert_eq!(block(&e, at), Some(u32::from(stone)), "{v:?}");
+        e.sim.world_packet(&ack(v, 1)).unwrap();
+        assert_eq!(block(&e, at), Some(u32::from(stone)), "{v:?}");
+        // Not a block item: nothing predicted.
+        let stick = match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => {
+                i32::from(ghast_data::v26_2::Item::from_name("stick").unwrap().id())
+            }
+            _ => i32::from(ghast_data::v26_1::Item::from_name("stick").unwrap().id()),
+        };
+        let (e, at) = place_on_floor(v, stick);
+        assert_eq!(block(&e, at), Some(0), "{v:?}");
+        // Oak logs place with their axis: left to the server.
+        let log = match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => {
+                i32::from(ghast_data::v26_2::Item::from_name("oak_log").unwrap().id())
+            }
+            _ => i32::from(ghast_data::v26_1::Item::from_name("oak_log").unwrap().id()),
+        };
+        let (e, at) = place_on_floor(v, log);
+        assert_eq!(block(&e, at), Some(0), "{v:?}");
+    }
+}
+
+/// A server block change on 1.8.9 – 1.16.5 (raw `id << 4 | meta` there, a state id on 1.16.5).
+fn legacy_set(e: &mut Engine<Box<dyn Sim>>, v: GameVersion, pos: BlockPos, s: u32) {
+    let raw = match v {
+        GameVersion::V1_8_9 => {
+            RawPacket::from_packet(&ghast_protocol::v1_8::play::clientbound::BlockChange {
+                location: pos,
+                r#type: s as i32,
+            })
+        }
+        GameVersion::V1_12_2 => {
+            RawPacket::from_packet(&ghast_protocol::v1_12_2::play::clientbound::BlockChange {
+                location: pos,
+                r#type: s as i32,
+            })
+        }
+        _ => RawPacket::from_packet(&ghast_protocol::v1_16_5::play::clientbound::BlockChange {
+            location: pos,
+            r#type: s as i32,
+        }),
+    };
+    e.sim.world_packet(&raw.unwrap()).unwrap();
+}
+
+/// 1.8.9 – 1.16.5: the placed block shows at once; the server's block change for it settles
+/// it (refused: back to air; accepted: the same block, no flicker). Logs (axis) and wool
+/// (variants) are not predicted.
+#[test]
+fn placed_block_is_predicted_on_legacy_versions() {
+    let cases: [(GameVersion, i32, u32, &[i32]); 3] = [
+        // cobblestone item 4 → raw 4 << 4; oak log 17, wool 35: not predicted.
+        (GameVersion::V1_8_9, 4, 4 << 4, &[17, 35, 280]),
+        (GameVersion::V1_12_2, 4, 4 << 4, &[17, 35, 280]),
+        (
+            GameVersion::V1_16_5,
+            i32::from(
+                ghast_data::v1_16_5::Item::from_name("cobblestone")
+                    .unwrap()
+                    .id(),
+            ),
+            u32::from(
+                ghast_data::v1_16_5::Block::from_name("cobblestone")
+                    .unwrap()
+                    .default_state()
+                    .id(),
+            ),
+            &[
+                i32::from(
+                    ghast_data::v1_16_5::Item::from_name("oak_log")
+                        .unwrap()
+                        .id(),
+                ),
+                i32::from(ghast_data::v1_16_5::Item::from_name("stick").unwrap().id()),
+            ],
+        ),
+    ];
+    for (v, item, placed, others) in cases {
+        let (mut e, at) = place_on_floor(v, item);
+        assert_eq!(block(&e, at), Some(placed), "predicted: {v:?}");
+        legacy_set(&mut e, v, at, 0);
+        assert_eq!(block(&e, at), Some(0), "refused: {v:?}");
+        let (mut e, at) = place_on_floor(v, item);
+        legacy_set(&mut e, v, at, placed);
+        assert_eq!(block(&e, at), Some(placed), "accepted: {v:?}");
+        for &o in others {
+            let (e, at) = place_on_floor(v, o);
+            assert_eq!(block(&e, at), Some(0), "{v:?} item {o}");
+        }
+    }
+}
+
+/// Replays of the oracle's right clicks (`tests/golden/<version>/place.jsonl.gz`, the real
+/// client's `MultiPlayerGameMode.useItemOn` and its prediction records): every placement this
+/// client predicts is the vanilla one, and after the server's answer (an ack alone, a block
+/// update then the ack, or the client's own state then the ack, with the player moved in
+/// between) the clicked block, the target block and the player's position are vanilla's.
+mod place_golden {
+    use super::*;
+    use serde_json::Value;
+    use std::io::BufRead;
+
+    /// The golden's player stands at (0.5, 64, 0.5); the test engine's at (8.5, 64, 8.5).
+    const SHIFT: i32 = 8;
+
+    fn f64_of(v: &Value) -> f64 {
+        let bits = v[1].as_str().expect("hex bits");
+        f64::from_bits(u64::from_str_radix(bits, 16).expect("hex"))
+    }
+
+    fn pos_of(v: &Value) -> BlockPos {
+        BlockPos::new(
+            v[0].as_i64().unwrap() as i32 + SHIFT,
+            v[1].as_i64().unwrap() as i32,
+            v[2].as_i64().unwrap() as i32 + SHIFT,
+        )
+    }
+
+    fn vec_of(v: &Value) -> Vec3 {
+        Vec3::new(
+            f64_of(&v[0]) + f64::from(SHIFT),
+            f64_of(&v[1]),
+            f64_of(&v[2]) + f64::from(SHIFT),
+        )
+    }
+
+    fn item_id(v: GameVersion, name: &str) -> i32 {
+        match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => i32::from(ghast_data::v26_2::Item::from_name(name).unwrap().id()),
+            _ => i32::from(ghast_data::v26_1::Item::from_name(name).unwrap().id()),
+        }
+    }
+
+    fn block_name(v: GameVersion, id: u32) -> String {
+        match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => ghast_data::v26_2::BlockState::from_id(id as u16)
+                .unwrap()
+                .block()
+                .name()
+                .to_string(),
+            _ => ghast_data::v26_1::BlockState::from_id(id as u16)
+                .unwrap()
+                .block()
+                .name()
+                .to_string(),
+        }
+    }
+
+    fn replay(v: GameVersion, label: &str) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/golden")
+            .join(label)
+            .join("place.jsonl.gz");
+        let Ok(file) = std::fs::File::open(&path) else {
+            panic!("missing {}", path.display());
+        };
+        let lines = std::io::BufReader::new(flate2::read::GzDecoder::new(file)).lines();
+        let mut e = modern(v);
+        let mut n = 0;
+        let mut predicted = 0;
+        let mut vanilla_placed = 0;
+        let mut missed: std::collections::BTreeMap<String, u32> = Default::default();
+        let mut sequence = 0;
+        let mut bad = Vec::new();
+        // Predictions where vanilla also changed neighbours (shape updates).
+        let mut extra: std::collections::BTreeMap<String, u32> = Default::default();
+        for line in lines {
+            let c: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            n += 1;
+            let k = c["k"].as_i64().unwrap();
+            let clicked = pos_of(&c["clicked"]);
+            let face = crate::common::Face::from_id(c["face"].as_i64().unwrap() as i8).unwrap();
+            let target = face.offset(clicked);
+            let (cs, ts) = (
+                c["clicked_state"].as_u64().unwrap() as u16,
+                c["target_state"].as_u64().unwrap() as u16,
+            );
+            // Nothing predicted from the case before; the case's blocks.
+            sequence += 1;
+            e.sim.world_packet(&ack(v, i32::MAX >> 1)).unwrap();
+            let _ = e.sim.take_snap();
+            for p in [clicked, target] {
+                let d = (p.x - SHIFT).abs().max((p.z - SHIFT).abs());
+                let floor = if p.y == 63 && d <= 4 {
+                    state(v, "stone")
+                } else {
+                    0
+                };
+                e.sim.world_packet(&block_update(v, p, floor)).unwrap();
+            }
+            e.sim.world_packet(&block_update(v, clicked, cs)).unwrap();
+            e.sim.world_packet(&block_update(v, target, ts)).unwrap();
+            let player = vec_of(&c["player"]);
+            e.sim.set_player_pos(player);
+            let held = c["held"].as_str().map(|name| {
+                ghast_inventory::Stack::new(
+                    item_id(v, name),
+                    c["count"].as_i64().unwrap() as i32,
+                    0,
+                )
+            });
+            let game_mode = match c["mode"].as_str().unwrap() {
+                "survival" => GameMode::Survival,
+                "creative" => GameMode::Creative,
+                "adventure" => GameMode::Adventure,
+                _ => GameMode::Spectator,
+            };
+            e.sim.place_sent(&crate::sim::predict::PlaceSent {
+                pos: clicked,
+                face,
+                held: held.as_ref(),
+                sneaking: c["sneaking"].as_bool().unwrap(),
+                any_item: held.is_some(),
+                game_mode,
+                sequence,
+                player,
+            });
+            let ours = block(&e, target).unwrap();
+            let changed: Vec<(BlockPos, u32)> = c["changed"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| (pos_of(&x[0]), x[1].as_u64().unwrap() as u32))
+                .collect();
+            let vanilla_target = changed.iter().find(|x| x.0 == target).map(|x| x.1);
+            if vanilla_target.is_some() {
+                vanilla_placed += 1;
+            }
+            let we_predicted = ours != u32::from(ts);
+            if we_predicted {
+                predicted += 1;
+                if vanilla_target != Some(ours) || c["result"] != "Success" {
+                    bad.push(format!(
+                        "case {k}: predicted {} at {target:?} clicking {}, vanilla {:?} ({}): {c}",
+                        block_name(v, ours),
+                        block_name(v, u32::from(cs)),
+                        vanilla_target.map(|s| block_name(v, s)),
+                        c["result"]
+                    ));
+                    continue;
+                }
+            } else if let Some(s) = vanilla_target {
+                *missed
+                    .entry(format!(
+                        "{} on {}",
+                        block_name(v, s),
+                        block_name(v, u32::from(cs))
+                    ))
+                    .or_default() += 1;
+            }
+            if we_predicted && changed.len() > 1 {
+                *extra
+                    .entry(format!(
+                        "{} next to {:?}",
+                        block_name(v, ours),
+                        changed
+                            .iter()
+                            .filter(|x| x.0 != target)
+                            .map(|x| block_name(v, x.1))
+                            .collect::<Vec<_>>()
+                    ))
+                    .or_default() += 1;
+            }
+            // The answer: comparable when the client changed what vanilla changed.
+            let same = changed.is_empty() && !we_predicted || we_predicted && changed.len() == 1;
+            if !same {
+                continue;
+            }
+            e.sim.set_player_pos(Vec3::new(
+                player.x,
+                player.y - f64_of(&c["moved"]),
+                player.z,
+            ));
+            let update = c["update"].as_i64().unwrap();
+            if update >= 0 {
+                e.sim
+                    .world_packet(&block_update(v, target, update as u16))
+                    .unwrap();
+            }
+            if c["sequence"].as_i64().unwrap() >= 0 {
+                e.sim.world_packet(&ack(v, sequence)).unwrap();
+            }
+            assert_eq!(
+                block(&e, target),
+                Some(c["target_after"].as_u64().unwrap() as u32),
+                "case {k} target after the answer: {c}"
+            );
+            assert_eq!(
+                block(&e, clicked),
+                Some(c["clicked_after"].as_u64().unwrap() as u32),
+                "case {k} clicked after the answer: {c}"
+            );
+            let after = vec_of(&c["player_after"]);
+            let now = e.sim.take_snap().unwrap_or(Vec3::new(
+                player.x,
+                player.y - f64_of(&c["moved"]),
+                player.z,
+            ));
+            assert_eq!(now, after, "case {k} player after the answer: {c}");
+        }
+        assert!(n > 0);
+        for b in bad.iter().take(12) {
+            eprintln!("{b}");
+        }
+        assert!(
+            bad.is_empty(),
+            "{label}: {} predictions differ from vanilla",
+            bad.len()
+        );
+        eprintln!("{label}: neighbours vanilla changed too: {extra:?}");
+        let mut top: Vec<_> = missed.into_iter().collect();
+        top.sort_by_key(|x| std::cmp::Reverse(x.1));
+        eprintln!(
+            "{label}: {n} clicks, vanilla placed {vanilla_placed}, predicted {predicted} (all \
+             vanilla); not predicted (top): {:?}",
+            &top[..top.len().min(25)]
+        );
+    }
+
+    #[test]
+    fn place_golden_26_1() {
+        replay(GameVersion::V26_1, "26.1");
+    }
+
+    #[cfg(feature = "v26_2")]
+    #[test]
+    fn place_golden_26_2() {
+        replay(GameVersion::V26_2, "26.2");
+    }
+}

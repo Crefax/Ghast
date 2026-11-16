@@ -519,6 +519,55 @@ impl Sim for Sim12 {
             .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
     }
 
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+        // 1.12.2: single-state full-cube blocks with a plain block item (from the 1.12.2 classes:
+        // no block-state properties, no own placement rules); the redstone ores light up when
+        // clicked and the listed blocks open a screen or react to the click.
+        const PLAIN: &[u16] = &[
+            4, 7, 13, 14, 15, 16, 20, 21, 22, 25, 41, 42, 45, 47, 48, 49, 52, 56, 57, 58, 73, 79,
+            80, 82, 87, 89, 103, 112, 121, 123, 129, 133, 138, 152, 153, 165, 166, 169, 172, 173,
+            174, 201, 206, 213, 214, 215,
+        ];
+        const ACTIVATED: &[u16] = &[
+            23, 25, 58, 61, 62, 73, 74, 84, 137, 138, 145, 158, 210, 211, 219, 220, 221, 222, 223,
+            224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 255,
+        ];
+        use ghast_data::v1_12::BlockState;
+        let w = &self.world;
+        let unit = ghast_data::Aabb {
+            min_x: 0.0,
+            min_y: 0.0,
+            min_z: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+            max_z: 1.0,
+        };
+        let Some((at, raw)) = crate::sim::predict::legacy_plain_placement(
+            p,
+            PLAIN,
+            ACTIVATED,
+            |q| w.block_state(q.x, q.y, q.z).map(BlockState::raw),
+            |raw| {
+                BlockState::from_raw(raw).is_some_and(|s| {
+                    s.block().shape_dependency() == ghast_data::ShapeDependency::None
+                        && s.shape() == [unit]
+                })
+            },
+            &self.player.bb,
+            &ghast_physics::BlockView::world_border(&self.world),
+        ) else {
+            return;
+        };
+        if let Some(s) = BlockState::from_raw(raw) {
+            self.world.set_block_state(at.x, at.y, at.z, s);
+        }
+    }
+
+    #[cfg(test)]
+    fn set_player_pos(&mut self, p: Vec3) {
+        self.player.set_position(p.x, p.y, p.z);
+    }
+
     fn held_item(&self, id: u16, count: u8, efficiency: u8) -> HeldItem {
         held_item_facts(DataSet::V1_12, id, count, efficiency)
     }

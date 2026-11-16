@@ -1448,12 +1448,13 @@ impl<S: Sim> Engine<S> {
         }
         // The tick's dig packets (behaviour actions and buttons): broken blocks turn to air
         // and the version keeps its records of them for the server's answers.
-        if c.hands.dug {
-            c.hands.dug = false;
+        if c.hands.dug || !c.hands.placing.is_empty() {
             // Only 1.16.5 records the digs that broke nothing.
-            if !c.broken_now.is_empty() || self.sim.records_digs() {
-                sent_digs(c, &mut self.sim);
+            if !c.broken_now.is_empty() || !c.hands.placing.is_empty() || self.sim.records_digs() {
+                sent_predictions(c, &mut self.sim);
             }
+            c.hands.dug = false;
+            c.hands.placing.clear();
         }
         // ClientPlayerEntity.tickMovement: a flight toggle is told to the server before the move.
         if let Some(f) = c.want_flying.take() {
@@ -1752,18 +1753,21 @@ impl TickContext<'_> {
     }
 }
 
-/// Hands the tick's dig packets to the sim in packet order ([`Sim::dig_sent`]): whether each
-/// broke its block on the client, its 1.19+ prediction sequence (counted from the wire's last
-/// sequence the way the wire will number this tick's predicting packets: dig start / finish,
-/// place, use item) and the player's position before the tick's movement.
+/// Hands the tick's dig and block-item placement packets to the sim in packet order
+/// ([`Sim::dig_sent`], [`Sim::place_sent`]): whether each dig broke its block on the client,
+/// each packet's 1.19+ prediction sequence (counted from the wire's last sequence the way the
+/// wire will number this tick's predicting packets: dig start / finish, place, use item) and
+/// the player's position before the tick's movement.
 #[cold]
 #[inline(never)]
-fn sent_digs<S: Sim>(c: &mut Core, sim: &mut S) {
+fn sent_predictions<S: Sim>(c: &mut Core, sim: &mut S) {
     use crate::common::DigStatus;
     let player = c.pose.pos;
     let mut sequence = c.sequence.unwrap_or(0);
     let mut broken = 0;
-    for o in &c.out {
+    let mut placing = c.hands.placing.iter().copied().peekable();
+    let any_item = c.inv.held().is_some() || c.inv.offhand().is_some();
+    for (i, o) in c.out.iter().enumerate() {
         match *o {
             Outbound::Dig { status, pos, .. } => {
                 let predicting = matches!(status, DigStatus::Start | DigStatus::Finish);
@@ -1778,7 +1782,28 @@ fn sent_digs<S: Sim>(c: &mut Core, sim: &mut S) {
                 }
                 sim.dig_sent(pos, status, b, sequence, player);
             }
-            Outbound::Place { .. } | Outbound::UseItem { .. } => {
+            Outbound::Place {
+                pos,
+                face,
+                ref held,
+                ..
+            } => {
+                sequence = sequence.wrapping_add(1);
+                while placing.next_if(|&p| (p as usize) < i).is_some() {}
+                if placing.next_if_eq(&(i as u32)).is_some() {
+                    sim.place_sent(&crate::sim::predict::PlaceSent {
+                        pos,
+                        face,
+                        held: held.as_ref(),
+                        sneaking: c.pose.sneaking,
+                        any_item,
+                        game_mode: c.game_mode,
+                        sequence,
+                        player,
+                    });
+                }
+            }
+            Outbound::UseItem { .. } => {
                 sequence = sequence.wrapping_add(1);
             }
             _ => {}

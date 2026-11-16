@@ -1307,6 +1307,19 @@ impl Sim for Sim16 {
         }
     }
 
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+        // interactBlock → BlockItem.place on the client world; the server's block updates for
+        // the clicked block and its neighbour settle it (no records).
+        if let Some((at, state)) = self.plain_placement(p) {
+            self.world.set_block_state(at.x, at.y, at.z, state);
+        }
+    }
+
+    #[cfg(test)]
+    fn set_player_pos(&mut self, p: Vec3) {
+        self.player.set_position(p.x, p.y, p.z);
+    }
+
     #[inline(always)]
     fn records_digs(&self) -> bool {
         true
@@ -1419,6 +1432,93 @@ impl Sim16 {
         }
         self.unacked.trim();
     }
+}
+
+impl Sim16 {
+    /// `ClientPlayerInteractionManager.interactBlock` → `BlockItem.place` on the client, when its
+    /// result is known exactly ([`crate::sim::predict::PlaceSent`]; the same rules as 26.x,
+    /// with this version's blocks): the position and the state placed.
+    fn plain_placement(
+        &self,
+        p: &crate::sim::predict::PlaceSent<'_>,
+    ) -> Option<(BlockPos, ghast_data::v1_16_5::BlockState)> {
+        use crate::common::GameMode;
+        use ghast_data::v1_16_5::{Block, Item};
+        // ItemStack.useOnBlock: adventure needs CanPlaceOn; spectators never place.
+        if !matches!(p.game_mode, GameMode::Survival | GameMode::Creative) {
+            return None;
+        }
+        let stack = p.held?;
+        // BlockStateTag / BlockEntityTag (BlockItem.placeFromTag).
+        if stack.nbt().is_some() {
+            return None;
+        }
+        let item = Item::from_id(u16::try_from(stack.id()).ok()?)?;
+        let block = Block::from_name(item.info().name)?;
+        let state = block.default_state();
+        if block.layout().state_count != 1
+            || !state.full_cube()
+            // ConcretePowderBlock.getPlacementState: concrete next to water.
+            || block.info().name.ends_with("_concrete_powder")
+        {
+            return None;
+        }
+        if !crate::sim::predict::border_contains(
+            &ghast_physics::BlockView::world_border(&self.world),
+            p.pos,
+        ) {
+            return None;
+        }
+        let clicked = self.world.block_state(p.pos.x, p.pos.y, p.pos.z)?;
+        if !clicked.full_cube() {
+            return None;
+        }
+        // AbstractBlock.onUse of the clicked block, unless sneaking with an item.
+        if !(p.sneaking && p.any_item) && activated_full_cube_16(clicked.block().info().name) {
+            return None;
+        }
+        let at = p.face.offset(p.pos);
+        if !(0..256).contains(&at.y) {
+            return None;
+        }
+        let there = self.world.block_state(at.x, at.y, at.z)?;
+        let name = there.block().info().name;
+        if !(there.is_air() || name == "water" || name == "lava") {
+            return None;
+        }
+        // World.canPlace: the player's own box (other entities: the server's updates).
+        if holds_player(state, at, &self.player.bb) {
+            return None;
+        }
+        Some((at, state))
+    }
+}
+
+/// Full-cube blocks whose `onUse` may accept a right click with a block item (from the 1.16.5
+/// classes; beehives, pumpkins, TNT, redstone ore and fletching tables pass it on).
+fn activated_full_cube_16(name: &str) -> bool {
+    const LIST: &[&str] = &[
+        "barrel",
+        "beacon",
+        "blast_furnace",
+        "cartography_table",
+        "chain_command_block",
+        "command_block",
+        "crafting_table",
+        "dispenser",
+        "dropper",
+        "furnace",
+        "jigsaw",
+        "jukebox",
+        "loom",
+        "note_block",
+        "repeating_command_block",
+        "respawn_anchor",
+        "smithing_table",
+        "smoker",
+        "structure_block",
+    ];
+    name.ends_with("shulker_box") || LIST.contains(&name)
 }
 
 /// 1.16.5 `Entity.collidesWithStateAtPos`: the state's collision shape at `pos` overlaps `bb`.

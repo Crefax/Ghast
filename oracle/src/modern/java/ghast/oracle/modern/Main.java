@@ -90,6 +90,11 @@ public final class Main {
                 int count = (int) a.lng("--count", DigDump.CASES);
                 Io.write(a.path("--out", golden.resolve("dig.jsonl.gz")), sink -> dig(seed, count, sink));
             }
+            case "place" -> {
+                long seed = a.lng("--seed", 1);
+                int count = (int) a.lng("--count", PlaceDump.CASES);
+                Io.write(a.path("--out", golden.resolve("place.jsonl.gz")), sink -> place(seed, count, sink));
+            }
             case "rays" -> {
                 long seed = a.lng("--seed", 1);
                 int worlds = (int) a.lng("--worlds", SelectionDump.RAY_WORLDS);
@@ -133,6 +138,7 @@ public final class Main {
                   selection [--out FILE]               outline / interaction shapes of every block state
                   items [--out FILE]                   item facts (stack, damage, food, block, tool) + dig facts per block
                   dig [--seed N] [--count N] [--out FILE]  block breaking through the real client
+                  place [--seed N] [--count N] [--out FILE]  right clicks on blocks (placement prediction, acks)
                   joins [--out FILE]                   joins through the level-load gate (delayed load)
                   hashed-stacks [--out FILE]           item stack wire bytes + the client's HashedStack
                   net-crypto [--out FILE]              login encryption: session hash, AES/CFB8, hello / key packets
@@ -195,6 +201,7 @@ public final class Main {
         Io.write(dir.resolve("clicks_seed1.jsonl.gz"), sink -> ClickDump.lines(1, ClickDump.CASES, sink));
         Io.write(dir.resolve("clicks_creative_seed1.jsonl.gz"), sink -> ClickDump.creativeLines(1, ClickDump.CREATIVE_CASES, sink));
         Io.write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
+        Io.write(dir.resolve("place.jsonl.gz"), sink -> place(1, PlaceDump.CASES, sink));
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.bestCompression = false;
     }
@@ -210,6 +217,14 @@ public final class Main {
     static void dig(long seed, int count, Consumer<String> sink) {
         try {
             DigDump.cases(seed, count, sink);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static void place(long seed, int count, Consumer<String> sink) {
+        try {
+            PlaceDump.cases(seed, count, sink);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
