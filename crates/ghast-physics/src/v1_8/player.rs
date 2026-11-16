@@ -148,7 +148,9 @@ pub struct PlayerState {
     pub sent: SentState,
     /// Movement-relevant status effects.
     pub effects: Effects,
-    /// Fell below y = −64: vanilla removes the entity and stops ticking it.
+    /// The entity was removed from the client world: the tick does nothing. The tick never sets
+    /// it (below y = −64 the client player is hurt, which the client refuses, and keeps
+    /// ticking; before 0.4.6 the tick set it there).
     pub removed: bool,
 }
 
@@ -390,15 +392,13 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
         state_at(self.w, x, y, z)
     }
 
-    /// Start of the entity tick: water contact (with flow push), lava halves the fall distance,
-    /// falling out of the world removes the entity.
+    /// Start of the entity tick: water contact (with flow push), lava halves the fall distance.
+    /// Below y = -64 a living entity is hurt (`LivingEntity.destroy`), not removed, and the
+    /// client player refuses the damage: it keeps ticking.
     fn base_tick(&mut self) {
         self.update_water_state();
         if is_touching_lava(self.p, self.w) {
             self.p.fall_distance *= 0.5;
-        }
-        if self.p.pos[1] < -64.0 {
-            self.p.removed = true;
         }
     }
 

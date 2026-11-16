@@ -292,6 +292,13 @@ final class Scenarios {
                 .fill(-4, 63, 6, 4, 63, 10, STONE_SLAB, 0).spawn(0.5, 66, 0.3, 0, 0).run(30, FORWARD).run(15, FORWARD | JUMP));
         landingVariants(l);
         extras(l);
+        // Below y = -64 a living entity is hurt (LivingEntity.destroy), not removed, and the
+        // client player refuses the damage: it keeps falling and moving.
+        l.add(flat("void_fall").desc("fall from below the floor through y = -64 into the void, steering and jumping")
+                .spawn(0.5, -20, 0.5, 0, 0).run(20, 0).run(20, FORWARD | SPRINT).run(20, JUMP | LEFT));
+        l.add(flat("void_fall_creative").desc("creative flight below y = -64: fly up and down")
+                .mode(Scenario.GameMode.CREATIVE).flying(true).spawn(0.5, -70, 0.5, 0, 0)
+                .run(10, 0).run(15, SNEAK).run(20, JUMP | FORWARD).run(10, 0));
         return l;
     }
 

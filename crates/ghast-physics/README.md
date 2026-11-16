@@ -498,8 +498,8 @@ minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.
-- 1.8.9: falling below y = −64 sets `PlayerState::removed` and the tick stops (not checked
-  against the oracle: 1.8.9 living entities are hurt there, not removed, as in 1.12.2, so the
-  1.8.9 client probably keeps ticking too). 1.12.2 keeps ticking there (the client player refuses the void damage that
-  replaces the removal for living entities; the 1.12 tick removed it before 0.4.6, found by the
-  elytra fuzz).
+- (Covered since 0.4.6.) Below y = −64 the client player keeps ticking on every version (vanilla hurts a living entity
+  there instead of removing it, and the client player refuses the damage). 1.8.9 and 1.12.2
+  stopped the tick there before 0.4.6 (`PlayerState::removed`, now only the caller's); 1.8.9:
+  scenarios `void_fall`, `void_fall_creative` and the cached `fuzz-void/` slice (1,000
+  `fuzz-extras` cases moved to y −58…−68 and replayed, 100,000 ticks, 80 % below −64, 0 diffs).
