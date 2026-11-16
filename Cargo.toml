@@ -64,3 +64,14 @@ debug = "line-tables-only"
 
 [profile.bench]
 inherits = "release"
+
+# Heavy test replays (`--features oracle-cache` fuzz / pick / entity replays and the ignored
+# engine cache replays): thin instead of fat LTO and parallel codegen, so a gate rebuild takes a
+# fraction of the time while single-threaded replays run about as fast. Results are the same as
+# under `release` (Rust has no fast-math; LTO and codegen units do not change float results).
+# Use: `cargo test --profile replay ...`; artifacts go to target/replay. See CONTRIBUTING.md.
+[profile.replay]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+debug = false

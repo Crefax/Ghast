@@ -37,6 +37,26 @@ MC=1.16.5 oracle/run.sh verify        # the same for 1.16.5
 oracle/run.sh help                    # fuzz, replay, clicks, boxes, ...
 ```
 
+Large replays of the git-ignored `oracle/cache/` (the `oracle-cache` feature of
+`ghast-physics`, the ignored engine cache tests of `ghast-client`, `ORACLE_TRACKING=<file>` for
+`ghast-entity`) are best built with the `replay` profile: the `release` profile is fat LTO with
+one codegen unit, which makes every rebuild slow, while `replay` uses thin LTO and parallel
+codegen and gives the same results:
+
+```sh
+cargo test --profile replay -p ghast-physics --features oracle-cache --test fuzz_cache -- --nocapture
+GHAST_FUZZ=$PWD/oracle/cache/1.8.9/fuzz cargo test --profile replay -p ghast-physics --features oracle-cache --test fuzz_cache
+cargo test --profile replay -p ghast-client --lib -- --ignored riptide_cache_1_16_5
+```
+
+Measured once (x86-64, 4 build jobs, a shared busy machine, so rough): rebuilding the
+`ghast-client` lib tests after a `ghast-physics` change took 138 s under `release` and 60 s under
+`replay`; the `ghast-physics` fuzz test 29 s and 20 s. The single-threaded 1.16.5 riptide cache
+replay ran in 43 – 47 s under both; the cached 1.8.9 (2.16 M ticks) and 26.1 (1.8 M ticks) fuzz
+replays matched with 0 diffs under both profiles. Release builds keep `release`, and benchmarks
+keep `cargo bench` (the `bench` profile, which is `release`): their numbers are only comparable
+there.
+
 A change to physics, collision, raytrace or click behaviour should come with oracle evidence:
 new or regenerated vectors, or a fuzz run (seeds and tick counts in the PR description).
 See [oracle/README.md](oracle/README.md).
