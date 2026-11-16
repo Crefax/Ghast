@@ -2926,7 +2926,7 @@ mod tests {
             hold_turn_on_action: true,
             accept_required_packs: true,
             entity_push: true,
-            inventory: match version {
+            inventory: match version.instance() {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
                 GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
                 _ => ghast_inventory::Version::V1_16_5,
@@ -3639,7 +3639,7 @@ mod tests {
             e.sim.collect_block_updates(true);
             let t0 = Instant::now();
             e.note_inbound(t0);
-            let raws = match v {
+            let raws = match v.instance() {
                 GameVersion::V1_8_9 => {
                     use ghast_protocol::v1_8::play::clientbound as cb;
                     vec![
@@ -3756,7 +3756,7 @@ mod tests {
             e.tick(&mut b, t0);
             e.tick(&mut b, t0);
             let _ = b;
-            let want = match v {
+            let want = match v.instance() {
                 GameVersion::V1_8_9 | GameVersion::V1_12_2 => vec![
                     (BlockPos::new(3, 63, 4), 59 << 4 | 7),
                     (BlockPos::new(5, 62, 6), 60 << 4 | 7),
