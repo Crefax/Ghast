@@ -173,10 +173,11 @@ impl Unacked {
     }
 }
 
-/// `Entity.isColliding(pos, state)` / 1.16.5 `collidesWithStateAtPos`: the collision shape
-/// (context-free cells, unshifted) placed at `pos` overlaps the player's box
-/// (`Shapes.joinIsNotEmpty(…, AND)`, 1e-7 merge tolerance).
-#[cfg(any(ghast_modern, feature = "v1_16_5"))]
+/// 1.16.5 `Entity.collidesWithStateAtPos`: the collision shape (context-free cells, unshifted)
+/// placed at `pos` overlaps the player's box (`VoxelShapes.matchesAnywhere(…, AND)`). Not exact
+/// for bamboo (model offset) and scaffolding (context shape); 26.x uses the physics' own
+/// context-aware query.
+#[cfg(feature = "v1_16_5")]
 pub(crate) fn shape_overlaps(
     shape: ghast_physics::voxel::VoxelShape<'_>,
     pos: BlockPos,

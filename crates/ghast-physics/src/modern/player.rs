@@ -703,6 +703,29 @@ pub fn no_block_collision<R: Rules, W: BlockView<State = R::State>>(
     world.no_collision(pos, &q, &c)
 }
 
+/// `Entity.isColliding(pos, state)`: the collision shape of `state` at block `pos` for the
+/// entity's context (scaffolding, powder snow) and with the block's model offset (bamboo,
+/// pointed dripstone) overlaps `bb` (`[min_x, min_y, min_z, max_x, max_y, max_z]`;
+/// `Shapes.joinIsNotEmpty(…, AND)`). The client uses it when a restored block moves the player
+/// back (`ClientLevel.syncBlockState`).
+#[must_use]
+pub fn state_collides<R: Rules>(
+    state: R::State,
+    pos: [i32; 3],
+    bb: [f64; 6],
+    ctx: &CollisionContext,
+) -> bool {
+    let c = ShapeCtx {
+        feet_y: ctx.feet_y,
+        descending: ctx.descending,
+        fall_distance: ctx.fall_distance,
+        leather_boots: ctx.walks_on_powder_snow,
+    };
+    let q = crate::math::Aabb::new(bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]);
+    super::collide::placed_shape::<R>(state, pos[0], pos[1], pos[2], Some(&c))
+        .is_some_and(|s| super::collide::placed_intersects(&s, &q))
+}
+
 fn climbable<R: Rules, W: BlockView<State = R::State>, E: Extra>(
     w: &World<'_, R, W, E>,
     p: &PlayerState,

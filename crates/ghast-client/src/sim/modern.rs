@@ -1143,7 +1143,7 @@ impl ModernSim {
             }
             world.set_block_state(pos.x, pos.y, pos.z, state);
             if let Some(at) = at
-                && holds_player(state, pos, &player.bb)
+                && holds_player(state, pos, player)
             {
                 // Entity.absSnapTo: the position and the old position, velocity kept.
                 player.set_pos(at[0], at[1], at[2]);
@@ -1157,6 +1157,18 @@ impl ModernSim {
     }
 }
 
+/// What a broken block leaves (`FluidState.createLegacyBlock` of its fluid): a waterlogged
+/// block (and kelp, seagrass, bubble columns) leaves a water source, anything else air.
+fn fluid_left_behind(old: BlockState) -> BlockState {
+    use super::data::Block;
+    // The fluid byte's kind bits: 1 water, 2 lava. A block that holds a fluid holds a source.
+    match old.phys().fluid() >> 6 {
+        1 => Block::WATER.default_state(),
+        2 => Block::LAVA.default_state(),
+        _ => BlockState::AIR,
+    }
+}
+
 /// A wire block state id as the world stores it (unknown ids read as air).
 fn state_from_wire(v: i64) -> BlockState {
     u16::try_from(v)
@@ -1165,26 +1177,21 @@ fn state_from_wire(v: i64) -> BlockState {
         .unwrap_or(BlockState::AIR)
 }
 
-/// `Entity.isColliding(pos, state)`: the state's collision shape at `pos` overlaps `bb`.
-fn holds_player(state: BlockState, pos: BlockPos, bb: &ghast_physics::math::Aabb) -> bool {
-    use ghast_physics::voxel::{Points, VoxelShape};
-    let r = state.voxel_shape();
-    if r.empty {
-        return false;
-    }
-    let axis = |n: u8, pts: &'static [f64]| match r.class {
-        super::data::VoxelClass::Simple => Points::Fractional(u32::from(n)),
-        super::data::VoxelClass::Array => Points::Explicit(pts),
-    };
-    let shape = VoxelShape {
-        axes: [
-            axis(r.sizes[0], r.xs),
-            axis(r.sizes[1], r.ys),
-            axis(r.sizes[2], r.zs),
-        ],
-        cells: r.cells,
-    };
-    crate::sim::predict::shape_overlaps(shape, pos, bb)
+/// `Entity.isColliding(pos, state)`: the state's collision shape at `pos` for the player's
+/// context (model offsets, scaffolding, powder snow) overlaps the player's box.
+fn holds_player(state: BlockState, pos: BlockPos, p: &modern::PlayerState) -> bool {
+    let b = &p.bb;
+    modern::state_collides::<Rules>(
+        state,
+        [pos.x, pos.y, pos.z],
+        [b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z],
+        &modern::CollisionContext {
+            feet_y: p.pos[1],
+            descending: p.shift(),
+            fall_distance: p.fall_distance,
+            walks_on_powder_snow: p.leather_boots,
+        },
+    )
 }
 
 /// The union of a shape's boxes as a ray box (block-local).
@@ -1991,7 +1998,7 @@ impl Sim for ModernSim {
         }
         if self
             .world
-            .set_block_state(pos.x, pos.y, pos.z, BlockState::AIR)
+            .set_block_state(pos.x, pos.y, pos.z, fluid_left_behind(old))
         {
             self.predictions
                 .retain(pos, old, sequence, [player.x, player.y, player.z]);

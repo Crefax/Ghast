@@ -671,30 +671,7 @@ impl<R: Rules, W: BlockView<State = R::State>, E: Extra> World<'_, R, W, E> {
         z: i32,
         ctx: Option<&ShapeCtx>,
     ) -> Option<Placed> {
-        let p = R::phys(s);
-        let f = p.flags();
-        let o = [f64::from(x), f64::from(y), f64::from(z)];
-        if f & sf::FULL_CUBE != 0 {
-            return Some(Placed::Cube(o));
-        }
-        if f & sf::CONTEXT != 0 {
-            return context_shape::<R>(p, y, ctx).map(|i| {
-                if i == R::FULL_CUBE_VOXEL {
-                    Placed::Cube(o)
-                } else {
-                    Placed::Shape(R::voxel(i), None, o)
-                }
-            });
-        }
-        if f & sf::EMPTY != 0 {
-            return None;
-        }
-        let r = R::voxel(p.shape());
-        if f & sf::OFFSET != 0 {
-            let shift = model_offset(R::offset(s), x, z);
-            return Some(Placed::Shape(r, Some(shift), o));
-        }
-        Some(Placed::Shape(r, None, o))
+        placed_shape::<R>(s, x, y, z, ctx)
     }
 
     /// Vanilla's `BlockCollisions` over `query`: calls `f(x, y, z, state, shape)` for every block
@@ -908,6 +885,52 @@ fn cmp_pos(a: [i32; 3], b: [i32; 3]) -> i32 {
         a[2] - b[2]
     } else {
         a[0] - b[0]
+    }
+}
+
+/// The collision shape of a state at a position for a context (`None` = the empty context),
+/// [`World::shape_of_state`] without the world (no shape reads other blocks).
+#[inline]
+pub(crate) fn placed_shape<R: Rules>(
+    s: R::State,
+    x: i32,
+    y: i32,
+    z: i32,
+    ctx: Option<&ShapeCtx>,
+) -> Option<Placed> {
+    let p = R::phys(s);
+    let f = p.flags();
+    let o = [f64::from(x), f64::from(y), f64::from(z)];
+    if f & sf::FULL_CUBE != 0 {
+        return Some(Placed::Cube(o));
+    }
+    if f & sf::CONTEXT != 0 {
+        return context_shape::<R>(p, y, ctx).map(|i| {
+            if i == R::FULL_CUBE_VOXEL {
+                Placed::Cube(o)
+            } else {
+                Placed::Shape(R::voxel(i), None, o)
+            }
+        });
+    }
+    if f & sf::EMPTY != 0 {
+        return None;
+    }
+    let r = R::voxel(p.shape());
+    if f & sf::OFFSET != 0 {
+        let shift = model_offset(R::offset(s), x, z);
+        return Some(Placed::Shape(r, Some(shift), o));
+    }
+    Some(Placed::Shape(r, None, o))
+}
+
+/// `Shapes.joinIsNotEmpty(shape, Shapes.create(query), AND)` of a placed block shape.
+#[inline]
+pub(crate) fn placed_intersects(shape: &Placed, query: &Aabb) -> bool {
+    match *shape {
+        Placed::Cube(o) => intersects(query, o[0], o[1], o[2], o[0] + 1.0, o[1] + 1.0, o[2] + 1.0),
+        Placed::Shape(r, sh, o) => shape_intersects(r, sh, o, query),
+        Placed::Border => false,
     }
 }
 

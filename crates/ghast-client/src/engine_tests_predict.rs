@@ -219,6 +219,61 @@ fn other_positions_and_section_updates() {
     }
 }
 
+/// `destroyBlock` leaves the block's fluid: a broken waterlogged block (and seagrass) becomes a
+/// water source, a dry one air; a refused break restores the waterlogged state.
+#[test]
+fn broken_waterlogged_block_leaves_water() {
+    for v in modern_versions() {
+        let mut e = modern(v);
+        let water = u32::from(state(v, "water"));
+        for name in [
+            "oak_stairs[waterlogged=true]",
+            "oak_slab[type=bottom,waterlogged=true]",
+            "seagrass",
+        ] {
+            let s = state(v, name);
+            e.sim.world_packet(&block_update(v, A, s)).unwrap();
+            predict(&mut e, A, 1);
+            assert_eq!(block(&e, A), Some(water), "{v:?} {name}");
+            e.sim.world_packet(&ack(v, 1)).unwrap();
+            assert_eq!(block(&e, A), Some(u32::from(s)), "{v:?} {name}");
+        }
+        let dry = state(v, "oak_stairs[waterlogged=false]");
+        e.sim.world_packet(&block_update(v, A, dry)).unwrap();
+        predict(&mut e, A, 2);
+        assert_eq!(block(&e, A), Some(0), "{v:?}");
+    }
+}
+
+/// `isColliding` uses the player's collision context: scaffolding the player stands inside
+/// (not above its top) has no collision shape, so restoring it does not move the player; a
+/// full block there does.
+#[test]
+fn move_back_uses_the_players_collision_context() {
+    for v in modern_versions() {
+        let mut e = modern(v);
+        let at_feet = BlockPos::new(8, 64, 8);
+        let back = Vec3::new(8.5, 66.0, 8.5);
+        let scaffolding = state(v, "scaffolding[distance=0,bottom=false]");
+        e.sim
+            .world_packet(&block_update(v, at_feet, scaffolding))
+            .unwrap();
+        e.sim.dig_sent(at_feet, DigStatus::Finish, true, 1, back);
+        e.sim.world_packet(&ack(v, 1)).unwrap();
+        e.sync_snap();
+        assert_eq!(block(&e, at_feet), Some(u32::from(scaffolding)), "{v:?}");
+        assert_eq!(e.core.pose.pos, FEET, "inside scaffolding: {v:?}");
+        let stone = state(v, "stone");
+        e.sim
+            .world_packet(&block_update(v, at_feet, stone))
+            .unwrap();
+        e.sim.dig_sent(at_feet, DigStatus::Finish, true, 2, back);
+        e.sim.world_packet(&ack(v, 2)).unwrap();
+        e.sync_snap();
+        assert_eq!(e.core.pose.pos, back, "inside stone: {v:?}");
+    }
+}
+
 /// The wire's numbers for the packets of one tick, as the connection writes them.
 fn write_tick<V: ClientVersion>(
     out: &[Outbound],
@@ -413,6 +468,30 @@ mod v1_16_5 {
         assert_eq!(block(&e, B), Some(0));
         e.sync_snap();
         assert_eq!(e.core.pose.pos, FEET);
+    }
+
+    /// `breakBlock` leaves the block's fluid (a waterlogged block: a water source).
+    #[test]
+    fn broken_waterlogged_block_leaves_water() {
+        use ghast_data::v1_16_5::{Block, Property};
+        let mut e = joined();
+        let stairs = |w: &str| {
+            Block::from_name("oak_stairs")
+                .unwrap()
+                .state_with(&[(Property::from_name("waterlogged").unwrap(), w)])
+                .unwrap()
+                .id()
+        };
+        let id = |n: &str| Block::from_name(n).unwrap().default_state().id();
+        let wet = stairs("true");
+        set(&mut e, A, wet);
+        e.sim.dig_sent(A, DigStatus::Finish, true, 0, FEET);
+        assert_eq!(block(&e, A), Some(u32::from(id("water"))));
+        e.sim.world_packet(&answer(A, wet, FINISH, false)).unwrap();
+        assert_eq!(block(&e, A), Some(u32::from(wet)));
+        set(&mut e, B, stairs("false"));
+        e.sim.dig_sent(B, DigStatus::Finish, true, 0, FEET);
+        assert_eq!(block(&e, B), Some(0));
     }
 
     /// An approved start the client recorded keeps the client's state (an instant break stays

@@ -1291,7 +1291,19 @@ impl Sim for Sim16 {
                 .put(pos, status.id() as u8, [player.x, player.y, player.z]);
         }
         if broken {
-            self.predict_air(pos.x, pos.y, pos.z);
+            // breakBlock: the block's fluid (`FluidState.getBlockState`) takes its place: a
+            // waterlogged block leaves a water source.
+            use ghast_data::FluidKind;
+            use ghast_data::v1_16_5::{Block, BlockState};
+            let Some(old) = self.world.block_state(pos.x, pos.y, pos.z) else {
+                return;
+            };
+            let left = match old.fluid().map(|f| f.kind) {
+                Some(FluidKind::Water) => Block::WATER.default_state(),
+                Some(FluidKind::Lava) => Block::LAVA.default_state(),
+                None => BlockState::AIR,
+            };
+            self.world.set_block_state(pos.x, pos.y, pos.z, left);
         }
     }
 

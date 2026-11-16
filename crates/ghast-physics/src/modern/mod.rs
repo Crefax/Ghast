@@ -51,7 +51,7 @@ pub use load::LoadGate;
 pub use player::{
     AttributeKind, Attributes, ClientInput, ClientOptions, CollisionContext, Dimensions, Effects,
     LevelInfo, PlayerState, Pose, SentState, UseEffects, in_water_or_rain, no_block_collision,
-    on_climbable, on_climbable_ext, riptide, tick, tick_ext, tick_in,
+    on_climbable, on_climbable_ext, riptide, state_collides, tick, tick_ext, tick_in,
 };
 pub use rules::Rules;
 #[cfg(feature = "v26_1")]
