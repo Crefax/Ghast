@@ -9,8 +9,10 @@ and tool speed multipliers.
 | `v1_8` | `v1_8` | 1.8.x (protocol 47) | `id << 4 \| meta` (`u16`, wire / chunk value) |
 | `v1_12` | `v1_12` | 1.12.x (protocol 335 – 340) | `id << 4 \| meta`; every shape, flag and face shape from the 1.12.2 oracle |
 | `v1_16_5` | `v1_16_5` | 1.16.5 (protocol 754) | global palette id with properties |
+| `v26_1` | `v26_1` | 26.1 (protocol 775) | global palette with properties; movement facts from the jar |
+| `v26_2` | `v26_2` | 26.2 (protocol 776) | global palette with properties; movement facts from the jar |
 
-Both features are on by default; disable the ones you do not need.
+All version features (and `display-names`) are on by default; disable the ones you do not need.
 
 ```rust
 use ghast_data::v1_8::{Block, BlockState};

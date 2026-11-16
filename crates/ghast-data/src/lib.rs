@@ -8,6 +8,7 @@
 //! | [`v1_12`] | `v1_12` | 1.12.x (protocol 335 – 340) | `id << 4 \| meta` |
 //! | [`v1_16_5`] | `v1_16_5` | 1.16.5 (protocol 754) | global palette with properties |
 //! | [`v26_1`] | `v26_1` | 26.1 (protocol 775) | global palette with properties; movement facts from the jar |
+//! | [`v26_2`] | `v26_2` | 26.2 (protocol 776) | global palette with properties; movement facts from the jar |
 //!
 //! All tables are generated (`codegen/data`) from PrismarineJS minecraft-data 3.119.0 plus a small
 //! hand-maintained file of physics facts, and live in `static` memory: no runtime parsing, no lazy
