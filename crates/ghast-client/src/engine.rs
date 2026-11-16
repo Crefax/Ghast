@@ -2877,6 +2877,11 @@ mod tests_26_2;
 #[path = "engine_tests_actions.rs"]
 mod tests_actions;
 
+/// The legacy special menus through the open-window path (`engine_tests_menus.rs`).
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[path = "engine_tests_menus.rs"]
+mod tests_menus;
+
 /// `Client::record` on every version (`engine_tests_record.rs`).
 #[cfg(all(
     test,

@@ -70,6 +70,13 @@ pub enum SlotKind {
     Output,
     /// 1.12 / 1.16.5 shulker box slot: any item but shulker boxes.
     Shulker,
+    /// Brewing stand bottle slot (0..=2): potions and glass bottles (1.12+: also splash and
+    /// lingering potions), one item.
+    Potion,
+    /// Brewing stand ingredient slot (3): the version's brewing ingredients.
+    BrewingIngredient,
+    /// 1.12+ brewing stand fuel slot (4): blaze powder.
+    BrewingFuel,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -202,6 +209,11 @@ impl WindowKind {
                 0 => SlotKind::Normal,
                 1 => SlotKind::Special,
                 _ => SlotKind::Output,
+            },
+            WindowKind::BrewingStand => match i {
+                0..=2 => SlotKind::Potion,
+                3 => SlotKind::BrewingIngredient,
+                _ => SlotKind::BrewingFuel,
             },
             WindowKind::Horse { .. } => {
                 if i < 2 {

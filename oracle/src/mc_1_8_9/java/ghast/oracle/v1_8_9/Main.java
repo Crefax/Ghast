@@ -102,6 +102,19 @@ public final class Main {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", 1000);
                 boolean craft = Boolean.parseBoolean(a.str("--craft", "false"));
+                String menu = a.str("--menu", "");
+                if (!menu.isEmpty()) {
+                    // special menus (MenuClickDump): --menu brewing|...|all
+                    Path mout = a.path("--out", Path.of("cache", VERSION, "clicks", "menu-" + menu + "-seed" + seed + "-n" + count + ".jsonl.gz"));
+                    write(mout, sink -> {
+                        if (menu.equals("all")) {
+                            MenuClickDump.all(seed, count, sink);
+                        } else {
+                            MenuClickDump.cases(seed, menu, count, sink);
+                        }
+                    });
+                    break;
+                }
                 Path out = a.path("--out", Path.of("cache", VERSION, "clicks",
                         (craft ? "craft" : "clicks") + "-seed" + seed + "-n" + count + ".jsonl.gz"));
                 write(out, sink -> ClickDump.cases(seed, count, craft, sink));
@@ -134,6 +147,7 @@ public final class Main {
                   recipes [--out FILE]                 crafting recipes in the client's match order
                   clicks [--seed N] [--count N] [--craft true] [--out FILE]  window click vectors (cache/<mc>/clicks/);
                                                        --craft: crafting grids from recipes, clicks on result/grid
+                                                       --menu M: special menu M (brewing, ..., all)
                   entity-sizes [--out FILE]            width/height/eye height of every entity type + variants
                   list                                 list hand-written scenarios
                   selftest                             generate everything twice and compare content
@@ -150,6 +164,8 @@ public final class Main {
     static final int GOLDEN_RAYS = 40;
     static final long GOLDEN_CLICK_SEED = 1;
     static final int GOLDEN_CLICK_CASES = 3000;
+    /** Cases per special menu in the golden set. */
+    static final int GOLDEN_MENU_CASES = 300;
 
     /** Golden files are compressed harder; big fuzz runs favour speed. */
     private static boolean bestCompression;
@@ -191,6 +207,7 @@ public final class Main {
         write(dir.resolve("picks.jsonl.gz"), sink -> picks(1, PickDump.WORLDS, PickDump.RAYS, sink));
         write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
+        write(dir.resolve("clicks_menus_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> MenuClickDump.all(GOLDEN_CLICK_SEED, GOLDEN_MENU_CASES, sink));
         bestCompression = false;
     }
 

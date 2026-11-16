@@ -7,7 +7,8 @@
 //! server's resync would do) and the replay continues.
 //!
 //! Committed vectors: `tests/golden/<ver>/clicks_seed1.jsonl.gz` (all windows) and
-//! `clicks_craft_seed1.jsonl.gz` (crafting). Bigger runs: `GHAST_CLICK_VECTORS_1_8`,
+//! `clicks_craft_seed1.jsonl.gz` (crafting), `clicks_menus_seed1.jsonl.gz` (special menus:
+//! brewing stand, ...). Bigger runs: `GHAST_MENU_VECTORS_1_8` (`oracle/run.sh clicks --menu M`), `GHAST_CLICK_VECTORS_1_8`,
 //! `GHAST_CLICK_VECTORS_1_12`, `GHAST_CLICK_VECTORS_1_16`, `GHAST_CRAFT_VECTORS_1_8`,
 //! `GHAST_CRAFT_VECTORS_1_12`, `GHAST_CRAFT_VECTORS_1_16` = path, then
 //! `cargo test -p ghast-inventory --release --test oracle_clicks -- --nocapture`.
@@ -62,6 +63,7 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "hopper" => Some(WindowKind::Hopper),
         "crafting" => Some(WindowKind::Crafting),
         "furnace" => Some(WindowKind::Furnace),
+        "brewing" => Some(WindowKind::BrewingStand),
         k => panic!("unknown kind {k}"),
     }
 }
@@ -307,6 +309,10 @@ fn replay(v: Version, path: &Path) -> Stats {
             eprintln!("declare_recipes: {} crafting recipes", book.len());
             continue;
         }
+        if c.get("facts").is_some() {
+            // a special menu's slot rules, checked by the crate's own unit tests
+            continue;
+        }
         replay_case(v, &c, &mut s, &book);
     }
     s
@@ -422,6 +428,19 @@ fn vanilla_crafting_1_16_5() {
             "GHAST_CRAFT_VECTORS_1_16",
             "1.16.5",
             "clicks_craft_seed1.jsonl.gz",
+        ),
+    );
+}
+
+/// Special menus (brewing stand, ...): `MenuClickDump`, clicks biased to the menu's slots.
+#[test]
+fn vanilla_menus_1_8_9() {
+    check(
+        Version::V1_8,
+        vectors(
+            "GHAST_MENU_VECTORS_1_8",
+            "1.8.9",
+            "clicks_menus_seed1.jsonl.gz",
         ),
     );
 }

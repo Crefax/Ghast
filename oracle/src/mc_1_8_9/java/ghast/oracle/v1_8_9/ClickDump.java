@@ -58,7 +58,7 @@ final class ClickDump {
     /** Ingredients for crafting grids, so recipes match now and then. */
     static final int[] CRAFT = {5, 5, 5, 17, 280, 4, 4, 263, 35, 12};
 
-    private static Harness.Run newRun() {
+    static Harness.Run newRun() {
         return new Harness.Run(new Scenario("clicks").fill(-8, 63, -8, 8, 63, 8, 1).spawn(0.5, 64, 0.5, 0, 0));
     }
 
@@ -103,7 +103,7 @@ final class ClickDump {
         return bad;
     }
 
-    private static NbtCompound tag(Rng r) {
+    static NbtCompound tag(Rng r) {
         NbtCompound c = new NbtCompound();
         switch (r.nextInt(4)) {
             case 0 -> {
@@ -128,7 +128,7 @@ final class ClickDump {
         return c;
     }
 
-    private static ItemStack of(int id, int count, int data) {
+    static ItemStack of(int id, int count, int data) {
         return new ItemStack(Item.byRawId(id), count, data);
     }
 
@@ -325,7 +325,7 @@ final class ClickDump {
         return l;
     }
 
-    private static ItemStack stack(Rng r, int[] pool) {
+    static ItemStack stack(Rng r, int[] pool) {
         int id = r.pick(pool);
         Item item = Item.byRawId(id);
         int max = item.getMaxCount();
@@ -459,7 +459,7 @@ final class ClickDump {
         return b.toString();
     }
 
-    private static void state(StringBuilder b, ClientPlayerEntity player, ScreenHandler w0, ScreenHandler h) {
+    static void state(StringBuilder b, ClientPlayerEntity player, ScreenHandler w0, ScreenHandler h) {
         b.append(",\"w0\":");
         slots(b, w0);
         b.append(",\"screen\":");
@@ -491,13 +491,13 @@ final class ClickDump {
         b.append(']');
     }
 
-    private static String hex(ItemStack s) {
+    static String hex(ItemStack s) {
         PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
         buf.writeItemStack(s);
         return hex(buf);
     }
 
-    private static String packetHex(ClickWindowC2SPacket p) {
+    static String packetHex(ClickWindowC2SPacket p) {
         if (p == null) {
             return "";
         }

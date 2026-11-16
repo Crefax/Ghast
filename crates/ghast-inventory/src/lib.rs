@@ -66,6 +66,7 @@ mod inventory;
 mod item;
 #[cfg(modern)]
 mod item26;
+mod menus;
 #[cfg(modern)]
 pub mod modern;
 mod packets;

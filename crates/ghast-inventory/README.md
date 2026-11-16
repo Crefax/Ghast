@@ -92,9 +92,24 @@ to the chest and the shield to the offhand; binding curse is the `ench` id 10.
   number key, Q) consumes one of each ingredient and hands back the recipe's remainders
   (buckets, 1.16.5 glass bottles; book cloning keeps the written book).
 
+### Special menus (1.8.9 – 1.16.5)
+
+Predicted like vanilla, with the slot rules read off the real client's slots (`Slot.canInsert`
+over every item id and damage, checked against the oracle's dump by the unit tests):
+
+| menu | 1.8.9 | 1.12.2 | 1.16.5 |
+|---|---|---|---|
+| brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | refused | refused |
+
+- **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
+  ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
+  incl. raw and cooked pufferfish); shift-click routes as `BrewingScreenHandler.transferSlot`
+  (1.8's `insertItem` ignores slot limits: a stack of bottles lands whole in one bottle slot).
+  Brew time and fuel are window properties the GUI shows; they never change slots on the client.
+
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
 shift-click from the player part of a furnace (smelting recipes, fuel), any interaction that
-reads a fuel / brewing / enchanting / anvil / beacon / trading / horse-equipment slot, a
+reads a fuel / unmodelled brewing / enchanting / anvil / beacon / trading / horse-equipment slot, a
 crafting-result click while the result is unknown, taking a result whose grid matches no recipe
 ghast models (1.8 banners, map upscaling; 1.16.5 special recipes, a written book or banner in the
 grid, or no recipe at all — vanilla then aliases the grid stacks).

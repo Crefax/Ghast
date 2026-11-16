@@ -44,6 +44,10 @@ name = "window_items"
 harness = false
 required-features = ["v1_8"]
 
+[[bench]]
+name = "clicks"
+harness = false
+
 [[example]]
 name = "live_clicks"
 required-features = ["v1_8", "v1_12", "v1_16_5"]

@@ -20,7 +20,7 @@ pub const OUTSIDE: i16 = -999;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Unpredictable;
 
-type R<T> = Result<T, Unpredictable>;
+pub(crate) type R<T> = Result<T, Unpredictable>;
 
 /// Everything a click can change.
 #[derive(Debug, Clone)]
@@ -123,6 +123,8 @@ pub(crate) enum Screen {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Layout {
     pub screen: Screen,
+    /// The connection's version (which special menus are modelled).
+    pub v: Version,
     /// Container slots (0 for window 0).
     pub n: usize,
     /// All slots.
@@ -134,12 +136,14 @@ impl Layout {
         match screen {
             Screen::Player => Layout {
                 screen,
+                v,
                 n: 0,
                 len: if v == Version::V1_8 { 45 } else { 46 },
             },
             // 26.1 crafter: 9 grid slots, the player's 36, then the result
             Screen::Container(WindowKind::Crafter) => Layout {
                 screen,
+                v,
                 n: 9,
                 len: 46,
             },
@@ -147,6 +151,7 @@ impl Layout {
                 let n = k.container_len(v);
                 Layout {
                     screen,
+                    v,
                     n,
                     len: n + if k.has_player_inventory() { 36 } else { 0 },
                 }
@@ -195,7 +200,15 @@ impl Layout {
             },
             Screen::Container(k) => {
                 if i < self.n {
-                    k.slot_kind(i)
+                    match k.slot_kind(i) {
+                        // a menu slot of a version whose menu is not modelled
+                        SlotKind::Potion | SlotKind::BrewingIngredient | SlotKind::BrewingFuel
+                            if !crate::menus::modelled(self.v, k) =>
+                        {
+                            SlotKind::Special
+                        }
+                        kind => kind,
+                    }
                 } else {
                     SlotKind::Normal
                 }
@@ -344,7 +357,7 @@ impl Sim<'_> {
         self.lay.loc(i).unwrap_or(Loc::Player(0))
     }
 
-    fn get(&self, i: usize) -> Option<&Stack> {
+    pub(crate) fn get(&self, i: usize) -> Option<&Stack> {
         self.m.at(self.loc(i)).as_ref()
     }
 
@@ -417,6 +430,9 @@ impl Sim<'_> {
             SlotKind::Armor(a) => self.v.armor_accepts(a, s),
             SlotKind::CraftResult | SlotKind::Output => false,
             SlotKind::Shulker => !self.v.is_shulker_box(s),
+            SlotKind::Potion => self.v.potion_slot_accepts(s),
+            SlotKind::BrewingIngredient => self.v.brewing_ingredient(s),
+            SlotKind::BrewingFuel => self.v.brewing_fuel(s),
             SlotKind::Special => return Err(Unpredictable),
         })
     }
@@ -425,7 +441,7 @@ impl Sim<'_> {
     /// is 99; the stack's own limit is applied separately).
     fn slot_limit(&self, i: usize) -> R<i32> {
         match self.lay.kind(i) {
-            SlotKind::Armor(_) => Ok(1),
+            SlotKind::Armor(_) | SlotKind::Potion => Ok(1),
             SlotKind::Special => Err(Unpredictable),
             _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
@@ -1019,6 +1035,9 @@ impl Sim<'_> {
                         };
                         (ok, true)
                     }
+                    WindowKind::BrewingStand if crate::menus::modelled(v, kind) => {
+                        (self.transfer_brewing(i, &mut st, &orig)?, true)
+                    }
                     _ => return Err(Unpredictable),
                 }
             }
@@ -1039,7 +1058,13 @@ impl Sim<'_> {
     }
 
     /// `ScreenHandler.insertItem` of `st` into slots `start..end`.
-    fn insert(&mut self, st: &mut Stack, start: usize, end: usize, rev: bool) -> R<bool> {
+    pub(crate) fn insert(
+        &mut self,
+        st: &mut Stack,
+        start: usize,
+        end: usize,
+        rev: bool,
+    ) -> R<bool> {
         let v = self.v;
         let end = end.min(self.lay.len);
         if start >= end {
