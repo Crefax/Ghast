@@ -5,6 +5,7 @@
 //! ([`crate::voxel`]).
 
 mod blocks;
+mod boat;
 mod collide;
 mod entity;
 mod ext;
@@ -12,6 +13,7 @@ mod fluid;
 mod player;
 
 pub use blocks::{CollisionContext, state_collides};
+pub use boat::{BOAT_HEIGHT, BOAT_WIDTH, Boat, BoatLocation, tick_boat};
 pub use entity::{
     OtherEntity, PushKind, Pusher, Surroundings, collides, push_by, push_kind, query_reaches,
 };

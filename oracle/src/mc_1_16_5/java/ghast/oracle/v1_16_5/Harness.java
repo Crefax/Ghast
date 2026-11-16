@@ -430,6 +430,8 @@ final class Harness {
             // ticks): the whole tick, key handling included, sees this tick's rotation.
             player.yaw = t.yaw();
             player.pitch = t.pitch();
+            // Entity.changeLookDirection: a vehicle clamps its passenger's turn (boats: 105 degrees).
+            Ext.afterTurn(this);
             setKeys(t.keys());
             useKey((t.keys() & Scenario.USE) != 0);
             Ents.beforeTick(this);

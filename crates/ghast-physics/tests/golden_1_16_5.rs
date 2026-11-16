@@ -72,3 +72,10 @@ fn riptide_1_16_5() {
 fn elytra_1_16_5() {
     check("elytra.jsonl.gz");
 }
+
+/// Boats the player rides and controls: paddling on water, land, ice, walls, flowing water,
+/// under water, other boats, server corrections, dismounting (hand cases + golden fuzz).
+#[test]
+fn boats_1_16_5() {
+    check("boats.jsonl.gz");
+}

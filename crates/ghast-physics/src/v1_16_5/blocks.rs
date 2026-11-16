@@ -338,7 +338,7 @@ impl CollisionContext {
 /// `Entity.collidesWithStateAtPos(pos, state)`: the collision shape of `state` at block `pos`
 /// for the entity's context (scaffolding) and with the block's model offset (bamboo) overlaps
 /// `bb` (`[min_x, min_y, min_z, max_x, max_y, max_z]`; `VoxelShapes.matchesAnywhere(…, AND)`:
-/// a positive-volume overlap). The client uses it when the server's answer to a dig action
+/// an overlap that survives its 1e-7 point merging). The client uses it when the server's answer to a dig action
 /// restores a block and moves the player back (`processPlayerActionResponse`).
 #[must_use]
 pub fn state_collides(
@@ -353,18 +353,63 @@ pub fn state_collides(
         descending: ctx.descending,
     };
     let q = Aabb::new(bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]);
-    let hits = |b: &Aabb| {
-        b.min_x < q.max_x
-            && b.max_x > q.min_x
-            && b.min_y < q.max_y
-            && b.max_y > q.min_y
-            && b.min_z < q.max_z
-            && b.max_z > q.min_z
-    };
+    let hits = |b: &Aabb| boxes_match(b, &q);
     if state.block() == Block::BAMBOO {
         return hits(&bamboo_box(x, z).at(x, y, z));
     }
     collision_boxes(state, y, Some(&c))
         .iter()
         .any(|b| hits(&b.at(x, y, z)))
+}
+
+/// One axis of `VoxelShapes.matchesAnywhere(a, b, AND)` for two single boxes: the merged point
+/// list of `SimplePairList` (points within 1e-7 of the last kept one collapse) has a cell inside
+/// both intervals. `DisjointPairList` when one ends more than 1e-7 before the other starts.
+// The NaN start (`d`) must compare false, as vanilla's negated comparison does.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn axis_overlaps(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
+    if a1 < b0 - 1.0e-7 || b1 < a0 - 1.0e-7 {
+        return false;
+    }
+    let first = [a0, a1];
+    let second = [b0, b1];
+    let (mut i, mut j) = (0usize, 0usize);
+    let mut d = f64::NAN;
+    // (min index, max index) of each kept point.
+    let mut cells: [(i32, i32); 4] = [(0, 0); 4];
+    let mut n = 0usize;
+    loop {
+        let bl = i < 2;
+        let bl2 = j < 2;
+        if !bl && !bl2 {
+            break;
+        }
+        let bl3 = bl && (!bl2 || first[i] < second[j] + 1.0e-7);
+        let e = if bl3 {
+            i += 1;
+            first[i - 1]
+        } else {
+            j += 1;
+            second[j - 1]
+        };
+        // AND: neither "first only" nor "second only" points are kept.
+        if (i != 0 && bl || bl3) && (j != 0 && bl2 || !bl3) {
+            if !(d >= e - 1.0e-7) {
+                cells[n] = (i as i32 - 1, j as i32 - 1);
+                n += 1;
+                d = e;
+            } else if n > 0 {
+                cells[n - 1] = (i as i32 - 1, j as i32 - 1);
+            }
+        }
+    }
+    // Cell k spans kept points k..k+1 and lies in segment cells[k] of each list.
+    (0..n.saturating_sub(1)).any(|k| cells[k] == (0, 0))
+}
+
+/// `VoxelShapes.matchesAnywhere(a, b, AND)` of two single boxes.
+pub(crate) fn boxes_match(a: &Aabb, b: &Aabb) -> bool {
+    axis_overlaps(a.min_x, a.max_x, b.min_x, b.max_x)
+        && axis_overlaps(a.min_y, a.max_y, b.min_y, b.max_y)
+        && axis_overlaps(a.min_z, a.max_z, b.min_z, b.max_z)
 }

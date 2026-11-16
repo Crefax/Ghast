@@ -150,6 +150,18 @@ pub enum Packet {
         /// The vehicle's on-ground flag.
         on_ground: bool,
     },
+    /// The legacy (1.9 - 1.21.1) `steer_vehicle` packet: the passenger's movement input after
+    /// its tick (sideways, forward after the ×0.98), jump and sneak keys.
+    SteerVehicle {
+        /// Sideways input.
+        sideways: f32,
+        /// Forward input.
+        forward: f32,
+        /// Jump key.
+        jump: bool,
+        /// Sneak key.
+        sneak: bool,
+    },
     /// The modern `steer_boat` (paddle) packet: the boat's paddle states, sent every boat tick.
     PaddleBoat {
         /// Left paddle.

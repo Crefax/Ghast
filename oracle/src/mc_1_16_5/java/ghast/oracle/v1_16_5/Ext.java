@@ -18,6 +18,7 @@ import static ghast.oracle.Scenario.BACK;
 import static ghast.oracle.Scenario.FORWARD;
 import static ghast.oracle.Scenario.JUMP;
 import static ghast.oracle.Scenario.LEFT;
+import static ghast.oracle.Scenario.RIGHT;
 import static ghast.oracle.Scenario.SNEAK;
 import static ghast.oracle.Scenario.SPRINT;
 import static ghast.oracle.Scenario.USE;
@@ -59,6 +60,8 @@ final class Ext {
         int chestDamage;
         /** The server has the player gliding at the start (shared flag 7 in the setup entity data). */
         boolean fallFlying;
+        /** A riding case: tick records carry the player's vehicle (and list the entities). */
+        boolean ride;
 
         @Override
         boolean records() {
@@ -102,6 +105,12 @@ final class Ext {
      * removes it with a destroy packet ({@link Ents.Remove}) when its life runs out.
      */
     record Firework(int id) implements Scenario.VersionEvent {}
+
+    /** Set-passengers packet: {@code passengers} (entity ids; the player is 1) ride {@code vehicle}. */
+    record Ride(int vehicle, int[] passengers) implements Scenario.VersionEvent {}
+
+    /** Move-vehicle packet: the server's correction of the player's vehicle. */
+    record VehicleMove(double x, double y, double z, float yaw, float pitch) implements Scenario.VersionEvent {}
 
     // ---- harness hooks -----------------------------------------------------------------------------
 
@@ -181,7 +190,78 @@ final class Ext {
             firework(run, f.id());
             return true;
         }
+        if (e instanceof Ride r) {
+            // ClientPlayNetworkHandler.onEntityPassengersSet without its overlay message (the
+            // "press sneak to dismount" text needs the key's GLFW name): the passengers leave,
+            // then each listed entity starts riding (forced).
+            net.minecraft.network.PacketByteBuf b = Harness.buf();
+            b.writeVarInt(r.vehicle());
+            b.writeIntArray(r.passengers());
+            net.minecraft.network.packet.s2c.play.EntityPassengersSetS2CPacket p =
+                    Harness.read(new net.minecraft.network.packet.s2c.play.EntityPassengersSetS2CPacket(), b);
+            net.minecraft.entity.Entity v = run.world.getEntityById(p.getId());
+            if (v != null) {
+                v.removeAllPassengers();
+                for (int id : p.getPassengerIds()) {
+                    net.minecraft.entity.Entity e2 = run.world.getEntityById(id);
+                    if (e2 != null) {
+                        e2.startRiding(v, true);
+                    }
+                }
+            }
+            return true;
+        }
+        if (e instanceof VehicleMove m) {
+            net.minecraft.network.PacketByteBuf b = Harness.buf();
+            b.writeDouble(m.x()).writeDouble(m.y()).writeDouble(m.z());
+            b.writeFloat(m.yaw()).writeFloat(m.pitch());
+            Harness.net.onVehicleMove(Harness.read(new net.minecraft.network.packet.s2c.play.VehicleMoveS2CPacket(), b));
+            return true;
+        }
         return false;
+    }
+
+    /** Mouse turning of a passenger ({@code Entity.changeLookDirection}): the vehicle then clamps it. */
+    static void afterTurn(Harness.Run run) {
+        net.minecraft.entity.Entity v = run.player.getVehicle();
+        if (v != null) {
+            v.onPassengerLookAround(run.player);
+        }
+    }
+
+    /** The player's vehicle after the tick (riding cases): everything the boat's client tick reads and writes. */
+    static void vehicleRecord(Json j, Harness.Run run) {
+        Setup s = of(run.sc);
+        if (s == null || !s.ride) {
+            return;
+        }
+        net.minecraft.entity.Entity v = run.player.getVehicle();
+        if (!(v instanceof net.minecraft.entity.vehicle.BoatEntity b)) {
+            return;
+        }
+        Class<?> c = net.minecraft.entity.vehicle.BoatEntity.class;
+        j.key("vehicle").beginObject().field("id", b.getEntityId()).field("type", "boat");
+        j.key("pos").beginArray().f64(b.getX()).f64(b.getY()).f64(b.getZ()).endArray();
+        net.minecraft.util.math.Vec3d vel = b.getVelocity();
+        j.key("vel").beginArray().f64(vel.x).f64(vel.y).f64(vel.z).endArray();
+        j.fieldF32("yaw", b.yaw).fieldF32("pitch", b.pitch);
+        net.minecraft.util.math.Box bb = b.getBoundingBox();
+        j.key("bb").beginArray().f64(bb.minX).f64(bb.minY).f64(bb.minZ).f64(bb.maxX).f64(bb.maxY).f64(bb.maxZ).endArray();
+        j.field("on_ground", b.isOnGround()).field("horizontal_collision", b.horizontalCollision).field("vertical_collision", b.verticalCollision);
+        j.fieldF32("fall_distance", b.fallDistance);
+        Object st = Reflect.get(c, b, "location"), old = Reflect.get(c, b, "lastLocation");
+        j.field("status", st == null ? null : st.toString().toLowerCase());
+        j.field("old_status", old == null ? null : old.toString().toLowerCase());
+        j.fieldF32("delta_rotation", (Float) Reflect.get(c, b, "yawVelocity"));
+        j.fieldF32("out_of_control", (Float) Reflect.get(c, b, "ticksUnderwater"));
+        j.fieldF64("water_level", (Double) Reflect.get(c, b, "waterLevel"));
+        j.fieldF32("land_friction", (Float) Reflect.get(c, b, "field_7714"));
+        j.fieldF64("last_yd", (Double) Reflect.get(c, b, "fallVelocity"));
+        j.key("input").beginArray().value((Boolean) Reflect.get(c, b, "pressingLeft")).value((Boolean) Reflect.get(c, b, "pressingRight"))
+                .value((Boolean) Reflect.get(c, b, "pressingForward")).value((Boolean) Reflect.get(c, b, "pressingBack")).endArray();
+        j.key("paddle").beginArray().value(b.isPaddleMoving(0)).value(b.isPaddleMoving(1)).endArray();
+        j.field("lerp_steps", Reflect.getInt(c, b, "field_7708"));
+        j.endObject();
     }
 
     @SuppressWarnings("unchecked")
@@ -328,6 +408,9 @@ final class Ext {
         if (s.fallFlying) {
             j.field("fall_flying", true);
         }
+        if (s.ride) {
+            j.field("ride", true);
+        }
     }
 
     /** Writes an event of this class (the {@code type} and its fields); false for the others. */
@@ -352,6 +435,19 @@ final class Ext {
             j.field("type", "firework").field("id", f.id());
             return true;
         }
+        if (e instanceof Ride r) {
+            j.field("type", "ride").field("vehicle", r.vehicle()).key("passengers").beginArray();
+            for (int p : r.passengers()) {
+                j.value(p);
+            }
+            j.endArray();
+            return true;
+        }
+        if (e instanceof VehicleMove m) {
+            j.field("type", "vehicle_move").key("pos").beginArray().f64(m.x()).f64(m.y()).f64(m.z()).endArray();
+            j.fieldF32("yaw", m.yaw()).fieldF32("pitch", m.pitch());
+            return true;
+        }
         return false;
     }
 
@@ -363,13 +459,26 @@ final class Ext {
             case "equip" -> new Equip(ev.get("slot").getAsString(), ev.has("item") ? ev.get("item").getAsString() : null,
                     ev.get("damage").getAsInt());
             case "firework" -> new Firework(ev.get("id").getAsInt());
+            case "ride" -> {
+                com.google.gson.JsonArray a = ev.getAsJsonArray("passengers");
+                int[] ids = new int[a.size()];
+                for (int i = 0; i < ids.length; i++) {
+                    ids[i] = a.get(i).getAsInt();
+                }
+                yield new Ride(ev.get("vehicle").getAsInt(), ids);
+            }
+            case "vehicle_move" -> {
+                com.google.gson.JsonArray p = ev.getAsJsonArray("pos");
+                yield new VehicleMove(ScenarioReader.f64(p.get(0)), ScenarioReader.f64(p.get(1)), ScenarioReader.f64(p.get(2)),
+                        ScenarioReader.f32(ev.get("yaw")), ScenarioReader.f32(ev.get("pitch")));
+            }
             default -> null;
         };
     }
 
     /** True when the {@code ext} object holds fields of this class (the case needs a {@link Setup}). */
     static boolean readSetup(JsonObject x, Scenario sc) {
-        if (!x.has("dimension") && !x.has("with_entities") && !x.has("hand") && !x.has("raining") && !x.has("glide")) {
+        if (!x.has("dimension") && !x.has("with_entities") && !x.has("hand") && !x.has("raining") && !x.has("glide") && !x.has("ride")) {
             return false;
         }
         Setup s = setup(sc);
@@ -386,6 +495,7 @@ final class Ext {
         s.chest = x.has("chest") ? x.get("chest").getAsString() : null;
         s.chestDamage = x.has("chest_damage") ? x.get("chest_damage").getAsInt() : 0;
         s.fallFlying = x.has("fall_flying") && x.get("fall_flying").getAsBoolean();
+        s.ride = x.has("ride") && x.get("ride").getAsBoolean();
         return true;
     }
 
@@ -895,6 +1005,162 @@ final class Ext {
             }
         }
         sc.description += ", elytra";
+        return sc;
+    }
+
+    // ---- boats: the local player controls a boat (client-authoritative vehicle) --------------------
+
+    private static final int BOAT = 100;
+
+    /** A case with a boat at a position; the player boards it in the first tick (set-passengers). */
+    private static Scenario boat(Scenario sc, double x, double y, double z, float yaw) {
+        Setup st = setup(sc);
+        st.ride = true;
+        st.withEntities = true;
+        st.entities.add(new Ents.Spawn(BOAT, "boat", x, y, z, yaw, 0));
+        addEvent(sc, 0, new Ride(BOAT, new int[] {Harness.PLAYER_ENTITY_ID}));
+        return sc;
+    }
+
+    private static Scenario pond(String name) {
+        return new Scenario(name).fill(-24, 58, -24, 24, 58, 24, s("stone"), 0).fill(-24, 59, -24, 24, 62, 24, s("water"), 0);
+    }
+
+    static List<Scenario> boatsGolden() {
+        List<Scenario> l = new ArrayList<>(boats());
+        for (int i = 0; i < GOLDEN_FUZZ; i++) {
+            l.add(boatsFuzz(1, i, 60));
+        }
+        return l;
+    }
+
+    static List<Scenario> boats() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(boat(pond("boat_water_paddle").desc("paddle a boat on still water: forward, turns, back, idle drift")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(40, FORWARD).run(15, FORWARD | LEFT).run(15, RIGHT).run(10, LEFT)
+                .run(15, BACK).run(10, LEFT | RIGHT).run(10, FORWARD | BACK).run(30, 0), 0.5, 62.6, 0.5, 0.0F));
+        l.add(boat(pond("boat_turn_look").desc("turn in place while looking around (rotation clamp to 105 degrees)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(20, LEFT, 150, 10).run(20, RIGHT, -40, -20).run(20, FORWARD, 200, 30), 0.5, 62.6, 0.5, 30.0F));
+        l.add(boat(flat("boat_land").desc("a boat on stone: paddling on land (land friction, halved each tick)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(30, FORWARD).run(20, FORWARD | RIGHT).run(10, 0), 0.5, 64, 0.5, 0.0F));
+        Scenario ice = new Scenario("boat_ice").fill(-24, 63, -24, 24, 63, 24, s("packed_ice"), 0).fill(-24, 63, 6, 24, 63, 24, s("blue_ice"), 0)
+                .fill(-24, 64, 30, 24, 66, 30, s("stone"), 0);
+        l.add(boat(ice.desc("a boat on packed and blue ice: speed up, turn").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(60, FORWARD)
+                .run(20, FORWARD | LEFT).run(20, 0), 0.5, 64, 0.5, 0.0F));
+        l.add(boat(pond("boat_drop_into_water").desc("a boat falls from the air into water (IN_AIR to IN_WATER snaps to the surface)")
+                .spawn(0.5, 70, 0.5, 0, 0).run(60, FORWARD), 0.5, 69, 0.5, 0.0F));
+        Scenario wall = pond("boat_wall").fill(-3, 59, 5, 3, 65, 5, s("stone"), 0).fill(4, 59, -3, 4, 65, 3, s("oak_planks"), 0);
+        l.add(boat(wall.desc("paddle into walls head-on and at an angle").spawn(0.5, 63, 0.5, 0, 0).run(3, 0).run(40, FORWARD)
+                .run(20, FORWARD | RIGHT).run(20, FORWARD), 0.5, 62.6, 0.5, 0.0F));
+        Scenario flow = pond("boat_flowing").fill(-24, 62, -24, 24, 62, 24, s("air"), 0).fill(-24, 61, -2, 24, 61, 2, s("water[level=1]"), 0)
+                .fill(-24, 61, 3, 24, 61, 8, s("water[level=3]"), 0);
+        l.add(boat(flow.desc("flowing water pushes the boat; paddle against and along it").spawn(0.5, 62, 0.5, 90, 0).run(3, 0).run(30, 0)
+                .run(30, FORWARD).run(30, BACK), 0.5, 61.6, 0.5, 90.0F));
+        Scenario under = pond("boat_under_water").fill(-24, 63, -24, 24, 64, 24, s("water"), 0).fill(-24, 65, -24, 24, 65, 24, s("glass"), 0);
+        l.add(boat(under.desc("a boat held under a water roof (UNDER_WATER)").spawn(0.5, 62, 0.5, 0, 0).run(80, FORWARD), 0.5, 61.5, 0.5, 0.0F));
+        Scenario step = flat("boat_slab_soul_sand").fill(-3, 64, 4, 3, 64, 4, s("smooth_stone_slab"), 0).fill(-3, 64, 7, 3, 64, 9, s("soul_sand"), 0);
+        l.add(boat(step.desc("a boat on land meets a slab (no step-up) and soul sand").spawn(0.5, 64, 0.5, 0, 0).run(3, 0).run(60, FORWARD),
+                0.5, 64, 0.5, 0.0F));
+        Scenario two = pond("boat_hits_boat").desc("paddle into another boat (entity collision)").spawn(0.5, 63, 0.5, 0, 0).run(3, 0).run(50, FORWARD);
+        setup(two).entities.add(new Ents.Spawn(BOAT + 1, "boat", 0.6, 62.6, 4.5, 90.0F, 0));
+        l.add(boat(two, 0.5, 62.6, 0.5, 0.0F));
+        Scenario fix = boat(pond("boat_server_correction").desc("the server corrects the boat (move-vehicle packets)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(40, FORWARD), 0.5, 62.6, 0.5, 0.0F);
+        addEvent(fix, 15, new VehicleMove(0.5, 62.6, 2.0, 10.0F, 0.0F));
+        addEvent(fix, 25, new VehicleMove(0.5, 62.6, 3.0, 0.0F, 0.0F));
+        addEvent(fix, 26, new VehicleMove(0.5, 62.6, 3.0, 0.0F, 0.0F));
+        l.add(fix);
+        Scenario off = boat(pond("boat_dismount").desc("sneak while paddling, then the server takes the player off (set-passengers)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, 0).run(20, FORWARD).run(5, FORWARD | SNEAK).run(30, 0), 0.5, 62.6, 0.5, 0.0F);
+        addEvent(off, 27, new Ride(BOAT, new int[0]));
+        l.add(off);
+        Scenario keys = boat(pond("boat_rider_keys").desc("jump, sprint and sneak keys while riding (the passenger's own tick)")
+                .spawn(0.5, 63, 0.5, 0, 0).run(5, JUMP).run(10, FORWARD | SPRINT).run(10, SNEAK).run(10, JUMP | FORWARD).run(10, 0), 0.5, 62.6, 0.5, 0.0F);
+        l.add(keys);
+        Scenario lily = pond("boat_lily_pads").fill(-3, 63, 3, 3, 63, 12, s("lily_pad"), 0);
+        l.add(boat(lily.desc("paddle over lily pads (not land for the boat)").spawn(0.5, 63, 0.5, 0, 0).run(3, 0).run(50, FORWARD), 0.5, 62.6, 0.5, 0.0F));
+        return l;
+    }
+
+    /**
+     * Randomized boat cases: a terrain of water pools, land, ice and walls around a boat the player boards
+     * in the first tick; random paddling keys, looks, server corrections, other boats and dismounts. Cases
+     * get a {@code _bo} suffix.
+     */
+    static Scenario boatsFuzz(long seed, int index, int ticks) {
+        Harness.init();
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x626f617473L);
+        Scenario sc = new Scenario("fuzz_s" + seed + "_" + index + "_bo");
+        sc.fill(-32, 58, -32, 32, 58, 32, s("stone"), 0);
+        String[] grounds = {"water", "water", "water", "stone", "grass_block", "ice", "packed_ice", "blue_ice", "soul_sand", "slime_block",
+                "honey_block", "sand", "water[level=2]", "water[level=5]", "magma_block", "lily_pad"};
+        int patches = x.range(3, 12);
+        for (int i = 0; i < patches; i++) {
+            int cx = x.range(-12, 12), cz = x.range(-12, 12), r = x.range(1, 6);
+            String g = x.pick(grounds);
+            int top = x.chance(0.7) ? 62 : x.range(60, 63);
+            if (g.equals("lily_pad")) {
+                sc.fill(cx - r, 59, cz - r, cx + r, 62, cz + r, s("water"), 0).fill(cx - r, 63, cz - r, cx + r, 63, cz + r, s("lily_pad"), 0);
+            } else if (g.startsWith("water")) {
+                sc.fill(cx - r, 59, cz - r, cx + r, top, cz + r, s("water"), 0);
+                if (!g.equals("water")) {
+                    sc.fill(cx - r, top, cz - r, cx + r, top, cz + r, s(g), 0);
+                }
+            } else {
+                sc.fill(cx - r, 59, cz - r, cx + r, top, cz + r, s(g), 0);
+            }
+        }
+        int walls = x.range(0, 5);
+        for (int i = 0; i < walls; i++) {
+            int cx = x.range(-10, 10), cz = x.range(-10, 10), len = x.range(1, 6);
+            String w = x.pick(new String[] {"stone", "oak_planks", "oak_fence", "cobblestone_wall", "oak_slab", "glass_pane"});
+            if (x.chance(0.5)) {
+                sc.fill(cx, 63, cz, cx + len, 63 + x.range(0, 2), cz, s(w), 0);
+            } else {
+                sc.fill(cx, 63, cz, cx, 63 + x.range(0, 2), cz + len, s(w), 0);
+            }
+        }
+        if (x.chance(0.2)) {
+            int cx = x.range(-8, 8), cz = x.range(-8, 8);
+            sc.fill(cx - 3, 59, cz - 3, cx + 3, 64, cz + 3, s("water"), 0).fill(cx - 3, 65, cz - 3, cx + 3, 65, cz + 3, s("glass"), 0);
+        }
+        double bx = x.range(-3, 3) + 0.5, bz = x.range(-3, 3) + 0.5;
+        double by = x.chance(0.8) ? 63.2 : 63 + x.range(1, 6);
+        float yaw = (float) (x.nextDouble() * 360 - 180);
+        sc.spawn(bx, by + 0.5, bz, yaw, 0);
+        float look = yaw, pitch = 0;
+        int[] keySets = {0, FORWARD, FORWARD, FORWARD | LEFT, FORWARD | RIGHT, LEFT, RIGHT, BACK, BACK | LEFT, LEFT | RIGHT, FORWARD | BACK,
+                FORWARD | JUMP, FORWARD | SPRINT, SNEAK};
+        int keys = 0;
+        for (int t = 0; t < ticks; t++) {
+            if (x.chance(0.12)) {
+                keys = keySets[x.nextInt(keySets.length)];
+            }
+            if (x.chance(0.2)) {
+                look += (float) ((x.nextDouble() - 0.5) * 90);
+                pitch = (float) Math.max(-90, Math.min(90, pitch + (x.nextDouble() - 0.5) * 40));
+            }
+            sc.run(1, keys, look, pitch);
+        }
+        boat(sc, bx, by, bz, yaw);
+        if (x.chance(0.4)) {
+            int n = x.range(1, 3);
+            for (int i = 0; i < n; i++) {
+                setup(sc).entities.add(new Ents.Spawn(BOAT + 1 + i, "boat", bx + (x.nextDouble() - 0.5) * 8, 63.2, bz + (x.nextDouble() - 0.5) * 8,
+                        (float) (x.nextDouble() * 360), 0));
+            }
+        }
+        for (int t = 5; t < ticks; t++) {
+            if (x.chance(0.02)) {
+                addEvent(sc, t, new VehicleMove(bx + (x.nextDouble() - 0.5) * 6, 63 + x.nextDouble(), bz + (x.nextDouble() - 0.5) * 6,
+                        (float) (x.nextDouble() * 360 - 180), 0.0F));
+            }
+        }
+        if (x.chance(0.15)) {
+            addEvent(sc, x.range(ticks / 2, ticks - 1), new Ride(BOAT, new int[0]));
+        }
+        sc.description = "randomized boat case: pools, land, ice, walls; paddling keys, looks, corrections";
         return sc;
     }
 }

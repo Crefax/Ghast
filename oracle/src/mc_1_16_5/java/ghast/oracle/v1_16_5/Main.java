@@ -42,10 +42,11 @@ public final class Main {
                 boolean nether = Boolean.parseBoolean(a.str("--nether", "false"));
                 boolean riptide = Boolean.parseBoolean(a.str("--riptide", "false"));
                 boolean elytra = Boolean.parseBoolean(a.str("--elytra", "false"));
+                boolean boats = Boolean.parseBoolean(a.str("--boats", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 Io.write(out, sink -> {
                     for (int i = 0; i < count; i++) {
-                        run(elytra ? Ext.elytraFuzz(seed, i, ticks) : riptide ? Ext.riptideFuzz(seed, i, ticks) : nether ? Ext.netherFuzz(seed, i, ticks) : entities ? EntCases.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
+                        run(boats ? Ext.boatsFuzz(seed, i, ticks) : elytra ? Ext.elytraFuzz(seed, i, ticks) : riptide ? Ext.riptideFuzz(seed, i, ticks) : nether ? Ext.netherFuzz(seed, i, ticks) : entities ? EntCases.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
@@ -59,6 +60,7 @@ public final class Main {
             case "nether" -> Io.write(a.path("--out", golden.resolve("nether.jsonl.gz")), sink -> runAll(Ext.netherGolden(), sink));
             case "riptide" -> Io.write(a.path("--out", golden.resolve("riptide.jsonl.gz")), sink -> runAll(Ext.riptideGolden(), sink));
             case "elytra" -> Io.write(a.path("--out", golden.resolve("elytra.jsonl.gz")), sink -> runAll(Ext.elytraGolden(), sink));
+            case "boats" -> Io.write(a.path("--out", golden.resolve("boats.jsonl.gz")), sink -> runAll(Ext.boatsGolden(), sink));
             case "boxes" -> Io.write(a.path("--out", golden.resolve("collision_shapes.jsonl.gz")), sink -> CollisionDump.lines(sink));
             case "boxes-far" -> Io.write(a.path("--out", golden.resolve("collision_shapes_far.jsonl.gz")), sink -> CollisionDump.farLines(sink));
             case "voxels" -> Io.write(a.path("--out", golden.resolve("voxel_shapes.jsonl.gz")), Main::voxels);
@@ -101,11 +103,12 @@ public final class Main {
                 ghast oracle (Minecraft %s)
                   golden   [--out DIR]                 write the committed golden set
                   scenarios [--out FILE] [--only NAME] run the hand-written scenarios
-                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--entities true] [--nether true] [--riptide true] [--elytra true] [--out FILE(.gz)]
+                  fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--entities true] [--nether true] [--riptide true] [--elytra true] [--boats true] [--out FILE(.gz)]
                   entities [--out FILE]                other entities: pushes, entity collisions (cases + golden fuzz)
                   nether [--out FILE]                  the nether dimension type: lava flow push (cases + golden fuzz)
                   riptide [--out FILE]                 riptide tridents in water and rain, the spin (cases + golden fuzz)
                   elytra [--out FILE]                  elytra gliding, firework rockets, the server's flag 7 (cases + golden fuzz)
+                  boats [--out FILE]                   riding a boat the client moves (cases + golden fuzz)
                   replay --in FILE [--out FILE]        rerun scenarios read from golden-format JSON lines
                   boxes [--out FILE]                   collision shapes of every block state
                   boxes-far [--out FILE]               the same at far positions, absolute
@@ -138,6 +141,7 @@ public final class Main {
         Io.write(dir.resolve("nether.jsonl.gz"), sink -> runAll(Ext.netherGolden(), sink));
         Io.write(dir.resolve("riptide.jsonl.gz"), sink -> runAll(Ext.riptideGolden(), sink));
         Io.write(dir.resolve("elytra.jsonl.gz"), sink -> runAll(Ext.elytraGolden(), sink));
+        Io.write(dir.resolve("boats.jsonl.gz"), sink -> runAll(Ext.boatsGolden(), sink));
         Io.write(dir.resolve("collision_shapes.jsonl.gz"), CollisionDump::lines);
         Io.write(dir.resolve("collision_shapes_far.jsonl.gz"), CollisionDump::farLines);
         Io.write(dir.resolve("voxel_shapes.jsonl.gz"), Main::voxels);
@@ -213,6 +217,7 @@ public final class Main {
         all.addAll(Ext.netherGolden());
         all.addAll(Ext.riptideGolden());
         all.addAll(Ext.elytraGolden());
+        all.addAll(Ext.boatsGolden());
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -230,7 +235,7 @@ public final class Main {
         System.out.println((clickMismatches == 0 ? "same " : "DIFF ") + "reverse-order rerun of 500 click cases");
         ok &= clickMismatches == 0;
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "entities.jsonl.gz", "nether.jsonl.gz", "riptide.jsonl.gz", "elytra.jsonl.gz"}) {
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "entities.jsonl.gz", "nether.jsonl.gz", "riptide.jsonl.gz", "elytra.jsonl.gz", "boats.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             Io.write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = Io.sha256(replayed).equals(Io.sha256(a.resolve(f)));

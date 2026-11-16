@@ -434,6 +434,13 @@ Gliding (`PlayerExt::{fall_flying, elytra, glide_pose}` + `tick_ext`, `apply_sha
 `fuzz --elytra true` seeds 71-75 in `fuzz-elytra/` (1,000,000 ticks), 0 diffs. Which rockets tick,
 and before or after the player, is the caller's (the iteration order of the client world's
 entity map; a rocket ticks while its chunk is loaded).
+Riding a boat (`Boat`, `tick_boat`; module docs of `v1_16_5::Boat`): the turn clamp, the boat's
+tick (location, fluid push, floating, paddling, move without step-up, block effects), the
+passenger tick (no water contact, no swimming, no auto-jump, no item slowdown, no flight) with
+`look` + `steer_vehicle` + `vehicle_move`, the seat, the client's own dismount on sneak:
+`boats.jsonl.gz` (14 hand cases + 100 fuzz cases) and `fuzz --boats true` seeds 81-85 in
+`fuzz-boats/` (1,000,000 ticks), 0 diffs. `state_collides` and the boat's land friction use
+`VoxelShapes.matchesAnywhere` exactly (overlaps under 1e-7 do not count).
 
 1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
 `fuzz_seed1`, `fuzz_edges_seed1` and `entities` (23 hand cases + 60 fuzz cases with other entities,
@@ -494,7 +501,8 @@ minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle on 1.8.9 / 1.12.2 / 1.16.5.
+- Riding a vehicle on 1.8.9 / 1.12.2; on 1.16.5 everything but boats (bubble columns under a
+  boat not modelled).
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.

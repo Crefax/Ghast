@@ -276,6 +276,23 @@ pub fn packet_json(p: &Packet) -> Value {
         Packet::StopSprinting => action(4, "stop_sprinting"),
         Packet::Abilities(a) => json!({"name": "abilities", "flying": a.flying}),
         Packet::StartFallFlying => action(8, "start_fall_flying"),
+        Packet::SteerVehicle {
+            sideways,
+            forward,
+            jump,
+            sneak,
+        } => {
+            json!({"name": "steer_vehicle", "sideways": jf32(sideways), "forward": jf32(forward), "jump": jump, "sneak": sneak})
+        }
+        Packet::MoveVehicle {
+            pos, yaw, pitch, ..
+        } => json!({
+            "name": "vehicle_move", "pos": [jf64(pos[0]), jf64(pos[1]), jf64(pos[2])],
+            "yaw": jf32(yaw), "pitch": jf32(pitch),
+        }),
+        Packet::PaddleBoat { left, right } => {
+            json!({"name": "steer_boat", "left": left, "right": right})
+        }
         other => super::packet_json(&other),
     }
 }
@@ -509,6 +526,29 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     ) {
         return Err(mm(0, d));
     }
+    // Riding cases (`setup.ext.ride`): the boat (entity 100) and whether the player is on it.
+    let mut boat: Option<v1_16_5::Boat> = None;
+    let mut riding = false;
+    if let Some(x) = case.header["setup"].get("ext")
+        && x.get("ride").and_then(Value::as_bool) == Some(true)
+    {
+        let sp = x["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == 100)
+            .expect("the boat");
+        // The spawn packet's angle byte.
+        let byte = (f32_of(&sp["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+        boat = Some(v1_16_5::Boat::new(
+            f3(&sp["pos"]),
+            f32::from(byte) * 360.0 / 256.0,
+            0.0,
+        ));
+        if ext.is_none() {
+            ext = Some(v1_16_5::PlayerExt::new());
+        }
+    }
     let mut use_key = UseKey::default();
     // Where the client world files the player (its position after its last tick).
     let mut filed = p.pos;
@@ -575,6 +615,31 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     }
                     // The rocket entity comes with the tick records (tick order, ticking).
                     "firework" => {}
+                    "ride" => {
+                        let on = e["passengers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|v| v.as_i64() == Some(1));
+                        if on && !riding {
+                            // Entity.startRiding: the standing pose.
+                            p.pose = Pose::Standing;
+                            let [px, py, pz] = p.pos;
+                            p.set_position(px, py, pz);
+                        }
+                        riding = on && boat.is_some();
+                    }
+                    "vehicle_move" => {
+                        if riding {
+                            let b = boat.as_mut().unwrap();
+                            let reply = b.server_move(
+                                f3(&e["pos"]),
+                                f32_of(&e["yaw"]),
+                                f32_of(&e["pitch"]),
+                            );
+                            sent.push(packet_json(&reply));
+                        }
+                    }
                     "living_flags" => {
                         let x = ext.as_mut().expect("living flags need the extended tick");
                         let cur = if x.spin_attack { 4u8 } else { 0 };
@@ -655,6 +720,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 };
                 if v1_16_5::collides(name)
                     && b(&e["alive"])
+                    && !(riding && id == 100)
                     && let Some(bb) = at_tick
                 {
                     colliders.push((
@@ -682,6 +748,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 let score_name = kinds.get(&id).map_or("", |k| k.1.as_str());
                 if let Some(kind) = v1_16_5::push_kind(name, living(name))
                     && b(&e["ticks"])
+                    && !(riding && id == 100)
                     && !spectator
                     && teams.may_push(score_name, ORACLE_NAME)
                 {
@@ -726,6 +793,61 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .with_entities(&colliders)
             .with_others(&others);
         match &mut ext {
+            Some(x) if riding => {
+                // The boat collides with the other boats as they are when it ticks.
+                let mut boat_boxes: Vec<ghast_physics::math::Aabb> = Vec::new();
+                if let Some(ents) = rec.get("entities").and_then(Value::as_array) {
+                    let mut before_boat = true;
+                    for e in ents {
+                        if e["id"] == 100 {
+                            before_boat = false;
+                            continue;
+                        }
+                        if e.get("player").is_some() || e["type"] != "boat" {
+                            continue;
+                        }
+                        let bb = if before_boat {
+                            e.get("post")
+                        } else {
+                            e.get("pre")
+                        };
+                        if let Some(bb) = bb {
+                            boat_boxes.push(aabb_of(bb));
+                        }
+                    }
+                }
+                let bt = boat.as_mut().unwrap();
+                if !v1_16_5::tick_boat(&mut p, x, bt, &around, &boat_boxes, &ti, &world, &mut out) {
+                    riding = false;
+                    // Got off: the player ticks in this tick when it comes after the boat.
+                    let ids: Vec<i64> = rec["entities"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|e| {
+                            if e.get("player").is_some() {
+                                1
+                            } else {
+                                e["id"].as_i64().unwrap()
+                            }
+                        })
+                        .collect();
+                    let at = |id: i64| ids.iter().position(|&v| v == id);
+                    if at(1) > at(100) {
+                        // Off the boat: it is solid again (as it is after its tick).
+                        let mut with_boat = colliders.clone();
+                        with_boat.push(bt.bb);
+                        let around = v1_16_5::Surroundings::new()
+                            .with_entities(&with_boat)
+                            .with_others(&others);
+                        // The turn of this tick was clamped while it still rode.
+                        let mut ti2 = ti;
+                        ti2.yaw = p.yaw;
+                        ti2.pitch = p.pitch;
+                        v1_16_5::tick_ext(&mut p, x, &around, &ti2, &world, &mut out);
+                    }
+                }
+            }
             Some(x) => v1_16_5::tick_ext(&mut p, x, &around, &ti, &world, &mut out),
             None => v1_16_5::tick_in(&mut p, &around, &ti, &world, &mut out),
         }
@@ -753,6 +875,22 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         ) {
             return Err(mm(t, d));
         }
+        if let (true, Some(want), Some(bt)) = (riding, rec.get("vehicle"), &boat) {
+            let got = json!({
+                "pos": [jf64(bt.pos[0]), jf64(bt.pos[1]), jf64(bt.pos[2])],
+                "vel": [jf64(bt.vel[0]), jf64(bt.vel[1]), jf64(bt.vel[2])],
+                "yaw": jf32(bt.yaw),
+                "input": bt.input(),
+                "paddle": bt.paddles(),
+            });
+            let want = json!({
+                "pos": want["pos"], "vel": want["vel"], "yaw": want["yaw"],
+                "input": want["input"], "paddle": want["paddle"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
+        }
         if let (true, Some(want), Some(x)) = (glide_case, rec.get("ext"), &ext) {
             let got = json!({
                 "fall_flying": x.fall_flying,
@@ -776,7 +914,11 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|p| MOVEMENT_PACKETS.contains(&p["name"].as_str().unwrap_or("")))
+            .filter(|p| {
+                let n = p["name"].as_str().unwrap_or("");
+                MOVEMENT_PACKETS.contains(&n)
+                    || matches!(n, "steer_vehicle" | "vehicle_move" | "steer_boat")
+            })
             .cloned()
             .collect();
         if let Some(d) = diff("packets", &Value::Array(expected), &Value::Array(sent)) {

@@ -163,7 +163,21 @@ pub(crate) fn region_loaded<W: BlockView<State = BlockState>>(
 
 /// Vanilla `updateMovementInFluid`: contact, height and the flow push added to `vel` when the
 /// player is pushed by fluids.
+#[inline(always)]
 pub(crate) fn update_in_fluid<W: BlockView<State = BlockState>>(
+    w: &W,
+    bb: &Aabb,
+    kind: FluidKind,
+    speed: f64,
+    pushed: bool,
+    vel: &mut V3,
+) -> FluidContact {
+    update_in_fluid_as::<W, true>(w, bb, kind, speed, pushed, vel)
+}
+
+/// [`update_in_fluid`] for any entity: a non-player (`PLAYER` false) gets the averaged push
+/// normalised.
+pub(crate) fn update_in_fluid_as<W: BlockView<State = BlockState>, const PLAYER: bool>(
     w: &W,
     bb: &Aabb,
     kind: FluidKind,
@@ -219,6 +233,9 @@ pub(crate) fn update_in_fluid<W: BlockView<State = BlockState>>(
     if push.length() > 0.0 {
         if count > 0 {
             push = push.scale(1.0 / f64::from(count));
+        }
+        if !PLAYER {
+            push = push.normalize();
         }
         push = push.scale(speed * 1.0);
         if vel.x.abs() < 0.003 && vel.z.abs() < 0.003 && push.length() < 0.004_500_000_000_000_000_5

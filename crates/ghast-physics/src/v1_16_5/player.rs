@@ -453,6 +453,42 @@ pub fn tick_ext<W: BlockView<State = BlockState>>(
         ExtCtx {
             x,
             others: around.others,
+            ride: None,
+        },
+        input,
+        &Apart(world),
+        out,
+    );
+}
+
+/// The vehicle of a passenger tick (`ClientWorld.tickPassenger`): the boat's box and whether
+/// the boat's eyes are in water.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct RideCtx {
+    pub bb: Aabb,
+    pub submerged: bool,
+}
+
+/// The player's tick as the passenger of a boat (`tickRiding`): motion zeroed first, the player
+/// tick with the passenger rules, then the riding packets (`look`, `steer_vehicle`) instead of
+/// the movement packets. The caller places the player afterwards.
+pub(super) fn tick_passenger<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    around: &Surroundings<'_>,
+    ride: RideCtx,
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    p.vel = [0.0; 3];
+    tick_among(
+        p,
+        around.entities,
+        ExtCtx {
+            x,
+            others: around.others,
+            ride: Some(ride),
         },
         input,
         &Apart(world),
@@ -493,6 +529,8 @@ pub(super) trait Extra {
     fn ext_ref(&self) -> &PlayerExt;
     /// The other entities in the world (only read when [`Extra::ON`]).
     fn others(&self) -> &[OtherEntity];
+    /// The vehicle of a passenger tick (only read when [`Extra::ON`]).
+    fn ride(&self) -> Option<RideCtx>;
 }
 
 /// No extension state.
@@ -515,12 +553,18 @@ impl Extra for NoExt {
     fn others(&self) -> &[OtherEntity] {
         &[]
     }
+
+    #[inline(always)]
+    fn ride(&self) -> Option<RideCtx> {
+        None
+    }
 }
 
 /// The extension state of [`tick_ext`].
 pub(super) struct ExtCtx<'a> {
     x: &'a mut PlayerExt,
     others: &'a [OtherEntity],
+    ride: Option<RideCtx>,
 }
 
 impl Extra for ExtCtx<'_> {
@@ -539,6 +583,11 @@ impl Extra for ExtCtx<'_> {
     #[inline(always)]
     fn others(&self) -> &[OtherEntity] {
         self.others
+    }
+
+    #[inline(always)]
+    fn ride(&self) -> Option<RideCtx> {
+        self.ride
     }
 }
 
@@ -593,6 +642,7 @@ pub fn riptide<W: BlockView<State = BlockState>>(
             x: ExtCtx {
                 x,
                 others: around.others,
+                ride: None,
             },
         };
         t.move_self(V3::new(0.0, f64::from(1.199_999_9f32), 0.0));
@@ -698,7 +748,31 @@ fn tick_among<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra>(
         x,
     };
     t.player_tick(&input.keys, input.using_item, out);
+    if X::ON && t.x.ride().is_some() {
+        // ClientPlayerEntity.tick while riding: no movement packets, no sprint / sneak actions.
+        let p = &*t.p;
+        out.push(Packet::Look {
+            yaw: p.yaw,
+            pitch: p.pitch,
+            on_ground: p.on_ground,
+        });
+        out.push(Packet::SteerVehicle {
+            sideways: p.sideways_speed,
+            forward: p.forward_speed,
+            jump: p.input.jumping,
+            sneak: p.input.sneaking,
+        });
+        return;
+    }
     t.send_movement(out);
+}
+
+impl<W, E, X: Extra> Ctx<'_, W, E, X> {
+    /// A passenger tick (compiled out of the plain ticks).
+    #[inline(always)]
+    fn riding(&self) -> bool {
+        X::ON && self.x.ride().is_some()
+    }
 }
 
 struct Ctx<'a, W, E, X> {
@@ -757,14 +831,15 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     fn base_tick(&mut self) {
         self.update_water_state();
         self.update_eye_fluid();
-        // Swimming flag.
+        // Swimming flag (never while riding).
+        let riding = self.riding();
         let p = &mut *self.p;
         p.swimming = if p.abilities.flying {
             false
         } else if p.swimming {
-            p.sprinting && p.touching_water
+            p.sprinting && p.touching_water && !riding
         } else {
-            p.sprinting && p.submerged_in_water
+            p.sprinting && p.submerged_in_water && !riding
         };
         if p.in_lava() {
             p.fall_distance *= 0.5;
@@ -776,6 +851,11 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn check_water(&mut self) {
+        if self.riding() {
+            // checkWaterState: a boat's passenger touches no water.
+            self.p.touching_water = false;
+            return;
+        }
         let mut v = self.vel();
         let c: FluidContact = update_in_fluid(
             self.w,
@@ -817,9 +897,18 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn update_eye_fluid(&mut self) {
+        let ride = if X::ON { self.x.ride() } else { None };
         let p = &mut *self.p;
         let eye = p.pos[1] + f64::from(p.eye_height()) - f64::from(0.111_111_11f32);
         p.eye_fluid = None;
+        // A boat whose own eyes are dry shields the eyes inside its box.
+        if let Some(r) = ride
+            && !r.submerged
+            && r.bb.max_y >= eye
+            && r.bb.min_y <= eye
+        {
+            return;
+        }
         if let Some((f, [x, y, z])) = fluid_at_point(self.w, p.pos[0], eye, p.pos[2]) {
             // `int + float`: a float sum.
             let top = f64::from(y as f32 + height(self.w, x, y, z, f));
@@ -859,7 +948,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         // Vanilla asks "does the swimming box fit" first, then the wanted pose, then crouching.
         // The pose boxes are nested (same feet and width, heights 0.6 < 1.5 < 1.8), so a fitting
         // larger box answers the smaller ones: the common case costs one query instead of two.
-        let pose = if self.p.spectator {
+        let pose = if self.p.spectator || self.riding() {
             if !self.pose_fits(Pose::Swimming) {
                 return;
             }
@@ -946,6 +1035,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn movement(&mut self, keys: &Keys, using_item: bool, out: &mut Packets) {
+        let riding = self.riding();
         let p = &mut *self.p;
         p.ticks_since_sprinting_changed += 1;
         if p.sprint_toggle_timer > 0 {
@@ -973,7 +1063,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         let swim_pose = p.pose == Pose::Swimming || (glide_pose_left && p.pose == Pose::FallFlying);
         let slow = sneak_pose || (swim_pose && !p.touching_water);
         p.input = read_keys(keys, slow);
-        if using_item {
+        if using_item && !riding {
             p.input.sideways *= 0.2;
             p.input.forward *= 0.2;
             p.sprint_toggle_timer = 0;
@@ -1056,7 +1146,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
                 p.fly_toggle_timer = 0;
             }
         }
-        if X::ON && p.input.jumping && !toggled && !prev_jump && !p.abilities.flying {
+        if X::ON && p.input.jumping && !toggled && !prev_jump && !p.abilities.flying && !riding {
             self.start_glide(out);
         }
         let p = &mut *self.p;
@@ -1296,7 +1386,8 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn player_travel(&mut self, input: V3) {
-        if self.p.is_swimming() {
+        let riding = self.riding();
+        if self.p.is_swimming() && !riding {
             let g = self.rotation_y();
             let h = if g < -0.2 { 0.085 } else { 0.06 };
             let p = &self.p;
@@ -1306,7 +1397,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
                 self.p.vel[1] = v.y + (g - v.y) * h;
             }
         }
-        if self.p.abilities.flying {
+        if self.p.abilities.flying && !riding {
             let vy = self.p.vel[1];
             let air = self.p.flying_speed;
             self.p.flying_speed =
@@ -1647,6 +1738,9 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     /// Vanilla client `autoJump`: schedules a jump when walking into a step 0.5..1.2 high.
     #[allow(clippy::too_many_lines)]
     fn auto_jump(&mut self, dx: f32, dz: f32) {
+        if self.riding() {
+            return;
+        }
         let p = &*self.p;
         let has_input = p.input.sideways != 0.0 || p.input.forward != 0.0;
         if !(p.auto_jump_enabled

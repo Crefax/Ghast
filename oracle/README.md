@@ -410,7 +410,7 @@ Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 orac
 (CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
 Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` and
 `fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `entities.jsonl.gz`, `nether.jsonl.gz`,
-`riptide.jsonl.gz`, `elytra.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
+`riptide.jsonl.gz`, `elytra.jsonl.gz`, `boats.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
 `voxel_shapes.jsonl.gz`.
 
 Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
@@ -570,6 +570,28 @@ run (`oracle/cache/1.16.5/fuzz-elytra/`, 1,000,000 ticks, 0 diffs):
 
 ```sh
 for s in 71 72 73 74 75; do MC=1.16.5 oracle/run.sh fuzz --elytra true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-elytra/elytra_s$s.jsonl.gz"; done
+```
+
+**`boats`** (14 cases + 100 fuzz, `boats.jsonl.gz`, `MC=1.16.5 oracle/run.sh boats`): the player
+rides a boat (entity 100, spawned at setup) that it boards in the first tick
+(`{"type":"ride","vehicle","passengers"}`: `onEntityPassengersSet` minus its overlay text, which
+needs the sneak key's GLFW name: the vehicle's passengers leave, the listed ones start riding);
+`{"type":"vehicle_move","pos","yaw","pitch"}` is the server's correction (`onVehicleMove`, real).
+The mouse turn of a passenger is clamped by the vehicle (`onPassengerLookAround`) after the tick's
+rotation is set. `setup.ext.ride` marks the kind; tick records add `vehicle` (the boat after the
+tick: position, motion, rotation, box, flags, fall distance, location / last location, yaw
+velocity, ticks under water, water level, land friction, fall velocity, paddle input and paddles,
+lerp steps) and list the entities. Packets: `steer_boat`, `look`, `steer_vehicle`,
+`vehicle_move`. Cases: paddling on water, turning while looking around, land, packed / blue ice,
+a drop into water, walls, flowing water, under water, a slab and soul sand, another boat, server
+corrections, a server dismount, jump / sprint / sneak keys while riding (the 1.16.5 client gets
+off by itself on sneak), lily pads. Fuzz (`Ext.boatsFuzz`, `fuzz --boats true`, cases
+`fuzz_s<seed>_<i>_bo`): pools, land patches of many blocks, walls, water roofs, random keys and
+looks, corrections, other boats, dismounts. Cached run (`oracle/cache/1.16.5/fuzz-boats/`,
+1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 81 82 83 84 85; do MC=1.16.5 oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-boats/boats_s$s.jsonl.gz"; done
 ```
 
 Entity spawns (`Ents`) send an entity's velocity right after its spawn and entity data when its

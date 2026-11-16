@@ -117,6 +117,7 @@ final class Recorder {
         state(j, run.player);
         Ents.tickRecord(j, run);
         Ext.tickRecord(j, run);
+        Ext.vehicleRecord(j, run);
         j.key("packets").beginArray();
         for (Packet<?> p : Harness.connection.sent) {
             packet(j, p);
@@ -282,6 +283,16 @@ final class Recorder {
             j.field("name", "block_dig");
             j.field("status", d.getAction().ordinal());
             j.field("status_name", d.getAction().name().toLowerCase());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket in) {
+            j.field("name", "steer_vehicle").fieldF32("sideways", in.getSideways()).fieldF32("forward", in.getForward())
+                    .field("jump", in.isJumping()).field("sneak", in.isSneaking());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket vm) {
+            j.field("name", "vehicle_move");
+            j.key("pos").beginArray().f64(vm.getX()).f64(vm.getY()).f64(vm.getZ()).endArray();
+            j.fieldF32("yaw", vm.getYaw()).fieldF32("pitch", vm.getPitch());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.BoatPaddleStateC2SPacket bp) {
+            j.field("name", "steer_boat").field("left", Reflect.getBoolean(net.minecraft.network.packet.c2s.play.BoatPaddleStateC2SPacket.class, bp, "leftPaddling"))
+                    .field("right", Reflect.getBoolean(net.minecraft.network.packet.c2s.play.BoatPaddleStateC2SPacket.class, bp, "rightPaddling"));
         } else if (pk instanceof UpdateSelectedSlotC2SPacket s) {
             j.field("name", "held_item_slot").field("slot", s.getSelectedSlot());
         } else {
