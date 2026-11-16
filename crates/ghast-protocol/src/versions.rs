@@ -2,9 +2,11 @@
 //!
 //! A row is the protocol layer's view of a version: its number, the generated module, the
 //! game versions that speak it (e.g. 775 = 26.1, 26.1.1 and 26.1.2) and the few wire facts
-//! that differ between versions outside the packet definitions. Rows of versions whose
-//! Cargo feature is off stay in the table with `enabled == false`, so a caller can tell
-//! "unknown" from "not compiled in".
+//! that differ between versions outside the packet definitions. A number whose wire layout
+//! equals another row's in every packet has a row of its own but that row's module (751 =
+//! 1.16.2 and 753 = 1.16.3 are served by `v1_16_5`, written with their own number in the
+//! handshake). Rows of versions whose Cargo feature is off stay in the table with
+//! `enabled == false`, so a caller can tell "unknown" from "not compiled in".
 //!
 //! Layers above (data sets, physics rules) keep their own columns keyed by the protocol
 //! number or the game version; [`ProtocolVersion`] is `#[non_exhaustive]`, so columns of
@@ -18,11 +20,12 @@ use crate::types::PositionLayout;
 pub struct ProtocolVersion {
     /// Protocol number sent in the handshake.
     pub protocol: i32,
-    /// Name of the generated module (`"v1_8"`, `"v26_1"`).
+    /// Name of the generated module (`"v1_8"`, `"v26_1"`); for a number without a module of
+    /// its own, the module of the row with the identical layout (751 -> `"v1_16_5"`).
     pub module: &'static str,
     /// Cargo feature that compiles the module in.
     pub feature: &'static str,
-    /// The version the module is named after and tested with (`"1.8.9"`).
+    /// The version the row is named after and tested with (`"1.8.9"`, `"1.16.2"`).
     pub name: &'static str,
     /// Every release that speaks this protocol, oldest first (from minecraft-data's
     /// `protocolVersions.json`).
@@ -78,5 +81,17 @@ mod tests {
         );
         assert!(by_protocol(775).is_some_and(|v| v.configuration));
         assert!(by_protocol(1).is_none());
+        // Pre-netty releases with a reused number are not listed.
+        assert!(by_game_version("1.4.2").is_none());
+        // 1.16.2 / 1.16.3 have their own numbers and the 1.16.5 module (identical layouts).
+        for (g, p) in [("1.16.2", 751), ("1.16.3", 753)] {
+            let row = by_game_version(g).unwrap();
+            assert_eq!((row.protocol, row.module, row.name), (p, "v1_16_5", g));
+        }
+        let row = by_game_version("1.12.1").unwrap();
+        assert_eq!(
+            (row.protocol, row.module, row.feature),
+            (338, "v1_12_1", "v1_12_2")
+        );
     }
 }

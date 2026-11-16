@@ -234,6 +234,68 @@ const VERSIONS: &[VersionSpec] = &[
             ),
         ],
     },
+    // Sub-versions come after the rows they were split from: a shared definition lives in the
+    // module of its first user in this list, so 1.12.1 reuses `defs::p340` and owns only what
+    // differs (the keep-alive id width).
+    VersionSpec {
+        module: "v1_12_1",
+        // Rides on the 1.12.2 feature: the client serves 1.12.1 with the 1.12.2 instance, and
+        // the module is aliases into `defs::p340` plus two keep-alive packets.
+        feature: "v1_12_2",
+        marker: "V1_12_1",
+        name: "1.12.1",
+        covers: "1.12.1",
+        data_key: "1.12.1",
+        protocol: 338,
+        layout: "Xyz",
+        slot: Some("crate::types::slot::legacy::Slot"),
+        configuration: false,
+        variant_names: &[
+            ("EntityMetadataValue.0", "Byte"),
+            ("EntityMetadataValue.1", "VarInt"),
+            ("EntityMetadataValue.2", "Float"),
+            ("EntityMetadataValue.3", "String"),
+            ("EntityMetadataValue.4", "Chat"),
+            ("EntityMetadataValue.5", "Slot"),
+            ("EntityMetadataValue.6", "Boolean"),
+            ("EntityMetadataValue.7", "Rotation"),
+            ("EntityMetadataValue.8", "Position"),
+            ("EntityMetadataValue.9", "OptPosition"),
+            ("EntityMetadataValue.10", "Direction"),
+            ("EntityMetadataValue.11", "OptUuid"),
+            ("EntityMetadataValue.12", "BlockState"),
+            ("EntityMetadataValue.13", "Nbt"),
+        ],
+        deltas: &[],
+        presence: &[],
+    },
+];
+
+/// A protocol number whose wire layout is identical to another row's in every packet, so it
+/// gets a table row but no module of its own: its `module` and `feature` are that row's.
+/// Checked against the vanilla jars, not only minecraft-data (which gives 1.16.2 - 1.16.5 one
+/// `protocol.json`): every network class of 1.16.2 / 1.16.3 equals 1.16.5's in bytecode except
+/// the login encryption refactor (same bytes on the wire) and `BookUpdateC2SPacket`, whose last
+/// VarInt is the hand there and the hotbar slot since 1.16.4.
+pub struct AliasRow {
+    pub protocol: i32,
+    /// Newest release speaking it (`ProtocolVersion::name`).
+    pub name: &'static str,
+    /// Module of the row whose layout it shares.
+    pub module: &'static str,
+}
+
+pub const ALIAS_ROWS: &[AliasRow] = &[
+    AliasRow {
+        protocol: 751,
+        name: "1.16.2",
+        module: "v1_16_5",
+    },
+    AliasRow {
+        protocol: 753,
+        name: "1.16.3",
+        module: "v1_16_5",
+    },
 ];
 
 /// A correction of minecraft-data's `protocol.json` where it disagrees with the vanilla
@@ -960,10 +1022,14 @@ fn scope_path(scope: &str) -> String {
 
 /// `#[cfg(...)]` condition for a set of version indices.
 fn cfg_of(versions: &BTreeSet<usize>) -> String {
-    let feats: Vec<String> = versions
-        .iter()
-        .map(|&v| format!("feature = \"{}\"", VERSIONS[v].feature))
-        .collect();
+    let mut feats: Vec<String> = Vec::new();
+    for &v in versions {
+        // Sub-versions ride on their row's feature: list each feature once.
+        let f = format!("feature = \"{}\"", VERSIONS[v].feature);
+        if !feats.contains(&f) {
+            feats.push(f);
+        }
+    }
     if feats.len() == 1 {
         feats[0].clone()
     } else {
@@ -1033,12 +1099,16 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
     for (&vi, scopes) in &by_owner {
         let spec = VERSIONS[vi].protocol;
         let cfg = cfg_of(&owner_cfg[&vi]);
-        let unpublished = spec > LAST_PUBLISHED_PROTOCOL;
+        let unpublished = !PUBLISHED_DEFS.contains(&spec);
         let _ = writeln!(
             root,
             "/// Definitions first used by protocol {spec} (Minecraft {}).{}\n#[cfg({cfg})]{}\npub mod p{spec};",
             VERSIONS[vi].covers,
-            if unpublished { UNSTABLE_NOTE } else { "" },
+            if unpublished {
+                unstable_note(VERSIONS[vi].module)
+            } else {
+                String::new()
+            },
             if unpublished { "\n#[doc(hidden)]" } else { "" },
         );
         let dir = format!("defs/p{spec}");
@@ -1059,7 +1129,7 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
             "//! Definitions first used by protocol {spec} (Minecraft {}).{}\n",
             VERSIONS[vi].covers,
             if unpublished {
-                UNSTABLE_NOTE.replace("\n///", "\n//!")
+                unstable_note(VERSIONS[vi].module).replace("\n///", "\n//!")
             } else {
                 String::new()
             }
@@ -1112,12 +1182,17 @@ fn write_defs(outs: &[VersionOut], shared: &share::Shared) -> Vec<(String, Strin
     files
 }
 
-/// The newest protocol whose `defs::p<N>` module was published (crates.io 0.4.1). Modules of
-/// newer protocols are `#[doc(hidden)]` and their switch enums and id newtypes
-/// `#[non_exhaustive]`: they are not a stability promise until the 0.5.0 share-rule redesign.
-const LAST_PUBLISHED_PROTOCOL: i32 = 775;
+/// The protocols whose `defs::p<N>` module was published (crates.io 0.4.1). Modules of the
+/// others (newer protocols, sub-versions) are `#[doc(hidden)]` and their switch enums and id
+/// newtypes `#[non_exhaustive]`: they are not a stability promise until the 0.5.0 share-rule
+/// redesign.
+const PUBLISHED_DEFS: &[i32] = &[47, 340, 754, 775];
 
-const UNSTABLE_NOTE: &str = "\n///\n/// Not a stability promise: these paths may change in a minor release; name the types through\n/// the version module (`crate::v26_2::…`) instead.";
+fn unstable_note(module: &str) -> String {
+    format!(
+        "\n///\n/// Not a stability promise: these paths may change in a minor release; name the types through\n/// the version module (`crate::{module}::…`) instead."
+    )
+}
 
 /// `#[non_exhaustive]` on the switch enums and id newtypes of one emitted item; newtypes get a
 /// `new` constructor (their field stays public for reading).
@@ -1318,7 +1393,7 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
          \x20   const PROTOCOL: i32 = {proto};\n\
          \x20   const NAME: &'static str = {name:?};\n\
          \x20   const POSITION_LAYOUT: crate::types::PositionLayout = crate::types::PositionLayout::{layout};\n\
-         \x20   const INFO: &'static crate::versions::ProtocolVersion = &crate::versions::TABLE[{vi}];\n\
+         \x20   const INFO: &'static crate::versions::ProtocolVersion = &crate::versions::TABLE[{ti}];\n\
          \x20   type HandshakingServerbound = handshaking::serverbound::ServerboundHandshakingPacket;\n\
          \x20   type StatusClientbound = status::clientbound::ClientboundStatusPacket;\n\
          \x20   type StatusServerbound = status::serverbound::ServerboundStatusPacket;\n\
@@ -1333,6 +1408,7 @@ fn write_version(vi: usize, out: &VersionOut, shared: &share::Shared) -> Vec<(St
         marker = spec.marker,
         name = spec.name,
         layout = spec.layout,
+        ti = table_index(proto),
         cc = conf("clientbound"),
         cs = conf("serverbound"),
     );
@@ -1348,6 +1424,8 @@ fn game_versions(pv: &Value, protocol: i32) -> Vec<String> {
         .expect("protocolVersions")
         .iter()
         .filter(|e| e["version"].as_i64() == Some(i64::from(protocol)))
+        // Pre-netty releases reuse small numbers (1.4.2 was protocol 47 too).
+        .filter(|e| e["usesNetty"].as_bool() != Some(false))
         .filter(|e| match e["releaseType"].as_str() {
             Some(t) => t == "release",
             None => {
@@ -1363,6 +1441,61 @@ fn game_versions(pv: &Value, protocol: i32) -> Vec<String> {
     out
 }
 
+/// One row of the protocol table: `(protocol, module, feature, name, layout, configuration)`.
+type TableRow = (
+    i32,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    bool,
+);
+
+/// Every row of the protocol table (versions with a module, then alias rows), ascending by
+/// protocol number.
+fn table_rows() -> Vec<TableRow> {
+    let mut rows: Vec<TableRow> = VERSIONS
+        .iter()
+        .map(|v| {
+            (
+                v.protocol,
+                v.module,
+                v.feature,
+                v.name,
+                v.layout,
+                v.configuration,
+            )
+        })
+        .collect();
+    for a in ALIAS_ROWS {
+        let of = VERSIONS
+            .iter()
+            .find(|v| v.module == a.module)
+            .unwrap_or_else(|| panic!("alias row {}: no module {}", a.protocol, a.module));
+        rows.push((
+            a.protocol,
+            of.module,
+            of.feature,
+            a.name,
+            of.layout,
+            of.configuration,
+        ));
+    }
+    rows.sort_by_key(|r| r.0);
+    for w in rows.windows(2) {
+        assert!(w[0].0 < w[1].0, "protocol {} listed twice", w[0].0);
+    }
+    rows
+}
+
+/// Index of a protocol's row in `TABLE`.
+fn table_index(protocol: i32) -> usize {
+    table_rows()
+        .iter()
+        .position(|r| r.0 == protocol)
+        .expect("protocol in the table")
+}
+
 fn versions_table(pv: &Value) -> String {
     let mut s = header("pc/common/protocolVersions.json and the codegen's version list");
     s.push_str(
@@ -1371,19 +1504,11 @@ fn versions_table(pv: &Value) -> String {
          /// whose feature is off have `enabled == false`.\n\
          pub const TABLE: &[ProtocolVersion] = &[\n",
     );
-    for spec in VERSIONS {
-        let gv = game_versions(pv, spec.protocol);
+    for (protocol, module, feature, name, layout, configuration) in table_rows() {
+        let gv = game_versions(pv, protocol);
         let _ = writeln!(
             s,
-            "    ProtocolVersion {{ protocol: {}, module: {:?}, feature: {:?}, name: {:?}, game_versions: &{:?}, position_layout: PositionLayout::{}, configuration: {}, enabled: cfg!(feature = {:?}) }},",
-            spec.protocol,
-            spec.module,
-            spec.feature,
-            spec.name,
-            gv,
-            spec.layout,
-            spec.configuration,
-            spec.feature
+            "    ProtocolVersion {{ protocol: {protocol}, module: {module:?}, feature: {feature:?}, name: {name:?}, game_versions: &{gv:?}, position_layout: PositionLayout::{layout}, configuration: {configuration}, enabled: cfg!(feature = {feature:?}) }},",
         );
     }
     s.push_str("];\n");

@@ -27,7 +27,7 @@ impl crate::packet::Version for V26_1 {
     const PROTOCOL: i32 = 775;
     const NAME: &'static str = "26.1.2";
     const POSITION_LAYOUT: crate::types::PositionLayout = crate::types::PositionLayout::Xzy;
-    const INFO: &'static crate::versions::ProtocolVersion = &crate::versions::TABLE[3];
+    const INFO: &'static crate::versions::ProtocolVersion = &crate::versions::TABLE[6];
     type HandshakingServerbound = handshaking::serverbound::ServerboundHandshakingPacket;
     type StatusClientbound = status::clientbound::ClientboundStatusPacket;
     type StatusServerbound = status::serverbound::ServerboundStatusPacket;

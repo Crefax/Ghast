@@ -306,6 +306,18 @@ fn v1_8_node_to_rust() {
 
 #[cfg(feature = "v1_12_2")]
 #[test]
+fn v1_12_1_rust_to_node() {
+    rust_to_node("1.12.1", &version_sets!(v1_12_1));
+}
+
+#[cfg(feature = "v1_12_2")]
+#[test]
+fn v1_12_1_node_to_rust() {
+    node_to_rust("1.12.1", &version_sets!(v1_12_1));
+}
+
+#[cfg(feature = "v1_12_2")]
+#[test]
 fn v1_12_2_rust_to_node() {
     rust_to_node("1.12.2", &version_sets!(v1_12_2));
 }

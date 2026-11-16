@@ -138,6 +138,17 @@ sets!(v1_8:
 );
 
 #[cfg(feature = "v1_12_2")]
+sets!(v1_12_1:
+    handshaking::serverbound::ServerboundHandshakingPacket,
+    status::clientbound::ClientboundStatusPacket,
+    status::serverbound::ServerboundStatusPacket,
+    login::clientbound::ClientboundLoginPacket,
+    login::serverbound::ServerboundLoginPacket,
+    play::clientbound::ClientboundPlayPacket,
+    play::serverbound::ServerboundPlayPacket,
+);
+
+#[cfg(feature = "v1_12_2")]
 sets!(v1_12_2:
     handshaking::serverbound::ServerboundHandshakingPacket,
     status::clientbound::ClientboundStatusPacket,

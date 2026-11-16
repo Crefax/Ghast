@@ -6,8 +6,8 @@
 //!   and strings), [`McWrite`] for encoding, VarInt/VarLong.
 //! - [`types`], [`nbt`], [`chat`]: hand-written shared types — [`BlockPos`] with the
 //!   per-version bit layout, slots, lazily parsed NBT ([`nbt::RawNbt`]), chat JSON.
-//! - Generated packet modules per protocol version (`v1_8` = protocol 47, `v1_12_2` =
-//!   340, `v1_16_5` = 754, `v26_1` = 775, `v26_2` = 776), each with typed packets, one enum per state
+//! - Generated packet modules per protocol version (`v1_8` = protocol 47, `v1_12_1` = 338,
+//!   `v1_12_2` = 340, `v1_16_5` = 754, `v26_1` = 775, `v26_2` = 776), each with typed packets, one enum per state
 //!   and direction, and id constants. The definitions themselves live once in [`defs`]
 //!   and are shared by every version whose code for them is identical. A [`Version`]
 //!   marker type ties a version's packet sets together so a version-agnostic layer can be
@@ -57,6 +57,12 @@ pub mod defs;
 #[cfg(feature = "v1_8")]
 #[path = "generated/v1_8/mod.rs"]
 pub mod v1_8;
+
+// 1.12.1 rides on the 1.12.2 feature: its module is aliases of 1.12.2's definitions except the
+// keep-alive packets (VarInt ids, as in 1.8).
+#[cfg(feature = "v1_12_2")]
+#[path = "generated/v1_12_1/mod.rs"]
+pub mod v1_12_1;
 
 #[cfg(feature = "v1_12_2")]
 #[path = "generated/v1_12_2/mod.rs"]

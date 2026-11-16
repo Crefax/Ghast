@@ -25,14 +25,14 @@ use crate::testgen::{Gen, Generate};
 use crate::types::{BlockPos, ByteString, Holder, HolderSet, LpVec3, PositionLayout, Uuid};
 use bytes::{BufMut, Bytes, BytesMut};
 
-#[cfg(feature = "v1_8")]
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 /// `keep_alive` (serverbound play).
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeepAlive<const V: i32> {
     /// `keepAliveId`
     pub keep_alive_id: i32,
 }
-#[cfg(feature = "v1_8")]
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 impl<const V: i32> Decode for KeepAlive<V> {
     fn decode(r: &mut Reader<'_>) -> DecodeResult<Self> {
         Ok({
@@ -41,14 +41,14 @@ impl<const V: i32> Decode for KeepAlive<V> {
         })
     }
 }
-#[cfg(feature = "v1_8")]
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 impl<const V: i32> Encode for KeepAlive<V> {
     fn encode(&self, w: &mut BytesMut) -> EncodeResult {
         w.put_varint((*self).keep_alive_id);
         Ok(())
     }
 }
-#[cfg(feature = "v1_8")]
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 #[cfg(feature = "testgen")]
 impl<const V: i32> Generate for KeepAlive<V> {
     fn generate(g: &mut Gen) -> Self {
