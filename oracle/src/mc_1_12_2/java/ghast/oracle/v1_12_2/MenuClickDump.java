@@ -10,6 +10,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickWindowC2SPacket;
 import net.minecraft.screen.BrewingScreenHandler;
+import net.minecraft.screen.EnchantingScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.text.LiteralText;
 import net.minecraft.util.ItemAction;
@@ -27,13 +28,15 @@ import java.util.function.Consumer;
  *
  * <p>What is faked: the screen handler is built directly over the same inventory class the client
  * uses for the window ({@code ClientNetworkSyncedInventory} for the brewing stand, as
- * {@code ClientPlayNetworkHandler.onOpenScreen} does); no server, no properties (brew time and
- * fuel only drive the GUI). Contents are set slot by slot like {@code window_items} does.
+ * {@code ClientPlayNetworkHandler.onOpenScreen} does; the enchanting table's own inventory, over the
+ * harness's client world at the origin); no server, no properties (brew time, fuel, enchantment
+ * offers and the seed only drive the GUI). Contents are set slot by slot like {@code window_items}
+ * does.
  */
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing"};
+    static final String[] MENUS = {"brewing", "enchanting"};
 
     /**
      * Items that appear in brewing slots or are close to the rules: potion, splash, lingering, glass
@@ -41,6 +44,9 @@ final class MenuClickDump {
      */
     static final int[] BREWING = {373, 373, 438, 441, 374, 374, 437, 289, 331, 348, 353, 370, 372, 375, 376, 377,
         377, 378, 382, 396, 414, 349, 350, 351, 1, 3, 264};
+
+    /** Enchantable items, books, dyes (damage 4 = lapis), a few others. */
+    static final int[] ENCHANTING = {351, 351, 351, 276, 261, 310, 278, 340, 340, 403, 1, 3, 264, 35};
 
     /** All lines for {@code menu}: the facts line, then {@code count} cases. */
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
@@ -64,6 +70,7 @@ final class MenuClickDump {
         return switch (menu) {
             case "brewing" -> new BrewingScreenHandler(inv,
                     new ClientNetworkSyncedInventory("minecraft:brewing_stand", new LiteralText("b"), 5));
+            case "enchanting" -> new EnchantingScreenHandler(inv, run.world);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -71,6 +78,7 @@ final class MenuClickDump {
     private static int containerSlots(String menu) {
         return switch (menu) {
             case "brewing" -> 5;
+            case "enchanting" -> 2;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -117,6 +125,14 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("enchanting")) {
+            int id = r.pick(ENCHANTING);
+            ItemStack s = ClickDump.stack(r, new int[] {id});
+            if (id == 351 && r.chance(0.7)) {
+                s.setDamage(4);
+            }
+            return s;
+        }
         int id = r.pick(BREWING);
         ItemStack s = ClickDump.stack(r, new int[] {id});
         if (s.getItem() != null && r.chance(0.5) && (id == 373 || id == 438 || id == 441)) {

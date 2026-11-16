@@ -100,6 +100,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | menu | 1.8.9 | 1.12.2 | 1.16.5 |
 |---|---|---|---|
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
+| enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -109,6 +110,12 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   `insertItem` ignores slot limits, so a stack of bottles lands whole in one bottle slot; 1.12:
   bottles only one at a time, blaze powder is an ingredient before it is fuel; 1.16.5: the
   ingredients of `BrewingRecipeRegistry` by item, blaze powder tried as fuel first).
+- **Enchanting table**: the item slot takes anything, one item by hand; the lapis slot lapis
+  (1.8 / 1.12: dye damage 4). Shift-click puts lapis into the lapis slot and one item of
+  anything else into an empty item slot (1.8 / 1.12: a fresh stack without NBT unless the stack
+  was a single item; 1.16: a copy with NBT). The offered enchantments, their costs and the seed
+  are window properties for the GUI only; the enchantment itself (`enchant_item`) is the
+  server's.
   Brew time and fuel are window properties the GUI shows; they never change slots on the client.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):

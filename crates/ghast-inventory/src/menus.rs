@@ -14,7 +14,9 @@ use crate::window::WindowKind;
 /// [`SlotKind::Special`](crate::SlotKind::Special) and clicks reading them are refused).
 pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
     match kind {
-        WindowKind::BrewingStand => matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5),
+        WindowKind::BrewingStand | WindowKind::Enchanting => {
+            matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
+        }
         _ => false,
     }
 }
@@ -86,6 +88,16 @@ impl Version {
         }
     }
 
+    /// The enchanting table's lapis slot: 1.8 / 1.12 dye (351) with damage 4 (`DyeColor.BLUE`),
+    /// 1.16.5 `lapis_lazuli`.
+    pub(crate) fn is_lapis(self, s: &Stack) -> bool {
+        match self {
+            Version::V1_8 | Version::V1_12 => s.id == 351 && s.damage == 4,
+            Version::V1_16_5 => self.name(s.id) == "lapis_lazuli",
+            _ => false,
+        }
+    }
+
     /// 1.12+ brewing stand fuel slot: blaze powder (1.12: 377, any damage).
     pub(crate) fn brewing_fuel(self, s: &Stack) -> bool {
         match self {
@@ -149,6 +161,41 @@ impl Sim<'_> {
 }
 
 /// `Slot.canInsert` of a special menu slot kind (`None`: not a special menu slot).
+impl Sim<'_> {
+    /// `EnchantingScreenHandler.transferSlot`: a menu slot goes to the player part (last slot
+    /// first); lapis to the lapis slot; anything else, when the item slot is empty, puts one item
+    /// there (1.8 / 1.12: a copy with its NBT only when the stack is a single item, otherwise a
+    /// fresh stack of the item and damage without NBT; 1.16: always a copy with the NBT).
+    pub(crate) fn transfer_enchanting(&mut self, i: usize, st: &mut Stack) -> R<bool> {
+        let v = self.v;
+        let (n, len) = (self.lay.n, self.lay.len);
+        if i < n {
+            return self.insert(st, n, len, true);
+        }
+        if v.is_lapis(st) {
+            return self.insert(st, 1, 2, true);
+        }
+        if self.get(0).is_some() {
+            return Ok(false);
+        }
+        let one = match v {
+            Version::V1_8 | Version::V1_12
+                if !matches!(st.data, crate::stack::ItemData::Nbt(_)) || st.count != 1 =>
+            {
+                if st.count < 1 {
+                    // 1.8 zero-count stack: nothing is placed (1.12 never gets here empty)
+                    return Ok(true);
+                }
+                Stack::new(st.id, 1, st.damage)
+            }
+            _ => st.with_count(1),
+        };
+        st.count -= 1;
+        self.set(0, Some(one));
+        Ok(true)
+    }
+}
+
 #[cfg(all(test, any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")))]
 fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
     use crate::SlotKind as K;
@@ -156,6 +203,8 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::Potion => v.potion_slot_accepts(s),
         K::BrewingIngredient => v.brewing_ingredient(s),
         K::BrewingFuel => v.brewing_fuel(s),
+        K::EnchantItem => true,
+        K::Lapis => v.is_lapis(s),
         _ => return None,
     })
 }
@@ -184,6 +233,7 @@ mod tests {
             let c: serde_json::Value = serde_json::from_str(&line).unwrap();
             let kind = match c["facts"].as_str().unwrap() {
                 "brewing" => WindowKind::BrewingStand,
+                "enchanting" => WindowKind::Enchanting,
                 m => panic!("unknown menu {m}"),
             };
             assert!(modelled(v, kind), "{kind:?} facts but not modelled");
@@ -195,6 +245,15 @@ mod tests {
                     want.insert(e[0].as_i64().unwrap() as i32, e[1].as_u64().unwrap() as u32);
                 }
                 for id in 0..4096 {
+                    if id == 0 {
+                        // air (an item in 1.12+) is an empty slot, never a stack
+                        continue;
+                    }
+                    if !v.known(id) {
+                        // ids the jar has no item for are never offered
+                        assert!(!want.contains_key(&id), "{kind:?} slot {k} id {id}");
+                        continue;
+                    }
                     for d in 0..16i16 {
                         let s = Stack::new(id, 1, d);
                         let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
@@ -208,7 +267,7 @@ mod tests {
             for (k, m) in c["max"].as_array().unwrap().iter().enumerate() {
                 let want = m.as_i64().unwrap() as i32;
                 let got = match kind.slot_kind(k) {
-                    crate::SlotKind::Potion => 1,
+                    crate::SlotKind::Potion | crate::SlotKind::EnchantItem => 1,
                     _ => 64,
                 };
                 assert_eq!(got, want, "{kind:?} slot {k} max");

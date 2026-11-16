@@ -202,7 +202,11 @@ impl Layout {
                 if i < self.n {
                     match k.slot_kind(i) {
                         // a menu slot of a version whose menu is not modelled
-                        SlotKind::Potion | SlotKind::BrewingIngredient | SlotKind::BrewingFuel
+                        SlotKind::Potion
+                        | SlotKind::BrewingIngredient
+                        | SlotKind::BrewingFuel
+                        | SlotKind::EnchantItem
+                        | SlotKind::Lapis
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
@@ -364,7 +368,7 @@ impl Sim<'_> {
     /// `Slot.setStack` -> the backing inventory's `setStack`. Container inventories other than
     /// crafting grids are `SimpleInventory`s, which cut a stack above 64 down to 64 (the stack
     /// object itself, so the excess is gone).
-    fn set(&mut self, i: usize, mut s: Option<Stack>) {
+    pub(crate) fn set(&mut self, i: usize, mut s: Option<Stack>) {
         let l = self.loc(i);
         if self.lay.clamps(l) {
             clamp_v(self.v, &mut s);
@@ -433,6 +437,8 @@ impl Sim<'_> {
             SlotKind::Potion => self.v.potion_slot_accepts(s),
             SlotKind::BrewingIngredient => self.v.brewing_ingredient(s),
             SlotKind::BrewingFuel => self.v.brewing_fuel(s),
+            SlotKind::EnchantItem => true,
+            SlotKind::Lapis => self.v.is_lapis(s),
             SlotKind::Special => return Err(Unpredictable),
         })
     }
@@ -441,7 +447,7 @@ impl Sim<'_> {
     /// is 99; the stack's own limit is applied separately).
     fn slot_limit(&self, i: usize) -> R<i32> {
         match self.lay.kind(i) {
-            SlotKind::Armor(_) | SlotKind::Potion => Ok(1),
+            SlotKind::Armor(_) | SlotKind::Potion | SlotKind::EnchantItem => Ok(1),
             SlotKind::Special => Err(Unpredictable),
             _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
@@ -1045,6 +1051,9 @@ impl Sim<'_> {
                                 return Ok(None);
                             }
                         }
+                    }
+                    WindowKind::Enchanting if crate::menus::modelled(v, kind) => {
+                        (self.transfer_enchanting(i, &mut st)?, true)
                     }
                     _ => return Err(Unpredictable),
                 }

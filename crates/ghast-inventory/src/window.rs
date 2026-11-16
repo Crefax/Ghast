@@ -77,6 +77,10 @@ pub enum SlotKind {
     BrewingIngredient,
     /// 1.12+ brewing stand fuel slot (4): blaze powder.
     BrewingFuel,
+    /// Enchanting table item slot (0): any item, one at a time.
+    EnchantItem,
+    /// Enchanting table lapis slot (1): lapis lazuli (1.8 / 1.12: dye damage 4).
+    Lapis,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -210,6 +214,13 @@ impl WindowKind {
                 1 => SlotKind::Special,
                 _ => SlotKind::Output,
             },
+            WindowKind::Enchanting => {
+                if i == 0 {
+                    SlotKind::EnchantItem
+                } else {
+                    SlotKind::Lapis
+                }
+            }
             WindowKind::BrewingStand => match i {
                 0..=2 => SlotKind::Potion,
                 3 => SlotKind::BrewingIngredient,

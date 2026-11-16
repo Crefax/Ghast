@@ -232,3 +232,59 @@ fn brewing_stand_1_16_5() {
     assert!(clicked(&out), "{out:?}");
     assert_eq!(e.core.inv.slot(3).map(Stack::count), Some(5));
 }
+
+/// Shift-clicks hotbar 0 (lapis) and hotbar 1 (a tool) into an open enchanting table; returns the
+/// table's two slots afterwards.
+fn enchant_two(mut e: Engine<Box<dyn Sim>>, window: i8) -> (Option<Stack>, Option<Stack>) {
+    assert_eq!(e.core.inv.slot_kind(0), Some(SlotKind::EnchantItem));
+    assert_eq!(e.core.inv.slot_kind(1), Some(SlotKind::Lapis));
+    // hotbar k is screen slot 2 + 27 + k
+    for (n, slot) in [29i16, 30].into_iter().enumerate() {
+        let out = click_once(&mut e, Click::QuickMove { slot, right: false });
+        assert!(clicked(&out), "{out:?}");
+        let _ = e.inventory_mut().on_transaction(window, n as i16 + 1, true);
+    }
+    let inv = &e.core.inv;
+    (inv.slot(0).cloned(), inv.slot(1).cloned())
+}
+
+/// The enchanting table on every legacy version: lapis to the lapis slot, one tool to the item
+/// slot.
+#[test]
+fn enchanting_table_legacy() {
+    let lapis_8 = Stack::new(351, 10, 4);
+    let e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_1_8(5, "minecraft:enchanting_table", 0),
+        5,
+        vec![None, None],
+        &[(0, lapis_8.clone()), (1, Stack::new(278, 1, 0))],
+    );
+    let (item, lapis) = enchant_two(e, 5);
+    assert_eq!(item.map(|s| s.id()), Some(278));
+    assert_eq!(lapis.map(|s| s.count()), Some(10));
+    let e = opened::<V1_12_2>(
+        GameVersion::V1_12_2,
+        &open_1_12(6, "minecraft:enchanting_table", 0),
+        6,
+        vec![None, None],
+        &[(0, lapis_8), (1, Stack::new(278, 1, 0))],
+    );
+    let (item, lapis) = enchant_two(e, 6);
+    assert_eq!(item.map(|s| s.id()), Some(278));
+    assert_eq!(lapis.map(|s| s.count()), Some(10));
+    let pick = id16("iron_pickaxe");
+    let e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(7, 12),
+        7,
+        vec![None, None],
+        &[
+            (0, Stack::new(id16("lapis_lazuli"), 10, 0)),
+            (1, Stack::new(pick, 1, 0)),
+        ],
+    );
+    let (item, lapis) = enchant_two(e, 7);
+    assert_eq!(item.map(|s| s.id()), Some(pick));
+    assert_eq!(lapis.map(|s| s.count()), Some(10));
+}

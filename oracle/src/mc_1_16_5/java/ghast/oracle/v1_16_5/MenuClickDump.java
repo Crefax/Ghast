@@ -8,6 +8,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.screen.BrewingStandScreenHandler;
+import net.minecraft.screen.EnchantmentScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Identifier;
@@ -27,19 +28,25 @@ import java.util.function.Consumer;
  *
  * <p>What is faked: the screen handler is built with the client constructor {@code ScreenHandlerType}
  * uses ({@code BrewingStandScreenHandler(syncId, playerInventory)}: a {@code SimpleInventory} and an
- * unsynced property delegate); no server, no properties (brew time and fuel only drive the GUI).
+ * unsynced property delegate; {@code EnchantmentScreenHandler(syncId, playerInventory)}: the empty
+ * client context); no server, no properties (brew time, fuel, enchantment offers and the seed only
+ * drive the GUI).
  * Contents are set slot by slot like {@code window_items} does.
  */
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing"};
+    static final String[] MENUS = {"brewing", "enchanting"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
         "dragon_breath", "nether_wart", "redstone", "glowstone_dust", "gunpowder", "sugar", "ghast_tear", "spider_eye",
         "fermented_spider_eye", "blaze_powder", "blaze_powder", "magma_cream", "glistering_melon_slice", "golden_carrot",
         "rabbit_foot", "pufferfish", "turtle_helmet", "phantom_membrane", "cod", "stone", "dirt", "diamond"};
+
+    /** Enchantable items, books, lapis, a dye, a few others. */
+    static final String[] ENCHANTING = {"lapis_lazuli", "lapis_lazuli", "lapis_lazuli", "blue_dye", "diamond_sword", "bow",
+        "diamond_helmet", "iron_pickaxe", "book", "book", "enchanted_book", "stone", "dirt", "diamond"};
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
@@ -59,6 +66,7 @@ final class MenuClickDump {
     private static int menuId(String menu) {
         return switch (menu) {
             case "brewing" -> 10;
+            case "enchanting" -> 12;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -66,6 +74,7 @@ final class MenuClickDump {
     private static ScreenHandler handler(int sync, PlayerInventory inv, String menu) {
         return switch (menu) {
             case "brewing" -> new BrewingStandScreenHandler(sync, inv);
+            case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -98,6 +107,9 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("enchanting")) {
+            return ClickDump.stack(r, ENCHANTING);
+        }
         ItemStack s = ClickDump.stack(r, BREWING);
         String id = Registry.ITEM.getId(s.getItem()).getPath();
         if (id.endsWith("potion") && r.chance(0.6)) {
