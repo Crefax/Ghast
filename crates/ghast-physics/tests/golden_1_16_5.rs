@@ -65,3 +65,10 @@ fn nether_1_16_5() {
 fn riptide_1_16_5() {
     check("riptide.jsonl.gz");
 }
+
+/// Elytra: the glide start, the glide, the server's flag 7, creative flight, attached firework
+/// rockets in the client world's tick order (hand cases + the golden elytra fuzz).
+#[test]
+fn elytra_1_16_5() {
+    check("elytra.jsonl.gz");
+}

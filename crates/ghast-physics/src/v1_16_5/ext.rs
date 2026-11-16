@@ -1,5 +1,6 @@
 //! 1.16.5 movement state beyond [`PlayerState`](super::PlayerState), kept apart so the 0.4.0
-//! types stay as they were: the level's dimension type and riptide.
+//! types stay as they were: the level's dimension type, riptide and gliding (elytra) with
+//! firework rockets.
 //!
 //! [`tick_ext`](super::tick_ext) runs the same tick as [`tick_in`](super::tick_in) with this
 //! state; with a default [`PlayerExt`] the two are identical.
@@ -39,6 +40,17 @@ pub struct PlayerExt {
     /// ([`riptide`](super::riptide)), counted down each tick, ended by a hit or a horizontal
     /// collision.
     pub riptide_ticks: i32,
+    /// Shared entity flag 7, `isFallFlying()`: the player glides. Set by the client when it starts
+    /// gliding; cleared by the server's entity data ([`PlayerExt::apply_shared_flags`]) or by
+    /// creative flight.
+    pub fall_flying: bool,
+    /// A usable elytra is in the chest slot (`Items.ELYTRA` with `ElytraItem.isUsable`: damage
+    /// below 431). Kept by the caller from the player's equipment; read only when a glide starts.
+    pub elytra: bool,
+    /// The [`Pose::FallFlying`](super::Pose::FallFlying) the player is in is the glide's
+    /// (vanilla `FALL_FLYING`), not the riptide spin's (`SPIN_ATTACK`, the same box). Kept by the
+    /// tick.
+    pub glide_pose: bool,
 }
 
 impl PlayerExt {
@@ -54,6 +66,24 @@ impl PlayerExt {
     /// arrives clear while it is (`ClientPlayerEntity.onTrackedDataSet`).
     pub fn apply_living_flags(&mut self, flags: u8) {
         self.spin_attack = flags & 4 != 0;
+    }
+
+    /// The server's entity data for the player's own shared flags byte (index 0): sets sprinting
+    /// (bit value 8; the flag only, the sprint speed modifier is not touched, as in vanilla),
+    /// swimming (16) and fall flying (128). Other bits are not read by movement.
+    pub fn apply_shared_flags(&mut self, p: &mut super::PlayerState, flags: u8) {
+        p.sprinting = flags & 0x08 != 0;
+        p.swimming = flags & 0x10 != 0;
+        self.fall_flying = flags & 0x80 != 0;
+    }
+
+    /// The bits of the player's shared flags byte that movement reads: 8 sprinting, 16 swimming,
+    /// 128 fall flying.
+    #[must_use]
+    pub fn shared_flags(&self, p: &super::PlayerState) -> u8 {
+        (u8::from(p.sprinting) << 3)
+            | (u8::from(p.swimming) << 4)
+            | (u8::from(self.fall_flying) << 7)
     }
 
     /// `true` when the state changes nothing: [`tick_ext`](super::tick_ext) is then the same

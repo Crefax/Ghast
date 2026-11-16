@@ -410,7 +410,8 @@ Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 orac
 (CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
 Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` and
 `fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `entities.jsonl.gz`, `nether.jsonl.gz`,
-`riptide.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`, `voxel_shapes.jsonl.gz`.
+`riptide.jsonl.gz`, `elytra.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
+`voxel_shapes.jsonl.gz`.
 
 Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
 and javac refuses to compile against them, so `prepareVanilla` drops parameter annotations from the
@@ -534,6 +535,41 @@ Cached run (`oracle/cache/1.16.5/fuzz-riptide/`, 1,000,000 ticks, 0 diffs):
 
 ```sh
 for s in 61 62 63 64 65; do MC=1.16.5 oracle/run.sh fuzz --riptide true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-riptide/riptide_s$s.jsonl.gz"; done
+```
+
+**`elytra`** (29 cases + 100 fuzz, `elytra.jsonl.gz`, `MC=1.16.5 oracle/run.sh elytra`): an
+elytra in the chest slot (`setup.ext.chest`, `chest_damage`; the equipment packet at setup),
+`setup.ext.glide` (marks the kind), `setup.ext.fall_flying` (the server's shared flag 7 in the
+setup entity data) and events `{"type":"shared_flags","set","clear"}` (entity data for the
+player's shared flags byte, index 0: 8 sprinting, 16 swimming, 128 fall flying),
+`{"type":"equip","slot","item","damage"}` (equipment packet) and `{"type":"firework","id"}`: the
+rocket the server spawns for a gliding player, built with the server's own constructor
+(`new FireworkRocketEntity(world, stack, player)`) and sent as the spawn packet (no motion; a
+rocket with a shooter takes the shooter's) plus its entity data (the shooter id); the server's
+destroy packet (`remove_entity`) ends it (its random life is the case's choice). Glide cases
+always list the client world's entities in tick order (`entities`), so the rockets' order
+around the player (the iteration order of the client world's entity map) and whether each
+ticks (its chunk loaded) come with each record; tick records add `ext: {fall_flying,
+shared_flags}`. Cases: the glide start, a jump from the ground and pressed again in the air,
+pressed while still rising (1.16 has no falling check), broken (431) and worn (430) elytra, no
+chest item, a chestplate, water, gliding into water and lava, the landing (the client glides
+on until the server clears flag 7), landing on soul sand (no speed factor while gliding; the
+glide pose left after the flag slows the input for one tick), a ladder (no start while
+climbing), vines, a wall, creative double taps, flag 7 set while flying (one glide travel, then
+the flight clears it), levitation, slow falling, a low ceiling, two rockets, twelve rockets
+with ids on both sides of the player's in the entity map, a rocket on a player who is not
+gliding, a rocket used from the hand (`use_item`; on the ground nothing), the server's sprint /
+swim / glide bits, joining gliding, the elytra taken off and put back, a rocket left in an
+unloaded chunk (it stops ticking), straight down and up. Fuzz (`Ext.elytraFuzz`,
+`fuzz --elytra true`, cases `…_x_el`): the `withExtras` case with an elytra (sometimes broken or
+missing), often raised and started gliding, jump flips, wide pitch changes, flag 7 cleared and
+set, sprint / swim bits, rockets with ids 2-60 or 1000-5000 alive 1-25 ticks, the chest item
+swapped. What the harness fakes beyond the base harness: nothing (the rocket's server-side
+random motion and life are replaced by a zero motion and the case's destroy packet). Cached
+run (`oracle/cache/1.16.5/fuzz-elytra/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 71 72 73 74 75; do MC=1.16.5 oracle/run.sh fuzz --elytra true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-elytra/elytra_s$s.jsonl.gz"; done
 ```
 
 Entity spawns (`Ents`) send an entity's velocity right after its spawn and entity data when its

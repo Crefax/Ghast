@@ -40,11 +40,12 @@ pub enum Pose {
     Crouching,
     /// Swimming / crawling (0.6 high).
     Swimming,
-    /// Elytra flight (0.6 high, eyes at 0.4; gliding is not simulated). Also the box of the
-    /// riptide spin (vanilla `SPIN_ATTACK`: the same size and eye height), the only way this
-    /// physics enters the pose: while [`PlayerExt::spin_attack`] is set the player takes this
-    /// pose, and every behaviour of the spin is keyed on that flag (it is not a swimming pose:
-    /// no crawling slowdown).
+    /// Elytra flight (0.6 high, eyes at 0.4): the glide's pose (vanilla `FALL_FLYING`, gliding
+    /// is simulated by [`tick_ext`] with [`PlayerExt::fall_flying`]). Also the box of the riptide
+    /// spin (vanilla `SPIN_ATTACK`: the same size and eye height): while
+    /// [`PlayerExt::spin_attack`] is set the player takes this pose, and every behaviour of the
+    /// spin is keyed on that flag (it is not a swimming pose: no crawling slowdown).
+    /// [`PlayerExt::glide_pose`] says which of the two it is.
     FallFlying,
     /// Sleeping (0.2 × 0.2; not simulated).
     Sleeping,
@@ -488,6 +489,8 @@ pub(super) trait Extra {
     const ON: bool;
     /// The extension state (only called when [`Extra::ON`]).
     fn ext(&mut self) -> &mut PlayerExt;
+    /// The extension state, read only (only called when [`Extra::ON`]).
+    fn ext_ref(&self) -> &PlayerExt;
     /// The other entities in the world (only read when [`Extra::ON`]).
     fn others(&self) -> &[OtherEntity];
 }
@@ -500,6 +503,11 @@ impl Extra for NoExt {
 
     #[inline(always)]
     fn ext(&mut self) -> &mut PlayerExt {
+        unreachable!("the plain tick has no extension state")
+    }
+
+    #[inline(always)]
+    fn ext_ref(&self) -> &PlayerExt {
         unreachable!("the plain tick has no extension state")
     }
 
@@ -520,6 +528,11 @@ impl Extra for ExtCtx<'_> {
 
     #[inline(always)]
     fn ext(&mut self) -> &mut PlayerExt {
+        self.x
+    }
+
+    #[inline(always)]
+    fn ext_ref(&self) -> &PlayerExt {
         self.x
     }
 
@@ -584,6 +597,25 @@ pub fn riptide<W: BlockView<State = BlockState>>(
         };
         t.move_self(V3::new(0.0, f64::from(1.199_999_9f32), 0.0));
     }
+}
+
+/// One tick of a firework rocket attached to the player (`FireworkRocketEntity.tick` with the
+/// player as its shooter): a gliding player is pushed along the look (`yaw`, `pitch`: the
+/// player's rotation when the rocket ticks, i.e. the tick's rotation). Call it for each rocket
+/// that ticks, in the client world's entity tick order: before [`tick_ext`] for the rockets
+/// before the player, after it for the others. A rocket ticks only while the chunk column at its
+/// position (the player's position after its previous tick, or its spawn position) is loaded.
+pub fn rocket_boost(p: &mut PlayerState, x: &PlayerExt, yaw: f32, pitch: f32) {
+    if !x.fall_flying {
+        return;
+    }
+    let look = rotation_vector(pitch, yaw);
+    let v = p.vel;
+    p.vel = [
+        v[0] + (look.x * 0.1 + (look.x * 1.5 - v[0]) * 0.5),
+        v[1] + (look.y * 0.1 + (look.y * 1.5 - v[1]) * 0.5),
+        v[2] + (look.z * 0.1 + (look.z * 1.5 - v[2]) * 0.5),
+    ];
 }
 
 /// `isTouchingWaterOrRain()`: in water, or `raining` and rain reaches the block position or the
@@ -811,7 +843,10 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn update_pose(&mut self) {
-        let wanted = if self.p.is_swimming() {
+        let glide = X::ON && self.x.ext().fall_flying;
+        let wanted = if glide {
+            Pose::FallFlying
+        } else if self.p.is_swimming() {
             Pose::Swimming
         } else if X::ON && self.x.ext().spin_attack {
             // SPIN_ATTACK: the elytra pose's box (see `Pose::FallFlying`).
@@ -842,7 +877,32 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         } else {
             Pose::Swimming
         };
+        if X::ON {
+            self.set_glide_pose(pose, glide);
+        }
         self.set_pose(pose);
+    }
+
+    /// `FALL_FLYING` and `SPIN_ATTACK` are both [`Pose::FallFlying`]: a change between the two is
+    /// still a pose change (`calculateDimensions` rebuilds the box from its minimum corner).
+    #[inline(never)]
+    fn set_glide_pose(&mut self, pose: Pose, glide: bool) {
+        let glide_pose = pose == Pose::FallFlying && glide;
+        let x = self.x.ext();
+        if pose == Pose::FallFlying && self.p.pose == Pose::FallFlying && x.glide_pose != glide_pose
+        {
+            let (w, h) = pose.dimensions();
+            let b = self.p.bb;
+            self.p.bb = bx(
+                b.min_x,
+                b.min_y,
+                b.min_z,
+                b.min_x + f64::from(w),
+                b.min_y + f64::from(h),
+                b.min_z + f64::from(w),
+            );
+        }
+        x.glide_pose = glide_pose;
     }
 
     /// Vanilla `calculateDimensions` on a pose change.
@@ -903,9 +963,15 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         } else {
             self.pose_fits(Pose::Crouching)
         };
+        // `isInSwimmingPose`: the swimming pose, or the glide's pose once the glide has ended.
+        let glide_pose_left = X::ON && {
+            let x = self.x.ext();
+            x.glide_pose && !x.fall_flying
+        };
         let p = &mut *self.p;
         p.in_sneaking_pose = sneak_pose;
-        let slow = sneak_pose || (p.pose == Pose::Swimming && !p.touching_water);
+        let swim_pose = p.pose == Pose::Swimming || (glide_pose_left && p.pose == Pose::FallFlying);
+        let slow = sneak_pose || (swim_pose && !p.touching_water);
         p.input = read_keys(keys, slow);
         if using_item {
             p.input.sideways *= 0.2;
@@ -972,10 +1038,12 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
             }
         }
 
+        let mut toggled = false;
         if p.abilities.allow_flying && p.spectator {
             // Spectators are locked into flight.
             if !p.abilities.flying {
                 p.abilities.flying = true;
+                toggled = true;
                 out.push(Packet::Abilities(p.abilities));
             }
         } else if p.abilities.allow_flying && !prev_jump && p.input.jumping && !autojumping {
@@ -983,10 +1051,15 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
                 p.fly_toggle_timer = 7;
             } else if !p.is_swimming() {
                 p.abilities.flying = !p.abilities.flying;
+                toggled = true;
                 out.push(Packet::Abilities(p.abilities));
                 p.fly_toggle_timer = 0;
             }
         }
+        if X::ON && p.input.jumping && !toggled && !prev_jump && !p.abilities.flying {
+            self.start_glide(out);
+        }
+        let p = &mut *self.p;
         // `method_29920` is "not flying" for players: fliers ignore liquids here.
         if p.touching_water && p.input.sneaking && !p.abilities.flying {
             p.vel[1] += f64::from(-0.04f32);
@@ -1010,6 +1083,26 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         if p.on_ground && p.abilities.flying && !p.spectator {
             p.abilities.flying = false;
             out.push(Packet::Abilities(p.abilities));
+        }
+    }
+
+    /// The elytra start (`ClientPlayerEntity.tickMovement` → `checkFallFlying`): the client sets
+    /// flag 7 itself and tells the server.
+    #[inline(never)]
+    fn start_glide(&mut self, out: &mut Packets) {
+        if is_climbing(self.p, self.w) {
+            return;
+        }
+        let p = &*self.p;
+        let x = self.x.ext();
+        if x.elytra
+            && !p.on_ground
+            && !x.fall_flying
+            && !p.touching_water
+            && p.effects.levitation.is_none()
+        {
+            x.fall_flying = true;
+            out.push(Packet::StartFallFlying);
         }
     }
 
@@ -1222,6 +1315,9 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
             self.p.vel[1] = vy * 0.6;
             self.p.flying_speed = air;
             self.p.fall_distance = 0.0;
+            if X::ON {
+                self.x.ext().fall_flying = false;
+            }
         } else {
             self.travel(input);
         }
@@ -1313,6 +1409,8 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
             let v = V3::new(v.x, v.y + -gravity / 4.0, v.z);
             self.set_vel(v);
             self.jump_out(v, start_y);
+        } else if X::ON && self.x.ext().fall_flying {
+            self.glide(gravity);
         } else {
             let [px, py, pz] = self.velocity_pos();
             let t = slipperiness(self.block(px, py, pz));
@@ -1340,6 +1438,58 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
             let u = f64::from(u);
             self.set_vel(V3::new(v.x * u, y * f64::from(0.98f32), v.z * u));
         }
+    }
+
+    /// `LivingEntity.travel` while fall flying: lift from the pitch, falling turned into forward
+    /// speed and forward speed into climb, steering towards the look, drag; then the move.
+    #[inline(never)]
+    fn glide(&mut self, gravity: f64) {
+        let v0 = self.vel();
+        if v0.y > -0.5 {
+            self.p.fall_distance = 1.0;
+        }
+        let look = rotation_vector(self.p.pitch, self.p.yaw);
+        let lean = self.p.pitch * (std::f64::consts::PI / 180.0) as f32;
+        let look_h = (look.x * look.x + look.z * look.z).sqrt();
+        let speed_h = (v0.x * v0.x + v0.z * v0.z).sqrt();
+        let look_len = (look.x * look.x + look.y * look.y + look.z * look.z).sqrt();
+        let c = math::cos(lean);
+        let lift = (f64::from(c) * (f64::from(c) * math::java_min(1.0, look_len / 0.4))) as f32;
+        let mut v = V3::new(
+            v0.x + 0.0,
+            v0.y + gravity * (-1.0 + f64::from(lift) * 0.75),
+            v0.z + 0.0,
+        );
+        if v.y < 0.0 && look_h > 0.0 {
+            let o = v.y * -0.1 * f64::from(lift);
+            v = V3::new(
+                v.x + look.x * o / look_h,
+                v.y + o,
+                v.z + look.z * o / look_h,
+            );
+        }
+        if lean < 0.0 && look_h > 0.0 {
+            let q = speed_h * f64::from(-math::sin(lean)) * 0.04;
+            v = V3::new(
+                v.x + -look.x * q / look_h,
+                v.y + q * 3.2,
+                v.z + -look.z * q / look_h,
+            );
+        }
+        if look_h > 0.0 {
+            v = V3::new(
+                v.x + (look.x / look_h * speed_h - v.x) * 0.1,
+                v.y + 0.0,
+                v.z + (look.z / look_h * speed_h - v.z) * 0.1,
+            );
+        }
+        let v = V3::new(
+            v.x * f64::from(0.99f32),
+            v.y * f64::from(0.98f32),
+            v.z * f64::from(0.99f32),
+        );
+        self.set_vel(v);
+        self.move_self(v);
     }
 
     fn jump_out(&mut self, v: V3, start_y: f64) {
@@ -1655,8 +1805,8 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
 
     fn velocity_multiplier(&self) -> f32 {
         let p = &self.p;
-        // Flying players ignore block speed factors.
-        if p.abilities.flying {
+        // Flying and gliding players ignore block speed factors.
+        if p.abilities.flying || (X::ON && self.x.ext_ref().fall_flying) {
             return 1.0;
         }
         let [vx, vy, vz] = self.velocity_pos();

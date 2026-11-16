@@ -36,11 +36,12 @@ fn pose_of(s: &str) -> Pose {
     }
 }
 
-fn pose_name(p: Pose) -> &'static str {
+fn pose_name(p: Pose, glide: bool) -> &'static str {
     match p {
         Pose::Standing => "standing",
         Pose::Crouching => "crouching",
         Pose::Swimming => "swimming",
+        Pose::FallFlying if glide => "fall_flying",
         Pose::FallFlying => "spin_attack",
         Pose::Sleeping => "sleeping",
     }
@@ -169,6 +170,17 @@ pub fn player_of(header: &Value, t0: &Value) -> PlayerState {
 
 /// The state in the oracle's 1.16.5 record layout.
 pub fn state_json(p: &PlayerState, w: &v1_16_5::MemoryWorld, using_item: bool) -> Value {
+    state_json_ext(p, None, w, using_item)
+}
+
+/// [`state_json`] with the extension state (the glide flag and pose).
+pub fn state_json_ext(
+    p: &PlayerState,
+    x: Option<&v1_16_5::PlayerExt>,
+    w: &v1_16_5::MemoryWorld,
+    using_item: bool,
+) -> Value {
+    let (fall_flying, glide_pose) = x.map_or((false, false), |x| (x.fall_flying, x.glide_pose));
     let bb = p.bb;
     let (wd, ht) = p.pose.dimensions();
     json!({
@@ -182,7 +194,7 @@ pub fn state_json(p: &PlayerState, w: &v1_16_5::MemoryWorld, using_item: bool) -
         "vertical_collision": p.vertical_collision,
         "fall_distance": jf32(p.fall_distance),
         "movement_multiplier": [jf64(p.movement_multiplier[0]), jf64(p.movement_multiplier[1]), jf64(p.movement_multiplier[2])],
-        "pose": pose_name(p.pose),
+        "pose": pose_name(p.pose, glide_pose),
         "width": jf32(wd),
         "height": jf32(ht),
         "eye_height": jf32(p.eye_height()),
@@ -203,7 +215,7 @@ pub fn state_json(p: &PlayerState, w: &v1_16_5::MemoryWorld, using_item: bool) -
         "sprinting": p.sprinting,
         "sneaking": p.sneaking(),
         "in_sneaking_pose": p.in_sneaking_pose,
-        "fall_flying": false,
+        "fall_flying": fall_flying,
         "using_item": using_item,
         "no_clip": p.no_clip,
         "step_height": jf32(v1_16_5::STEP_HEIGHT),
@@ -263,6 +275,7 @@ pub fn packet_json(p: &Packet) -> Value {
         Packet::StartSprinting => action(3, "start_sprinting"),
         Packet::StopSprinting => action(4, "stop_sprinting"),
         Packet::Abilities(a) => json!({"name": "abilities", "flying": a.flying}),
+        Packet::StartFallFlying => action(8, "start_fall_flying"),
         other => super::packet_json(&other),
     }
 }
@@ -378,7 +391,7 @@ fn spawned(e: &Value, out: &mut std::collections::HashMap<i64, (String, String)>
 
 /// `instanceof LivingEntity` for the types of the oracle's entity cases.
 fn living(name: &str) -> bool {
-    !matches!(name, "boat" | "minecart" | "item")
+    !matches!(name, "boat" | "minecart" | "item" | "firework_rocket")
 }
 
 /// The use-key model of the harness (`MinecraftClient.handleInputEvents` with the crosshair on
@@ -437,9 +450,6 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         expected,
         actual,
     };
-    if let Some(d) = diff("state", &t0["state"], &state_json(&p, &world, false)) {
-        return Err(mm(0, d));
-    }
     let mut out = Packets::new();
     // Entity cases: the teams and the spawned entities.
     let mut teams = Teams::default();
@@ -450,6 +460,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     // Riptide: the trident's level, the level's rain (the oracle's biome is plains; the nether
     // has no sky light), the harness's use key.
     let (mut riptide, mut raining, mut trident) = (0u8, false, false);
+    // Elytra cases: the chest item (an elytra at max damage - 1 cannot glide).
+    let mut glide_case = false;
+    // A firework rocket in the hand: `FireworkItem.use` never starts an item use.
+    let mut rocket_hand = false;
     if let Some(x) = case.header["setup"].get("ext") {
         for t in x["teams"].as_array().unwrap() {
             teams.apply(t);
@@ -466,7 +480,17 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             };
             on = true;
         }
-        if let Some(h) = x.get("hand").and_then(Value::as_str) {
+        if x.get("glide").and_then(Value::as_bool) == Some(true) {
+            glide_case = true;
+            e.elytra = x.get("chest").and_then(Value::as_str) == Some("elytra")
+                && x.get("chest_damage").map_or(0, i) < 431;
+            e.fall_flying = x.get("fall_flying").and_then(Value::as_bool) == Some(true);
+            on = true;
+        }
+        rocket_hand = x.get("hand").and_then(Value::as_str) == Some("firework_rocket");
+        if let Some(h) = x.get("hand").and_then(Value::as_str)
+            && h != "firework_rocket"
+        {
             assert_eq!(h, "trident", "hand item {h}");
             trident = true;
             riptide = x.get("riptide").map_or(0, |v| i(v) as u8);
@@ -477,6 +501,13 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         if on {
             ext = Some(e);
         }
+    }
+    if let Some(d) = diff(
+        "state",
+        &t0["state"],
+        &state_json_ext(&p, ext.as_ref(), &world, false),
+    ) {
+        return Err(mm(0, d));
     }
     let mut use_key = UseKey::default();
     // Where the client world files the player (its position after its last tick).
@@ -530,6 +561,20 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     "team" => teams.apply(e),
                     "entity_move" | "entity_rel" | "entity_look" | "remove_entity"
                     | "game_mode" => {}
+                    "shared_flags" => {
+                        let x = ext.as_mut().expect("shared flags need the extended tick");
+                        let cur = x.shared_flags(&p);
+                        let next = (cur & !(i(&e["clear"]) as u8)) | i(&e["set"]) as u8;
+                        x.apply_shared_flags(&mut p, next);
+                    }
+                    "equip" => {
+                        let x = ext.as_mut().expect("equipment needs the extended tick");
+                        assert_eq!(e["slot"], "chest");
+                        x.elytra = e.get("item").and_then(Value::as_str) == Some("elytra")
+                            && i(&e["damage"]) < 431;
+                    }
+                    // The rocket entity comes with the tick records (tick order, ticking).
+                    "firework" => {}
                     "living_flags" => {
                         let x = ext.as_mut().expect("living flags need the extended tick");
                         let cur = if x.spin_attack { 4u8 } else { 0 };
@@ -543,7 +588,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let (keys, use_down) = keys_of(input["keys"].as_str().unwrap());
         // Spectators cannot use items (`interactItem` passes in spectator mode), so the shield
         // is never raised; the physics only sees whether an item is in use.
-        let mut using_item = use_down && !p.spectator;
+        let mut using_item = use_down && !p.spectator && !rocket_hand;
         // The trident: `TridentItem.use` refuses a riptide trident out of water and rain; the
         // release launches (before the tick, along the tick's rotation).
         let mut launch = false;
@@ -592,6 +637,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         // when it ticks; those after it push it after its tick.
         let mut colliders: Vec<(i64, ghast_physics::math::Aabb)> = Vec::new();
         let mut after: Vec<v1_16_5::Pusher> = Vec::new();
+        // The ones after the player in tick order: a pusher (index into `after`) or a rocket.
+        let mut after_order: Vec<Option<usize>> = Vec::new();
         if let Some(ents) = rec.get("entities").and_then(Value::as_array) {
             let mut before_player = true;
             for e in ents {
@@ -617,6 +664,20 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         bb,
                     ));
                 }
+                if name == "firework_rocket" && b(&e["ticks"]) {
+                    if before_player {
+                        let x = ext.as_ref().expect("rockets need the extended tick");
+                        v1_16_5::rocket_boost(
+                            &mut p,
+                            x,
+                            f32_of(&input["yaw"]),
+                            f32_of(&input["pitch"]),
+                        );
+                    } else {
+                        after_order.push(None);
+                    }
+                    continue;
+                }
                 let spectator = e.get("spectator").and_then(Value::as_bool).unwrap_or(false);
                 let score_name = kinds.get(&id).map_or("", |k| k.1.as_str());
                 if let Some(kind) = v1_16_5::push_kind(name, living(name))
@@ -628,6 +689,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     if before_player {
                         v1_16_5::push_by(&mut p, filed, &world, &pusher);
                     } else {
+                        after_order.push(Some(after.len()));
                         after.push(pusher);
                     }
                 }
@@ -671,14 +733,35 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             use_key.held += 1;
         }
         filed = p.pos;
-        for pusher in &after {
-            v1_16_5::push_by(&mut p, filed, &world, pusher);
+        for k in &after_order {
+            match k {
+                Some(k) => {
+                    v1_16_5::push_by(&mut p, filed, &world, &after[*k]);
+                }
+                None => {
+                    let x = ext.as_ref().expect("rockets need the extended tick");
+                    let (yaw, pitch) = (p.yaw, p.pitch);
+                    v1_16_5::rocket_boost(&mut p, x, yaw, pitch);
+                }
+            }
         }
         sent.extend(out.as_slice().iter().map(packet_json));
-        if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
+        if let Some(d) = diff(
+            "state",
+            &rec["state"],
+            &state_json_ext(&p, ext.as_ref(), &world, using_item),
+        ) {
             return Err(mm(t, d));
         }
-        if let (Some(want), Some(x)) = (rec.get("ext"), &ext) {
+        if let (true, Some(want), Some(x)) = (glide_case, rec.get("ext"), &ext) {
+            let got = json!({
+                "fall_flying": x.fall_flying,
+                "shared_flags": i(&want["shared_flags"]) as u8 & !0x98 | x.shared_flags(&p),
+            });
+            if let Some(d) = diff("ext", want, &got) {
+                return Err(mm(t, d));
+            }
+        } else if let (Some(want), Some(x)) = (rec.get("ext"), &ext) {
             let got = json!({
                 "riptide_ticks": x.riptide_ticks,
                 "spin_attack": x.spin_attack,

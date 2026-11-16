@@ -19,7 +19,8 @@ pub use ext::PlayerExt;
 pub use ghast_data::v1_16_5::BlockState;
 pub use player::{
     Effects, Enchantments, MovementInput, PlayerState, Pose, STEP_HEIGHT, SentState,
-    SpeedModifiers, WIDTH, box_at, in_water_or_rain, is_climbing, riptide, tick, tick_ext, tick_in,
+    SpeedModifiers, WIDTH, box_at, in_water_or_rain, is_climbing, riptide, rocket_boost, tick,
+    tick_ext, tick_in,
 };
 
 use crate::input::{Packets, TickInput};

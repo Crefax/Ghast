@@ -14,8 +14,10 @@ import net.minecraft.world.dimension.DimensionType;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ghast.oracle.Scenario.BACK;
 import static ghast.oracle.Scenario.FORWARD;
 import static ghast.oracle.Scenario.JUMP;
+import static ghast.oracle.Scenario.LEFT;
 import static ghast.oracle.Scenario.SNEAK;
 import static ghast.oracle.Scenario.SPRINT;
 import static ghast.oracle.Scenario.USE;
@@ -49,6 +51,14 @@ final class Ext {
         boolean raining;
         /** Tick records list the other entities (cases that spawn some). */
         boolean withEntities;
+        /** An elytra case: tick records carry the gliding state (and list the entities: the rockets). */
+        boolean glide;
+        /** Item in the chest slot ({@code elytra}), null for none. */
+        String chest;
+        /** Damage value of the chest item (an elytra at max damage - 1 cannot glide). */
+        int chestDamage;
+        /** The server has the player gliding at the start (shared flag 7 in the setup entity data). */
+        boolean fallFlying;
 
         @Override
         boolean records() {
@@ -76,6 +86,23 @@ final class Ext {
      */
     record LivingFlags(int set, int clear) implements Scenario.VersionEvent {}
 
+    /**
+     * The server's entity data for the player's shared flags byte (index 0): the client's current byte
+     * with the {@code clear} bits cleared and the {@code set} bits set (bit values 8 sprinting, 16
+     * swimming, 128 fall flying).
+     */
+    record SharedFlags(int set, int clear) implements Scenario.VersionEvent {}
+
+    /** Equipment packet for the player: {@code item} (null = empty) in {@code slot} with a damage value. */
+    record Equip(String slot, String item, int damage) implements Scenario.VersionEvent {}
+
+    /**
+     * A firework rocket the server spawned for the gliding player (its entity {@code id}): the spawn
+     * packet at the player's position plus the entity data naming the player as the shooter. The server
+     * removes it with a destroy packet ({@link Ents.Remove}) when its life runs out.
+     */
+    record Firework(int id) implements Scenario.VersionEvent {}
+
     // ---- harness hooks -----------------------------------------------------------------------------
 
     /** The hand item for the use key ({@code null}: the harness's shield). */
@@ -98,6 +125,12 @@ final class Ext {
         Setup s = of(run.sc);
         if (s == null) {
             return;
+        }
+        if (s.chest != null) {
+            equip(run, "chest", s.chest, s.chestDamage);
+        }
+        if (s.fallFlying) {
+            sharedFlags(run, 0x80, 0);
         }
         if (s.raining) {
             gameState(net.minecraft.network.packet.s2c.play.GameStateChangeS2CPacket.RAIN_STARTED, 0.0F);
@@ -136,7 +169,77 @@ final class Ext {
             Harness.net.onEntityTrackerUpdate(Harness.read(new net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket(), b));
             return true;
         }
+        if (e instanceof SharedFlags f) {
+            sharedFlags(run, f.set(), f.clear());
+            return true;
+        }
+        if (e instanceof Equip q) {
+            equip(run, q.slot(), q.item(), q.damage());
+            return true;
+        }
+        if (e instanceof Firework f) {
+            firework(run, f.id());
+            return true;
+        }
         return false;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void sharedFlags(Harness.Run run, int set, int clear) {
+        net.minecraft.entity.data.TrackedData<Byte> flags =
+                (net.minecraft.entity.data.TrackedData<Byte>) Reflect.get(net.minecraft.entity.Entity.class, null, "FLAGS");
+        int cur = run.player.getDataTracker().get(flags);
+        int next = ((cur & ~clear) | set) & 0xFF;
+        net.minecraft.network.PacketByteBuf b = Harness.buf();
+        b.writeVarInt(Harness.PLAYER_ENTITY_ID);
+        b.writeByte(0);
+        b.writeVarInt(0);
+        b.writeByte(next);
+        b.writeByte(255);
+        Harness.net.onEntityTrackerUpdate(Harness.read(new net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket(), b));
+    }
+
+    private static void equip(Harness.Run run, String slot, String item, int damage) {
+        net.minecraft.item.ItemStack stack = item == null ? net.minecraft.item.ItemStack.EMPTY
+                : new net.minecraft.item.ItemStack(Registry.ITEM.getOrEmpty(new net.minecraft.util.Identifier(item))
+                        .orElseThrow(() -> new IllegalArgumentException("item " + item)));
+        if (damage != 0) {
+            stack.setDamage(damage);
+        }
+        net.minecraft.entity.EquipmentSlot s = net.minecraft.entity.EquipmentSlot.byName(slot);
+        net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket p =
+                new net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket(Harness.PLAYER_ENTITY_ID,
+                        List.of(com.mojang.datafixers.util.Pair.of(s, stack)));
+        net.minecraft.network.PacketByteBuf b = Harness.buf();
+        writePacket(p, b);
+        Harness.net.onEquipmentUpdate(Harness.read(new net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket(), b));
+    }
+
+    /**
+     * What the server sends when a gliding player uses a rocket ({@code FireworkItem.use}): the entity
+     * of the server's own constructor ({@code new FireworkRocketEntity(world, stack, player)}: at the
+     * player, shooter = the player) as a spawn packet (no motion: a rocket that has a shooter takes the
+     * shooter's) plus its changed entity data (the shooter id).
+     */
+    private static void firework(Harness.Run run, int id) {
+        net.minecraft.entity.projectile.FireworkRocketEntity server = new net.minecraft.entity.projectile.FireworkRocketEntity(
+                run.world, new net.minecraft.item.ItemStack(net.minecraft.item.Items.FIREWORK_ROCKET), run.player);
+        net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket spawn = new net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket(
+                id, new java.util.UUID(0x66697265L, id), server.getX(), server.getY(), server.getZ(), server.pitch, server.yaw,
+                net.minecraft.entity.EntityType.FIREWORK_ROCKET, 0, net.minecraft.util.math.Vec3d.ZERO);
+        net.minecraft.network.PacketByteBuf b = Harness.buf();
+        writePacket(spawn, b);
+        Harness.net.onEntitySpawn(Harness.read(new net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket(), b));
+        net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket data =
+                new net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket(id, server.getDataTracker(), false);
+        net.minecraft.network.PacketByteBuf d = Harness.buf();
+        writePacket(data, d);
+        Harness.net.onEntityTrackerUpdate(Harness.read(new net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket(), d));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static net.minecraft.entity.data.TrackedData<Byte> sharedFlagsData() {
+        return (net.minecraft.entity.data.TrackedData<Byte>) Reflect.get(net.minecraft.entity.Entity.class, null, "FLAGS");
     }
 
     @SuppressWarnings("unchecked")
@@ -147,6 +250,13 @@ final class Ext {
     /** The {@code ext} object of a tick record (cases with a hand item): the riptide state. */
     static void tickRecord(Json j, Harness.Run run) {
         Setup s = of(run.sc);
+        if (s != null && s.glide) {
+            j.key("ext").beginObject();
+            j.field("fall_flying", run.player.isFallFlying());
+            j.field("shared_flags", run.player.getDataTracker().get(sharedFlagsData()) & 0xFF);
+            j.endObject();
+            return;
+        }
         if (s == null || s.hand == null) {
             return;
         }
@@ -206,12 +316,40 @@ final class Ext {
         if (s.withEntities) {
             j.field("with_entities", true);
         }
+        if (s.glide) {
+            j.field("glide", true);
+        }
+        if (s.chest != null) {
+            j.field("chest", s.chest);
+            if (s.chestDamage != 0) {
+                j.field("chest_damage", s.chestDamage);
+            }
+        }
+        if (s.fallFlying) {
+            j.field("fall_flying", true);
+        }
     }
 
     /** Writes an event of this class (the {@code type} and its fields); false for the others. */
     static boolean event(Json j, Scenario.VersionEvent e) {
         if (e instanceof LivingFlags f) {
             j.field("type", "living_flags").field("set", f.set()).field("clear", f.clear());
+            return true;
+        }
+        if (e instanceof SharedFlags f) {
+            j.field("type", "shared_flags").field("set", f.set()).field("clear", f.clear());
+            return true;
+        }
+        if (e instanceof Equip q) {
+            j.field("type", "equip").field("slot", q.slot());
+            if (q.item() != null) {
+                j.field("item", q.item());
+            }
+            j.field("damage", q.damage());
+            return true;
+        }
+        if (e instanceof Firework f) {
+            j.field("type", "firework").field("id", f.id());
             return true;
         }
         return false;
@@ -221,13 +359,17 @@ final class Ext {
     static Scenario.VersionEvent readEvent(JsonObject ev) {
         return switch (ev.get("type").getAsString()) {
             case "living_flags" -> new LivingFlags(ev.get("set").getAsInt(), ev.get("clear").getAsInt());
+            case "shared_flags" -> new SharedFlags(ev.get("set").getAsInt(), ev.get("clear").getAsInt());
+            case "equip" -> new Equip(ev.get("slot").getAsString(), ev.has("item") ? ev.get("item").getAsString() : null,
+                    ev.get("damage").getAsInt());
+            case "firework" -> new Firework(ev.get("id").getAsInt());
             default -> null;
         };
     }
 
     /** True when the {@code ext} object holds fields of this class (the case needs a {@link Setup}). */
     static boolean readSetup(JsonObject x, Scenario sc) {
-        if (!x.has("dimension") && !x.has("with_entities") && !x.has("hand") && !x.has("raining")) {
+        if (!x.has("dimension") && !x.has("with_entities") && !x.has("hand") && !x.has("raining") && !x.has("glide")) {
             return false;
         }
         Setup s = setup(sc);
@@ -240,6 +382,10 @@ final class Ext {
         s.riptide = x.has("riptide") ? x.get("riptide").getAsInt() : 0;
         s.raining = x.has("raining") && x.get("raining").getAsBoolean();
         s.withEntities = x.has("with_entities") && x.get("with_entities").getAsBoolean();
+        s.glide = x.has("glide") && x.get("glide").getAsBoolean();
+        s.chest = x.has("chest") ? x.get("chest").getAsString() : null;
+        s.chestDamage = x.has("chest_damage") ? x.get("chest_damage").getAsInt() : 0;
+        s.fallFlying = x.has("fall_flying") && x.get("fall_flying").getAsBoolean();
         return true;
     }
 
@@ -512,6 +658,243 @@ final class Ext {
             }
         }
         sc.description += ", riptide";
+        return sc;
+    }
+
+    // ---- elytra: gliding, rockets, the server's flag 7 ---------------------------------------------
+
+    /** Shared flag 7 (fall flying) as a bit value. */
+    static final int FF = 0x80;
+
+    private static Scenario elytra(Scenario sc) {
+        Setup st = setup(sc);
+        st.glide = true;
+        st.withEntities = true;
+        st.chest = "elytra";
+        return sc;
+    }
+
+    static List<Scenario> elytraGolden() {
+        List<Scenario> l = new ArrayList<>(elytra());
+        for (int i = 0; i < GOLDEN_FUZZ; i++) {
+            l.add(elytraFuzz(1, i, 60));
+        }
+        return l;
+    }
+
+    static List<Scenario> elytra() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(elytra(flat("elytra_start_glide")).desc("fall, press jump in the air: START_FALL_FLYING, glide level, dive, climb")
+                .spawn(0.5, 110, 0.5, 0, 0).run(4, 0).run(1, JUMP).run(30, 0).turn(10, 0, 0, 4).run(15, 0, 0, 40)
+                .turn(20, 0, 0, -5).run(30, 0, 3, -50));
+        l.add(elytra(flat("elytra_jump_from_ground")).desc("jump on the ground (no glide), keep holding (no retrigger), press again in the air")
+                .spawn(0.5, 64, 0.5, 90, 10).run(2, 0).run(8, JUMP | FORWARD).run(1, FORWARD).run(1, JUMP | FORWARD).run(40, FORWARD));
+        Scenario rising = elytra(flat("elytra_press_while_rising")).desc("press jump while still rising after a jump (1.16 glides rising too)")
+                .spawn(0.5, 64, 0.5, 0, 0);
+        l.add(rising.run(2, 0).run(1, JUMP).run(1, 0).run(1, JUMP).run(30, 0));
+        Scenario broken = elytra(flat("elytra_broken")).desc("elytra at max damage - 1: jump in the air does not glide")
+                .spawn(0.5, 90, 0.5, 0, 0);
+        setup(broken).chestDamage = 431;
+        l.add(broken.run(3, 0).run(1, JUMP).run(20, 0).run(1, JUMP).run(10, 0));
+        Scenario worn = elytra(flat("elytra_worn")).desc("elytra at max damage - 2: still glides").spawn(0.5, 90, 0.5, 0, 0);
+        setup(worn).chestDamage = 430;
+        l.add(worn.run(3, 0).run(1, JUMP).run(20, 0));
+        Scenario none = elytra(flat("elytra_no_chest")).desc("no elytra: jump in the air does nothing").spawn(0.5, 80, 0.5, 0, 0);
+        setup(none).chest = null;
+        l.add(none.run(3, 0).run(1, JUMP).run(20, 0));
+        Scenario chestplate = elytra(flat("elytra_chestplate")).desc("a chestplate is not an elytra").spawn(0.5, 80, 0.5, 0, 0);
+        setup(chestplate).chest = "diamond_chestplate";
+        l.add(chestplate.run(3, 0).run(1, JUMP).run(20, 0));
+        l.add(elytra(flat("elytra_water").fill(-6, 64, -6, 6, 70, 6, s("water"), 0))
+                .desc("in water: no glide").spawn(0.5, 68, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(10, 0).run(1, JUMP).run(5, 0));
+        l.add(elytra(flat("elytra_into_water").fill(-6, 60, 10, 6, 66, 30, s("water"), 0))
+                .desc("glide down into a pool: water travel while the flag stays set; sprint-swim attempts")
+                .spawn(0.5, 80, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, 0, 0, 30).run(20, FORWARD | SPRINT, 0, 30));
+        l.add(elytra(flat("elytra_into_lava").fill(-6, 60, 10, 6, 66, 30, s("lava"), 0))
+                .desc("glide down into lava: lava travel while the flag stays set")
+                .spawn(0.5, 80, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, 0, 0, 30));
+        Scenario land = elytra(flat("elytra_landing")).desc("glide to the ground: the client keeps gliding until the server clears flag 7")
+                .spawn(0.5, 72, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, 0, 0, 15).run(20, FORWARD);
+        addEvent(land, 52, new SharedFlags(0, FF));
+        l.add(land);
+        Scenario landSneak = elytra(flat("elytra_land_sneak_soul_sand").fill(-8, 63, 4, 8, 63, 40, s("soul_sand"), 0))
+                .desc("land on soul sand gliding (no speed factor while gliding), flag cleared: the glide pose slows the input one tick")
+                .spawn(0.5, 70, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(30, FORWARD, 0, 20).run(20, FORWARD | SNEAK);
+        addEvent(landSneak, 30, new SharedFlags(0, FF));
+        l.add(landSneak);
+        l.add(elytra(flat("elytra_ladder").fill(-1, 64, 12, 1, 90, 12, s("stone"), 0).fill(-1, 64, 11, 1, 90, 11, s("ladder[facing=north]"), 0))
+                .desc("glide into a ladder; jump on the ladder (climbing: no glide start)")
+                .spawn(0.5, 85, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(40, FORWARD, 0, 5).run(1, 0).run(1, JUMP).run(10, 0));
+        l.add(elytra(flat("elytra_vines").fill(-3, 64, 10, 3, 90, 13, s("vine[south=true]"), 0))
+                .desc("glide through vines").spawn(0.5, 85, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(30, 0, 0, 5).run(1, JUMP).run(10, 0));
+        l.add(elytra(flat("elytra_wall").fill(-5, 64, 8, 5, 100, 8, s("stone"), 0))
+                .desc("glide into a wall (horizontal collision)").spawn(0.5, 90, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(25, 0, 0, 10));
+        Scenario creative = elytra(flat("elytra_creative")).desc("creative: a double tap toggles flight (no glide); flying clears flag 7")
+                .spawn(0.5, 80, 0.5, 0, 0).mode(Scenario.GameMode.CREATIVE);
+        l.add(creative.run(3, 0).run(1, JUMP).run(2, 0).run(1, JUMP).run(10, 0).run(1, JUMP).run(5, 0).run(1, JUMP).run(2, 0)
+                .run(1, JUMP).run(30, 0));
+        Scenario flyGlide = elytra(flat("elytra_flying_with_flag")).mode(Scenario.GameMode.CREATIVE).flying(true)
+                .desc("flying when the server sets flag 7: one glide travel, then the flight clears the flag").spawn(0.5, 80, 0.5, 0, 0);
+        flyGlide.run(3, FORWARD).run(10, FORWARD);
+        addEvent(flyGlide, 4, new SharedFlags(FF, 0));
+        l.add(flyGlide);
+        Scenario lev = elytra(flat("elytra_levitation")).desc("levitation: cannot glide").spawn(0.5, 80, 0.5, 0, 0).effect(25, 0);
+        l.add(lev.run(3, 0).run(1, JUMP).run(20, 0));
+        Scenario slow = elytra(flat("elytra_slow_falling")).desc("slow falling while gliding (gravity 0.01 when falling)")
+                .spawn(0.5, 100, 0.5, 0, 0).effect(28, 0);
+        l.add(slow.run(3, 0).run(1, JUMP).run(40, 0, 0, 20).run(20, 0, 0, -30));
+        Scenario ceil = elytra(flat("elytra_ceiling").fill(-4, 66, 2, 4, 66, 30, s("stone"), 0))
+                .desc("glide under a low ceiling (pose 0.6 high), then the flag is cleared under it")
+                .spawn(0.5, 65.2, 0.5, 0, 0).velocity(0, 0, 1.2).run(1, JUMP).run(12, 0).run(10, FORWARD);
+        addEvent(ceil, 8, new SharedFlags(0, FF));
+        l.add(ceil);
+        Scenario fw = elytra(flat("elytra_fireworks")).desc("two rockets attached: boost along the look vector, removed by the server")
+                .spawn(0.5, 120, 0.5, 30, 0).run(3, 0).run(1, JUMP).run(10, 0).run(40, 0, 30, -20).run(30, 0, 60, 10);
+        addEvent(fw, 8, new Firework(1001));
+        addEvent(fw, 20, new Firework(1002));
+        addEvent(fw, 26, new Ents.Remove(1001));
+        addEvent(fw, 40, new Ents.Remove(1002));
+        addEvent(fw, 50, new Firework(1003));
+        addEvent(fw, 75, new Ents.Remove(1003));
+        l.add(fw);
+        // Entity ids that come before and after the player (id 1) in the client world's entity map.
+        Scenario order = elytra(flat("elytra_rocket_ids")).desc("rockets with many ids: some tick before the player, some after")
+                .spawn(0.5, 150, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(60, 0, 0, 5);
+        int[] ids = {2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377};
+        for (int k = 0; k < ids.length; k++) {
+            addEvent(order, 6 + k * 4, new Firework(ids[k]));
+            addEvent(order, 9 + k * 4, new Ents.Remove(ids[k]));
+        }
+        l.add(order);
+        Scenario fwGround = elytra(flat("elytra_firework_not_gliding")).desc("a rocket attached to a player who is not gliding: no boost")
+                .spawn(0.5, 64, 0.5, 0, -30).run(5, FORWARD);
+        addEvent(fwGround, 1, new Firework(1001));
+        l.add(fwGround.run(20, FORWARD).run(1, JUMP).run(10, 0));
+        Scenario use = elytra(flat("elytra_firework_use")).desc("use a rocket on the ground (nothing), gliding: use_item + swing; the server spawns it later")
+                .spawn(0.5, 110, 0.5, 0, 0);
+        setup(use).hand = "firework_rocket";
+        use.run(3, 0).run(1, USE).run(2, 0).run(1, JUMP).run(5, 0).run(1, USE).run(30, 0);
+        addEvent(use, 14, new Firework(1001));
+        addEvent(use, 33, new Ents.Remove(1001));
+        l.add(use);
+        Scenario flags = elytra(flat("elytra_server_flags")).desc("server entity data: sprint / swim bits, flag 7 set and cleared from the server")
+                .spawn(0.5, 100, 0.5, 0, 0).run(3, FORWARD);
+        flags.run(10, FORWARD).run(30, FORWARD | SPRINT).run(20, 0);
+        addEvent(flags, 2, new SharedFlags(FF, 0));
+        addEvent(flags, 12, new SharedFlags(0x08, 0));
+        addEvent(flags, 20, new SharedFlags(0x10, 0x08));
+        addEvent(flags, 30, new SharedFlags(0, 0x90));
+        addEvent(flags, 40, new SharedFlags(0x88, 0));
+        l.add(flags);
+        Scenario started = elytra(flat("elytra_setup_gliding")).desc("join gliding (flag 7 in the setup entity data), sneak and strafe")
+                .spawn(0.5, 100, 0.5, 45, 10).velocity(1.0, -0.2, 1.0);
+        setup(started).fallFlying = true;
+        l.add(started.run(10, 0).run(10, SNEAK).run(10, LEFT | FORWARD).run(10, BACK).run(10, JUMP));
+        Scenario unequip = elytra(flat("elytra_unequip")).desc("elytra taken off while gliding: the client keeps gliding; no restart")
+                .spawn(0.5, 110, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(15, 0).run(1, JUMP).run(10, 0);
+        addEvent(unequip, 10, new Equip("chest", null, 0));
+        addEvent(unequip, 15, new SharedFlags(0, FF));
+        addEvent(unequip, 22, new Equip("chest", "elytra", 0));
+        l.add(unequip.run(1, JUMP).run(15, 0));
+        Scenario edge = elytra(new Scenario("elytra_rocket_chunk_edge").outside(Scenario.Outside.UNLOADED)
+                .fill(-16, 63, -96, -1, 63, 15, s("stone"), 0))
+                .desc("glide along a loaded / unloaded chunk border: a rocket in an unloaded chunk does not tick")
+                .spawn(-0.3, 110, 8.5, 180, 0).run(3, 0).run(1, JUMP).run(30, 0, 200, 0);
+        addEvent(edge, 6, new Firework(1001));
+        addEvent(edge, 16, new Ents.Remove(1001));
+        l.add(edge);
+        l.add(elytra(flat("elytra_steep")).desc("look straight down and straight up while gliding (lift, conversion terms)")
+                .spawn(0.5, 200, 0.5, 0, 0).run(3, 0).run(1, JUMP).run(20, 0, 0, 90).run(20, 0, 0, -90).run(20, 0, 0, -45));
+        return l;
+    }
+
+    /**
+     * Randomized elytra cases: the {@code withExtras} case (terrain, attributes, effects, inbound packets)
+     * with an elytra (sometimes broken or missing), often raised or started gliding, frequent jump presses,
+     * wide pitch changes, and server packets: flag 7 cleared or set, sprint / swim bits, attached rockets
+     * (added and removed, ids before and after the player's in the entity map), the chest item swapped.
+     * Cases get an {@code _el} suffix.
+     */
+    static Scenario elytraFuzz(long seed, int index, int ticks) {
+        Scenario base = Fuzz.withExtras(seed, index, ticks, false);
+        Scenario sc = new Scenario(base.name + "_el");
+        Fuzz.copyInto(base, sc);
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x656c79747261L);
+        Setup st = setup(sc);
+        st.glide = true;
+        st.withEntities = true;
+        if (x.chance(0.92)) {
+            st.chest = "elytra";
+            if (x.chance(0.05)) {
+                st.chestDamage = 431;
+            } else if (x.chance(0.2)) {
+                st.chestDamage = x.range(1, 430);
+            }
+        }
+        if (x.chance(0.6)) {
+            sc.y += x.range(2, 60) + x.nextDouble();
+            if (sc.y > 250) {
+                sc.y = 250;
+            }
+        }
+        if (x.chance(0.3)) {
+            st.fallFlying = true;
+        }
+        if (x.chance(0.3)) {
+            sc.velocity((x.nextDouble() - 0.5) * 3, (x.nextDouble() - 0.7) * 2, (x.nextDouble() - 0.5) * 3);
+        }
+        float pitch = sc.pitch;
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            Scenario.Tick tk = sc.ticks.get(i);
+            int keys = tk.keys();
+            if (x.chance(0.12)) {
+                keys ^= JUMP;
+            }
+            float p = tk.pitch();
+            if (x.chance(0.7)) {
+                if (x.chance(0.1)) {
+                    pitch = (float) (x.nextDouble() * 180 - 90);
+                } else {
+                    pitch = Math.max(-90f, Math.min(90f, pitch + (float) ((x.nextDouble() - 0.5) * 12)));
+                }
+                p = pitch;
+            }
+            sc.ticks.set(i, new Scenario.Tick(keys, tk.yaw(), p, tk.events()));
+        }
+        List<int[]> live = new ArrayList<>();
+        java.util.Set<Integer> used = new java.util.HashSet<>();
+        for (int i = 0; i < sc.ticks.size(); i++) {
+            if (x.chance(0.035)) {
+                addEvent(sc, i, new SharedFlags(0, FF));
+            }
+            if (x.chance(0.015)) {
+                addEvent(sc, i, new SharedFlags(FF, 0));
+            }
+            if (x.chance(0.01)) {
+                int bits = x.pick(new int[] {0x08, 0x10, 0x18});
+                addEvent(sc, i, x.chance(0.5) ? new SharedFlags(bits, 0) : new SharedFlags(0, bits));
+            }
+            if (x.chance(0.04) && live.size() < 3) {
+                // Small and large ids: the client world's entity map ticks some before the player.
+                int id = x.chance(0.5) ? x.range(2, 60) : x.range(1000, 5000);
+                if (used.add(id)) {
+                    addEvent(sc, i, new Firework(id));
+                    live.add(new int[] {id, i + x.range(1, 25)});
+                }
+            }
+            for (int k = live.size() - 1; k >= 0; k--) {
+                if (live.get(k)[1] == i) {
+                    addEvent(sc, i, new Ents.Remove(live.get(k)[0]));
+                    live.remove(k);
+                }
+            }
+            if (x.chance(0.01)) {
+                boolean on = x.chance(0.6);
+                addEvent(sc, i, new Equip("chest", on ? "elytra" : null, on && x.chance(0.2) ? 431 : 0));
+            }
+        }
+        sc.description += ", elytra";
         return sc;
     }
 }
