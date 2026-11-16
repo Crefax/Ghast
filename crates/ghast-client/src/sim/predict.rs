@@ -350,22 +350,6 @@ impl Unacked {
     }
 }
 
-/// 1.16.5 `Entity.collidesWithStateAtPos`: the collision shape (context-free cells, unshifted)
-/// placed at `pos` overlaps the player's box (`VoxelShapes.matchesAnywhere(…, AND)`). Not exact
-/// for bamboo (model offset) and scaffolding (context shape); 26.x uses the physics' own
-/// context-aware query.
-#[cfg(feature = "v1_16_5")]
-pub(crate) fn shape_overlaps(
-    shape: ghast_physics::voxel::VoxelShape<'_>,
-    pos: BlockPos,
-    bb: &ghast_physics::math::Aabb,
-) -> bool {
-    shape.intersects(
-        bb,
-        Some([f64::from(pos.x), f64::from(pos.y), f64::from(pos.z)]),
-    )
-}
-
 #[cfg(all(test, feature = "v1_16_5"))]
 mod tests_unacked {
     use super::*;

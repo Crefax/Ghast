@@ -572,6 +572,38 @@ mod v1_16_5 {
         assert_eq!(e.core.pose.pos, back);
     }
 
+    /// The move-back uses the player's collision context: scaffolding the player stands inside
+    /// has no shape for it (no move), stone does.
+    #[test]
+    fn move_back_uses_the_players_collision_context() {
+        use ghast_data::v1_16_5::{Block, Property};
+        let mut e = joined();
+        let at_feet = BlockPos::new(8, 64, 8);
+        let back = Vec3::new(8.5, 66.0, 8.5);
+        let scaffolding = Block::from_name("scaffolding")
+            .unwrap()
+            .state_with(&[
+                (Property::from_name("distance").unwrap(), "0"),
+                (Property::from_name("bottom").unwrap(), "false"),
+            ])
+            .unwrap()
+            .id();
+        e.sim.dig_sent(at_feet, DigStatus::Finish, true, 0, back);
+        e.sim
+            .world_packet(&answer(at_feet, scaffolding, FINISH, false))
+            .unwrap();
+        e.sync_snap();
+        assert_eq!(block(&e, at_feet), Some(u32::from(scaffolding)));
+        assert_eq!(e.core.pose.pos, FEET, "inside scaffolding");
+        set(&mut e, at_feet, 0);
+        e.sim.dig_sent(at_feet, DigStatus::Finish, true, 0, back);
+        e.sim
+            .world_packet(&answer(at_feet, STONE, FINISH, false))
+            .unwrap();
+        e.sync_snap();
+        assert_eq!(e.core.pose.pos, back, "inside stone");
+    }
+
     /// The left button records its start and finish with the position before the tick's
     /// movement; the refused finish brings the block back under the falling player and
     /// moves it back up.

@@ -1674,7 +1674,7 @@ impl Sim16 {
             );
             self.world.set_block_state(pos.x, pos.y, pos.z, state);
             if let Some(at) = at
-                && holds_player(state, pos, &self.player.bb)
+                && holds_player(state, pos, &self.player)
             {
                 // Entity.updatePosition: the position and the previous position.
                 self.player.set_position(at[0], at[1], at[2]);
@@ -1738,7 +1738,7 @@ impl Sim16 {
             return None;
         }
         // World.canPlace: the player's own box (other entities: the server's updates).
-        if holds_player(state, at, &self.player.bb) {
+        if holds_player(state, at, &self.player) {
             return None;
         }
         Some((at, state))
@@ -1772,28 +1772,20 @@ fn activated_full_cube_16(name: &str) -> bool {
     name.ends_with("shulker_box") || LIST.contains(&name)
 }
 
-/// 1.16.5 `Entity.collidesWithStateAtPos`: the state's collision shape at `pos` overlaps `bb`.
+/// 1.16.5 `Entity.collidesWithStateAtPos`: the state's collision shape at `pos`, for the
+/// player's context (scaffolding) and with its model offset (bamboo), overlaps the player's box.
 fn holds_player(
     state: ghast_data::v1_16_5::BlockState,
     pos: BlockPos,
-    bb: &ghast_physics::math::Aabb,
+    p: &ghast_physics::v1_16_5::PlayerState,
 ) -> bool {
-    use ghast_data::v1_16_5::VoxelClass;
-    use ghast_physics::voxel::{Points, VoxelShape};
-    let r = state.voxel_shape();
-    let axis = |n: u8, pts: &'static [f64]| match r.class {
-        VoxelClass::Simple => Points::Fractional(u32::from(n)),
-        VoxelClass::Array => Points::Explicit(pts),
-    };
-    let shape = VoxelShape {
-        axes: [
-            axis(r.sizes[0], r.xs),
-            axis(r.sizes[1], r.ys),
-            axis(r.sizes[2], r.zs),
-        ],
-        cells: r.cells,
-    };
-    crate::sim::predict::shape_overlaps(shape, pos, bb)
+    let b = &p.bb;
+    ghast_physics::v1_16_5::state_collides(
+        state,
+        [pos.x, pos.y, pos.z],
+        [b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z],
+        &ghast_physics::v1_16_5::CollisionContext::new(p.pos[1], p.input.sneaking),
+    )
 }
 
 fn sync_pose_16(pose: &mut Pose, p: &ghast_physics::v1_16_5::PlayerState) {
