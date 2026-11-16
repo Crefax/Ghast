@@ -69,6 +69,19 @@ public final class Main {
                 long seed = a.lng("--seed", 1);
                 int count = (int) a.lng("--count", 1000);
                 boolean craft = Boolean.parseBoolean(a.str("--craft", "false"));
+                String menu = a.str("--menu", "");
+                if (!menu.isEmpty()) {
+                    // special menus (MenuClickDump): --menu brewing|...|all
+                    Path mout = a.path("--out", Path.of("cache", VERSION, "clicks", "menu-" + menu + "-seed" + seed + "-n" + count + ".jsonl.gz"));
+                    Io.write(mout, sink -> {
+                        if (menu.equals("all")) {
+                            MenuClickDump.all(seed, count, sink);
+                        } else {
+                            MenuClickDump.cases(seed, menu, count, sink);
+                        }
+                    });
+                    break;
+                }
                 Path out = a.path("--out", Path.of("cache", VERSION, "clicks",
                         (craft ? "craft" : "clicks") + "-seed" + seed + "-n" + count + ".jsonl.gz"));
                 Io.write(out, sink -> ClickDump.cases(seed, count, craft, sink));
@@ -116,7 +129,8 @@ public final class Main {
                   entity-sizes [--out FILE]            dimensions / eye heights of every entity type, poses, variants
                   selection [--out FILE]               outline / raycast shapes of every block state
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
-                  clicks [--seed N] [--count N] [--craft true] [--out FILE]  window click vectors (cache/<mc>/clicks/)
+                  clicks [--seed N] [--count N] [--craft true] [--out FILE]  window click vectors (cache/<mc>/clicks/);
+                                                       --menu M: special menu M (brewing, ..., all)
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
     }
@@ -126,6 +140,8 @@ public final class Main {
     static final int GOLDEN_FUZZ_TICKS = 60;
     static final long GOLDEN_CLICK_SEED = 1;
     static final int GOLDEN_CLICK_CASES = 3000;
+    /** Cases per special menu in the golden set. */
+    static final int GOLDEN_MENU_CASES = 300;
 
     static void writeGolden(Path dir) throws IOException {
         Io.bestCompression = true;
@@ -152,6 +168,7 @@ public final class Main {
         Io.write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(1, SelectionDump.RAY_WORLDS, SelectionDump.RAY_RAYS, sink));
         Io.write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         Io.write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
+        Io.write(dir.resolve("clicks_menus_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> MenuClickDump.all(GOLDEN_CLICK_SEED, GOLDEN_MENU_CASES, sink));
         Io.bestCompression = false;
     }
 

@@ -50,7 +50,7 @@ final class ClickDump {
     static final String[] ARMOR = {"leather_helmet", "iron_chestplate", "diamond_helmet", "golden_boots", "elytra", "carved_pumpkin"};
     static final String[] CRAFT = {"oak_planks", "oak_planks", "oak_planks", "oak_log", "stick", "cobblestone", "cobblestone", "coal", "white_wool"};
 
-    private static Harness.Run newRun() {
+    static Harness.Run newRun() {
         return new Harness.Run(new Scenario("clicks").fill(-8, 63, -8, 8, 63, 8, States.id("stone"), 0).spawn(0.5, 64, 0.5, 0, 0));
     }
 
@@ -136,7 +136,7 @@ final class ClickDump {
         return bad;
     }
 
-    private static NbtCompound tag(Rng r, Item item) {
+    static NbtCompound tag(Rng r, Item item) {
         NbtCompound c = new NbtCompound();
         switch (r.nextInt(5)) {
             case 0 -> {
@@ -234,7 +234,7 @@ final class ClickDump {
         return s;
     }
 
-    private static ItemStack stack(Rng r, String[] pool) {
+    static ItemStack stack(Rng r, String[] pool) {
         Item item = Registry.ITEM.get(new Identifier(r.pick(pool)));
         int max = item.getMaxCount();
         int count = r.chance(0.08) ? max : r.chance(0.04) ? r.range(1, 70) : r.range(1, max);
@@ -412,7 +412,7 @@ final class ClickDump {
         return b.toString();
     }
 
-    private static void state(StringBuilder b, ClientPlayerEntity player, ScreenHandler w0, ScreenHandler h) {
+    static void state(StringBuilder b, ClientPlayerEntity player, ScreenHandler w0, ScreenHandler h) {
         b.append(",\"w0\":");
         slots(b, w0);
         b.append(",\"screen\":");
@@ -443,13 +443,13 @@ final class ClickDump {
         b.append(']');
     }
 
-    private static String hex(ItemStack s) {
+    static String hex(ItemStack s) {
         PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
         buf.writeItemStack(s);
         return hex(buf);
     }
 
-    private static String packetHex(ClickSlotC2SPacket p) {
+    static String packetHex(ClickSlotC2SPacket p) {
         if (p == null) {
             return "";
         }

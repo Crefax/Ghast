@@ -1036,7 +1036,15 @@ impl Sim<'_> {
                         (ok, true)
                     }
                     WindowKind::BrewingStand if crate::menus::modelled(v, kind) => {
-                        (self.transfer_brewing(i, &mut st, &orig)?, true)
+                        match self.transfer_brewing(i, &mut st, &orig)? {
+                            Some(ok) => (ok, true),
+                            None => {
+                                // vanilla returned EMPTY after moving items (1.16 fuel)
+                                let left = self.norm(st);
+                                self.set(i, left);
+                                return Ok(None);
+                            }
+                        }
                     }
                     _ => return Err(Unpredictable),
                 }

@@ -99,7 +99,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 
 | menu | 1.8.9 | 1.12.2 | 1.16.5 |
 |---|---|---|---|
-| brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | refused |
+| brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -107,7 +107,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   raw pufferfish), the 1.12 fuel slot blaze powder; shift-click routes as
   `BrewingScreenHandler.transferSlot` (1.8: an ingredient only into an empty ingredient slot, and
   `insertItem` ignores slot limits, so a stack of bottles lands whole in one bottle slot; 1.12:
-  bottles only one at a time, blaze powder is an ingredient before it is fuel).
+  bottles only one at a time, blaze powder is an ingredient before it is fuel; 1.16.5: the
+  ingredients of `BrewingRecipeRegistry` by item, blaze powder tried as fuel first).
   Brew time and fuel are window properties the GUI shows; they never change slots on the client.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):

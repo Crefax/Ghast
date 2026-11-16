@@ -6,7 +6,7 @@
 
 use super::tests::{Script, engine, join};
 use super::*;
-use crate::version::{ClientVersion, V1_8, V1_12_2};
+use crate::version::{ClientVersion, V1_8, V1_12_2, V1_16_5};
 use ghast_inventory::{Click, SlotKind, Stack};
 use ghast_protocol::RawPacket;
 
@@ -34,6 +34,22 @@ fn open_1_12(id: u8, ty: &str, slots: u8) -> RawPacket {
         entity_id: None,
     })
     .unwrap()
+}
+
+/// A 1.16.5 `open_window` (menu type registry id) as the server sends it.
+fn open_1_16(id: i32, menu: i32) -> RawPacket {
+    use ghast_protocol::v1_16_5::play::clientbound as cb;
+    RawPacket::from_packet(&cb::OpenWindow {
+        window_id: id,
+        inventory_type: menu,
+        window_title: "{\"text\":\"\"}".into(),
+    })
+    .unwrap()
+}
+
+/// A 1.16.5 item registry id.
+fn id16(name: &str) -> i32 {
+    i32::from(ghast_data::v1_16_5::Item::from_name(name).unwrap().id())
 }
 
 /// Opens the window through the connection's path and fills it; returns the engine.
@@ -181,4 +197,38 @@ fn brewing_stand_1_12_2() {
     );
     assert!(clicked(&out), "{out:?}");
     assert_eq!(e.core.inv.slot(0).map(|s| s.id()), Some(438));
+}
+
+/// 1.16.5 brewing stand (menu 10): blaze powder goes to the fuel slot first; with the fuel slot
+/// full it goes on as an ingredient.
+#[test]
+fn brewing_stand_1_16_5() {
+    let blaze = id16("blaze_powder");
+    let mut e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(2, 10),
+        2,
+        vec![None, None, None, None, None],
+        &[(0, Stack::new(blaze, 64, 0)), (1, Stack::new(blaze, 5, 0))],
+    );
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 32,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.slot(4).map(Stack::count), Some(64));
+    assert!(e.core.inv.slot(32).is_none());
+    let _ = e.inventory_mut().on_transaction(2, 1, true);
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 33,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.slot(3).map(Stack::count), Some(5));
 }
