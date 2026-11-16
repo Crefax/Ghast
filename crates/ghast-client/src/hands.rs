@@ -748,8 +748,13 @@ pub(crate) struct HandsIo<'a> {
     pub broken: &'a mut Vec<BlockPos>,
     /// The held stack's count went down by one (a block was placed).
     pub placed: &'a mut bool,
-    /// Spectator mode: items are never used (vanilla's `useItem` passes without a packet).
+    /// Spectator mode: items are never used (vanilla's `useItem` passes without a packet), a
+    /// right click on a block sends the block packet and ends the click there.
     pub spectator: bool,
+    /// That spectator block click swings the arm: 1.8 – 1.16 (`interactBlock` true / SUCCESS);
+    /// 26.x answers CONSUME, whose swing source is none. Both 26.x rows are the versions with
+    /// block-prediction sequences here, which is how the engine sets it.
+    pub spectator_swings: bool,
 }
 
 impl HandsIo<'_> {
@@ -1189,6 +1194,14 @@ impl Hands {
                     held: stack.clone(),
                     off_hand,
                 });
+                // interactBlock / useItemOn of a spectator: the packet, then SUCCESS (1.12, 1.16:
+                // swing) or CONSUME (26.x: no swing); the click ends (no off hand, no item use).
+                if io.spectator {
+                    if io.spectator_swings {
+                        io.out.push(swing);
+                    }
+                    return;
+                }
                 // Sneaking with something in either hand skips the block's activation.
                 if b.activates && !(io.sneaking && any_item) {
                     io.out.push(swing);
@@ -1245,6 +1258,10 @@ impl Hands {
             held: io.held_stack.clone(),
             off_hand: false,
         });
+        // 1.8 onRightClick: a spectator's click ends with the packet (true: the caller swings).
+        if io.spectator {
+            return true;
+        }
         if activated {
             return true;
         }
@@ -1377,6 +1394,7 @@ mod tests {
                 broken: &mut broken,
                 placed: &mut placed,
                 spectator: false,
+                spectator_swings: true,
             };
             h.tick(false, true, &mut io);
             kinds(&out)
@@ -1396,6 +1414,59 @@ mod tests {
             ..HeldItem::default()
         };
         assert_eq!(run(Some(stick)), ["place_main", "use_main", "place_off"]);
+    }
+
+    /// A spectator's right click on a block: the block packet, then the click ends (no
+    /// placement, no off hand, no item use); 1.8 – 1.16 swing, 26.x (CONSUME) does not. The
+    /// block item is never recorded for the placed-block prediction.
+    #[test]
+    fn spectator_block_click_ends_with_the_packet() {
+        let hit = Some(BlockHit {
+            pos: BlockPos::new(0, 0, 0),
+            face: Face::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            distance: 1.6,
+        });
+        let dirt = HeldItem {
+            id: 3,
+            count: 10,
+            places_block: true,
+            ..HeldItem::default()
+        };
+        let run = |modern: bool, swings: bool, held: Option<HeldItem>| {
+            let mut h = Hands::default();
+            let (mut out, mut broken, mut placed) = (Vec::new(), Vec::new(), false);
+            let mut io = HandsIo {
+                blocks: &io_blocks,
+                target: hit,
+                held,
+                held_stack: None,
+                food: 20,
+                modern,
+                off_held: None,
+                off_stack: None,
+                entity: None,
+                factors: DigFactors::default(),
+                sneaking: false,
+                out: &mut out,
+                broken: &mut broken,
+                placed: &mut placed,
+                spectator: true,
+                spectator_swings: swings,
+            };
+            h.tick(false, true, &mut io);
+            assert!(!placed);
+            assert!(h.placing.is_empty());
+            kinds(&out)
+        };
+        for held in [None, Some(dirt)] {
+            // 1.8 onRightClick true: swing, no item use.
+            assert_eq!(run(false, true, held), ["place_main", "swing"]);
+            // 1.12 / 1.16 SUCCESS: main hand only, swing.
+            assert_eq!(run(true, true, held), ["place_main", "swing"]);
+            // 26.x CONSUME: main hand only, no swing.
+            assert_eq!(run(true, false, held), ["place_main"]);
+        }
     }
 
     /// Pressing the left button on an instant-break block sends one START: the held-button
@@ -1448,6 +1519,7 @@ mod tests {
                     broken: &mut broken,
                     placed: &mut placed,
                     spectator: false,
+                    spectator_swings: true,
                 };
                 h.tick(true, false, &mut io);
                 let starts = out
@@ -1500,6 +1572,7 @@ mod tests {
                 broken: &mut broken,
                 placed: &mut placed,
                 spectator: false,
+                spectator_swings: true,
             };
             h.click_mouse(hit, &mut io);
             assert_eq!(kinds(&out)[..2], want);
@@ -1553,6 +1626,7 @@ mod tests {
                 broken: &mut broken,
                 placed: &mut placed,
                 spectator: false,
+                spectator_swings: true,
             };
             h.tick(true, false, &mut io);
             ticks += 1;

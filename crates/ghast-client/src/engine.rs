@@ -1440,6 +1440,7 @@ impl<S: Sim> Engine<S> {
                 broken: &mut c.broken_now,
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
+                spectator_swings: !c.opts.caps.block_sequence,
             };
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
@@ -2504,6 +2505,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
+            spectator_swings: !c.opts.caps.block_sequence,
         };
         if !modern {
             io.out.push(Outbound::Swing);
@@ -2692,6 +2694,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
+            spectator_swings: !c.opts.caps.block_sequence,
         };
         c.hands.click_block(pos, face, &mut io);
         c.out.push(Outbound::Swing);
@@ -2734,6 +2737,7 @@ impl TickContext<'_> {
             broken: &mut c.broken_now,
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
+            spectator_swings: !c.opts.caps.block_sequence,
         };
         c.hands
             .right_click_block(BlockHit { hit, ..t }, &b, &mut io);

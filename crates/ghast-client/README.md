@@ -352,6 +352,9 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
   for the block wait until then), 1.16.5 applies `acknowledge_player_digging` like vanilla;
   1.8.9 / 1.12.2 wait for the server's block change. A broken waterlogged block (or kelp,
   seagrass) leaves a water source, as vanilla's `destroyBlock` does (26.x, 1.16.5).
+- A spectator's right click on a block sends the block packet and ends there (no placement,
+  off hand or item use): 1.8.9 – 1.16.5 swing (`interactBlock` true / SUCCESS), 26.x does not
+  (CONSUME).
 - Placed blocks are predicted (every version) when the result is known exactly: a block
   whose only state is a full collision cube (stone, cobblestone, planks on 1.13+, ores,
   wool on 1.13+, glass, …; 1.8.9 / 1.12.2: the blocks without block-state properties, so
