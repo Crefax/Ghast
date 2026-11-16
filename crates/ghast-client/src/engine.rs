@@ -2936,7 +2936,7 @@ mod tests {
 
     /// A 1.8.9 engine (physics) or a 1.16.5 one (stand-still mover).
     pub(super) fn engine(version: GameVersion) -> Engine<Box<dyn Sim>> {
-        let sim: Box<dyn Sim> = match version {
+        let sim: Box<dyn Sim> = match version.instance() {
             GameVersion::V1_8_9 => Box::new(crate::sim::Sim18::new()),
             GameVersion::V1_12_2 => Box::new(crate::sim::Sim12::new()),
             GameVersion::V26_1 => Box::new(crate::sim::Sim26::test_overworld()),
@@ -2949,7 +2949,7 @@ mod tests {
 
     /// Loads the column of chunk (x, z) the way the connection does.
     pub(super) fn load(e: &mut Engine<Box<dyn Sim>>, x: i32, z: i32) {
-        let raw = match e.core.opts.caps.version {
+        let raw = match e.core.opts.caps.version.instance() {
             GameVersion::V1_8_9 => crate::sim::test_chunks::v1_8(x, z),
             GameVersion::V1_12_2 => crate::sim::test_chunks::v1_12_2(x, z),
             GameVersion::V26_1 => crate::sim::test_chunks::v26_1(x, z),
@@ -4139,7 +4139,7 @@ mod tests {
             join(&mut e);
             let t0 = Instant::now();
             e.note_inbound(t0);
-            if v == GameVersion::V1_16_5 {
+            if v.instance() == GameVersion::V1_16_5 {
                 // The 1.16 test chunk is all air: put a stone floor under the player.
                 use ghast_protocol::v1_16_5::play::clientbound as cb;
                 let raw = RawPacket::from_packet(&cb::BlockChange {
