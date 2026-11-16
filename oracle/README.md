@@ -1327,6 +1327,35 @@ MC=26.1.2 oracle/run.sh replay --in "$PWD/tests/golden/26.1/fuzz_extras_seed1.js
 
 26.2 (protocol 776) has its own row (see "26.2" below).
 
+### Sub-versions of the legacy rows (1.8.2 - 1.8.8, 1.12.1, 1.16.2 - 1.16.4)
+
+`versions/<mc>.properties` of these releases run their row's harness (`harness.sourceSet`) with
+`harness.label` set to the row, so `verify` compares with `tests/golden/<row>/`. For 1.8.2 - 1.8.8
+and 1.16.2 - 1.16.4 `mappings.names=<row>` gives the jar the row's names: Setup remaps official ->
+intermediary with the release's own Yarn build, then intermediary -> named with the row's
+mappings, so every class both jars share gets exactly the row's names and the row's harness
+compiles unchanged. Legacy Fabric has no mappings for 1.12.1; its official jar uses the same
+obfuscated names as 1.12.2 (3,260 of 3,310 classes byte-identical, the other 50 the same classes
+changed), so the 1.12.2 mappings are applied to it directly. `oracle/check-sub-versions.sh`
+re-runs `verify` for every such release.
+
+Result (2026-11-16): every golden file of the row is content-identical on each release (14 for
+1.8.9, 17 for 1.12.2 and 1.16.5), and 1.0 M fuzz ticks per release (1.8.x, 1.16.2, 1.16.3:
+`physics_s11`/`s12`, `edges_s31`, `extras_s41`/`s42`; 1.12.1: 1.2 M with `physics_s13`; 1.16.4:
+1.8 M) gave records identical to the row's cached files with the same seeds, and replay at 0
+diffs with the row's Rust rules (`GHAST_FUZZ=oracle/cache/<mc>/<dir>`; the fuzz-cache test reads
+a sub-version's directory as its row's). A normalized bytecode comparison of the remapped jars
+(`javap -c -p`, constant-pool indices dropped) backs it: the client movement, collision and
+block classes are identical between each release and its row; what differs does not touch
+player movement, with one exception: before 1.8.5 the movement speed attribute has no upper
+bound (1.8.5+: 1024; ghast caps at 1024), which matters only for values above 1024.
+
+Not covered: 1.8 and 1.8.1. Their Legacy Yarn builds leave about 900 classes unnamed, their
+intermediary is not the one 1.8.2 - 1.8.9 share, and the jars have no generic signatures, so the
+1.8.9 harness does not compile against them; a name-free comparison of method bodies shows real
+differences (1.8: `Entity.move`, soul sand; 1.8.1: `Entity.isInsideWall`, lighting). They connect
+with the 1.8.9 code (same protocol) without an oracle check.
+
 ### 26.1 quirks (observed in the vectors)
 
 - Position packets are sent when the squared move exceeds `(2.0E-4)^2` (1.16.5: 9.0E-4) or every 20

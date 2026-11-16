@@ -43,6 +43,7 @@ import java.util.zip.ZipInputStream;
  *   libraries/...           runtime libraries (SHA-1 checked), natives skipped
  *   mappings/mappings.tiny  tiny v2 mappings (artifact SHA-1 checked against the maven .sha1)
  *   client-named.jar        client jar remapped mappings.from -> mappings.to
+ *   client-intermediary.jar (only with mappings.names) the intermediate step of the two-step remap
  *   classpath.txt           absolute paths of the library jars, one per line
  *   setup.properties        record of what was fetched (hashes, mapping build)
  * </pre>
@@ -146,12 +147,32 @@ public final class Setup {
         boolean strip = Boolean.parseBoolean(cfg.getProperty("remap.stripParameterAnnotations", "false"));
         boolean fixAccess = Boolean.parseBoolean(cfg.getProperty("remap.fixPackageAccess", "false"));
         boolean publicProtected = Boolean.parseBoolean(cfg.getProperty("remap.publicProtected", "false"));
+        // mappings.names=<row>: a patch release checked against an existing row takes that row's names
+        // through the version-stable intermediary namespace (official -> intermediary with its own
+        // mappings, then intermediary -> named with the row's), so the row's harness compiles unchanged
+        // and every class both versions share gets exactly the row's names.
+        String namesRow = cfg.getProperty("mappings.names");
+        Path namesTiny = namesRow == null ? null : cacheRoot.resolve(namesRow).toAbsolutePath()
+                .resolve("mappings").resolve("mappings.tiny");
+        if (namesTiny != null && !Files.exists(namesTiny)) {
+            throw new IllegalStateException("mappings.names=" + namesRow + ": run prepareVanilla for " + namesRow
+                    + " first (" + namesTiny + " is missing)");
+        }
         String stamp = clientSha1 + "|" + mappingSha1 + "|" + from + "->" + to + (strip ? "|strip-param-annotations" : "")
-                + (fixAccess ? "|fix-package-access" : "") + (publicProtected ? "|public-protected" : "");
+                + (fixAccess ? "|fix-package-access" : "") + (publicProtected ? "|public-protected" : "")
+                + (namesTiny == null ? "" : "|names-from-" + namesRow + "-" + sha1(namesTiny));
         Path stampFile = dir.resolve("client-" + to + ".stamp");
         if (!Files.exists(named) || !Files.exists(stampFile) || !Files.readString(stampFile).equals(stamp)) {
-            System.out.println("[setup] remapping " + clientJar.getFileName() + " " + from + " -> " + to);
-            remap(clientJar, named, tiny, from, to, libs, fixAccess);
+            if (namesTiny == null) {
+                System.out.println("[setup] remapping " + clientJar.getFileName() + " " + from + " -> " + to);
+                remap(clientJar, named, tiny, from, to, libs, fixAccess);
+            } else {
+                Path inter = dir.resolve("client-intermediary.jar");
+                System.out.println("[setup] remapping " + clientJar.getFileName() + " " + from + " -> intermediary");
+                remap(clientJar, inter, tiny, from, "intermediary", libs, false);
+                System.out.println("[setup] remapping " + inter.getFileName() + " intermediary -> " + to + " (names of " + namesRow + ")");
+                remap(inter, named, namesTiny, "intermediary", to, libs, fixAccess);
+            }
             if (strip || publicProtected) {
                 rewriteClasses(named, strip, publicProtected);
             }
