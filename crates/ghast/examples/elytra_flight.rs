@@ -87,6 +87,17 @@ impl Behavior for Flight {
                 }
             }
             Phase::Glide(n) => {
+                if n % 5 == 0 {
+                    log::debug!(
+                        "glide {n}: {:.3} {:.3} {:.3} motion {:.3} {:.3} {:.3}",
+                        pose.pos.x,
+                        pose.pos.y,
+                        pose.pos.z,
+                        pose.motion.x,
+                        pose.motion.y,
+                        pose.motion.z
+                    );
+                }
                 // Level flight, a slow turn; a rocket every 60 ticks.
                 self.yaw += 1.5;
                 ctx.set_aim(self.yaw, 8.0);
@@ -124,10 +135,13 @@ impl Behavior for Flight {
                 }
                 if n > 40 {
                     log::info!(
-                        "summary: {} ticks gliding, {} rockets used, landed {}",
+                        "summary: {} ticks gliding, {} rockets used, landed {} at {:.4} {:.4} {:.4}",
                         self.glide_ticks,
                         self.rockets_used,
-                        pose.on_ground && !gliding
+                        pose.on_ground && !gliding,
+                        pose.pos.x,
+                        pose.pos.y,
+                        pose.pos.z
                     );
                     ctx.disconnect("flight done");
                 }

@@ -48,4 +48,6 @@ for run in overworld nether; do
   f=$("$here/alerts.sh" "$VER" --count --since "$since"); echo "  ${f:-0 Grim flags}"
 done
 q "effect clear $BOT"
+# Remove both strips again (the overworld one would stand in other runs' way).
+q "fill -3 30 -1 5 34 62 minecraft:air" "execute in minecraft:the_nether run fill -3 100 -1 5 104 62 minecraft:air"
 "$here/stop.sh" "$VER" >/dev/null 2>&1 || true
