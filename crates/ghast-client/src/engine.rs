@@ -1561,6 +1561,14 @@ impl<S: Sim> Engine<S> {
         c.sent.sprinting = c.pose.sprinting;
         c.sent.flying = c.pose.flying;
         c.swings += count_swings(&c.out);
+        // Minecraft.tick's screen check: a dead player without a screen gets the death screen
+        // or, with the immediate-respawn rule (1.15+, `respawn_screen` off), asks to respawn,
+        // every tick until the server's respawn arrives (also when it joined already dead,
+        // which brings no death event). With the death screen the behaviour decides
+        // (`TickContext::respawn`).
+        if c.dead && c.joined && !c.respawn_screen && !c.inv.gui_open() {
+            c.out.push(Outbound::Respawn);
+        }
         // Minecraft.tick ends with `tick_end` (1.21.2+), after the player's packets.
         if c.opts.caps.sends_tick_end {
             c.out.push(Outbound::TickEnd);
@@ -3392,6 +3400,56 @@ mod tests {
         e.tick(&mut b, t0);
         let _ = b;
         assert_eq!(seen, ["hi"]);
+    }
+
+    /// Joining already dead (health 0, no death event): with the immediate-respawn rule the
+    /// tick asks to respawn (vanilla's screen check) until the respawn arrives; with the
+    /// death screen nothing is sent, the behaviour sees `died` and may call `respawn`.
+    #[test]
+    fn joining_dead_respawns_like_vanilla() {
+        let mut versions = vec![
+            (GameVersion::V1_8_9, false),
+            (GameVersion::V1_12_2, false),
+            (GameVersion::V1_16_5, true),
+            (GameVersion::V26_1, true),
+        ];
+        #[cfg(feature = "v26_2")]
+        versions.push((GameVersion::V26_2, true));
+        for (v, rule) in versions {
+            for immediate in [false, true] {
+                let mut e = engine(v);
+                join(&mut e);
+                if rule {
+                    e.handle(Inbound::GameState {
+                        reason: 11,
+                        value: if immediate { 1.0 } else { 0.0 },
+                    });
+                }
+                e.handle(Inbound::Health(crate::common::Health {
+                    health: 0.0,
+                    food: 20,
+                    saturation: 5.0,
+                }));
+                let t0 = Instant::now();
+                e.note_inbound(t0);
+                let mut died = false;
+                let mut b = Script(|ctx: &mut TickContext<'_>| died |= ctx.events().died);
+                let mut respawns = 0;
+                for _ in 0..3 {
+                    e.tick(&mut b, t0);
+                    respawns += e
+                        .outbound()
+                        .iter()
+                        .filter(|o| matches!(o, Outbound::Respawn))
+                        .count();
+                    e.outbound().clear();
+                }
+                let _ = b;
+                assert!(died, "{v:?}");
+                let want = if rule && immediate { 3 } else { 0 };
+                assert_eq!(respawns, want, "{v:?} immediate {immediate}");
+            }
+        }
     }
 
     #[test]
