@@ -45,6 +45,8 @@ struct Probe {
     acted: Option<u64>,
     /// Ticks spent trying to act.
     trying: u64,
+    /// Give up after this many (`PROBE_TRIES`, default 400): "could not act".
+    tries: u64,
     broken_before: u64,
     last: Option<String>,
     changes: Vec<String>,
@@ -163,7 +165,7 @@ impl Behavior for Probe {
             return;
         }
         self.trying += 1;
-        if self.trying > 400 {
+        if self.trying > self.tries {
             println!(
                 "PROBE {:?}: could not act | final {}",
                 self.mode,
@@ -264,6 +266,7 @@ fn main() {
             settle: num("PROBE_SETTLE", 60),
             acted: None,
             trying: 0,
+            tries: num("PROBE_TRIES", 400),
             broken_before: 0,
             last: None,
             changes: Vec::new(),

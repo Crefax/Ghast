@@ -799,6 +799,80 @@ fn spectator_switch_stops_a_use_only_on_26_x() {
     }
 }
 
+/// 1.8.9 / 1.12.2 `canPlaceItemBlock` before the block packet: decided for a spot that is not
+/// replaceable and for a full-cube block in the player's box; anvils, slabs and non-block items
+/// are left alone. `ctx.place` then sends nothing.
+#[test]
+fn legacy_client_suppresses_unplaceable_blocks() {
+    use crate::common::Face;
+    for v in [GameVersion::V1_8_9, GameVersion::V1_12_2] {
+        let mut e = engine(v);
+        join(&mut e);
+        let under = BlockPos::new(8, 63, 8);
+        let ahead = BlockPos::new(8, 63, 10);
+        // Into the player's own box (cobblestone 4, stone 1 with its variants).
+        assert!(e.sim.place_suppressed(under, Face::Up, 4), "{v:?}");
+        assert!(e.sim.place_suppressed(under, Face::Up, 1), "{v:?}");
+        // Free air.
+        assert!(!e.sim.place_suppressed(ahead, Face::Up, 4), "{v:?}");
+        // The spot next to the face is stone: no block item fits (torch 50 too).
+        assert!(e.sim.place_suppressed(ahead, Face::North, 4), "{v:?}");
+        assert!(e.sim.place_suppressed(ahead, Face::North, 50), "{v:?}");
+        // Not decided: anvil, stone slab; not a block item: stick.
+        assert!(!e.sim.place_suppressed(ahead, Face::North, 145), "{v:?}");
+        assert!(!e.sim.place_suppressed(ahead, Face::North, 44), "{v:?}");
+        assert!(!e.sim.place_suppressed(ahead, Face::North, 280), "{v:?}");
+        // A torch has no collision box: it may go into the player's box.
+        assert!(!e.sim.place_suppressed(under, Face::Up, 50), "{v:?}");
+        // Tall grass is replaced itself: the spot is the grass, not the block above.
+        legacy_set(&mut e, v, BlockPos::new(8, 64, 10), 31 << 4 | 1);
+        assert!(
+            !e.sim
+                .place_suppressed(BlockPos::new(8, 64, 10), Face::Up, 4),
+            "{v:?}"
+        );
+    }
+    // 1.16.5 has no such check.
+    let mut e = engine(GameVersion::V1_16_5);
+    join(&mut e);
+    assert!(!e.sim.place_suppressed(BlockPos::new(8, 63, 8), Face::Up, 1));
+}
+
+/// `ctx.place` into the player's own box on 1.8.9 / 1.12.2 writes nothing and reports it.
+#[test]
+fn legacy_place_into_the_player_is_refused() {
+    for v in [GameVersion::V1_8_9, GameVersion::V1_12_2] {
+        let mut e = engine(v);
+        join(&mut e);
+        e.inventory_mut()
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(4, 16, 0)));
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let under = BlockPos::new(8, 63, 8);
+        let mut tried = 0;
+        let mut accepted = false;
+        for _ in 0..20 {
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                ctx.set_aim(0.0, 90.0);
+                if ctx.target().is_some_and(|t| t.pos == under) {
+                    tried += 1;
+                    accepted |=
+                        ctx.place(under, crate::common::Face::Up, Vec3::new(8.5, 64.0, 8.5));
+                }
+            });
+            e.tick(&mut b, t0);
+            assert!(
+                !e.outbound()
+                    .iter()
+                    .any(|o| matches!(o, Outbound::Place { .. })),
+                "{v:?}"
+            );
+            e.outbound().clear();
+        }
+        assert!(tried > 0 && !accepted, "{v:?}");
+    }
+}
+
 /// Replays of the oracle's right clicks (`tests/golden/<version>/place.jsonl.gz`, the real
 /// client's `MultiPlayerGameMode.useItemOn` and its prediction records): every placement this
 /// client predicts is the vanilla one, and after the server's answer (an ack alone, a block

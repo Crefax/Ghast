@@ -119,6 +119,67 @@ pub(crate) fn legacy_plain_placement(
     Some((at, id << 4))
 }
 
+/// 1.8.9 / 1.12.2 `BlockItem.canPlaceItemBlock`, which the client's right click checks before it
+/// writes the `block_place` packet (`onRightClick` / `interactBlock`: no packet when it fails),
+/// decided where the data decides it exactly: `true` = vanilla sends no block packet for this
+/// click. `false` also for every case this cannot decide (the packet is sent as before).
+///
+/// Decided: the block next to the clicked face (or the clicked block itself when it is
+/// replaceable: air, tall grass, dead bush, vines, any snow layer) is not of a replaceable
+/// material (`World.canBlockBePlaced` needs one, whatever the block's own rules add), and the
+/// held block's collision box, a full cube on every data value, would overlap the player's own
+/// box (`World.hasEntityIn`). Not decided: anvils (they go on decorations) and slab items (their
+/// own check), double plants as the clicked block, the block's own placement rules
+/// (`canBePlacedAdjacent`: torches, flowers, ...), partial collision boxes, other entities.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legacy_place_suppressed(
+    pos: BlockPos,
+    face: crate::common::Face,
+    held: u16,
+    undecided_items: &[u16],
+    raw_at: impl Fn(BlockPos) -> Option<u16>,
+    replaceable: impl Fn(u16) -> bool,
+    full_cube_block: impl Fn(u16) -> bool,
+    player: &ghast_physics::math::Aabb,
+) -> bool {
+    // Block items: ids below 256, and the banner (its item is a block item too).
+    if !(held < 256 || held == 425) || undecided_items.contains(&held) {
+        return false;
+    }
+    let Some(clicked) = raw_at(pos) else {
+        return false;
+    };
+    let target = match clicked >> 4 {
+        // Snow layers: the face is taken as up, the layer itself is the spot.
+        0 | 31 | 32 | 78 | 106 => pos,
+        // DoublePlantBlock.isReplaceable reads the plant's kind from the other half.
+        175 => return false,
+        _ => face.offset(pos),
+    };
+    // getBlockState of an unloaded or out-of-height position is air (replaceable).
+    let Some(there) = raw_at(target) else {
+        return false;
+    };
+    if !replaceable(there >> 4) {
+        return true;
+    }
+    if held < 256 && full_cube_block(held) {
+        let (x, y, z) = (
+            f64::from(target.x),
+            f64::from(target.y),
+            f64::from(target.z),
+        );
+        return player.max_x > x
+            && player.min_x < x + 1.0
+            && player.max_y > y
+            && player.min_y < y + 1.0
+            && player.max_z > z
+            && player.min_z < z + 1.0;
+    }
+    false
+}
+
 /// One prediction of [`Sequenced`] (`ServerVerifiedState`).
 #[cfg(ghast_modern)]
 #[derive(Clone, Copy, Debug)]

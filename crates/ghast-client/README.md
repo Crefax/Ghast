@@ -369,6 +369,14 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
 - A spectator's right click on a block sends the block packet and ends there (no placement,
   off hand or item use): 1.8.9 – 1.16.5 swing (`interactBlock` true / SUCCESS), 26.x does not
   (CONSUME).
+- 1.8.9 / 1.12.2 write no `block_place` for a block item that cannot go there, like vanilla's
+  `canPlaceItemBlock` check: the spot next to the face (or the clicked tall grass / dead bush /
+  vine / snow layer) is not replaceable, or a block that is a full cube on every data value
+  would overlap the player. The item use follows instead (1.8 `use_item` form; 1.12
+  `use_item`, then the off hand); `ctx.place` returns `false`. Not decided (sent as before):
+  anvils, slab items, double plants as the clicked block, the block's own placement rules
+  (torch supports, flower soil, …), partial collision boxes, other entities in the spot.
+  1.16.5 and 26.x have no such client check.
 - Placed blocks are predicted (every version) when the result is known exactly: a block
   whose only state is a full collision cube (stone, cobblestone, planks on 1.13+, ores,
   wool on 1.13+, glass, …; 1.8.9 / 1.12.2: the blocks without block-state properties, so

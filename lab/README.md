@@ -46,6 +46,9 @@ LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build inst
                              # view after each action, the server's block and the Grim flags. PASS = bot == server, 0 flags
 ./resource-pack.sh 1.8|1.12|1.16 [url]  # the server announces a pack, the lab plugin logs the client's statuses;
                              # PASS = ACCEPTED + SUCCESSFULLY_LOADED (a level:// url: FAILED_DOWNLOAD on 1.12+), 0 flags
+./place-suppress.sh 1.8|1.12 # placements vanilla does not send (into the bot's own box: nothing written) and ones it
+                             # sends that the server refuses (a cow in the spot: rolled back) or ignores (above the
+                             # build limit); PASS = as described, 0 Grim flags
 ./nether-lava.sh             # 1.16.5: walk through a lava stream in the overworld and in the nether (faster lava push),
                              # fire resistance on; PASS = 0 Grim flags
 LAB_PROPS="key=value ..." ./start.sh 26.1   # server.properties overrides for one start (e.g. spawn-protection=16)

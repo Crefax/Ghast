@@ -755,6 +755,9 @@ pub(crate) struct HandsIo<'a> {
     /// 26.x answers CONSUME, whose swing source is none. Both 26.x rows are the versions with
     /// block-prediction sequences here, which is how the engine sets it.
     pub spectator_swings: bool,
+    /// 1.8.9 / 1.12.2: the client writes no `block_place` for this click with this block item
+    /// ([`crate::sim::Sim::place_suppressed`]).
+    pub place_blocked: &'a dyn Fn(BlockPos, Face, u16) -> bool,
 }
 
 impl HandsIo<'_> {
@@ -836,6 +839,7 @@ impl Hands {
     /// `startUsingItem`: remembers the hand and the item.
     /// Test hook: a use of item `id` in the main hand starts.
     #[cfg(test)]
+    #[allow(dead_code)] // used by the all-version prediction tests
     pub(crate) fn test_start_using(&mut self, id: u16) {
         self.start_using(false, id);
     }
@@ -1187,6 +1191,11 @@ impl Hands {
                 self.interact(e, off_hand, io);
             } else if let Some(hit) = t
                 && let Some(b) = io.solid(hit.pos)
+                // 1.12 interactBlock: FAIL without a packet when the block item cannot go
+                // there (not for spectators or an activated block); the item use follows.
+                && !(!io.spectator
+                    && !(b.activates && !(io.sneaking && any_item))
+                    && held.is_some_and(|h| (io.place_blocked)(hit.pos, hit.face, h.id)))
             {
                 let cursor = Vec3::new(
                     hit.hit.x - f64::from(hit.pos.x),
@@ -1257,6 +1266,16 @@ impl Hands {
             f64::from((hit.hit.z - f64::from(hit.pos.z)) as f32),
         );
         let activated = b.activates && (!io.sneaking || io.held.is_none());
+        // 1.8 onRightClick: no packet when the block item cannot go there (false: the caller
+        // uses the item itself).
+        if !io.spectator
+            && !activated
+            && io
+                .held
+                .is_some_and(|h| (io.place_blocked)(hit.pos, hit.face, h.id))
+        {
+            return false;
+        }
         io.out.push(Outbound::Place {
             pos: hit.pos,
             face: hit.face,
@@ -1401,6 +1420,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                place_blocked: &|_, _, _| false,
             };
             h.tick(false, true, &mut io);
             kinds(&out)
@@ -1420,6 +1440,57 @@ mod tests {
             ..HeldItem::default()
         };
         assert_eq!(run(Some(stick)), ["place_main", "use_main", "place_off"]);
+    }
+
+    /// 1.8.9 / 1.12.2: a block item that cannot go there writes no block packet; the item
+    /// itself is used instead (1.8 `doUse` falls through to `interactItem`; 1.12 `FAIL` goes on
+    /// to `use_item`, then the off hand).
+    #[test]
+    fn unplaceable_block_item_sends_no_block_packet() {
+        let hit = Some(BlockHit {
+            pos: BlockPos::new(0, 0, 0),
+            face: Face::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            distance: 1.6,
+        });
+        let dirt = HeldItem {
+            id: 3,
+            count: 10,
+            places_block: true,
+            ..HeldItem::default()
+        };
+        let run = |modern: bool, blocked: bool| {
+            let mut h = Hands::default();
+            let (mut out, mut broken, mut placed) = (Vec::new(), Vec::new(), false);
+            let check = move |_: BlockPos, _: Face, id: u16| blocked && id == 3;
+            let mut io = HandsIo {
+                blocks: &io_blocks,
+                target: hit,
+                held: Some(dirt),
+                held_stack: None,
+                food: 20,
+                modern,
+                off_held: None,
+                off_stack: None,
+                entity: None,
+                factors: DigFactors::default(),
+                sneaking: false,
+                out: &mut out,
+                broken: &mut broken,
+                placed: &mut placed,
+                spectator: false,
+                spectator_swings: true,
+                place_blocked: &check,
+            };
+            h.tick(false, true, &mut io);
+            assert_eq!(placed, !blocked);
+            assert_eq!(h.placing.is_empty(), blocked);
+            kinds(&out)
+        };
+        assert_eq!(run(false, false), ["place_main", "swing"]);
+        assert_eq!(run(false, true), ["use_main"]);
+        assert_eq!(run(true, false), ["place_main", "swing"]);
+        assert_eq!(run(true, true), ["use_main", "place_off"]);
     }
 
     /// A spectator's right click on a block: the block packet, then the click ends (no
@@ -1459,6 +1530,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: true,
                 spectator_swings: swings,
+                place_blocked: &|_, _, _| true,
             };
             h.tick(false, true, &mut io);
             assert!(!placed);
@@ -1526,6 +1598,7 @@ mod tests {
                     placed: &mut placed,
                     spectator: false,
                     spectator_swings: true,
+                    place_blocked: &|_, _, _| false,
                 };
                 h.tick(true, false, &mut io);
                 let starts = out
@@ -1579,6 +1652,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                place_blocked: &|_, _, _| false,
             };
             h.click_mouse(hit, &mut io);
             assert_eq!(kinds(&out)[..2], want);
@@ -1633,6 +1707,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                place_blocked: &|_, _, _| false,
             };
             h.tick(true, false, &mut io);
             ticks += 1;

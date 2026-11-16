@@ -1389,6 +1389,9 @@ impl<S: Sim> Engine<S> {
             let eyes = Vec3::new(c.pose.pos.x, c.pose.pos.y + eye, c.pose.pos.z);
             let sim = &self.sim;
             let blocks = |x: i32, y: i32, z: i32| sim.block_query(x, y, z);
+            let blocked = |p: ghast_protocol::BlockPos, f: crate::common::Face, id: u16| {
+                sim.place_suppressed(p, f, id)
+            };
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
             let held_id = c.inv.held().and_then(|s| u16::try_from(s.id()).ok());
             let (left, right) = (c.buttons.left && !gui, c.buttons.right && !gui);
@@ -1444,6 +1447,7 @@ impl<S: Sim> Engine<S> {
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
                 spectator_swings: !c.opts.caps.block_sequence,
+                place_blocked: &blocked,
             };
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
@@ -2489,6 +2493,9 @@ impl TickContext<'_> {
         }
         let world = self.world;
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
+        let blocked = |p: ghast_protocol::BlockPos, f: crate::common::Face, id: u16| {
+            world.place_suppressed(p, f, id)
+        };
         let c = &mut *self.core;
         let modern = c.opts.caps.combat_1_9;
         let mut placed = false;
@@ -2509,6 +2516,7 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: !c.opts.caps.block_sequence,
+            place_blocked: &blocked,
         };
         if !modern {
             io.out.push(Outbound::Swing);
@@ -2676,6 +2684,9 @@ impl TickContext<'_> {
         }
         let world = self.world;
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
+        let blocked = |p: ghast_protocol::BlockPos, f: crate::common::Face, id: u16| {
+            world.place_suppressed(p, f, id)
+        };
         let c = &mut *self.core;
         let mut placed = false;
         let mut io = HandsIo {
@@ -2701,6 +2712,7 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: !c.opts.caps.block_sequence,
+            place_blocked: &blocked,
         };
         c.hands.click_block(pos, face, &mut io);
         c.out.push(Outbound::Swing);
@@ -2709,7 +2721,10 @@ impl TickContext<'_> {
 
     /// Right-clicks `support`'s `face` at the absolute point `hit` (`block_place`, then an arm
     /// swing): places the held block or activates the block. Refused (nothing sent, `false`)
-    /// unless the crosshair from the sent pose is on exactly that block face.
+    /// unless the crosshair from the sent pose is on exactly that block face, and on 1.8.9 /
+    /// 1.12.2 when the vanilla client would write no packet because the held block cannot go
+    /// there (the spot next to the face is not replaceable, or the block would overlap the
+    /// player).
     pub fn place(
         &mut self,
         support: ghast_protocol::BlockPos,
@@ -2724,6 +2739,9 @@ impl TickContext<'_> {
             return false;
         };
         let blocks = |x: i32, y: i32, z: i32| world.block_query(x, y, z);
+        let blocked = |p: ghast_protocol::BlockPos, f: crate::common::Face, id: u16| {
+            world.place_suppressed(p, f, id)
+        };
         let c = &mut *self.core;
         let mut placed = false;
         let first = c.out.len();
@@ -2744,10 +2762,16 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: !c.opts.caps.block_sequence,
+            place_blocked: &blocked,
         };
         c.hands
             .right_click_block(BlockHit { hit, ..t }, &b, &mut io);
         let _ = placed;
+        if c.out.len() == first {
+            // 1.8.9 / 1.12.2: the vanilla client would write no block packet (the block item
+            // cannot go there): nothing is sent.
+            return false;
+        }
         predict_planting(c, world, first);
         c.out.push(Outbound::Swing);
         true
@@ -3562,10 +3586,11 @@ mod tests {
             ctx.set_aim(90.0, 89.5);
             results.push(ctx.place(floor, crate::Face::Up, Vec3::new(8.5, 64.0, 8.5)));
         });
-        // A stack of stone in the selected hotbar slot (window 0 slot 36).
+        // Torches in the selected hotbar slot (window 0 slot 36): a full block would go into
+        // the player's own box, which the 1.8 client does not even send.
         e.core
             .inv
-            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(1, 64, 0)));
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(50, 64, 0)));
         let mut placed_tick = None;
         for i in 0..20 {
             e.tick(&mut b, t0);
@@ -3579,7 +3604,7 @@ mod tests {
         let first = results.iter().position(|r| *r).unwrap();
         assert!(first > 3, "refused while still turning");
         assert_eq!(placed_tick, Some(first));
-        assert_eq!(e.core.inv.held().map(|s| s.id()), Some(1));
+        assert_eq!(e.core.inv.held().map(|s| s.id()), Some(50));
     }
 
     #[test]
@@ -3898,7 +3923,7 @@ mod tests {
         e.note_inbound(t0);
         e.core
             .inv
-            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(1, 64, 0)));
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(50, 64, 0)));
         let floor = ghast_protocol::BlockPos::new(8, 63, 8);
         let mut tick = 0;
         let mut placed_at = None;
@@ -3938,7 +3963,7 @@ mod tests {
         e.note_inbound(t0);
         e.core
             .inv
-            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(1, 64, 0)));
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(50, 64, 0)));
         let mut ticket = None;
         let mut n = 0;
         let mut b = Script(|ctx: &mut TickContext<'_>| {
@@ -3968,14 +3993,14 @@ mod tests {
     }
 
     /// 1.8 planting uses the seed at once (vanilla `SeedItem.use` on the client); a
-    /// stone block place waits for the server.
+    /// torch place waits for the server.
     #[test]
     fn planting_uses_the_seed_at_once() {
         use ghast_protocol::v1_8::play::clientbound as cb;
         for (soil, item, used) in [
             (60 << 4 | 7, 295, true),
             (1 << 4, 295, false),
-            (60 << 4, 1, false),
+            (60 << 4, 50, false),
         ] {
             let mut e = engine(GameVersion::V1_8_9);
             join(&mut e);
@@ -4028,7 +4053,7 @@ mod tests {
         e.note_inbound(t0);
         e.core
             .inv
-            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(1, 64, 0)));
+            .on_set_slot(0, 36, Some(ghast_inventory::Stack::new(50, 64, 0)));
         let floor = ghast_protocol::BlockPos::new(8, 63, 8);
         let mut n = 0;
         let mut placed = false;

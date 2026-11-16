@@ -428,6 +428,14 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
         let _ = p;
     }
+    /// 1.8.9 / 1.12.2: the vanilla client writes no `block_place` for a right click with block
+    /// item `held` on `face` of `pos` (`BlockItem.canPlaceItemBlock` fails; see
+    /// [`predict::legacy_place_suppressed`]). Always `false` from 1.13 on (no such check).
+    #[inline]
+    fn place_suppressed(&self, pos: BlockPos, face: crate::common::Face, held: u16) -> bool {
+        let _ = (pos, face, held);
+        false
+    }
     /// Test hook: moves the sim's player (as a fall between a prediction and its answer would).
     #[cfg(test)]
     #[allow(dead_code)] // used by the all-version prediction tests
@@ -1139,6 +1147,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
         (**self).place_sent(p);
+    }
+    fn place_suppressed(&self, pos: BlockPos, face: crate::common::Face, held: u16) -> bool {
+        (**self).place_suppressed(pos, face, held)
     }
     fn set_player_pos(&mut self, p: Vec3) {
         (**self).set_player_pos(p);

@@ -470,6 +470,45 @@ impl Sim for Sim18 {
         }
     }
 
+    fn place_suppressed(&self, pos: BlockPos, face: crate::common::Face, held: u16) -> bool {
+        use ghast_data::v1_8::{Block, BlockState};
+        // Anvils and slab items (stone, wooden, red sandstone): not decided.
+        const UNDECIDED: &[u16] = &[44, 126, 145, 182];
+        let w = &self.world;
+        let unit = ghast_data::Aabb {
+            min_x: 0.0,
+            min_y: 0.0,
+            min_z: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+            max_z: 1.0,
+        };
+        crate::sim::predict::legacy_place_suppressed(
+            pos,
+            face,
+            held,
+            UNDECIDED,
+            |q| w.block_state(q.x, q.y, q.z).map(BlockState::raw),
+            |id| {
+                u8::try_from(id)
+                    .ok()
+                    .and_then(Block::from_id)
+                    .is_some_and(|b| b.material().replaceable)
+            },
+            |id| {
+                let Some(b) = u8::try_from(id).ok().and_then(Block::from_id) else {
+                    return false;
+                };
+                b.shape_dependency() == ghast_data::ShapeDependency::None
+                    && (0..16u8).all(|m| {
+                        let s = BlockState::new(b, m);
+                        !s.is_registered() || s.shape() == [unit]
+                    })
+            },
+            &self.player.bb,
+        )
+    }
+
     #[cfg(test)]
     fn set_player_pos(&mut self, p: Vec3) {
         self.player.set_position(p.x, p.y, p.z);
