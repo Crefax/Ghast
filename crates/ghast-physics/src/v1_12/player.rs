@@ -12,6 +12,7 @@ use super::blocks::{
     BoxList, BoxSink, add_collision_boxes, id, is_air, is_normal_cube, is_tall_support,
     is_valid_pos, ladder_facing, slipperiness, state_at, trapdoor_facing,
 };
+use super::ext::PlayerExt;
 use super::fluid::{contains_lava, contains_liquid, water_contact};
 use crate::attribute::Modifiers;
 use crate::input::{Abilities, Keys, Packet, Packets, TickInput};
@@ -24,6 +25,8 @@ pub const WIDTH: f32 = 0.6;
 pub const HEIGHT: f32 = 1.8;
 /// Sneaking height (`float`, 1.9+).
 pub const SNEAK_HEIGHT: f32 = 1.65;
+/// Gliding height (`float`, elytra).
+pub const GLIDE_HEIGHT: f32 = 0.6;
 /// Step-up height (`float`).
 pub const STEP_HEIGHT: f32 = 0.6;
 /// Forward input needed to sprint (`float`).
@@ -99,7 +102,8 @@ pub struct PlayerState {
     pub pitch: f32,
     /// Current box width (`float`).
     pub width: f32,
-    /// Current box height (`float`): 1.8 standing, 1.65 sneaking (when the box fits).
+    /// Current box height (`float`): 1.8 standing, 1.65 sneaking, 0.6 gliding (when the box
+    /// fits).
     pub height: f32,
     /// On ground after the last move.
     pub on_ground: bool,
@@ -161,7 +165,9 @@ pub struct PlayerState {
     pub sent: SentState,
     /// Movement-relevant status effects.
     pub effects: Effects,
-    /// Fell below y = −64: vanilla removes the entity and stops ticking it.
+    /// The entity was removed from the client world: the tick does nothing. The tick never sets
+    /// it (below y = −64 the client player is hurt, which the client refuses, and keeps
+    /// ticking; before 0.4.6 the tick set it there).
     pub removed: bool,
     /// The client world has added the entity to its chunk. 1.9+ only ticks such an entity: a
     /// player spawned above a column that is not loaded does not move (and sends nothing) until
@@ -383,7 +389,7 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
     options: &Options,
     out: &mut Packets,
 ) {
-    tick_solid(p, input, world, options, NoSolids, out);
+    tick_solid(p, input, world, options, NoSolids, NoExt, out);
 }
 
 /// [`tick_with`] next to other entities the player collides with: `entities` are the boxes of
@@ -400,7 +406,102 @@ pub fn tick_in<W: BlockView<State = BlockState>>(
     entities: &[Aabb],
     out: &mut Packets,
 ) {
-    tick_solid(p, input, &Beside(world), options, entities, out);
+    tick_solid(p, input, &Beside(world), options, entities, NoExt, out);
+}
+
+/// [`tick_in`] with the movement state beyond [`PlayerState`] (see [`PlayerExt`]: gliding). With
+/// a default [`PlayerExt`] it is the same tick as [`tick_in`]. Attached rockets tick after the
+/// player: call [`rocket_boost`] for each after this.
+pub fn tick_ext<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    input: &TickInput,
+    world: &W,
+    options: &Options,
+    entities: &[Aabb],
+    out: &mut Packets,
+) {
+    tick_solid(p, input, &Apart(world), options, entities, ExtCtx(x), out);
+}
+
+/// One tick of a firework rocket attached to the player (`FireworkRocketEntity.tick` with the
+/// player as its shooter): a gliding player is pushed along its look. The 1.12 client ticks the
+/// rockets after its player (they join the world's entity list later), every tick, loaded
+/// column or not: call it once per attached rocket after [`tick_ext`].
+pub fn rocket_boost(p: &mut PlayerState, x: &PlayerExt) {
+    if !x.fall_flying {
+        return;
+    }
+    let look = look_vector(p.yaw, p.pitch);
+    let v = p.vel;
+    for (k, l) in look.iter().enumerate() {
+        p.vel[k] = v[k] + (l * 0.1 + (l * 1.5 - v[k]) * 0.5);
+    }
+}
+
+/// `Entity.getRotationVector(pitch, yaw)` (float sine table).
+fn look_vector(yaw: f32, pitch: f32) -> [f64; 3] {
+    const PI: f32 = std::f64::consts::PI as f32;
+    let f = math::cos(-yaw * DEG_TO_RAD - PI);
+    let g = math::sin(-yaw * DEG_TO_RAD - PI);
+    let h = -math::cos(-pitch * DEG_TO_RAD);
+    let i = math::sin(-pitch * DEG_TO_RAD);
+    [f64::from(g * h), f64::from(i), f64::from(f * h)]
+}
+
+/// The world of the extended tick: its own type, so that tick is compiled apart from the others.
+struct Apart<'a, W>(&'a W);
+
+impl<W: BlockView> BlockView for Apart<'_, W> {
+    type State = W::State;
+
+    #[inline(always)]
+    fn block(&self, x: i32, y: i32, z: i32) -> Self::State {
+        self.0.block(x, y, z)
+    }
+
+    #[inline(always)]
+    fn is_chunk_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.0.is_chunk_loaded(chunk_x, chunk_z)
+    }
+
+    #[inline(always)]
+    fn world_border(&self) -> WorldBorder {
+        self.0.world_border()
+    }
+}
+
+/// The extension state a tick runs with: none (the plain ticks, everything compiled out) or a
+/// [`PlayerExt`].
+trait Extra {
+    /// `false` for [`NoExt`]: known at compile time.
+    const ON: bool;
+    /// The extension state (only called when [`Extra::ON`]).
+    fn ext(&mut self) -> &mut PlayerExt;
+}
+
+/// No extension state.
+struct NoExt;
+
+impl Extra for NoExt {
+    const ON: bool = false;
+
+    #[inline(always)]
+    fn ext(&mut self) -> &mut PlayerExt {
+        unreachable!("the plain tick has no extension state")
+    }
+}
+
+/// The extension state of [`tick_ext`].
+struct ExtCtx<'a>(&'a mut PlayerExt);
+
+impl Extra for ExtCtx<'_> {
+    const ON: bool = true;
+
+    #[inline(always)]
+    fn ext(&mut self) -> &mut PlayerExt {
+        self.0
+    }
 }
 
 /// The world of the tick next to entities: its own type, so that tick is compiled apart from
@@ -456,12 +557,13 @@ impl Solids for &[Aabb] {
 // Always inlined: each entry point keeps its own copy of the tick (the one without entities is
 // then the plain block-only tick).
 #[inline(always)]
-fn tick_solid<W: BlockView<State = BlockState>, E: Solids>(
+fn tick_solid<W: BlockView<State = BlockState>, E: Solids, X: Extra>(
     p: &mut PlayerState,
     input: &TickInput,
     world: &W,
     _options: &Options,
     solids: E,
+    x: X,
     out: &mut Packets,
 ) {
     p.yaw = input.yaw;
@@ -491,6 +593,7 @@ fn tick_solid<W: BlockView<State = BlockState>, E: Solids>(
         border: world.world_border(),
         boxes: BoxList::new(),
         solids,
+        x,
     };
     cx.base_tick();
     cx.movement(&input.keys, input.using_item, out);
@@ -499,30 +602,30 @@ fn tick_solid<W: BlockView<State = BlockState>, E: Solids>(
     cx.send_movement(out);
 }
 
-struct Ctx<'a, W, E> {
+struct Ctx<'a, W, E, X> {
     p: &'a mut PlayerState,
     w: &'a W,
     border: WorldBorder,
     boxes: BoxList,
     /// Entity boxes of the collision query.
     solids: E,
+    /// The extension state.
+    x: X,
 }
 
-impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
+impl<W: BlockView<State = BlockState>, E: Solids, X: Extra> Ctx<'_, W, E, X> {
     #[inline]
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         state_at(self.w, x, y, z)
     }
 
-    /// Start of the entity tick: water contact (with flow push), lava halves the fall distance,
-    /// falling out of the world removes the entity.
+    /// Start of the entity tick: water contact (with flow push), lava halves the fall distance.
+    /// Below y = -64 a living entity is hurt (`LivingEntity.destroy`), not removed, and the
+    /// client player refuses the damage: it keeps ticking.
     fn base_tick(&mut self) {
         self.update_water_state();
         if is_touching_lava(self.p, self.w) {
             self.p.fall_distance *= 0.5;
-        }
-        if self.p.pos[1] < -64.0 {
-            self.p.removed = true;
         }
     }
 
@@ -614,6 +717,10 @@ impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
                 }
             }
         }
+        if X::ON && p.input.jump && !prev.jump {
+            self.request_glide(out);
+        }
+        let p = &mut *self.p;
         if p.abilities.flying {
             let impulse = f64::from(p.abilities.fly_speed * 3.0);
             if p.input.sneak {
@@ -642,6 +749,17 @@ impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
         if p.on_ground && p.abilities.flying && !p.spectator {
             p.abilities.flying = false;
             out.push(Packet::Abilities(p.abilities));
+        }
+    }
+
+    /// The elytra request (`ClientPlayerEntity.tickMovement`): the client only asks; the server
+    /// starts the glide.
+    #[inline(never)]
+    fn request_glide(&mut self, out: &mut Packets) {
+        let p = &*self.p;
+        let x = self.x.ext();
+        if !p.on_ground && p.vel[1] < 0.0 && !x.fall_flying && !p.abilities.flying && x.elytra {
+            out.push(Packet::StartFallFlying);
         }
     }
 
@@ -712,6 +830,9 @@ impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
             self.p.vel[1] = vy * 0.6;
             self.p.flying_speed = air;
             self.p.fall_distance = 0.0;
+            if X::ON {
+                self.x.ext().fall_flying = false;
+            }
         } else {
             self.travel(strafe, up, forward);
         }
@@ -754,9 +875,51 @@ impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
             );
         } else if !flying && is_touching_lava(self.p, self.w) {
             self.travel_liquid(strafe, up, forward, 0.02, 0.5, 0.5);
+        } else if X::ON && self.x.ext().fall_flying {
+            self.glide();
         } else {
             self.travel_air(strafe, up, forward);
         }
+    }
+
+    /// The travel while fall flying: lift from the pitch, falling turned into forward speed and
+    /// forward speed into climb, steering towards the look, drag; then the move.
+    #[inline(never)]
+    fn glide(&mut self) {
+        let p = &mut *self.p;
+        if p.vel[1] > -0.5 {
+            p.fall_distance = 1.0;
+        }
+        let look = look_vector(p.yaw, p.pitch);
+        let lean = p.pitch * DEG_TO_RAD;
+        let look_h = (look[0] * look[0] + look[2] * look[2]).sqrt();
+        let speed_h = (p.vel[0] * p.vel[0] + p.vel[2] * p.vel[2]).sqrt();
+        let look_len = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        let c = math::cos(lean);
+        let lift = (f64::from(c) * (f64::from(c) * math::java_min(1.0, look_len / 0.4))) as f32;
+        p.vel[1] += -0.08 + f64::from(lift) * 0.06;
+        if p.vel[1] < 0.0 && look_h > 0.0 {
+            let q = p.vel[1] * -0.1 * f64::from(lift);
+            p.vel[1] += q;
+            p.vel[0] += look[0] * q / look_h;
+            p.vel[2] += look[2] * q / look_h;
+        }
+        // No `look_h > 0` test here in 1.12: straight up divides by zero.
+        if lean < 0.0 {
+            let r = speed_h * f64::from(-math::sin(lean)) * 0.04;
+            p.vel[1] += r * 3.2;
+            p.vel[0] -= look[0] * r / look_h;
+            p.vel[2] -= look[2] * r / look_h;
+        }
+        if look_h > 0.0 {
+            p.vel[0] += (look[0] / look_h * speed_h - p.vel[0]) * 0.1;
+            p.vel[2] += (look[2] / look_h * speed_h - p.vel[2]) * 0.1;
+        }
+        p.vel[0] *= f64::from(0.99f32);
+        p.vel[1] *= f64::from(0.98f32);
+        p.vel[2] *= f64::from(0.99f32);
+        let [vx, vy, vz] = p.vel;
+        self.move_by(vx, vy, vz);
     }
 
     /// Walking, falling, flying, climbing and levitating.
@@ -1200,7 +1363,9 @@ impl<W: BlockView<State = BlockState>, E: Solids> Ctx<'_, W, E> {
     /// 1.9+ pose size: 0.6 × 1.65 while sneaking, 0.6 × 1.8 otherwise, applied only when the box
     /// of the new size (grown from the box's minimum corner) is free.
     fn update_size(&mut self) {
-        let (w, h) = if self.p.input.sneak {
+        let (w, h) = if X::ON && self.x.ext().fall_flying {
+            (WIDTH, GLIDE_HEIGHT)
+        } else if self.p.input.sneak {
             (WIDTH, SNEAK_HEIGHT)
         } else {
             (WIDTH, HEIGHT)

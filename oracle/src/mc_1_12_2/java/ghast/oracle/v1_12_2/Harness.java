@@ -182,7 +182,9 @@ final class Harness {
             if (sc.usesItem()) {
                 // Held in the selected hotbar slot (0). A shield: using it starts at once, lasts 72000
                 // ticks, needs no ammunition or hunger (1.9+ swords no longer block).
-                player.inventory.field_15082.set(player.inventory.selectedSlot, new ItemStack(Items.SHIELD));
+                // Elytra cases may hold rockets instead.
+                ItemStack hand = Elytra.handStack(sc);
+                player.inventory.field_15082.set(player.inventory.selectedSlot, hand != null ? hand : new ItemStack(Items.SHIELD));
             }
 
             // --- position packet (absolute, like a login teleport) ---

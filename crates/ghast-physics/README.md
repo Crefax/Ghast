@@ -428,6 +428,12 @@ the spin pose as `Pose::FallFlying`, the same box): `riptide.jsonl.gz` (18 hand 
 `fuzz --riptide true` seeds 61-65 in `fuzz-riptide/` (1,000,000 ticks), 0 diffs. The use state
 (10-tick minimum, the 4-tick retry, refusal out of water and rain) is the caller's, as are the
 rain (gradient, biome, sky light) and the list of other entities.
+Gliding (`PlayerExt::{fall_flying, elytra, glide_pose}` + `tick_ext`, `apply_shared_flags`,
+`rocket_boost` once per attached rocket in the client world's tick order; module docs of
+`v1_16_5::PlayerExt`): `elytra.jsonl.gz` (29 hand cases + 100 fuzz cases) and
+`fuzz --elytra true` seeds 71-75 in `fuzz-elytra/` (1,000,000 ticks), 0 diffs. Which rockets tick,
+and before or after the player, is the caller's (the iteration order of the client world's
+entity map; a rocket ticks while its chunk is loaded).
 
 1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
 `fuzz_seed1`, `fuzz_edges_seed1` and `entities` (23 hand cases + 60 fuzz cases with other entities,
@@ -436,7 +442,10 @@ dumps (6,083 box lines incl. neighbour configurations, 12,192 far lines) and the
 Large fuzz: the same commands with `MC=1.12.2` and `oracle/cache/1.12.2/` (seeds 11-15, 21 with
 `--use-item true`, extra 1-6 replayed from `fuzz-in/`, edges 31-35, extras 41-45) = 4,160,000 ticks,
 0 diffs; entities (`fuzz --entities true`, seeds 51-60 in `fuzz-entities/`) 2,000,000 ticks, 0
-diffs.
+diffs. Gliding (`v1_12::PlayerExt` + `tick_ext`, `apply_shared_flags`, `rocket_boost` after the
+tick once per attached rocket; the 1.12 client only asks with `start_fall_flying`, the server's
+flag 7 starts the glide): `elytra.jsonl.gz` (25 hand cases + 100 fuzz cases) and
+`fuzz --elytra true` seeds 71-75 in `fuzz-elytra/` (1,000,000 ticks), 0 diffs.
 
 **Total randomized oracle fuzz: 9,320,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
 1,000,000 extras, 1,000,000 edges), 1.12.2 4,160,000 and 1.16.5 1,000,000.
@@ -481,13 +490,16 @@ Even the 1.16.5 busy case at ~5 µs per tick is 0.01 % of a core per bot at 20 t
 Done since earlier versions of this list: speed modifiers of every operation (`attribute::Modifiers`,
 vanilla's hash order), depth strider, spectators, entity pushes and collisions (1.12.2, 1.16.5,
 26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats and
-minecarts (26.x).
+minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle on 1.8.9 / 1.12.2 / 1.16.5; gliding (elytra) and rockets outside 26.x.
+- Riding a vehicle on 1.8.9 / 1.12.2 / 1.16.5.
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.
-- Falling below y = −64 removes the player (vanilla stops ticking it): modelled as
-  `PlayerState::removed`; a real server kills the player first.
+- 1.8.9: falling below y = −64 sets `PlayerState::removed` and the tick stops (not checked
+  against the oracle: 1.8.9 living entities are hurt there, not removed, as in 1.12.2, so the
+  1.8.9 client probably keeps ticking too). 1.12.2 keeps ticking there (the client player refuses the void damage that
+  replaces the removal for living entities; the 1.12 tick removed it before 0.4.6, found by the
+  elytra fuzz).

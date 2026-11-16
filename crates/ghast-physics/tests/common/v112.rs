@@ -307,6 +307,10 @@ struct EntityInputs {
     /// Boxes of the boats after their ticks (they break lily pads), before / after the player.
     boats_before: Vec<ghast_physics::math::Aabb>,
     boats_after: Vec<ghast_physics::math::Aabb>,
+    /// The ones after the player in tick order: a pusher (index into `after`) or a rocket.
+    after_order: Vec<Option<usize>>,
+    /// Rockets that tick before the player.
+    rockets_before: usize,
 }
 
 /// Removes the lily pads the boats with these boxes break.
@@ -359,6 +363,14 @@ fn entity_inputs(rec: &Value, rules: &EntityRules) -> EntityInputs {
                 out.boats_after.push(bb);
             }
         }
+        if name == "fireworks_rocket" {
+            if before_player {
+                out.rockets_before += 1;
+            } else {
+                out.after_order.push(None);
+            }
+            continue;
+        }
         let living = !matches!(name, "boat" | "item" | "minecart");
         let Some(kind) = v1_12::push_kind(name, living) else {
             continue;
@@ -374,6 +386,7 @@ fn entity_inputs(rec: &Value, rules: &EntityRules) -> EntityInputs {
         if before_player {
             out.before.push(p);
         } else {
+            out.after_order.push(Some(out.after.len()));
             out.after.push(p);
         }
     }
@@ -412,6 +425,17 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     {
         rules.apply(e);
     }
+    // Elytra cases (`setup.ext.glide`): the extended tick.
+    let x = case.header["setup"].get("ext");
+    let mut ext: Option<v1_12::PlayerExt> = x.map(|x| {
+        let mut e = v1_12::PlayerExt::new();
+        e.elytra = x.get("chest").and_then(Value::as_str) == Some("elytra")
+            && x.get("chest_damage").map_or(0, i) < 431;
+        e.fall_flying = x.get("fall_flying").and_then(Value::as_bool) == Some(true);
+        e
+    });
+    // A rocket in the hand: `FireworkItem.use` never starts an item use.
+    let rocket_hand = x.and_then(|x| x.get("hand")).and_then(Value::as_str) == Some("fireworks");
     for rec in &case.ticks[1..] {
         let t = rec["t"].as_i64().unwrap();
         let input = &rec["input"];
@@ -460,11 +484,26 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     }
                     "spawn" | "entity_move" | "entity_rel_move" | "remove_entity" => {}
                     "tab" | "team" => rules.apply(e),
+                    "shared_flags" => {
+                        let x = ext.as_mut().expect("shared flags need the extended tick");
+                        let cur = x.shared_flags(&p);
+                        let next = (cur & !(i(&e["clear"]) as u8)) | i(&e["set"]) as u8;
+                        x.apply_shared_flags(&mut p, next);
+                    }
+                    "equip" => {
+                        let x = ext.as_mut().expect("equipment needs the extended tick");
+                        assert_eq!(e["slot"], "chest");
+                        x.elytra = e.get("item").and_then(Value::as_str) == Some("elytra")
+                            && i(&e["damage"]) < 431;
+                    }
+                    // The rocket entity comes with the tick records.
+                    "firework" => {}
                     other => panic!("unknown event {other}"),
                 }
             }
         }
         let (keys, using_item) = keys_of(input["keys"].as_str().unwrap());
+        let using_item = using_item && !rocket_hand;
         let ti = TickInput {
             keys,
             yaw: f32_of(&input["yaw"]),
@@ -478,19 +517,47 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                 v1_12::push_by(&mut p, &world, pusher);
             }
         }
-        v1_12::tick_in(
-            &mut p,
-            &ti,
-            &world,
-            &v1_12::Options::default(),
-            &ent.solid,
-            &mut out,
-        );
+        if let Some(x) = &ext {
+            for _ in 0..ent.rockets_before {
+                let mut q = p;
+                q.yaw = ti.yaw;
+                q.pitch = ti.pitch;
+                v1_12::rocket_boost(&mut q, x);
+                p.vel = q.vel;
+            }
+        }
+        match &mut ext {
+            Some(x) => v1_12::tick_ext(
+                &mut p,
+                x,
+                &ti,
+                &world,
+                &v1_12::Options::default(),
+                &ent.solid,
+                &mut out,
+            ),
+            None => v1_12::tick_in(
+                &mut p,
+                &ti,
+                &world,
+                &v1_12::Options::default(),
+                &ent.solid,
+                &mut out,
+            ),
+        }
         // The other entities tick after the player and push it (only once it is in a chunk's
-        // entity list).
-        for pusher in &ent.after {
-            if p.added_to_chunk {
-                v1_12::push_by(&mut p, &world, pusher);
+        // entity list); attached rockets boost it.
+        for k in &ent.after_order {
+            match k {
+                Some(k) => {
+                    if p.added_to_chunk {
+                        v1_12::push_by(&mut p, &world, &ent.after[*k]);
+                    }
+                }
+                None => v1_12::rocket_boost(
+                    &mut p,
+                    ext.as_ref().expect("rockets need the extended tick"),
+                ),
             }
         }
         break_lily_pads(&mut world, &ent.boats_after);
@@ -522,6 +589,15 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         }
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(x)) = (rec.get("ext"), &ext) {
+            let got = json!({
+                "fall_flying": x.fall_flying,
+                "shared_flags": i(&want["shared_flags"]) as u8 & !0x88 | x.shared_flags(&p),
+            });
+            if let Some(d) = diff("ext", want, &got) {
+                return Err(mm(t, d));
+            }
         }
         let expected: Vec<Value> = rec["packets"]
             .as_array()

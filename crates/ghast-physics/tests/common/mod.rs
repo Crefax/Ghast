@@ -283,6 +283,8 @@ pub fn packet_json(p: &Packet) -> Value {
         Packet::StopSneaking => action(1, "stop_sneaking"),
         Packet::StartSprinting => action(3, "start_sprinting"),
         Packet::StopSprinting => action(4, "stop_sprinting"),
+        // 1.9+ (1.12.2 numbering).
+        Packet::StartFallFlying => action(8, "start_fall_flying"),
         Packet::Abilities(a) => json!({
             "name": "abilities", "invulnerable": a.invulnerable, "flying": a.flying,
             "allow_flying": a.allow_flying, "creative": a.creative,

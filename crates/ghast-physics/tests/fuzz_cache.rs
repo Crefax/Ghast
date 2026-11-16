@@ -82,8 +82,24 @@ fn inputs() -> Vec<PathBuf> {
     files
 }
 
+/// Patch releases checked against a row (`harness.label` in `oracle/versions/<mc>.properties`)
+/// replay with that row's rules: `oracle/cache/1.16.4/...` is read as a 1.16.5 file.
+fn row_path(path: &std::path::Path) -> String {
+    const ROWS: &[(&str, &str)] = &[
+        ("/1.16.2/", "/1.16.5/"),
+        ("/1.16.3/", "/1.16.5/"),
+        ("/1.16.4/", "/1.16.5/"),
+        ("/1.12.1/", "/1.12.2/"),
+    ];
+    let mut name = path.to_string_lossy().into_owned();
+    for (sub, row) in ROWS {
+        name = name.replace(sub, row);
+    }
+    name
+}
+
 fn replay_any(path: &std::path::Path) -> Summary {
-    let name = path.to_string_lossy();
+    let name = row_path(path);
     #[cfg(all(feature = "v26_1", feature = "v26_2"))]
     if name.contains("26.2") {
         return common::v261::replay_file_with::<ghast_physics::modern::V26_2>(path);

@@ -118,6 +118,7 @@ final class Recorder {
         j.endArray();
         run.net.sent.clear();
         Ent.tickRecord(j, run);
+        Elytra.tickRecord(j, run);
         return j.endObject().toString();
     }
 

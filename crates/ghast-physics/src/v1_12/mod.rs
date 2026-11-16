@@ -9,14 +9,17 @@
 
 mod blocks;
 pub mod entity;
+mod ext;
 mod fluid;
 mod player;
 mod ray;
 
 pub use entity::{PushKind, Pusher, collides, lily_pads_broken_by_boat, push_by, push_kind};
+pub use ext::PlayerExt;
 pub use player::{
-    Effects, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT, SentState,
-    WIDTH, box_at, is_climbing, is_touching_lava, tick, tick_in, tick_with,
+    Effects, GLIDE_HEIGHT, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT,
+    SentState, WIDTH, box_at, is_climbing, is_touching_lava, rocket_boost, tick, tick_ext, tick_in,
+    tick_with,
 };
 
 /// The 1.12 block state the world view returns (re-exported from `ghast-data`).

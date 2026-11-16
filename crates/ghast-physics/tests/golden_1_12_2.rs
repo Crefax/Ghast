@@ -48,3 +48,10 @@ fn fuzz_edges_seed1_1_12_2() {
 fn entities_1_12_2() {
     check("entities.jsonl.gz");
 }
+
+/// Elytra: the glide request, the server's flag 7, the glide, creative flight, the 0.6 box and
+/// attached firework rockets (hand cases + the golden elytra fuzz).
+#[test]
+fn elytra_1_12_2() {
+    check("elytra.jsonl.gz");
+}

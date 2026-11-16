@@ -846,6 +846,31 @@ Big runs (git-ignored, replayed by the Rust large-fuzz test and by the ignored e
 for s in 51 52 53 54 55 56 57 58 59 60; do MC=1.12.2 oracle/run.sh fuzz --entities true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-entities/entities_s$s.jsonl.gz"; done
 ```
 
+### 1.12.2 elytra (`elytra.jsonl.gz`)
+
+`MC=1.12.2 oracle/run.sh elytra` (25 hand cases + 100 fuzz cases × 60 ticks of seed 1) and
+`fuzz --elytra true` (`Elytra.fuzz`, cases `…_x_el`). In 1.12 the client only asks to glide
+(`entity_action` `start_fall_flying` on a jump press while falling and not on the ground, with a
+usable elytra; no water or levitation check); the server starts the glide by setting shared flag
+7, so the hand cases send flag 7 the tick after the request, and the fuzz sets and clears it at
+random (no server logic). Setup (`setup.ext`, an `Ent.Setup` subclass: entity id 1, tick records
+list the world's entities): `glide`, `chest` / `chest_damage` (an equipment packet), `fall_flying`
+(flag 7 at setup), `hand` (`fireworks` instead of the shield). Events: `shared_flags` (entity
+data index 0, `set` / `clear` masks), `equip`, `firework` (the server's
+`new FireworkRocketEntity(world, stack, player)` as a spawn-object packet, type 76, no motion,
+plus its entity data with the shooter id; `remove_entity` ends it). Tick records add `ext:
+{fall_flying, shared_flags}`. What is faked beyond the entity harness: nothing (the rocket's
+server-side random motion and life are replaced by a zero motion and the case's destroy packet).
+Quirks: rockets tick after the player (added later to the world's entity list) and also over
+columns the client has not loaded (`isChunkLoaded(..., true)` is always true on the client); the
+glide's climb term divides by the look's horizontal length without checking it (pitch -90); the
+client player keeps ticking below y = -64 (the void damage that replaces the removal of living
+entities is refused on the client).
+
+```sh
+for s in 71 72 73 74 75; do MC=1.12.2 oracle/run.sh fuzz --elytra true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-elytra/elytra_s$s.jsonl.gz"; done
+```
+
 ### 1.12.2 quirks (observed in the vectors)
 
 - No idle `flying` packets: a bare on-ground packet is sent only when `on_ground` changed

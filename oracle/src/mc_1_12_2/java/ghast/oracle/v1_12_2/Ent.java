@@ -52,7 +52,7 @@ final class Ent {
     static final int PLAYER_ENTITY_ID = 1;
 
     /** Setup of a case with entities: events applied after the join, in order (spawns, tab entries, teams). */
-    static final class Setup {
+    static class Setup {
         final List<Scenario.Event> events = new ArrayList<>();
     }
 
@@ -237,7 +237,7 @@ final class Ent {
         } else if (e instanceof Team t) {
             team(run, t);
         } else {
-            return false;
+            return Elytra.apply(run, e);
         }
         return true;
     }
@@ -253,6 +253,7 @@ final class Ent {
         for (Scenario.Event e : s.events) {
             apply(run, e);
         }
+        Elytra.finishSetup(run);
     }
 
     // ---- recording --------------------------------------------------------------------------------
@@ -357,7 +358,7 @@ final class Ent {
             }
             j.endArray();
         } else {
-            return false;
+            return Elytra.event(j, e);
         }
         return true;
     }
@@ -375,6 +376,7 @@ final class Ent {
             j.endObject();
         }
         j.endArray();
+        Elytra.header(j, sc);
     }
 
     // ---- reading back (ScenarioReader) -------------------------------------------------------------
@@ -401,7 +403,7 @@ final class Ent {
                 yield new Team(ev.get("name").getAsString(), ev.get("mode").getAsInt(),
                         ev.has("rule") ? ev.get("rule").getAsString() : "", List.copyOf(members));
             }
-            default -> null;
+            default -> Elytra.read(ev);
         };
     }
 
@@ -411,5 +413,6 @@ final class Ent {
         }
         Setup s = setup(sc);
         setup.getAsJsonArray("entities").forEach(e -> s.events.add(read(e.getAsJsonObject())));
+        Elytra.readHeader(setup, sc);
     }
 }
