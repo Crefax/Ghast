@@ -1,14 +1,22 @@
 # ghast-world
 
 Chunk storage for the ghast Minecraft Java Edition client library: decodes the chunk and
-block-change packets of 1.8.9 (protocol 47), 1.12.2 (protocol 340) and 1.16.5 (protocol 754) into compact sections with
-O(1) block lookup, and keeps loaded and unloaded columns explicitly apart.
+block-change packets of 1.8.9 (protocol 47), 1.12.2 (protocol 340), 1.16.5 (protocol 754), 26.1
+(protocol 775) and 26.2 (protocol 776) into compact sections with O(1) block lookup, and keeps
+loaded and unloaded columns explicitly apart.
 
 | module | feature | chunk format |
 |---|---|---|
 | `v1_8` | `v1_8` | `id << 4 \| meta` `u16` arrays, light arrays, 256 biome bytes |
+| `v1_12` | `v1_12` | 1.9 – 1.12 paletted `id << 4 \| meta` sections (values may span two longs), 256 biome bytes |
 | `v1_16_5` | `v1_16_5` | paletted sections, 1.16 compact long arrays, 1024 biome ints |
-| — | `physics` (default) | `ghast_physics::BlockView` for both worlds |
+| `v26_1` | `v26_1` | `level_chunk_with_light` paletted block + biome containers, dimension height from the configuration registries (sections in `paletted`) |
+| `v26_2` | `v26_2` | the `v26_1` world over the 26.2 block-state ids and packets |
+| — | `physics` (default) | `ghast_physics::BlockView` for every world |
+
+All features are on by default; any subset builds. The 26.x worlds store sections in the compact
+power-of-two `paletted::Section` and can share identical sections between many worlds in one
+process through an opt-in `SharedChunks` store (copy on write; see its rustdoc).
 
 ```rust
 use ghast_world::{Applied, WorldConfig, v1_8::World};

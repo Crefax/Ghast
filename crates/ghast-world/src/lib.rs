@@ -1,7 +1,7 @@
 //! Chunk storage for the ghast Minecraft Java Edition client library.
 //!
-//! One world type per protocol version ([`v1_8::World`], [`v1_12::World`], [`v1_16_5::World`])
-//! decodes the version's chunk and block-change packets into a version-independent
+//! One world type per protocol version ([`v1_8::World`], [`v1_12::World`], [`v1_16_5::World`],
+//! [`v26_1::World`], [`v26_2::World`], each behind the feature of its module's name) decodes the version's chunk and block-change packets into a version-independent
 //! [`ColumnMap`] of [`Column`]s made of compact [`Section`]s.
 //!
 //! - **Loaded vs unloaded is explicit.** [`v1_8::World::block_state`] returns `None` for a

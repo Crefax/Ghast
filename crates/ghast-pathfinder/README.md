@@ -1,7 +1,7 @@
 # ghast-pathfinder
 
 Path planning and path following for the ghast Minecraft Java Edition bot library, 1.8.9,
-1.12.2, 1.16.5 and 26.1. The planner is an A* over feet blocks; the follower drives the vanilla-exact
+1.12.2, 1.16.5, 26.1 and 26.2. The planner is an A* over feet blocks; the follower drives the vanilla-exact
 `ghast-physics` player. Every move type is checked by running it in that physics, both in
 the tests and (by default) before the bot moves.
 
@@ -22,11 +22,12 @@ assert_eq!(run.outcome, SimOutcome::Arrived);
 From a bot, use `Follower` (feature `client`, on by default) in `Behavior::tick`, or
 `ghast-ext`'s `Bot::goto`.
 
-Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1` (default: all; they
+Versions: one cargo feature each, `v1_8`, `v1_12_2`, `v1_16_5`, `v26_1`, `v26_2` (default: all; they
 forward to ghast-data, ghast-physics and, with `client`, ghast-client).
 
 26.1 (`Version::V26_1`) runs on the modern physics core (`ghast_physics::modern`, rule set
-`V26_1`) and the 26.1 block tables:
+`V26_1`) and the 26.1 block tables; 26.2 (`Version::V26_2`) is the same with the `V26_2` rule set
+(collision restitution) and the 26.2 tables:
 
 - **Live player.** 26.1 servers send movement as attributes (movement speed, step height, jump
   strength, gravity, scale, ...). The controller's look-ahead, the pre-jump check and the

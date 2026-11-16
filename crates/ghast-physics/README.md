@@ -211,7 +211,7 @@ the 26.1 tables by state name, the measurement that put 26.2 into the 26.1 famil
 Instructions per plain tick (hardware counter, 40,000 ticks, memory world; walk / busy / swim):
 26.1 41,751 / 45,590 / 30,287; 26.2 41,824 / 45,639 / 30,289.
 
-## Crosshair pick (`pick`: 1.8.9, 1.12.2, 1.16.5, 26.1)
+## Crosshair pick (`pick`: 1.8.9, 1.12.2, 1.16.5, 26.1, 26.2)
 
 1.8.9 / 1.12.2 (`pick::v1_8`, `pick::v1_12`, shared `pick::legacy`): `eye_position`, `look_vector`
 (1.8: pass the **head** yaw; 1.12: the body yaw), `pick(world, eye, look, reach)` (block or the
@@ -478,10 +478,16 @@ Even the 1.16.5 busy case at ~5 µs per tick is 0.01 % of a core per bot at 20 t
 
 ## Not covered yet (open)
 
-- **Movement speed modifiers** beyond the sprint modifier (speed / slowness potions arrive as
-  attribute modifiers; with several multiply-total modifiers vanilla's hash-set iteration order
-  matters for the last bit). `movement_speed_base` covers the base value only.
-- Depth strider, riding, sleeping, spectator, portals / nausea, entity collisions (boats,
-  minecarts) and entity pushing, a moving world border, server-side corrections.
+Done since earlier versions of this list: speed modifiers of every operation (`attribute::Modifiers`,
+vanilla's hash order), depth strider, spectators, entity pushes and collisions (1.12.2, 1.16.5,
+26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats and
+minecarts (26.x).
+
+- 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
+  minecarts are not solid for the player's move.
+- Riding a vehicle on 1.8.9 / 1.12.2 / 1.16.5; gliding (elytra) and rockets outside 26.x.
+- Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
+  pistons.
+- Server-side corrections are the client's job (teleports), not this crate's.
 - Falling below y = −64 removes the player (vanilla stops ticking it): modelled as
   `PlayerState::removed`; a real server kills the player first.
