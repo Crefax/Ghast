@@ -104,17 +104,19 @@ impl Version {
     #[cfg(feature = "client")]
     #[must_use]
     pub fn from_game(v: ghast_client::GameVersion) -> Option<Version> {
-        match v {
+        use ghast_client::version::PhysicsRules as R;
+        // By rule set: sub-versions (1.12.1, 1.16.2, ...) move by their row's rules.
+        match v.caps().physics {
             #[cfg(feature = "v1_8")]
-            ghast_client::GameVersion::V1_8_9 => Some(Version::V1_8),
+            R::V1_8 => Some(Version::V1_8),
             #[cfg(feature = "v1_12_2")]
-            ghast_client::GameVersion::V1_12_2 => Some(Version::V1_12),
+            R::V1_12 => Some(Version::V1_12),
             #[cfg(feature = "v1_16_5")]
-            ghast_client::GameVersion::V1_16_5 => Some(Version::V1_16_5),
+            R::V1_16_5 => Some(Version::V1_16_5),
             #[cfg(feature = "v26_1")]
-            ghast_client::GameVersion::V26_1 => Some(Version::V26_1),
+            R::Modern26_1 => Some(Version::V26_1),
             #[cfg(feature = "v26_2")]
-            ghast_client::GameVersion::V26_2 => Some(Version::V26_2),
+            R::Modern26_2 => Some(Version::V26_2),
             _ => None,
         }
     }
@@ -138,5 +140,27 @@ mod tests_util {
             #[cfg(feature = "v26_2")]
             Version::V26_2,
         ]
+    }
+}
+
+#[cfg(all(test, feature = "client", feature = "v1_12_2", feature = "v1_16_5"))]
+mod from_game_tests {
+    use crate::Version;
+    use ghast_client::GameVersion;
+
+    #[test]
+    fn sub_versions_plan_with_their_row() {
+        assert_eq!(
+            Version::from_game(GameVersion::V1_12_1),
+            Some(Version::V1_12)
+        );
+        assert_eq!(
+            Version::from_game(GameVersion::V1_16_2),
+            Some(Version::V1_16_5)
+        );
+        assert_eq!(
+            Version::from_game(GameVersion::V1_16_3),
+            Some(Version::V1_16_5)
+        );
     }
 }

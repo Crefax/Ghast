@@ -1,6 +1,7 @@
 //! Blocks and entities: naming raw states, searching the loaded world, entity snapshots.
 
 use ghast_client::entity::{EntityClass, EntityType};
+use ghast_client::version::DataSet;
 use ghast_client::{BlockPos, GameVersion, TickContext, Vec3};
 
 use crate::{Bot, Error};
@@ -56,29 +57,30 @@ impl Block {
     /// ```
     #[must_use]
     pub fn name(self) -> &'static str {
-        match self.version {
+        // By data set: sub-versions (1.12.1, 1.16.2, ...) share their row's tables.
+        match self.version.caps().data {
             #[cfg(feature = "v1_8")]
-            GameVersion::V1_8_9 => u8::try_from(self.raw >> 4)
+            DataSet::V1_8 => u8::try_from(self.raw >> 4)
                 .ok()
                 .and_then(ghast_data::v1_8::Block::from_id)
                 .map_or("", ghast_data::v1_8::Block::name),
             #[cfg(feature = "v1_12_2")]
-            GameVersion::V1_12_2 => u8::try_from(self.raw >> 4)
+            DataSet::V1_12 => u8::try_from(self.raw >> 4)
                 .ok()
                 .and_then(ghast_data::v1_12::Block::from_id)
                 .map_or("", ghast_data::v1_12::Block::name),
             #[cfg(feature = "v1_16_5")]
-            GameVersion::V1_16_5 => u16::try_from(self.raw)
+            DataSet::V1_16_5 => u16::try_from(self.raw)
                 .ok()
                 .and_then(ghast_data::v1_16_5::BlockState::from_id)
                 .map_or("", |s| s.block().name()),
             #[cfg(feature = "v26_1")]
-            GameVersion::V26_1 => u16::try_from(self.raw)
+            DataSet::V26_1 => u16::try_from(self.raw)
                 .ok()
                 .and_then(ghast_data::v26_1::BlockState::from_id)
                 .map_or("", |s| s.block().name()),
             #[cfg(feature = "v26_2")]
-            GameVersion::V26_2 => u16::try_from(self.raw)
+            DataSet::V26_2 => u16::try_from(self.raw)
                 .ok()
                 .and_then(ghast_data::v26_2::BlockState::from_id)
                 .map_or("", |s| s.block().name()),
@@ -94,8 +96,8 @@ impl Block {
     /// ```
     #[must_use]
     pub fn meta(self) -> u8 {
-        match self.version {
-            GameVersion::V1_8_9 | GameVersion::V1_12_2 => (self.raw & 15) as u8,
+        match self.version.caps().data {
+            DataSet::V1_8 | DataSet::V1_12 => (self.raw & 15) as u8,
             _ => 0,
         }
     }
@@ -316,18 +318,18 @@ pub struct EntityInfo {
 /// The name of an entity type (1.8 and 1.12 share the legacy mob / object id spaces but not
 /// the names).
 fn entity_name(version: GameVersion, ty: EntityType) -> &'static str {
-    let info: Option<&'static ghast_data::EntityInfo> = match (ty, version) {
+    let info: Option<&'static ghast_data::EntityInfo> = match (ty, version.caps().data) {
         (EntityType::Player, _) => return "player",
         #[cfg(feature = "v26_1")]
-        (EntityType::Registry(_), GameVersion::V26_1) => ghast_client::entity::v26_1::info(ty),
+        (EntityType::Registry(_), DataSet::V26_1) => ghast_client::entity::v26_1::info(ty),
         #[cfg(feature = "v26_2")]
-        (EntityType::Registry(_), GameVersion::V26_2) => ghast_client::entity::v26_2::info(ty),
+        (EntityType::Registry(_), DataSet::V26_2) => ghast_client::entity::v26_2::info(ty),
         #[cfg(feature = "v1_16_5")]
         (EntityType::Registry(_), _) => ghast_client::entity::v1_16_5::info(ty),
         #[cfg(feature = "v1_12_2")]
-        (_, GameVersion::V1_12_2) => ghast_client::entity::v1_12::info(ty),
+        (_, DataSet::V1_12) => ghast_client::entity::v1_12::info(ty),
         #[cfg(feature = "v1_8")]
-        (_, GameVersion::V1_8_9) => ghast_client::entity::v1_8::info(ty),
+        (_, DataSet::V1_8) => ghast_client::entity::v1_8::info(ty),
         _ => None,
     };
     info.map_or("", |i| i.name)

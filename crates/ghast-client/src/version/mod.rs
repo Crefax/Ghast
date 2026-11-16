@@ -40,6 +40,8 @@ pub use ghast_protocol::v1_16_5::V1_16_5;
 pub use ghast_protocol::v26_1::V26_1;
 #[cfg(feature = "v26_2")]
 pub use ghast_protocol::v26_2::V26_2;
+#[cfg(feature = "v1_12_2")]
+pub use v1_12_2::Wire as Wire1_12;
 #[cfg(feature = "v26_1")]
 pub use v26_1::Wire as Wire26_1;
 #[cfg(feature = "v26_2")]
@@ -59,6 +61,14 @@ pub enum GameVersion {
     V26_1,
     /// 26.2 (protocol 776).
     V26_2,
+    /// 1.12.1 (protocol 338). Served by the 1.12.2 code (feature `v1_12_2`): the wire
+    /// differs only in the keep-alive id (a VarInt), the client game code is the same.
+    V1_12_1,
+    /// 1.16.2 (protocol 751). Served by the 1.16.5 code (feature `v1_16_5`) with its own
+    /// handshake number: the packet layouts and the client game code are the same.
+    V1_16_2,
+    /// 1.16.3 (protocol 753). Served by the 1.16.5 code like [`GameVersion::V1_16_2`].
+    V1_16_3,
 }
 
 impl GameVersion {
@@ -66,7 +76,10 @@ impl GameVersion {
     /// breaking change.
     pub const ALL: &'static [GameVersion] = &[
         GameVersion::V1_8_9,
+        GameVersion::V1_12_1,
         GameVersion::V1_12_2,
+        GameVersion::V1_16_2,
+        GameVersion::V1_16_3,
         GameVersion::V1_16_5,
         GameVersion::V26_1,
         GameVersion::V26_2,
@@ -82,6 +95,21 @@ impl GameVersion {
             Self::V1_16_5 => &caps::V1_16_5,
             Self::V26_1 => &caps::V26_1,
             Self::V26_2 => &caps::V26_2,
+            Self::V1_12_1 => &caps::V1_12_1,
+            Self::V1_16_2 => &caps::V1_16_2,
+            Self::V1_16_3 => &caps::V1_16_3,
+        }
+    }
+
+    /// The version whose code serves this one: itself, or for a release that differs from
+    /// another only in its handshake number (1.16.2, 1.16.3) or its keep-alive width
+    /// (1.12.1), that release. The session runs that version's monomorphised instance with
+    /// this version's capability row.
+    pub(crate) const fn instance(self) -> GameVersion {
+        match self {
+            Self::V1_12_1 => Self::V1_12_2,
+            Self::V1_16_2 | Self::V1_16_3 => Self::V1_16_5,
+            v => v,
         }
     }
 
@@ -94,6 +122,8 @@ impl GameVersion {
             Self::V1_16_5 => cfg!(feature = "v1_16_5"),
             Self::V26_1 => cfg!(feature = "v26_1"),
             Self::V26_2 => cfg!(feature = "v26_2"),
+            Self::V1_12_1 => cfg!(feature = "v1_12_2"),
+            Self::V1_16_2 | Self::V1_16_3 => cfg!(feature = "v1_16_5"),
         }
     }
 
@@ -121,6 +151,9 @@ impl GameVersion {
             Self::V1_16_5 => "1.16.5",
             Self::V26_1 => "26.1",
             Self::V26_2 => "26.2",
+            Self::V1_12_1 => "1.12.1",
+            Self::V1_16_2 => "1.16.2",
+            Self::V1_16_3 => "1.16.3",
         }
     }
 
@@ -153,19 +186,25 @@ impl fmt::Display for GameVersion {
 
 /// Error parsing a [`GameVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("unsupported Minecraft version `{0}` (supported: 1.8.9, 1.12.2, 1.16.5, 26.1, 26.2)")]
+#[error(
+    "unsupported Minecraft version `{0}` (supported: 1.8 - 1.8.9, 1.12.1, 1.12.2, 1.16.2 - 1.16.5, 26.1 - 26.1.2, 26.2)"
+)]
 pub struct UnknownVersion(pub String);
 
 impl FromStr for GameVersion {
     type Err = UnknownVersion;
 
-    /// Accepts `1.8`, `1.8.x`, `47`, `1.12.2`, `340`, `1.16.4`, `1.16.5`, `754`, `26.1`,
-    /// `26.1.1`, `26.1.2`, `775`, `26.2` and `776`.
+    /// Accepts `1.8`, `1.8.x`, `47`, `1.12.1`, `338`, `1.12.2`, `340`, `1.16.2`, `751`,
+    /// `1.16.3`, `753`, `1.16.4`, `1.16.5`, `754`, `26.1`, `26.1.1`, `26.1.2`, `775`, `26.2`
+    /// and `776`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim() {
             "1.8" | "1.8.0" | "1.8.1" | "1.8.2" | "1.8.3" | "1.8.4" | "1.8.5" | "1.8.6"
             | "1.8.7" | "1.8.8" | "1.8.9" | "47" => Ok(Self::V1_8_9),
+            "1.12.1" | "338" => Ok(Self::V1_12_1),
             "1.12.2" | "340" => Ok(Self::V1_12_2),
+            "1.16.2" | "751" => Ok(Self::V1_16_2),
+            "1.16.3" | "753" => Ok(Self::V1_16_3),
             "1.16.4" | "1.16.5" | "754" => Ok(Self::V1_16_5),
             "26.1" | "26.1.0" | "26.1.1" | "26.1.2" | "775" => Ok(Self::V26_1),
             "26.2" | "26.2.0" | "776" => Ok(Self::V26_2),
@@ -186,9 +225,29 @@ pub trait ClientVersion: Version + sealed::Sealed {
 
     /// Queues the handshake packet (next state = login).
     fn write_handshake(enc: &mut FrameEncoder, host: &str, port: u16) -> Result<(), EncodeError>;
+    /// Queues the handshake of `version`, a release this version's code serves
+    /// ([`GameVersion::V1_16_2`] by 1.16.5's): the same packet with that release's protocol
+    /// number. Default: [`ClientVersion::write_handshake`] (versions serving no other).
+    #[doc(hidden)]
+    fn write_handshake_for(
+        enc: &mut FrameEncoder,
+        version: GameVersion,
+        host: &str,
+        port: u16,
+    ) -> Result<(), EncodeError> {
+        debug_assert_eq!(version.protocol(), Self::GAME.protocol());
+        Self::write_handshake(enc, host, port)
+    }
     /// Per-connection state of the wire layer (block action sequence numbers, chat
-    /// acknowledgements, cookies); `()` for versions without any.
+    /// acknowledgements, cookies, 1.12.1's keep-alive width); `()` for versions without any.
     type Wire: Default + fmt::Debug + Send;
+    /// The wire state of a connection to `version` (this version or a release its code
+    /// serves, see [`ClientVersion::write_handshake_for`]). Default: `Default`.
+    #[doc(hidden)]
+    fn wire_for(version: GameVersion) -> Self::Wire {
+        let _ = version;
+        Self::Wire::default()
+    }
 
     /// Queues the login start packet (1.19+ also send the profile id).
     fn write_login_start(
@@ -541,6 +600,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sub_versions_share_their_row() {
+        for &v in GameVersion::ALL {
+            let (c, base) = (v.caps(), v.instance().caps());
+            assert_eq!(v.instance().instance(), v.instance());
+            assert_eq!(v.enabled(), v.instance().enabled());
+            // Everything but the identity is the serving row's.
+            let row = Capabilities {
+                version: c.version,
+                protocol: c.protocol,
+                ..*base
+            };
+            assert_eq!(*c, row, "{v}");
+        }
+    }
+
+    #[test]
     fn protocol_rows() {
         for &v in GameVersion::ALL {
             assert_eq!(v.caps().version, v);
@@ -560,7 +635,20 @@ mod tests {
             GameVersion::V1_12_2
         );
         assert_eq!("340".parse::<GameVersion>().unwrap(), GameVersion::V1_12_2);
-        assert!("1.12.1".parse::<GameVersion>().is_err());
+        assert!("1.12".parse::<GameVersion>().is_err());
+        assert!("1.16.1".parse::<GameVersion>().is_err());
+        for (s, v, p) in [
+            ("1.12.1", GameVersion::V1_12_1, 338),
+            ("338", GameVersion::V1_12_1, 338),
+            ("1.16.2", GameVersion::V1_16_2, 751),
+            ("751", GameVersion::V1_16_2, 751),
+            ("1.16.3", GameVersion::V1_16_3, 753),
+            ("753", GameVersion::V1_16_3, 753),
+            ("1.16.4", GameVersion::V1_16_5, 754),
+        ] {
+            assert_eq!(s.parse::<GameVersion>().unwrap(), v, "{s}");
+            assert_eq!(v.protocol(), p);
+        }
         assert_eq!(GameVersion::V1_8_9.protocol(), 47);
         assert_eq!(GameVersion::V1_12_2.protocol(), 340);
         assert_eq!(GameVersion::V1_16_5.protocol(), 754);

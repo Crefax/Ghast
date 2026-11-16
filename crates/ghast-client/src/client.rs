@@ -384,8 +384,9 @@ impl Client {
         S: Future<Output = ()>,
     {
         let shutdown = std::pin::pin!(shutdown);
-        // The version is chosen once: everything below is monomorphised per version.
-        match self.version {
+        // The version is chosen once: everything below is monomorphised per version (a
+        // sub-version runs the instance of the version that serves it, with its own row).
+        match self.version.instance() {
             #[cfg(feature = "v1_8")]
             GameVersion::V1_8_9 => sessions::<V1_8, B, S>(self, behavior, shutdown).await,
             #[cfg(feature = "v1_12_2")]
@@ -397,9 +398,9 @@ impl Client {
             #[cfg(feature = "v26_2")]
             GameVersion::V26_2 => sessions::<V26_2, B, S>(self, behavior, shutdown).await,
             #[allow(unreachable_patterns)]
-            v => {
+            _ => {
                 let _ = (behavior, shutdown);
-                Err(ClientError::VersionNotEnabled(v))
+                Err(ClientError::VersionNotEnabled(self.version))
             }
         }
     }
@@ -500,7 +501,7 @@ where
     // copied, they do not keep the receive buffers of those states alive.
     dec.set_detach_frames(true);
     let mut enc = FrameEncoder::new();
-    let mut wire = V::Wire::default();
+    let mut wire = V::wire_for(client.version);
     let transfer = hop.is_some();
     let address = match hop {
         Some(h) => {
@@ -549,14 +550,14 @@ where
             V::take_cookies(&mut wire),
         ));
     }
-    log::info!("[{name}] logged in to {address} ({})", V::GAME);
+    log::info!("[{name}] logged in to {address} ({})", client.version);
     // Play packets already received go to a buffer of their own.
     dec.set_detach_frames(false);
     dec.rehome();
 
     let opts = CoreOptions {
         name,
-        caps: V::GAME.caps(),
+        caps: client.version.caps(),
         settings: client.settings.clone(),
         brand: client.brand.clone(),
         sensitivity: client.sensitivity,
@@ -664,7 +665,7 @@ where
     if transfer {
         V::write_transfer_handshake(enc, &address.host(), address.port())?;
     } else {
-        V::write_handshake(enc, &address.host(), address.port())?;
+        V::write_handshake_for(enc, client.version, &address.host(), address.port())?;
     }
     V::write_login_start(enc, client.account.name(), client.account.uuid())?;
     flush(wr, enc).await?;

@@ -1,4 +1,5 @@
-//! Protocol 754 (1.16.4 – 1.16.5).
+//! Protocol 754 (1.16.4 – 1.16.5); also serves 1.16.2 (751) and 1.16.3 (753), which speak
+//! the same layout under their own numbers.
 
 use bytes::BytesMut;
 use ghast_protocol::types::ByteString;
@@ -25,6 +26,21 @@ impl ClientVersion for V1_16_5 {
     fn write_handshake(enc: &mut FrameEncoder, host: &str, port: u16) -> Result<(), EncodeError> {
         enc.write_packet(&handshaking::serverbound::SetProtocol {
             protocol_version: 754,
+            server_host: ByteString::from(host),
+            server_port: port,
+            next_state: 2,
+        })
+    }
+
+    fn write_handshake_for(
+        enc: &mut FrameEncoder,
+        version: GameVersion,
+        host: &str,
+        port: u16,
+    ) -> Result<(), EncodeError> {
+        // 1.16.2 / 1.16.3 speak this layout under their own numbers (751, 753).
+        enc.write_packet(&handshaking::serverbound::SetProtocol {
+            protocol_version: version.protocol(),
             server_host: ByteString::from(host),
             server_port: port,
             next_state: 2,
@@ -377,8 +393,7 @@ impl ClientVersion for V1_16_5 {
                     EntityAction::StopSneaking => sb::EntityActionActionId::STOP_SNEAKING,
                     EntityAction::StartSprinting => sb::EntityActionActionId::START_SPRINTING,
                     EntityAction::StopSprinting => sb::EntityActionActionId::STOP_SPRINTING,
-                    // Only the 26.1 elytra start sends it.
-                    EntityAction::StartFallFlying => return Ok(()),
+                    EntityAction::StartFallFlying => sb::EntityActionActionId::START_FALL_FLYING,
                 };
                 enc.write_packet(&sb::EntityAction {
                     entity_id: *entity_id,

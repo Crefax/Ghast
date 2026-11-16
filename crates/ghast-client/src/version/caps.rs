@@ -13,9 +13,9 @@ use super::GameVersion;
 pub enum PhysicsRules {
     /// `ghast_physics::v1_8` (1.8 – 1.8.9).
     V1_8,
-    /// `ghast_physics::v1_12` (1.12.2).
+    /// `ghast_physics::v1_12` (1.12.1, 1.12.2).
     V1_12,
-    /// `ghast_physics::v1_16_5` (1.16.4 – 1.16.5).
+    /// `ghast_physics::v1_16_5` (1.16.2 – 1.16.5).
     V1_16_5,
     /// `ghast_physics::modern` with the `V26_1` rules (26.1 – 26.1.2).
     Modern26_1,
@@ -119,6 +119,29 @@ pub struct Capabilities {
 const fn f(v: f32) -> f64 {
     v as f64
 }
+
+/// 1.12.1 (protocol 338): the 1.12.2 row with its own number (the same jar code apart from
+/// the keep-alive width and GUI details; oracle records identical).
+pub(crate) const V1_12_1: Capabilities = Capabilities {
+    version: GameVersion::V1_12_1,
+    protocol: 338,
+    ..V1_12_2
+};
+
+/// 1.16.2 (protocol 751): the 1.16.5 row with its own number (client movement, block and
+/// network code identical in the jars; oracle records identical).
+pub(crate) const V1_16_2: Capabilities = Capabilities {
+    version: GameVersion::V1_16_2,
+    protocol: 751,
+    ..V1_16_5
+};
+
+/// 1.16.3 (protocol 753): the 1.16.5 row with its own number, like [`V1_16_2`].
+pub(crate) const V1_16_3: Capabilities = Capabilities {
+    version: GameVersion::V1_16_3,
+    protocol: 753,
+    ..V1_16_5
+};
 
 /// 1.8 – 1.8.9 (protocol 47).
 pub(crate) const V1_8_9: Capabilities = Capabilities {

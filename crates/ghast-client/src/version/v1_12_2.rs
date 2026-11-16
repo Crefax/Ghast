@@ -1,4 +1,6 @@
-//! Protocol 340 (1.12.2), the first member of the 1.9 – 1.12 family supported here.
+//! Protocol 340 (1.12.2), the first member of the 1.9 – 1.12 family supported here. It also
+//! serves 1.12.1 (protocol 338), whose wire differs only in the keep-alive id: a VarInt
+//! there ([`Wire`]).
 
 use bytes::BytesMut;
 use ghast_protocol::types::ByteString;
@@ -18,6 +20,13 @@ use play::serverbound as sb;
 /// `combat_event` event id for "entity dead".
 const COMBAT_ENTITY_DEAD: i32 = 2;
 
+/// Per-connection state of the 1.12 wire: which keep-alive id the server speaks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Wire {
+    /// 1.12.1 (protocol 338): keep-alive ids are VarInts both ways (1.12.2: longs).
+    keep_alive_varint: bool,
+}
+
 impl ClientVersion for V1_12_2 {
     const GAME: GameVersion = GameVersion::V1_12_2;
     const CHAT_LIMIT: usize = 256;
@@ -31,7 +40,27 @@ impl ClientVersion for V1_12_2 {
         })
     }
 
-    type Wire = ();
+    fn write_handshake_for(
+        enc: &mut FrameEncoder,
+        version: GameVersion,
+        host: &str,
+        port: u16,
+    ) -> Result<(), EncodeError> {
+        enc.write_packet(&handshaking::serverbound::SetProtocol {
+            protocol_version: version.protocol(),
+            server_host: ByteString::from(host),
+            server_port: port,
+            next_state: 2,
+        })
+    }
+
+    type Wire = Wire;
+
+    fn wire_for(version: GameVersion) -> Wire {
+        Wire {
+            keep_alive_varint: version == GameVersion::V1_12_1,
+        }
+    }
 
     fn write_login_start(
         enc: &mut FrameEncoder,
@@ -123,8 +152,12 @@ impl ClientVersion for V1_12_2 {
         f
     }
 
-    fn decode_play(raw: &RawPacket, (): &mut ()) -> Result<Option<Inbound>, DecodeError> {
+    fn decode_play(raw: &RawPacket, wire: &mut Wire) -> Result<Option<Inbound>, DecodeError> {
         Ok(Some(match raw.id {
+            cb::id::KEEP_ALIVE if wire.keep_alive_varint => Inbound::KeepAlive(i64::from(
+                raw.decode_as::<ghast_protocol::v1_12_1::play::clientbound::KeepAlive>()?
+                    .keep_alive_id,
+            )),
             cb::id::KEEP_ALIVE => {
                 Inbound::KeepAlive(raw.decode_as::<cb::KeepAlive>()?.keep_alive_id)
             }
@@ -316,9 +349,19 @@ impl ClientVersion for V1_12_2 {
         Ok(inv.apply_v1_12_2(&p))
     }
 
-    fn write_play(enc: &mut FrameEncoder, out: &Outbound, (): &mut ()) -> Result<(), EncodeError> {
+    fn write_play(
+        enc: &mut FrameEncoder,
+        out: &Outbound,
+        wire: &mut Wire,
+    ) -> Result<(), EncodeError> {
         match out {
             Outbound::Raw(p) => enc.write_raw(p),
+            // The id came in as a VarInt on 1.12.1, so it fits (the engine echoes it).
+            Outbound::KeepAlive(id) if wire.keep_alive_varint => {
+                enc.write_packet(&ghast_protocol::v1_12_1::play::serverbound::KeepAlive {
+                    keep_alive_id: *id as i32,
+                })
+            }
             Outbound::KeepAlive(id) => enc.write_packet(&sb::KeepAlive { keep_alive_id: *id }),
             Outbound::TeleportConfirm(teleport_id) => enc.write_packet(&sb::TeleportConfirm {
                 teleport_id: *teleport_id,
@@ -362,8 +405,7 @@ impl ClientVersion for V1_12_2 {
                     EntityAction::StopSneaking => sb::EntityActionActionId::STOP_SNEAKING,
                     EntityAction::StartSprinting => sb::EntityActionActionId::START_SPRINTING,
                     EntityAction::StopSprinting => sb::EntityActionActionId::STOP_SPRINTING,
-                    // Only the 26.1 elytra start sends it.
-                    EntityAction::StartFallFlying => return Ok(()),
+                    EntityAction::StartFallFlying => sb::EntityActionActionId::START_FALL_FLYING,
                 };
                 enc.write_packet(&sb::EntityAction {
                     entity_id: *entity_id,

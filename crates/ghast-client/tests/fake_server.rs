@@ -1471,3 +1471,101 @@ async fn many_bots_one_runtime() {
     assert!(matches!(rb.await.unwrap(), Ok(SessionEnd::Kicked { .. })));
     server.await.unwrap();
 }
+
+// ---- sub-versions served by another version's code -----------------------------------
+
+/// A sub-version (1.12.1, 1.16.2, 1.16.3) logs in with its own protocol number, plays with
+/// the serving version's packets (1.12.1: VarInt keep-alive ids both ways) and reports its
+/// own version to the behaviour.
+async fn sub_version_session<V: Fake>(v: GameVersion) {
+    struct Seen(Option<GameVersion>);
+    impl Behavior for Seen {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            self.0 = Some(ctx.version());
+        }
+    }
+    assert_ne!(v.protocol(), V::PROTOCOL);
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        let hs = c.recv().await.unwrap();
+        assert_eq!(hs.id, 0);
+        assert_eq!(V::handshake_protocol(&hs), v.protocol());
+        let ls = c.recv().await.unwrap();
+        assert_eq!(V::login_start_name(&ls), "Tester");
+        c.send(&V::login_compress(64)).await;
+        c.enc.set_compression(64);
+        c.dec.set_compression(64);
+        c.send(&V::login_success("Tester")).await;
+        spawn::<V>(&mut c).await;
+        let id: i64 = 300_000;
+        if v == GameVersion::V1_12_1 {
+            c.send(&raw(
+                &ghast_protocol::v1_12_1::play::clientbound::KeepAlive {
+                    keep_alive_id: id as i32,
+                },
+            ))
+            .await;
+        } else {
+            c.send(&V::keep_alive(id)).await;
+        }
+        // By id: the 1.12.2 decoder of the fake server does not read 1.12.1's keep-alive.
+        let keep_alive_id = if v == GameVersion::V1_12_1 {
+            ghast_protocol::v1_12_1::play::serverbound::id::KEEP_ALIVE
+        } else {
+            ghast_protocol::v1_16_5::play::serverbound::id::KEEP_ALIVE
+        };
+        let answer = loop {
+            let p = c.recv().await.expect("closed before the keep-alive answer");
+            if p.id == keep_alive_id {
+                break p;
+            }
+        };
+        let echoed = if v == GameVersion::V1_12_1 {
+            i64::from(
+                answer
+                    .decode_as::<ghast_protocol::v1_12_1::play::serverbound::KeepAlive>()
+                    .unwrap()
+                    .keep_alive_id,
+            )
+        } else {
+            answer
+                .decode_as::<ghast_protocol::v1_16_5::play::serverbound::KeepAlive>()
+                .unwrap()
+                .keep_alive_id
+        };
+        assert_eq!(echoed, id);
+        // A few ticks (one movement packet each) so the behaviour has run.
+        let mut moves = 0;
+        while moves < 3 {
+            let p = c.recv().await.expect("closed before the ticks");
+            if V::sb_play_name(&p).starts_with("position") || V::sb_play_name(&p) == "flying" {
+                moves += 1;
+            }
+        }
+        c.send(&V::kick(r#"{"text":"bye"}"#)).await;
+    };
+    let cl = client(addr, v, "Tester");
+    let mut seen = Seen(None);
+    let (end, ()) = tokio::join!(cl.run(&mut seen), server);
+    match end.unwrap() {
+        SessionEnd::Kicked { reason, .. } => assert_eq!(reason, "bye"),
+        e => panic!("unexpected end {e:?}"),
+    }
+    assert_eq!(seen.0, Some(v));
+}
+
+#[tokio::test]
+async fn v1_12_1_session() {
+    sub_version_session::<V1_12_2>(GameVersion::V1_12_1).await;
+}
+
+#[tokio::test]
+async fn v1_16_2_session() {
+    sub_version_session::<V1_16_5>(GameVersion::V1_16_2).await;
+}
+
+#[tokio::test]
+async fn v1_16_3_session() {
+    sub_version_session::<V1_16_5>(GameVersion::V1_16_3).await;
+}

@@ -24,19 +24,14 @@ fn prompt(id: i32, url: &str, hash: &str) -> RawPacket {
 }
 
 /// The answers to a prompt, each as its framed bytes (uncompressed).
-fn answer<V: ClientVersion<Wire = ()>>(
-    id: i32,
-    url: &str,
-    hash: &str,
-    accept: bool,
-) -> Vec<Vec<u8>> {
+fn answer<V: ClientVersion>(id: i32, url: &str, hash: &str, accept: bool) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     V::resource_pack(&prompt(id, url, hash), accept, &mut out).unwrap();
     out.iter()
         .map(|o| {
             assert!(matches!(o, Outbound::Raw(_)), "{o:?}");
             let mut enc = FrameEncoder::new();
-            V::write_play(&mut enc, o, &mut ()).unwrap();
+            V::write_play(&mut enc, o, &mut V::Wire::default()).unwrap();
             enc.take().to_vec()
         })
         .collect()
@@ -212,7 +207,7 @@ fn frame_of(v: GameVersion, o: &Outbound) -> Vec<u8> {
     let mut enc = FrameEncoder::new();
     match v {
         GameVersion::V1_8_9 => V1_8::write_play(&mut enc, o, &mut ()).unwrap(),
-        GameVersion::V1_12_2 => V1_12_2::write_play(&mut enc, o, &mut ()).unwrap(),
+        GameVersion::V1_12_2 => V1_12_2::write_play(&mut enc, o, &mut Default::default()).unwrap(),
         GameVersion::V1_16_5 => V1_16_5::write_play(&mut enc, o, &mut ()).unwrap(),
         #[cfg(feature = "v26_2")]
         GameVersion::V26_2 => {

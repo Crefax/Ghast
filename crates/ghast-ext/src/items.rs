@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use ghast_client::inventory::{Click, ClickError, ClickOutcome, Stack, WindowKind};
+use ghast_client::version::DataSet;
 use ghast_client::{BlockPos, ClickRefused, GameVersion, TickContext};
 
 use crate::{Bot, Error};
@@ -78,17 +79,18 @@ impl<F: Fn(&Stack) -> bool + Send + Sync + 'static> From<F> for ItemMatch {
 #[must_use]
 pub fn item_id(version: GameVersion, name: &str) -> Option<i32> {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
-    match version {
+    // By data set: sub-versions (1.12.1, 1.16.2, ...) share their row's tables.
+    match version.caps().data {
         #[cfg(feature = "v1_8")]
-        GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_name(n).map(|i| i32::from(i.id())),
+        DataSet::V1_8 => ghast_data::v1_8::Item::from_name(n).map(|i| i32::from(i.id())),
         #[cfg(feature = "v1_12_2")]
-        GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_name(n).map(|i| i32::from(i.id())),
+        DataSet::V1_12 => ghast_data::v1_12::Item::from_name(n).map(|i| i32::from(i.id())),
         #[cfg(feature = "v1_16_5")]
-        GameVersion::V1_16_5 => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
+        DataSet::V1_16_5 => ghast_data::v1_16_5::Item::from_name(n).map(|i| i32::from(i.id())),
         #[cfg(feature = "v26_1")]
-        GameVersion::V26_1 => ghast_data::v26_1::Item::from_name(n).map(|i| i32::from(i.id())),
+        DataSet::V26_1 => ghast_data::v26_1::Item::from_name(n).map(|i| i32::from(i.id())),
         #[cfg(feature = "v26_2")]
-        GameVersion::V26_2 => ghast_data::v26_2::Item::from_name(n).map(|i| i32::from(i.id())),
+        DataSet::V26_2 => ghast_data::v26_2::Item::from_name(n).map(|i| i32::from(i.id())),
         _ => None,
     }
 }
@@ -104,19 +106,18 @@ pub fn item_name(version: GameVersion, id: i32) -> &'static str {
     let Ok(id) = u16::try_from(id) else {
         return "";
     };
-    match version {
+    // By data set: sub-versions (1.12.1, 1.16.2, ...) share their row's tables.
+    match version.caps().data {
         #[cfg(feature = "v1_8")]
-        GameVersion::V1_8_9 => ghast_data::v1_8::Item::from_id(id).map_or("", |i| i.info().name),
+        DataSet::V1_8 => ghast_data::v1_8::Item::from_id(id).map_or("", |i| i.info().name),
         #[cfg(feature = "v1_12_2")]
-        GameVersion::V1_12_2 => ghast_data::v1_12::Item::from_id(id).map_or("", |i| i.info().name),
+        DataSet::V1_12 => ghast_data::v1_12::Item::from_id(id).map_or("", |i| i.info().name),
         #[cfg(feature = "v1_16_5")]
-        GameVersion::V1_16_5 => {
-            ghast_data::v1_16_5::Item::from_id(id).map_or("", |i| i.info().name)
-        }
+        DataSet::V1_16_5 => ghast_data::v1_16_5::Item::from_id(id).map_or("", |i| i.info().name),
         #[cfg(feature = "v26_1")]
-        GameVersion::V26_1 => ghast_data::v26_1::Item::from_id(id).map_or("", |i| i.name()),
+        DataSet::V26_1 => ghast_data::v26_1::Item::from_id(id).map_or("", |i| i.name()),
         #[cfg(feature = "v26_2")]
-        GameVersion::V26_2 => ghast_data::v26_2::Item::from_id(id).map_or("", |i| i.name()),
+        DataSet::V26_2 => ghast_data::v26_2::Item::from_id(id).map_or("", |i| i.name()),
         _ => "",
     }
 }
@@ -662,5 +663,28 @@ impl Bot {
             moved = delta;
         }
         Ok(moved)
+    }
+}
+
+#[cfg(all(test, feature = "v1_12_2", feature = "v1_16_5"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sub_versions_use_their_rows_tables() {
+        for (sub, row) in [
+            (GameVersion::V1_12_1, GameVersion::V1_12_2),
+            (GameVersion::V1_16_2, GameVersion::V1_16_5),
+            (GameVersion::V1_16_3, GameVersion::V1_16_5),
+        ] {
+            let id = item_id(row, "diamond_pickaxe");
+            assert!(id.is_some());
+            assert_eq!(item_id(sub, "diamond_pickaxe"), id);
+            assert_eq!(item_name(sub, id.unwrap()), "diamond_pickaxe");
+            assert_eq!(
+                crate::Block::new(sub, 1 << 4).name(),
+                crate::Block::new(row, 1 << 4).name()
+            );
+        }
     }
 }
