@@ -506,6 +506,8 @@ impl Sim for Sim18 {
                     })
             },
             &self.player.bb,
+            // 1.8 keeps no client positions of other entities (interpolation): not decided.
+            |_| false,
         )
     }
 

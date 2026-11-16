@@ -838,6 +838,70 @@ fn legacy_client_suppresses_unplaceable_blocks() {
     assert!(!e.sim.place_suppressed(BlockPos::new(8, 63, 8), Face::Up, 1));
 }
 
+/// 1.12.2 with entity tracking: a cow standing in the spot (client position) makes vanilla's
+/// `hasEntityIn` fail, so no block packet; without tracking the cow is unknown and the packet
+/// is sent as before. 1.8.9 never decides other entities.
+#[test]
+fn tracked_entity_in_the_spot_suppresses_on_1_12_2() {
+    use crate::common::Face;
+    use ghast_protocol::v1_12_2::play::clientbound as cb;
+    let cow = |id: i32| {
+        RawPacket::from_packet(&cb::SpawnEntityLiving {
+            entity_id: id,
+            entity_uuid: uuid::Uuid::from_u128(0x636f_7700 + id as u128),
+            r#type: 92,
+            x: 8.5,
+            y: 64.0,
+            z: 10.5,
+            yaw: 0,
+            pitch: 0,
+            head_pitch: 0,
+            velocity: ghast_protocol::defs::p47::types::Vec3i16 { x: 0, y: 0, z: 0 },
+            metadata: Vec::new(),
+        })
+        .unwrap()
+    };
+    let ahead = BlockPos::new(8, 63, 10);
+    let mut e = engine(GameVersion::V1_12_2);
+    join(&mut e);
+    e.sim.world_packet(&cow(50)).unwrap();
+    assert!(!e.sim.place_suppressed(ahead, Face::Up, 4), "tracking off");
+    e.sim.set_entities(Some(ghast_entity::Config::default()));
+    e.sim.world_packet(&cow(51)).unwrap();
+    assert!(e.sim.place_suppressed(ahead, Face::Up, 4));
+    // A torch has no collision box: the cow does not matter.
+    assert!(!e.sim.place_suppressed(ahead, Face::Up, 50));
+    // The cow's box ends at x 8.95: the spot west of it is free.
+    assert!(
+        !e.sim
+            .place_suppressed(BlockPos::new(9, 63, 10), Face::Up, 4)
+    );
+
+    let mut e = engine(GameVersion::V1_8_9);
+    join(&mut e);
+    e.sim.set_entities(Some(ghast_entity::Config::default()));
+    let raw = RawPacket::from_packet(
+        &ghast_protocol::v1_8::play::clientbound::SpawnEntityLiving {
+            entity_id: 51,
+            r#type: 92,
+            x: 8 * 32 + 16,
+            y: 64 * 32,
+            z: 10 * 32 + 16,
+            yaw: 0,
+            pitch: 0,
+            head_pitch: 0,
+            velocity: ghast_protocol::defs::p47::types::Vec3i16 { x: 0, y: 0, z: 0 },
+            metadata: Vec::new(),
+        },
+    )
+    .unwrap();
+    e.sim.world_packet(&raw).unwrap();
+    assert!(
+        !e.sim.place_suppressed(ahead, Face::Up, 4),
+        "1.8.9: not decided"
+    );
+}
+
 /// `ctx.place` into the player's own box on 1.8.9 / 1.12.2 writes nothing and reports it.
 #[test]
 fn legacy_place_into_the_player_is_refused() {

@@ -375,7 +375,11 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
   would overlap the player. The item use follows instead (1.8 `use_item` form; 1.12
   `use_item`, then the off hand); `ctx.place` returns `false`. Not decided (sent as before):
   anvils, slab items, double plants as the clicked block, the block's own placement rules
-  (torch supports, flower soil, …), partial collision boxes, other entities in the spot.
+  (torch supports, flower soil, …), partial collision boxes, other entities in the spot. With
+  entity tracking on, 1.12.2 also decides other entities (`World.hasEntityIn` over the living
+  entities, players that are not spectators, boats and shulkers whose client position the sim
+  keeps); minecarts, armor stands, bats, parrots, TNT, falling blocks and riders are not
+  decided, nor is any entity on 1.8.9 (no client positions kept) or with tracking off.
   1.16.5 and 26.x have no such client check.
 - Placed blocks are predicted (every version) when the result is known exactly: a block
   whose only state is a full collision cube (stone, cobblestone, planks on 1.13+, ores,

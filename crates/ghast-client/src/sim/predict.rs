@@ -128,9 +128,10 @@ pub(crate) fn legacy_plain_placement(
 /// replaceable: air, tall grass, dead bush, vines, any snow layer) is not of a replaceable
 /// material (`World.canBlockBePlaced` needs one, whatever the block's own rules add), and the
 /// held block's collision box, a full cube on every data value, would overlap the player's own
-/// box (`World.hasEntityIn`). Not decided: anvils (they go on decorations) and slab items (their
+/// box or a box `entity_in` knows (`World.hasEntityIn`; 1.12.2 with entity tracking: the
+/// entities whose client position the sim keeps). Not decided: anvils (they go on decorations) and slab items (their
 /// own check), double plants as the clicked block, the block's own placement rules
-/// (`canBePlacedAdjacent`: torches, flowers, ...), partial collision boxes, other entities.
+/// (`canBePlacedAdjacent`: torches, flowers, ...), partial collision boxes, the other entities.
 #[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn legacy_place_suppressed(
@@ -142,6 +143,7 @@ pub(crate) fn legacy_place_suppressed(
     replaceable: impl Fn(u16) -> bool,
     full_cube_block: impl Fn(u16) -> bool,
     player: &ghast_physics::math::Aabb,
+    entity_in: impl Fn(&ghast_physics::math::Aabb) -> bool,
 ) -> bool {
     // Block items: ids below 256, and the banner (its item is a block item too).
     if !(held < 256 || held == 425) || undecided_items.contains(&held) {
@@ -170,14 +172,25 @@ pub(crate) fn legacy_place_suppressed(
             f64::from(target.y),
             f64::from(target.z),
         );
-        return player.max_x > x
-            && player.min_x < x + 1.0
-            && player.max_y > y
-            && player.min_y < y + 1.0
-            && player.max_z > z
-            && player.min_z < z + 1.0;
+        let cube = ghast_physics::math::Aabb::new(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+        return boxes_intersect(player, &cube) || entity_in(&cube);
     }
     false
+}
+
+/// `Box.intersects` (open intervals).
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+#[inline]
+pub(crate) fn boxes_intersect(
+    a: &ghast_physics::math::Aabb,
+    b: &ghast_physics::math::Aabb,
+) -> bool {
+    a.max_x > b.min_x
+        && a.min_x < b.max_x
+        && a.max_y > b.min_y
+        && a.min_y < b.max_y
+        && a.max_z > b.min_z
+        && a.min_z < b.max_z
 }
 
 /// One prediction of [`Sequenced`] (`ServerVerifiedState`).

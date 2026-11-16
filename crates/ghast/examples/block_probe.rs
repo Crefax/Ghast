@@ -45,6 +45,8 @@ struct Probe {
     acted: Option<u64>,
     /// Ticks spent trying to act.
     trying: u64,
+    /// `--entities`: track entities (the client keeps their positions).
+    entities: bool,
     /// Give up after this many (`PROBE_TRIES`, default 400): "could not act".
     tries: u64,
     broken_before: u64,
@@ -128,7 +130,11 @@ impl Behavior for Probe {
     }
 
     fn interests(&self) -> Interests {
-        Interests::CHAT
+        if self.entities {
+            Interests::CHAT | Interests::ENTITY_TRACKING
+        } else {
+            Interests::CHAT
+        }
     }
 
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
@@ -267,6 +273,7 @@ fn main() {
             acted: None,
             trying: 0,
             tries: num("PROBE_TRIES", 400),
+            entities: opts.entities,
             broken_before: 0,
             last: None,
             changes: Vec::new(),

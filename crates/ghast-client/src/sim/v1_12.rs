@@ -867,6 +867,13 @@ impl Sim for Sim12 {
                     })
             },
             &self.player.bb,
+            // World.hasEntityIn (spectators left out by getEntitiesIn): the entities whose
+            // client position the sim keeps (with entity tracking). Not decided: the others
+            // (minecarts, armor stands, bats, parrots, TNT, falling blocks, riders).
+            |cube| match (self.near.as_deref(), self.entities.as_ref()) {
+                (Some(n), Some(t)) => n.blocks_building(t, &self.world, cube),
+                _ => false,
+            },
         )
     }
 
@@ -1261,6 +1268,23 @@ impl Near12 {
         e.vehicle().is_none()
             && e.passengers().is_empty()
             && world.is_column_loaded((c.at[0].floor() as i32) >> 4, (c.at[2].floor() as i32) >> 4)
+    }
+
+    /// `World.hasEntityIn(box)` over these entities: one of them (not riding, not a spectator
+    /// player) overlaps `cube` at its client position (`Box.intersects`).
+    fn blocks_building(
+        &self,
+        t: &ghast_entity::v1_12::Tracker,
+        world: &ghast_world::v1_12::World,
+        cube: &ghast_physics::math::Aabb,
+    ) -> bool {
+        self.list.iter().any(|c| {
+            crate::sim::predict::boxes_intersect(&c.bb, cube)
+                && Self::present(t, world, c)
+                && !(c.class == Class12::Player
+                    && t.get(c.id)
+                        .is_some_and(|e| t.tab_game_mode(&e.uuid()) == Some(3)))
+        })
     }
 
     /// This tick's boxes the player collides with: boats and live shulkers within reach of any
