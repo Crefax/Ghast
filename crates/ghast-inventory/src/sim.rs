@@ -1233,7 +1233,13 @@ impl Sim<'_> {
             (Some(mut h), Some(s)) => {
                 if self.can_take(i)? && self.can_insert(i, &h)? {
                     let lim = self.slot_limit(i)?;
-                    if h.count > lim {
+                    if h.count > lim && self.loc(i) == Loc::Player(k) {
+                        // the slot *is* hotbar slot k (one stack object): the split goes into the
+                        // slot, the rest of the same object back through insertStack
+                        self.set(i, Some(h.with_count(lim)));
+                        self.on_take(i)?;
+                        self.insert_stack(s.with_count(h.count - lim));
+                    } else if h.count > lim {
                         h.count -= lim;
                         self.set(i, Some(h.with_count(lim)));
                         self.m.player[k] = Some(h);
