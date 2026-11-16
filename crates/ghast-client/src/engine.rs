@@ -1023,8 +1023,11 @@ impl<S: Sim> Engine<S> {
                 3 => {
                     c.game_mode = GameMode::from_wire(value as u8);
                     sim.spectator(c.game_mode == GameMode::Spectator);
-                    if c.game_mode == GameMode::Spectator {
-                        // Spectators cannot use items (vanilla `useItem` passes).
+                    // 26.x ServerPlayer.setGameMode(SPECTATOR) calls stopUsingItem and the living
+                    // flags clear the client's use: stopping at once stands in for that. 1.8.9 –
+                    // 1.16.5 stop nothing (the use runs until release or finish). The 26.x rows are
+                    // the versions with block-prediction sequences here.
+                    if c.game_mode == GameMode::Spectator && c.opts.caps.block_sequence {
                         c.hands.stop_using();
                     }
                     c.pending.game_mode_changed = true;

@@ -773,6 +773,32 @@ fn placed_block_is_predicted_on_legacy_versions() {
     }
 }
 
+/// Switching to spectator stops an item use only on 26.x (the server's `stopUsingItem`);
+/// 1.8.9 – 1.16.5 keep it until release or finish.
+#[test]
+fn spectator_switch_stops_a_use_only_on_26_x() {
+    let mut versions = vec![
+        (GameVersion::V1_8_9, false),
+        (GameVersion::V1_12_2, false),
+        (GameVersion::V1_16_5, false),
+        (GameVersion::V26_1, true),
+    ];
+    #[cfg(feature = "v26_2")]
+    versions.push((GameVersion::V26_2, true));
+    for (v, stops) in versions {
+        let mut e = engine(v);
+        join(&mut e);
+        e.core.hands.test_start_using(1);
+        assert!(e.core.hands.using_item(), "{v:?}");
+        e.handle(Inbound::GameState {
+            reason: 3,
+            value: 3.0,
+        });
+        assert_eq!(e.core.game_mode, GameMode::Spectator, "{v:?}");
+        assert_eq!(e.core.hands.using_item(), !stops, "{v:?}");
+    }
+}
+
 /// Replays of the oracle's right clicks (`tests/golden/<version>/place.jsonl.gz`, the real
 /// client's `MultiPlayerGameMode.useItemOn` and its prediction records): every placement this
 /// client predicts is the vanilla one, and after the server's answer (an ack alone, a block

@@ -834,6 +834,12 @@ impl Hands {
     }
 
     /// `startUsingItem`: remembers the hand and the item.
+    /// Test hook: a use of item `id` in the main hand starts.
+    #[cfg(test)]
+    pub(crate) fn test_start_using(&mut self, id: u16) {
+        self.start_using(false, id);
+    }
+
     fn start_using(&mut self, off_hand: bool, id: u16) {
         self.use_ticks = 0;
         self.using = true;
