@@ -777,6 +777,7 @@ pub(crate) struct Near12 {
 }
 
 /// The first VarInt of a body (the entity id of spawn and move packets).
+            log::debug!("predicted {} at {at:?}", s.block().name());
 fn first_varint(body: &[u8]) -> Option<i32> {
     let mut v: u32 = 0;
     for (k, &b) in body.iter().take(5).enumerate() {

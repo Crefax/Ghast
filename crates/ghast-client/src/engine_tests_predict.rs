@@ -494,6 +494,39 @@ mod v1_16_5 {
         assert_eq!(block(&e, B), Some(0));
     }
 
+    /// The left button on a waterlogged block: the engine's dig path leaves water too.
+    #[test]
+    fn left_button_on_a_waterlogged_block_leaves_water() {
+        use ghast_data::v1_16_5::{Block, Property};
+        let mut e = joined();
+        let wet = Block::from_name("oak_stairs")
+            .unwrap()
+            .state_with(&[(Property::from_name("waterlogged").unwrap(), "true")])
+            .unwrap()
+            .id();
+        let water = Block::from_name("water").unwrap().default_state().id();
+        let under = BlockPos::new(8, 63, 8);
+        set(&mut e, under, wet);
+        let t0 = Instant::now();
+        e.note_inbound(t0);
+        let mut b = Script(|ctx: &mut TickContext<'_>| {
+            ctx.set_aim(90.0, 89.5);
+            let down = ctx.target().is_some_and(|t| t.pos == under);
+            ctx.set_buttons(Buttons {
+                left: down,
+                right: false,
+            });
+        });
+        let mut ticks = 0;
+        while block(&e, under) == Some(u32::from(wet)) {
+            e.tick(&mut b, t0);
+            e.outbound().clear();
+            ticks += 1;
+            assert!(ticks < 400, "no finish");
+        }
+        assert_eq!(block(&e, under), Some(u32::from(water)));
+    }
+
     /// An approved start the client recorded keeps the client's state (an instant break stays
     /// air although the answer carries the state before); without a record, or refused, the
     /// server's state is set.

@@ -56,6 +56,11 @@ mkdir -p "$DIR/plugins/GhastLabFly"
 
 echo "eula=true" > "$DIR/eula.txt"
 cp "$here/templates/server-$VER.properties" "$DIR/server.properties"
+# LAB_PROPS="key=value ...": per-run overrides of the template (e.g. spawn-protection=16).
+for kv in ${LAB_PROPS:-}; do
+  k=${kv%%=*}
+  if grep -q "^$k=" "$DIR/server.properties"; then sed -i "s|^$k=.*|$kv|" "$DIR/server.properties"; else echo "$kv" >> "$DIR/server.properties"; fi
+done
 { printf '['; sep=
   for n in $LAB_OPS; do printf '%s{"uuid":"%s","name":"%s","level":4,"bypassesPlayerLimit":false}' "$sep" "$(offline_uuid "$n")" "$n"; sep=,; done
   printf ']\n'; } > "$DIR/ops.json"

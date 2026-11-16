@@ -12,11 +12,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerResourcePackStatusEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
  * Lab-only /fly: lets survival test accounts keep allowFlight, as many survival servers grant it.
+ * Also logs every resource pack status a client sends.
  * Built against the Bukkit API shared by 1.8.8 and 1.16.5 (Java 8 bytecode).
  */
 public final class LabFly extends JavaPlugin implements Listener {
@@ -50,6 +52,12 @@ public final class LabFly extends JavaPlugin implements Listener {
     @EventHandler public void onRespawn(PlayerRespawnEvent e) { grantNextTick(e.getPlayer()); }
     @EventHandler public void onWorld(PlayerChangedWorldEvent e) { grantNextTick(e.getPlayer()); }
     @EventHandler public void onGameMode(PlayerGameModeChangeEvent e) { grantNextTick(e.getPlayer()); }
+
+    /** Logs the client's resource pack answers (the lab checks that they arrive). */
+    @EventHandler
+    public void onPackStatus(PlayerResourcePackStatusEvent e) {
+        getLogger().info("[lab] resource pack status " + e.getPlayer().getName() + " " + e.getStatus());
+    }
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {

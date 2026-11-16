@@ -1094,10 +1094,13 @@ impl ModernSim {
         if raw.id == cb::id::BLOCK_CHANGE {
             let p: cb::BlockChange = raw.decode_as()?;
             self.updates.push(p.location, p.r#type as u32);
-            if !self
-                .predictions
-                .update(p.location, state_from_wire(i64::from(p.r#type)))
-            {
+            let s = state_from_wire(i64::from(p.r#type));
+            if self.predictions.update(p.location, s) {
+                log::debug!(
+                    "block update {s} for predicted {:?} waits for the ack",
+                    p.location
+                );
+            } else {
                 self.world.apply_block_change(&p);
             }
             return Ok(());
@@ -1139,8 +1142,10 @@ impl ModernSim {
                 .block_state(pos.x, pos.y, pos.z)
                 .unwrap_or(BlockState::AIR);
             if now == state {
+                log::debug!("block_changed_ack {ack}: {pos:?} stays {now}");
                 return;
             }
+            log::debug!("block_changed_ack {ack}: {pos:?} {now} back to the server's {state}");
             world.set_block_state(pos.x, pos.y, pos.z, state);
             if let Some(at) = at
                 && holds_player(state, pos, player)
@@ -2131,6 +2136,7 @@ impl Sim for ModernSim {
             .world
             .set_block_state(pos.x, pos.y, pos.z, fluid_left_behind(old))
         {
+            log::debug!("predicted the break of {old} at {pos:?} (sequence {sequence})");
             self.predictions
                 .retain(pos, old, sequence, [player.x, player.y, player.z]);
         }
@@ -2145,6 +2151,7 @@ impl Sim for ModernSim {
             return;
         };
         if self.world.set_block_state(at.x, at.y, at.z, state) {
+            log::debug!("predicted {state} at {at:?} (sequence {})", p.sequence);
             self.predictions
                 .retain(at, old, p.sequence, [p.player.x, p.player.y, p.player.z]);
         }

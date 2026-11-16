@@ -1540,6 +1540,11 @@ fn holds_player(
             axis(r.sizes[1], r.ys),
             axis(r.sizes[2], r.zs),
         ],
+            log::debug!(
+                "predicted the break of {} at {pos:?}: {}",
+                old.block().name(),
+                left.block().name()
+            );
         cells: r.cells,
     };
     crate::sim::predict::shape_overlaps(shape, pos, bb)
@@ -1548,6 +1553,7 @@ fn holds_player(
 fn sync_pose_16(pose: &mut Pose, p: &ghast_physics::v1_16_5::PlayerState) {
     pose.pos = Vec3::new(p.pos[0], p.pos[1], p.pos[2]);
     pose.motion = Vec3::new(p.vel[0], p.vel[1], p.vel[2]);
+            log::debug!("predicted {} at {at:?}", state.block().name());
     pose.yaw = p.yaw;
     pose.pitch = p.pitch;
     pose.on_ground = p.on_ground;
@@ -1580,3 +1586,10 @@ mod tests {
         }
     }
 }
+            log::debug!(
+                "dig answer {} ({}): {pos:?} {} back to the server's {}",
+                p.status,
+                if p.successful { "approved" } else { "refused" },
+                now.block().name(),
+                state.block().name()
+            );

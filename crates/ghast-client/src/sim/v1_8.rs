@@ -465,6 +465,7 @@ impl Sim for Sim18 {
             return;
         };
         if let Some(s) = BlockState::from_raw(raw) {
+            log::debug!("predicted {} at {at:?}", s.block().name());
             self.world.set_block_state(at.x, at.y, at.z, s);
         }
     }

@@ -18,7 +18,8 @@ All: offline mode, `-Xmx896M` (`LAB_HEAP`), compression threshold 256, view dist
 (bedrock, 2 dirt, grass: grass is y=3, players stand at y=4), spawn `0 4 0`, peaceful, no mobs.
 Opped accounts (`LAB_OPS`): `GhastBot`..`GhastBot11`, `GhastBot13`, `Baseline`, `Baseline2`. Op does **not**
 exempt from Grim. `GhastBot` and `GhastBot5` (`LAB_FLY`, read at server start) get allowFlight on join via the lab plugin (`/fly [player] [on|off]`,
-source in `plugins/labfly`, built at start against the 1.8.8 API, loads on both servers).
+source in `plugins/labfly`, built at start against the 1.8.8 API, loads on both servers; it also logs every resource
+pack status a client sends, `[lab] resource pack status <name> <status>`).
 Grim alerts and verbose flags are printed to the console (`config.yml` patched on first start).
 
 Why Java 17 for 1.12.2 and 1.16.5: Grim 2.3.73 is Java 17 bytecode and those Paper builds refuse Java 17+
@@ -39,6 +40,15 @@ LAB_GRIM_JAR=<jar in servers/dl> ./start.sh 26.1   # run another Grim build inst
                              # Simulation on the 26.2 20-block drop (corner case 3, vanilla-exact)
 ./transfer.sh                # 26.1: /transfer the bot back to the lab twice (--follow-transfers), PASS = both followed, 0 flags
 ./entities.sh [crowd|horse|villager|border|teams|boat|cart]  # 26.1 with summoned NoAI mobs (the lab spawns none): crowd + boat with entity tracking on/off, horse inventory, villager trade, shrinking world border, two bots with and without a collisionRule-never team; PASS = screens confirmed, 0 flags
+./predict.sh 1.8|1.12|1.16|26.1|26.2  # block predictions (block_probe example): breaks / placements the server refuses
+                             # (spawn-protection=16, a non-op account) and accepts (an op), a broken waterlogged block,
+                             # a block a repeating command block puts back every tick, drop / swap hands; prints the bot's
+                             # view after each action, the server's block and the Grim flags. PASS = bot == server, 0 flags
+./resource-pack.sh 1.8|1.12|1.16 [url]  # the server announces a pack, the lab plugin logs the client's statuses;
+                             # PASS = ACCEPTED + SUCCESSFULLY_LOADED (a level:// url: FAILED_DOWNLOAD on 1.12+), 0 flags
+./nether-lava.sh             # 1.16.5: walk through a lava stream in the overworld and in the nether (faster lava push),
+                             # fire resistance on; PASS = 0 Grim flags
+LAB_PROPS="key=value ..." ./start.sh 26.1   # server.properties overrides for one start (e.g. spawn-protection=16)
 ./proxy-switch.sh [10]       # 26.1 reconfiguration: Velocity + two backends, N /server switches (own server set, see below)
 ./online-26.1.sh             # 26.1 online mode + signed chat against a local account stand-in (own server, see below)
 ```
