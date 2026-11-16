@@ -11,6 +11,7 @@ mod ext;
 mod fluid;
 mod player;
 
+pub use blocks::{CollisionContext, state_collides};
 pub use entity::{
     OtherEntity, PushKind, Pusher, Surroundings, collides, push_by, push_kind, query_reaches,
 };

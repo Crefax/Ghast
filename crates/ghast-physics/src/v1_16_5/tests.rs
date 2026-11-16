@@ -117,3 +117,67 @@ fn facts_vs_voxel_dump() {
         "block facts differ from the oracle: {diffs:?}"
     );
 }
+
+/// `state_collides`: bamboo's collision box carries its per-position model offset; scaffolding's
+/// shape depends on the entity (feet above its top, sneaking).
+#[test]
+fn state_collides_offset_and_context() {
+    use super::{CollisionContext, state_collides};
+    let bamboo = BlockState::from_id(
+        (0..u16::MAX)
+            .find(|&i| BlockState::from_id(i).is_some_and(|s| s.block().info().name == "bamboo"))
+            .unwrap(),
+    )
+    .unwrap();
+    let ctx = CollisionContext::new(64.0, false);
+    // A position whose offset moves the 3/16-wide stem off the block centre.
+    let (x, z) = (5, 9);
+    let b = super::blocks::bamboo_box(x, z);
+    let (cx, cz) = (
+        f64::from(x) + (b.min_x + b.max_x) / 2.0,
+        f64::from(z) + (b.min_z + b.max_z) / 2.0,
+    );
+    assert!(
+        (cx - (f64::from(x) + 0.5)).abs() > 0.1,
+        "offset too small for the test"
+    );
+    let thin = |px: f64, pz: f64| [px - 0.01, 64.0, pz - 0.01, px + 0.01, 65.0, pz + 0.01];
+    assert!(state_collides(bamboo, [x, 64, z], thin(cx, cz), &ctx));
+    assert!(!state_collides(
+        bamboo,
+        [x, 64, z],
+        thin(f64::from(x) + 0.5, f64::from(z) + 0.5),
+        &ctx
+    ));
+
+    let scaffold = BlockState::from_id(
+        (0..u16::MAX)
+            .find(|&i| {
+                BlockState::from_id(i).is_some_and(|s| s.block().info().name == "scaffolding")
+            })
+            .unwrap(),
+    )
+    .unwrap();
+    let inside = [0.2, 64.5, 0.2, 0.8, 64.9, 0.8];
+    // Feet above the block top, not sneaking: the stable shape (its top slab) collides.
+    assert!(state_collides(
+        scaffold,
+        [0, 64, 0],
+        [0.2, 64.95, 0.2, 0.8, 65.5, 0.8],
+        &CollisionContext::new(65.0, false)
+    ));
+    // Inside it (feet below its top): no collision for a standing scaffold of distance 0.
+    assert!(!state_collides(
+        scaffold,
+        [0, 64, 0],
+        inside,
+        &CollisionContext::new(64.5, false)
+    ));
+    // Sneaking on top: falls through.
+    assert!(!state_collides(
+        scaffold,
+        [0, 64, 0],
+        [0.2, 64.95, 0.2, 0.8, 65.5, 0.8],
+        &CollisionContext::new(65.0, true)
+    ));
+}

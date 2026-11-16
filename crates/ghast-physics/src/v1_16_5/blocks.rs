@@ -315,3 +315,56 @@ pub(crate) fn is_climbable_at<W: BlockView<State = BlockState>>(
     }
     false
 }
+
+/// The entity-dependent part of a 1.16.5 block collision query (vanilla `EntityShapeContext`
+/// as the collision shapes read it).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct CollisionContext {
+    /// `entity.getY()` when the context was made (scaffolding's "above" tests).
+    pub feet_y: f64,
+    /// `isDescending()`: a sneaking player.
+    pub descending: bool,
+}
+
+impl CollisionContext {
+    /// The context of an entity with its feet at `feet_y`, sneaking or not.
+    #[must_use]
+    pub fn new(feet_y: f64, descending: bool) -> CollisionContext {
+        CollisionContext { feet_y, descending }
+    }
+}
+
+/// `Entity.collidesWithStateAtPos(pos, state)`: the collision shape of `state` at block `pos`
+/// for the entity's context (scaffolding) and with the block's model offset (bamboo) overlaps
+/// `bb` (`[min_x, min_y, min_z, max_x, max_y, max_z]`; `VoxelShapes.matchesAnywhere(…, AND)`:
+/// a positive-volume overlap). The client uses it when the server's answer to a dig action
+/// restores a block and moves the player back (`processPlayerActionResponse`).
+#[must_use]
+pub fn state_collides(
+    state: BlockState,
+    pos: [i32; 3],
+    bb: [f64; 6],
+    ctx: &CollisionContext,
+) -> bool {
+    let [x, y, z] = pos;
+    let c = ShapeCtx {
+        min_y: ctx.feet_y,
+        descending: ctx.descending,
+    };
+    let q = Aabb::new(bb[0], bb[1], bb[2], bb[3], bb[4], bb[5]);
+    let hits = |b: &Aabb| {
+        b.min_x < q.max_x
+            && b.max_x > q.min_x
+            && b.min_y < q.max_y
+            && b.max_y > q.min_y
+            && b.min_z < q.max_z
+            && b.max_z > q.min_z
+    };
+    if state.block() == Block::BAMBOO {
+        return hits(&bamboo_box(x, z).at(x, y, z));
+    }
+    collision_boxes(state, y, Some(&c))
+        .iter()
+        .any(|b| hits(&b.at(x, y, z)))
+}
