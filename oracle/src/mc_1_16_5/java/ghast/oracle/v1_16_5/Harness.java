@@ -124,8 +124,16 @@ final class Harness {
         Reflect.set(MinecraftClient.class, client, "tutorialManager", new TutorialManager(client));
         Reflect.set(MinecraftClient.class, client, "worldRenderer", StubWorldRenderer.create());
         // Tab-list additions report to the social interactions manager (no service, no screen).
-        Reflect.set(MinecraftClient.class, client, "socialInteractionsManager",
-                new net.minecraft.client.network.SocialInteractionsManager(client, null));
+        // It exists since 1.16.4; 1.16.2 / 1.16.3 (checked with this harness) have none.
+        try {
+            Class<?> social = Class.forName("net.minecraft.client.network.SocialInteractionsManager");
+            Reflect.set(MinecraftClient.class, client, "socialInteractionsManager",
+                    social.getConstructors()[0].newInstance(client, null));
+        } catch (ClassNotFoundException absent) {
+            // 1.16.2 / 1.16.3
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
         // Sounds measure their distance to the camera; a game renderer with just its camera object.
         net.minecraft.client.render.GameRenderer gameRenderer = Reflect.allocate(net.minecraft.client.render.GameRenderer.class);
         Reflect.set(net.minecraft.client.render.GameRenderer.class, gameRenderer, "camera", new net.minecraft.client.render.Camera());
