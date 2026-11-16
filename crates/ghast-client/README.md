@@ -321,10 +321,11 @@ strider / soul speed from the armour NBT) and spectator mode (1.16). Haste / min
 
 ## Hands: dig, place, use (phase 3 groundwork)
 
-> **Entities are invisible without `Interests::ENTITIES`.** The crosshair (`set_buttons`,
+> **Entities are invisible without entity tracking** (`Interests::ENTITIES` or
+> `Interests::ENTITY_TRACKING`). The crosshair (`set_buttons`,
 > `target()`, `dig`, `place`) is then a block pick: a player or mob standing in front of the
 > block does not stop the dig and cannot be attacked or used, and nothing pushes the bot. Ask
-> for the interest whenever other entities can be near (keep it and stop pushes with
+> for one of them whenever other entities can be near (keep it and stop pushes with
 > `Client::entity_push(false)` if needed, a non-vanilla opt-in).
 
 `hands.rs` ports 1.8.9 `MinecraftClient.tick` key processing and

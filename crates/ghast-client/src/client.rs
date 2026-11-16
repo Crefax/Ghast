@@ -295,10 +295,12 @@ impl Client {
         self
     }
 
-    /// Whether other entities push the player (default on, like vanilla). Pushes happen only
-    /// with [`Interests::ENTITIES`] (1.12.2 and 26.1+: mobs, players and boats around the
-    /// player push it in the client's entity tick; the 1.8.9 client is never pushed by the
-    /// client, and on 1.16.5 the switch is a no-op so far). **Off is not vanilla**: a vanilla client always applies
+    /// Whether other entities push the player (default on, like vanilla). **Pushes happen only
+    /// with entity tracking** ([`Interests::ENTITIES`] or [`Interests::ENTITY_TRACKING`]):
+    /// without it the client knows no entities, so nothing pushes the bot and the crosshair
+    /// sees blocks only. With it, on 1.12.2, 1.16.5 and 26.1+ mobs, players and boats around
+    /// the player push it in the client's entity tick; the 1.8.9 client is never pushed by the
+    /// client (the switch is a no-op there). **Off is not vanilla**: a vanilla client always applies
     /// these pushes itself; off keeps entity tracking (crosshair, attack, interact) without
     /// them. A behaviour can switch it at run time with [`TickContext::set_entity_push`](crate::TickContext::set_entity_push).
     #[must_use]

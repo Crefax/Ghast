@@ -2293,17 +2293,19 @@ impl TickContext<'_> {
     /// open window). Left held mines what the crosshair is on, right held uses / places
     /// (vanilla's key processing, after the behaviour and before the movement packet).
     ///
-    /// **Entities are invisible without [`Interests::ENTITIES`]:** the crosshair then sees
-    /// blocks only (a player or mob in front of the block does not stop the dig and cannot be
-    /// attacked) and nothing pushes the bot. Ask for the interest when other entities matter.
+    /// **Entities are invisible without entity tracking** ([`Interests::ENTITIES`] or
+    /// [`Interests::ENTITY_TRACKING`]): the crosshair then sees blocks only (a player or mob in
+    /// front of the block does not stop the dig and cannot be attacked) and nothing pushes the
+    /// bot. Ask for one of the interests when other entities matter.
     pub fn set_buttons(&mut self, buttons: Buttons) {
         self.core.buttons = buttons;
     }
 
     /// **Not vanilla when off**: whether other entities push the player from now on (default
     /// on, see [`crate::Client::entity_push`]). Takes effect on this tick's entity ticks; a
-    /// no-op where the sim does not push the player (1.8.9, whose client never does; 1.16.5 so
-    /// far).
+    /// no-op without entity tracking ([`Interests::ENTITIES`] or
+    /// [`Interests::ENTITY_TRACKING`]: no entities are known, so nothing pushes) and on 1.8.9,
+    /// whose client never pushes the player.
     pub fn set_entity_push(&mut self, on: bool) {
         self.core.entity_push = on;
     }

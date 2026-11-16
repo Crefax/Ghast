@@ -18,8 +18,9 @@
 //! hardness, tool groups, selection boxes, the held stack, destroy-progress formulas) come
 //! from the [`BlockQuery`] answers and [`HeldItem`].
 //!
-//! **Entities are seen only with [`Interests::ENTITIES`](crate::Interests::ENTITIES).** Without
-//! entity tracking the crosshair is a block pick: a player or mob between the eyes and the
+//! **Entities are seen only with entity tracking**
+//! ([`Interests::ENTITIES`](crate::Interests::ENTITIES) or
+//! [`Interests::ENTITY_TRACKING`](crate::Interests::ENTITY_TRACKING)). Without it the crosshair is a block pick: a player or mob between the eyes and the
 //! block neither stops the dig nor can be attacked or used, and nothing pushes the player.
 
 use ghast_data::DigMaterial;
