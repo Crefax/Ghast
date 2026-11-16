@@ -505,6 +505,8 @@ pub(super) fn replay_file_with(
     // Cases cut short where the player left the loaded columns, or used an item on a block.
     let mut left = 0;
     let mut picked = 0;
+    // Ticks whose block click passed on to the item (its block packet left out).
+    let mut passed_on = 0;
     let mut failed = Vec::new();
     while let Some(header) = lines.next() {
         let sc = &header;
@@ -830,12 +832,19 @@ pub(super) fn replay_file_with(
             e.core.forced_look = Some((f32v(&input["yaw"]), f32v(&input["pitch"])));
             e.note_inbound(t0);
             e.tick(&mut b, t0);
-            let out = std::mem::take(e.outbound());
+            let mut out = std::mem::take(e.outbound());
             // The oracle uses the item with the crosshair on nothing; the engine picks the
-            // block it looks at (and may activate it): a case ends at its first block use.
+            // block it looks at. A block click that passes on to the item (vanilla sends the
+            // block packet, then uses the item) is the oracle's miss plus that block packet:
+            // drop it and go on. An activation or a placement (no item use) ends the case.
             if out.iter().any(|o| matches!(o, Outbound::Place { .. })) {
-                picked += 1;
-                break;
+                if out.iter().any(|o| matches!(o, Outbound::UseItem { .. })) {
+                    out.retain(|o| !matches!(o, Outbound::Place { .. }));
+                    passed_on += 1;
+                } else {
+                    picked += 1;
+                    break;
+                }
             }
             let got: Vec<Value> = out.iter().filter_map(ours).collect();
             let want: Vec<Value> = rec["packets"]
@@ -914,7 +923,7 @@ pub(super) fn replay_file_with(
         }
     }
     eprintln!(
-        "1.16.5 {} through the engine (tracking {tracking}, metadata {metadata}): {cases} cases ({skipped} skipped, {left} left the loaded columns, {picked} used an item on a block), {ticks_done} ticks, {orders} tick orders, {packets} packets identical",
+        "1.16.5 {} through the engine (tracking {tracking}, metadata {metadata}): {cases} cases ({skipped} skipped, {left} left the loaded columns, {picked} used an item on a block, {passed_on} block clicks passed on to the item), {ticks_done} ticks, {orders} tick orders, {packets} packets identical",
         path.display()
     );
     assert!(
