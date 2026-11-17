@@ -470,12 +470,28 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Op
     }
 }
 
+/// The vanilla data pack's `tags` (the first `tags` line of the 1.16.5 menus golden).
+fn vanilla_tags_16() -> cb16::Tags {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5/clicks_menus_seed1.jsonl.gz");
+    let f = std::fs::File::open(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for line in BufReader::new(flate2::read::GzDecoder::new(f)).lines() {
+        let line = line.unwrap();
+        if line.starts_with("{\"tags\"") {
+            let c: Value = serde_json::from_str(&line).unwrap();
+            return decode_exact(&hex(c["tags"].as_str().unwrap())).unwrap();
+        }
+    }
+    panic!("no tags line in {}", path.display());
+}
+
 fn replay(v: Version, path: &Path) -> Stats {
     let f = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let r = BufReader::new(flate2::read::GzDecoder::new(f));
     let mut s = Stats::default();
     let mut book = RecipeBook::default();
-    let mut tags: Option<cb16::Tags> = None;
+    // the emulated server runs the vanilla data pack unless a `tags` line says otherwise
+    let mut tags: Option<cb16::Tags> = (v == Version::V1_16_5).then(vanilla_tags_16);
     for line in r.lines() {
         let line = line.unwrap();
         let c: Value = serde_json::from_str(&line).unwrap();

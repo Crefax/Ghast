@@ -127,12 +127,6 @@ impl ClientVersion for V1_16_5 {
             .with(cb::id::WINDOW_ITEMS)
             .with(cb::id::SET_SLOT)
             .with(cb::id::CRAFT_PROGRESS_BAR)
-            // the inventory: villager offers, the recipes (crafting remainders, furnace,
-            // smithing, stonecutter)
-            .with(cb::id::TRADE_LIST)
-            .with(cb::id::DECLARE_RECIPES)
-            // the item tags (beacon payments, fuels, llama carpets follow the server's)
-            .with(cb::id::TAGS)
             .with(cb::id::EXPERIENCE)
             .with(cb::id::ABILITIES)
             .with(cb::id::KICK_DISCONNECT)
@@ -153,6 +147,12 @@ impl ClientVersion for V1_16_5 {
         f.insert(cb::id::RESOURCE_PACK_SEND);
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::CHAT);
+        }
+        // the inventory's recipes (crafting remainders, furnace, smithing, stonecutter) and
+        // item tags (beacon payments, fuels, llama carpets follow the server's)
+        if interests.contains(Interests::RECIPES) {
+            f.insert(cb::id::DECLARE_RECIPES);
+            f.insert(cb::id::TAGS);
         }
         f
     }
@@ -341,6 +341,17 @@ impl ClientVersion for V1_16_5 {
         raw.decode_as::<cb::OpenHorseWindow>()
             .ok()
             .map(|p| p.entity_id)
+    }
+
+    fn inventory_packet_ids(inv: &ghast_inventory::Inventory) -> &'static [i32] {
+        // the villager offers (`trade_list`), sent right after the merchant's `open_window`
+        if inv.window().map(ghast_inventory::Window::kind)
+            == Some(ghast_inventory::WindowKind::Merchant)
+        {
+            &[cb::id::TRADE_LIST]
+        } else {
+            &[]
+        }
     }
 
     fn inventory_packet(

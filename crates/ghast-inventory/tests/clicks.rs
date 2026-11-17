@@ -75,6 +75,37 @@ fn window_inv(
     inv
 }
 
+/// The first line of a 1.16.5 golden that starts with `{"<key>"`: its hex body.
+fn golden_line_16(file: &str, key: &str) -> bytes::Bytes {
+    use std::io::BufRead;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5")
+        .join(file);
+    let f = std::fs::File::open(&path).unwrap();
+    let start = format!("{{\"{key}\"");
+    for line in std::io::BufReader::new(flate2::read::GzDecoder::new(f)).lines() {
+        let line = line.unwrap();
+        if line.starts_with(&start) {
+            let c: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let h = c[key].as_str().unwrap();
+            return (0..h.len() / 2)
+                .map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())
+                .collect::<Vec<u8>>()
+                .into();
+        }
+    }
+    panic!("no {key} line in {}", path.display());
+}
+
+/// What a vanilla 1.16.5 server sends at join: its recipes and item tags.
+fn vanilla_server_data_16(inv: &mut Inventory) {
+    use ghast_protocol::codec::decode_exact;
+    let r = decode_exact(&golden_line_16("clicks_seed1.jsonl.gz", "declare_recipes")).unwrap();
+    inv.on_declare_recipes(ghast_inventory::RecipeBook::from_v1_16_5(&r));
+    let t = decode_exact(&golden_line_16("clicks_menus_seed1.jsonl.gz", "tags")).unwrap();
+    inv.on_tags_v1_16_5(&t);
+}
+
 /// Click, expect a packet, accept it.
 fn click(inv: &mut Inventory, c: Click) -> ClickPacket {
     inv.tick();
@@ -696,6 +727,16 @@ fn furnace() {
             },
         );
         assert_eq!(count(&inv, 38), Some((STONE, 5)));
+        if v == Version::V1_16_5 {
+            // the shift-click reads the server's recipes and fuel tags: unknown until sent
+            inv.tick();
+            let r = inv.click(Click::QuickMove {
+                slot: 3,
+                right: false,
+            });
+            assert!(matches!(r, Err(ClickError::Unpredictable)), "{r:?}");
+            vanilla_server_data_16(&mut inv);
+        }
         // player -> furnace: dirt neither smelts nor burns, so main inventory -> hotbar
         click(
             &mut inv,

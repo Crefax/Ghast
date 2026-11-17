@@ -587,6 +587,7 @@ where
         ),
         read_timeout: client.read_timeout,
         interests: Interests::NONE,
+        inventory_ids: &[],
         raw_ids: Vec::new(),
         raw_mask: [0; 4],
         world_errors: 0,
@@ -974,6 +975,8 @@ struct Play<'c, V: ClientVersion + HasSim, R, W> {
     engine: Engine<V::Sim>,
     read_timeout: Duration,
     interests: Interests,
+    /// The inventory's state-dependent packets in the filter ([`ClientVersion::inventory_packet_ids`]).
+    inventory_ids: &'static [i32],
     /// Packet ids copied for the behaviour (`Behavior::raw_packets`), as a bit set.
     raw_ids: Vec<i32>,
     raw_mask: [u64; 4],
@@ -1155,6 +1158,10 @@ where
         for id in self.engine.sim.world_packet_ids() {
             filter.insert(id);
         }
+        self.inventory_ids = V::inventory_packet_ids(self.engine.inventory_mut());
+        for &id in self.inventory_ids {
+            filter.insert(id);
+        }
         for &id in raw {
             filter.insert(id);
         }
@@ -1163,7 +1170,8 @@ where
 
     /// Applies a packet filter change the sim asked for (it reads more packets from now on).
     fn refilter_if_dirty(&mut self) {
-        if self.engine.sim.take_filter_dirty() {
+        let inventory = V::inventory_packet_ids(self.engine.inventory_mut()) != self.inventory_ids;
+        if self.engine.sim.take_filter_dirty() || inventory {
             let raw = self.raw_ids.clone();
             self.set_filter(self.interests, &raw);
         }
@@ -1289,6 +1297,9 @@ where
                     .outbound()
                     .push(crate::common::Outbound::Inventory(o));
             }
+            // A merchant window opened or closed: the rest of this read is decoded with its
+            // offers passing or dropped again.
+            self.refilter_if_dirty();
             // 1.8 – 1.16.5 mount screens: their slot rules from the tracked entity.
             if let Some(eid) = mount_eid {
                 self.engine.mount_screen_opened(eid);

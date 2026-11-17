@@ -46,6 +46,14 @@ impl Interests {
     /// configuration state [`crate::Behavior::configuration_dialog`]. Without it play-state
     /// dialogs are dropped undecoded and a configuration-state dialog is only logged.
     pub const DIALOGS: Interests = Interests(1 << 5);
+    /// 1.16.5: the server's recipes and item tags (`declare_recipes`, `tags`), which the
+    /// inventory's predictions read: crafting remainders, a furnace's shift-click (smelting
+    /// recipes and fuel tags), the fuel, beacon payment and llama carpet slots, the smithing
+    /// table and the stonecutter. The server sends them once at join (and on `/reload`), so
+    /// set it from the start. Without it they are not decoded or kept, and those predictions
+    /// are refused ([`ghast_inventory::ClickError::Unpredictable`]). Other versions: no
+    /// effect (1.8 / 1.12 clients have them built in; 26.x reads its own).
+    pub const RECIPES: Interests = Interests(1 << 7);
 
     /// Whether every group in `other` is in `self`.
     #[must_use]

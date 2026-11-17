@@ -88,6 +88,12 @@ to the chest and the shield to the offhand; binding curse is the `ench` id 10.
 - **1.16.5**: the server sends results; the client keeps the recipes from `declare_recipes`
   ([`RecipeBook`], `apply_v1_16_5` handles the packet) and uses them for the remainders of a taken
   result. After a grid change the result is unknown until the server's `set_slot`.
+- **1.16.5 server data**: what reads the server's recipes (crafting remainders, a furnace's
+  shift-click, the smithing table, the stonecutter) or item tags (the furnace fuel slot and
+  shift-click, the beacon payment slot, llama carpets) is refused as unpredictable until the
+  `declare_recipes` / `tags` packet was applied — never guessed from the vanilla data, since a
+  data pack server sends others. ghast-client decodes those two packets only with
+  `Interests::RECIPES` (they arrive once at join): a bot without it gets refusals there.
 - Taking a result (click, shift-click — 1.8 repeats while the result stays the same item —,
   number key, Q) consumes one of each ingredient and hands back the recipe's remainders
   (buckets, 1.16.5 glass bottles; book cloning keeps the written book).
@@ -145,9 +151,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   all-clashing book still give a result, the prior work penalty doubles on every use, and the
   field takes 30 characters (`MC|ItemName`; `Inventory::anvil_rename`). Its result's tag is
   written in Java `HashMap` order like the 1.8 client's.
-- **Beacon**: the payment slot takes emerald, diamond, iron and gold ingot (1.16.5: the vanilla
-  `beacon_payment_items` tag, which adds the netherite ingot; ghast does not read the server's
-  tags), one item; shift-click moves a single payment item into an empty payment slot and
+- **Beacon**: the payment slot takes emerald, diamond, iron and gold ingot (1.16.5: the server's
+  `beacon_payment_items` tag, vanilla adds the netherite ingot), one item; shift-click moves a single payment item into an empty payment slot and
   anything else between main inventory and hotbar. 1.16.5's payment inventory caps every stack
   set into it at one, also a server's `window_items` / `set_slot`. Choosing the effects
   (the screen's `MC|Beacon` / `update_beacon`; ghast-inventory does not build it) and using up
@@ -185,8 +190,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 - **Furnace** (1.16.5 also blast furnace and smoker): the fuel slot takes fuels and the bucket
   (one at a time); shift-click from the player part puts what the furnace smelts into the input
   slot, else fuel into the fuel slot, else moves it between main inventory and hotbar. Fuels
-  and (1.8 / 1.12) smelting inputs are the real client's (`src/furnace.rs`; 1.16.5 fuels with the
-  vanilla item tags); 1.16.5 smelting inputs are the server's recipes of the furnace's type
+  and (1.8 / 1.12) smelting inputs are the real client's (`src/furnace.rs`; 1.16.5 fuels from the
+  server's item tags); 1.16.5 smelting inputs are the server's recipes of the furnace's type
   (`declare_recipes`; open the window with `Inventory::on_open_window_v1_16_5` /
   `apply_v1_16_5` so blast furnaces and smokers are told apart). Burn and cook progress are
   window properties; smelting itself is the server's.
@@ -195,7 +200,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   (`beacon_payment_items`), the furnace fuels (`createFuelTimeMap`: its items and the wood,
   wool, banner, boat, carpet, ... tags minus `non_flammable_wood`) and llama carpets
   (`carpets`), so ghast does too (`Inventory::on_tags_v1_16_5`, through `apply_v1_16_5`);
-  before a `tags` packet the vanilla tags apply. Proven with a data pack's tags as well.
+  before a `tags` packet these rules are refused. Proven with a data pack's tags as well.
 - **1.16.5 workstations** keep the state their handler keeps on the client and run its
   `onContentChanged` / `updateResult` on every notification of the input inventory, as often as
   vanilla does (`Slot.setStack` notifies twice, `markDirty` and `onTakeItem` once each; a

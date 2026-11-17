@@ -439,6 +439,12 @@ pub trait ClientVersion: Version + sealed::Sealed {
         inv: &mut ghast_inventory::Inventory,
         raw: &RawPacket,
     ) -> Result<Option<ghast_inventory::Outgoing>, DecodeError>;
+    /// Packets the inventory reads only in its current state (an open merchant window: its
+    /// offers); the client adds them to the filter while this returns them.
+    fn inventory_packet_ids(inv: &ghast_inventory::Inventory) -> &'static [i32] {
+        let _ = inv;
+        &[]
+    }
     /// The inventory version.
     const INVENTORY: ghast_inventory::Version;
     /// Hands the wire layer's registry facts to the inventory (1.20.5+ hashed stacks).
@@ -593,6 +599,20 @@ pub(crate) fn teleport_target(pose: &mut Pose, t: &Teleport) -> (f32, f32) {
         yaw += pose.yaw;
     }
     (yaw, pitch)
+}
+
+/// Whether a 1.8 / 1.12 `custom_payload` body is on `channel` (its leading string), read
+/// without decoding (or allocating) the rest.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+pub(crate) fn payload_channel_is(body: &[u8], channel: &[u8]) -> bool {
+    let mut len = 0usize;
+    for (k, &b) in body.iter().take(5).enumerate() {
+        len |= usize::from(b & 0x7f) << (7 * k);
+        if b & 0x80 == 0 {
+            return body.get(k + 1..k + 1 + len) == Some(channel);
+        }
+    }
+    false
 }
 
 #[cfg(test)]

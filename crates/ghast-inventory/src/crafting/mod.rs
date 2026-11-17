@@ -818,6 +818,9 @@ pub struct RecipeBook {
     pub(crate) stonecutting: Arc<Vec<(Vec<i32>, Option<Stack>)>>,
     /// The smithing recipes (base item ids, addition item ids, result), in packet order.
     pub(crate) smithing: Arc<Vec<SmithingRecipe>>,
+    /// Built from the server's `declare_recipes` (the default book is not: what reads the
+    /// server's recipes is then unpredictable).
+    pub(crate) declared: bool,
 }
 
 impl RecipeBook {
@@ -910,7 +913,14 @@ impl RecipeBook {
             cooking: Arc::new(cooking),
             stonecutting: Arc::new(stonecutting),
             smithing: Arc::new(smithing),
+            declared: true,
         }
+    }
+
+    /// Whether the book holds the server's recipes (a 1.16.5 `declare_recipes`).
+    #[must_use]
+    pub fn is_declared(&self) -> bool {
+        self.declared
     }
 }
 

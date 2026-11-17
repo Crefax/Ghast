@@ -164,6 +164,10 @@ impl Sim<'_> {
 
     /// `SmithingScreenHandler.updateResult`.
     fn smithing_update(&mut self) {
+        if !self.book.declared {
+            self.m.container_result_known = false;
+            return;
+        }
         let book = &self.book.smithing;
         let (a, b) = (self.m.container[0].as_ref(), self.m.container[1].as_ref());
         let mut matches: Vec<usize> = (0..book.len())
@@ -189,6 +193,10 @@ impl Sim<'_> {
     /// `StonecutterScreenHandler.onContentChanged`: a new input item gets a new recipe list,
     /// no selection and an empty output.
     fn stonecutter_changed(&mut self) {
+        if !self.book.declared {
+            self.m.container_result_known = false;
+            return;
+        }
         let item = self.m.container[0].as_ref().map_or(0, |s| s.id);
         let v = self.v;
         let book = &self.book.stonecutting;
@@ -216,6 +224,10 @@ impl Sim<'_> {
 
     /// `StonecutterScreenHandler.populateResult`.
     pub(crate) fn stonecutter_populate(&mut self) {
+        if !self.book.declared {
+            self.m.container_result_known = false;
+            return;
+        }
         let book = &self.book.stonecutting;
         let Some(Station::Stonecutter {
             recipes, selected, ..
@@ -231,13 +243,19 @@ impl Sim<'_> {
     }
 
     /// Whether a stonecutting recipe takes the stack (the shift-click into the input).
-    pub(crate) fn stonecuttable(&self, s: &Stack) -> bool {
-        self.book.stonecutting.iter().any(|r| test(&r.0, Some(s)))
+    pub(crate) fn stonecuttable(&self, s: &Stack) -> R<bool> {
+        if !self.book.declared {
+            return Err(Unpredictable);
+        }
+        Ok(self.book.stonecutting.iter().any(|r| test(&r.0, Some(s))))
     }
 
     /// Whether a smithing recipe takes the stack as its addition (shift-click to slot 1).
-    pub(crate) fn smithing_addition(&self, s: &Stack) -> bool {
-        self.book.smithing.iter().any(|r| test(&r.1, Some(s)))
+    pub(crate) fn smithing_addition(&self, s: &Stack) -> R<bool> {
+        if !self.book.declared {
+            return Err(Unpredictable);
+        }
+        Ok(self.book.smithing.iter().any(|r| test(&r.1, Some(s))))
     }
 
     /// The result slot's `canTakeItems` (`Err`: taking it runs code ghast does not model: a
@@ -365,7 +383,7 @@ impl Sim<'_> {
                 2 => self.insert(st, 3, 39, true)?,
                 0 | 1 => self.insert(st, 3, 39, false)?,
                 _ => {
-                    let from = usize::from(self.smithing_addition(st));
+                    let from = usize::from(self.smithing_addition(st)?);
                     self.insert(st, from, 2, false)?
                 }
             }
@@ -373,7 +391,7 @@ impl Sim<'_> {
             match i {
                 1 => self.insert(st, 2, 38, true)?,
                 0 => self.insert(st, 2, 38, false)?,
-                _ if self.stonecuttable(st) => self.insert(st, 0, 1, false)?,
+                _ if self.stonecuttable(st)? => self.insert(st, 0, 1, false)?,
                 2..29 => self.insert(st, 29, 38, false)?,
                 29..38 => self.insert(st, 2, 29, false)?,
                 _ => false,

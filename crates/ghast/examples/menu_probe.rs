@@ -23,6 +23,10 @@
 //! ```
 //! `GHAST_MENU_RETURNS=1`: the screen gives its items back on close (enchanting table,
 //! workstations); the reopen then checks the screen is empty and no item was lost.
+//! `GHAST_MENU_RECIPES=0`: without `Interests::RECIPES` (1.16.5: the server's recipes and
+//! tags are not read; the furnace, smoker, stonecutter, smithing and beacon clicks that need
+//! them are then refused, not sent: the run fails with `refused: … unpredictable`,
+//! the expected outcome without the flag).
 //! `GHAST_MENU_LIVE=0,1`: container slots the server's own tick may change (a burning
 //! furnace); their changes are only printed. `GHAST_MENU_RESULT=N`: the result slot (its
 //! preview is not counted as an item).
@@ -113,6 +117,8 @@ fn trade_uses(ctx: &TickContext<'_>) -> Option<Vec<i32>> {
 
 struct Probe {
     block: Option<BlockPos>,
+    /// `Interests::RECIPES` (1.16.5 recipes and tags; `GHAST_MENU_RECIPES=0` turns it off).
+    recipes: bool,
     /// Aim height in the block (0..1; default the centre).
     aim_y: f64,
     sneak: bool,
@@ -332,7 +338,12 @@ impl Behavior for Probe {
 
     fn interests(&self) -> Interests {
         // Mount screens read the mount entity (its type and chest) from the tracker.
-        Interests::ENTITIES | Interests::CHAT
+        let i = Interests::ENTITIES | Interests::CHAT;
+        if self.recipes {
+            i | Interests::RECIPES
+        } else {
+            i
+        }
     }
 
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
@@ -567,6 +578,7 @@ fn main() {
         };
         let mut probe = Probe {
             block,
+            recipes: std::env::var("GHAST_MENU_RECIPES").map_or(true, |v| v != "0"),
             aim_y: std::env::var("GHAST_MENU_AIM_Y")
                 .ok()
                 .and_then(|v| v.parse().ok())

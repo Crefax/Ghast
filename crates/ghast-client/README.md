@@ -253,7 +253,15 @@ Core set: keep_alive, login, update_health, respawn, position, held_item_slot,
 game_state_change, open/close window, transaction, abilities, kick_disconnect, the world
 (`ghast_world::v1_*::PACKET_IDS`: chunks, block changes, explosion, world border; 1.8
 map_chunk_bulk; 1.16 unload_chunk, update_view_position / distance), entity_velocity (1.8 knockback),
-set_compression (1.8 play), combat_event (1.16 immediate respawn). `Interests::CHAT` adds chat.
+set_compression (1.8 play), combat_event (1.16 immediate respawn), experience (the anvil's
+level check). `Interests::CHAT` adds chat. Villager offers (1.8 / 1.12 `custom_payload`, of
+which only `MC|TrList` is decoded — the channel name is checked first; 1.16.5 `trade_list`) pass
+only while a merchant window is open: the filter is rebuilt right after the `open_window`, so
+the offers behind it in the same read are seen. `Interests::RECIPES` (1.16.5) adds
+`declare_recipes` and `tags`, which the inventory needs for crafting remainders, the furnace
+(shift-click, fuel slot), the beacon payment slot, llama carpets, the smithing table and the
+stonecutter; without it those clicks are refused (`ClickError::Unpredictable`), never guessed.
+The server sends them once at join, so set it from the start.
 `Interests::BLOCK_UPDATES` copies the block changes the world applies into
 `TickEvents::block_updates` (position, raw state; at most 4096 between two behaviour ticks,
 the rest counted in `block_updates_dropped`) — no extra packets, only the copy.

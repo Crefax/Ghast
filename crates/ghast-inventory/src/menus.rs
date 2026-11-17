@@ -196,7 +196,7 @@ impl Sim<'_> {
             return self.insert(st, 1, len, true);
         }
         if self.get(0).is_none()
-            && crate::tags16::beacon_payment(self.v, self.tags, st)
+            && crate::tags16::beacon_payment(self.v, self.tags, st)?
             && st.count == 1
         {
             return self.insert(st, 0, 1, false);
@@ -403,6 +403,7 @@ mod tests {
             for e in list.as_array().unwrap() {
                 want.insert(e[0].as_i64().unwrap() as i32, e[1].as_u64().unwrap() as u32);
             }
+            let vanilla = (v == Version::V1_16_5).then(|| crate::tags16::ItemTags16::vanilla(v));
             for id in 1..4096 {
                 if !v.known(id) {
                     continue;
@@ -412,7 +413,7 @@ mod tests {
                     let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
                     let got = match k {
                         0 => crate::mount::saddle_accepts(v, rules, &s, false).unwrap(),
-                        1 => crate::mount::armor_accepts(v, None, rules, &s).unwrap(),
+                        1 => crate::mount::armor_accepts(v, vanilla.as_ref(), rules, &s).unwrap(),
                         _ => true,
                     };
                     assert_eq!(got, w, "{c} slot {k} {id}:{d}");
@@ -420,7 +421,7 @@ mod tests {
                     if k < 2 {
                         let blind = match k {
                             0 => crate::mount::saddle_accepts(v, None, &s, false),
-                            _ => crate::mount::armor_accepts(v, None, None, &s),
+                            _ => crate::mount::armor_accepts(v, vanilla.as_ref(), None, &s),
                         };
                         assert!(
                             blind.map_or(true, |b| b == w),

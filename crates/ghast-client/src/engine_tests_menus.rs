@@ -356,6 +356,43 @@ fn beacon_legacy() {
             (1, Stack::new(ingot, 1, 0)),
         ],
     );
+    // the payment slot reads the server's `beacon_payment_items` tag: refused until it is sent
+    let pay = Click::QuickMove {
+        slot: 28,
+        right: false,
+    };
+    assert!(matches!(
+        try_click(&mut e, pay),
+        Err(ClickRefused::Inventory(
+            ghast_inventory::ClickError::Unpredictable
+        ))
+    ));
+    {
+        use ghast_protocol::v1_16_5::{play::clientbound as cb, types::Tags};
+        let tags = RawPacket::from_packet(&cb::Tags {
+            block_tags: Vec::new(),
+            item_tags: vec![Tags {
+                tag_name: "minecraft:beacon_payment_items".into(),
+                entries: [
+                    "netherite_ingot",
+                    "emerald",
+                    "diamond",
+                    "gold_ingot",
+                    "iron_ingot",
+                ]
+                .map(id16)
+                .to_vec(),
+            }],
+            fluid_tags: Vec::new(),
+            entity_tags: Vec::new(),
+        })
+        .unwrap();
+        assert!(
+            V1_16_5::inventory_packet(e.inventory_mut(), &tags)
+                .unwrap()
+                .is_none()
+        );
+    }
     e.inventory_mut()
         .on_set_slot(7, 0, Some(Stack::new(ingot, 4, 0)));
     assert_eq!(e.core.inv.slot(0).map(Stack::count), Some(1));
@@ -605,24 +642,78 @@ fn mount_screens_legacy() {
     assert_eq!(e.core.inv.slot(1).map(Stack::id), Some(171));
 }
 
-/// The play filters pass what the inventory reads beyond the window packets (villager offers,
-/// 1.16.5 recipes): a filtered packet never reaches `inventory_packet`.
+/// The play filters keep a windowless bot's cost: villager offers pass only while a merchant
+/// window is open, 1.16.5 recipes and tags only with `Interests::RECIPES`.
 #[test]
-fn filters_pass_inventory_extras() {
+fn filters_gate_inventory_extras() {
     use crate::Interests;
-    assert!(
-        V1_8::play_filter(Interests::NONE)
-            .contains(ghast_protocol::v1_8::play::clientbound::id::CUSTOM_PAYLOAD)
-    );
-    assert!(
-        V1_12_2::play_filter(Interests::NONE)
-            .contains(ghast_protocol::v1_12_2::play::clientbound::id::CUSTOM_PAYLOAD)
-    );
-    let f = V1_16_5::play_filter(Interests::NONE);
-    use ghast_protocol::v1_16_5::play::clientbound::id;
-    assert!(f.contains(id::TRADE_LIST));
-    assert!(f.contains(id::DECLARE_RECIPES));
-    assert!(f.contains(id::TAGS));
+    use ghast_inventory::{Inventory, Version, WindowKind};
+    fn merchant(v: Version) -> Inventory {
+        let mut inv = Inventory::new(v).unwrap();
+        inv.on_open_window(3, Some(WindowKind::Merchant), "{}".into());
+        inv
+    }
+    fn chest(v: Version) -> Inventory {
+        let mut inv = Inventory::new(v).unwrap();
+        inv.on_open_window(3, Some(WindowKind::Chest { rows: 3 }), "{}".into());
+        inv
+    }
+    {
+        use ghast_protocol::v1_8::play::clientbound::id;
+        let f = V1_8::play_filter(Interests::NONE);
+        assert!(!f.contains(id::CUSTOM_PAYLOAD));
+        assert!(V1_8::inventory_packet_ids(&Inventory::new(Version::V1_8).unwrap()).is_empty());
+        assert!(V1_8::inventory_packet_ids(&chest(Version::V1_8)).is_empty());
+        assert_eq!(
+            V1_8::inventory_packet_ids(&merchant(Version::V1_8)),
+            [id::CUSTOM_PAYLOAD]
+        );
+    }
+    {
+        use ghast_protocol::v1_12_2::play::clientbound::id;
+        let f = V1_12_2::play_filter(Interests::NONE);
+        assert!(!f.contains(id::CUSTOM_PAYLOAD));
+        assert!(V1_12_2::inventory_packet_ids(&chest(Version::V1_12)).is_empty());
+        assert_eq!(
+            V1_12_2::inventory_packet_ids(&merchant(Version::V1_12)),
+            [id::CUSTOM_PAYLOAD]
+        );
+    }
+    {
+        use ghast_protocol::v1_16_5::play::clientbound::id;
+        let f = V1_16_5::play_filter(Interests::NONE);
+        for i in [id::TRADE_LIST, id::DECLARE_RECIPES, id::TAGS] {
+            assert!(!f.contains(i), "{i:#x}");
+        }
+        let f = V1_16_5::play_filter(Interests::RECIPES);
+        assert!(f.contains(id::DECLARE_RECIPES) && f.contains(id::TAGS));
+        assert!(!f.contains(id::TRADE_LIST));
+        assert!(V1_16_5::inventory_packet_ids(&chest(Version::V1_16_5)).is_empty());
+        assert_eq!(
+            V1_16_5::inventory_packet_ids(&merchant(Version::V1_16_5)),
+            [id::TRADE_LIST]
+        );
+    }
+}
+
+/// A 1.8 / 1.12 plugin message on another channel is skipped before its body is decoded.
+#[test]
+fn custom_payload_channel_peek() {
+    use crate::version::payload_channel_is;
+    assert!(payload_channel_is(b"\x09MC|TrList\x00\x01", b"MC|TrList"));
+    assert!(!payload_channel_is(b"\x08MC|Brand\x05hello", b"MC|TrList"));
+    assert!(!payload_channel_is(b"\x09MC|TrLis", b"MC|TrList"));
+    assert!(!payload_channel_is(b"", b"MC|TrList"));
+    assert!(!payload_channel_is(b"\xff\xff\xff\xff\xff", b"MC|TrList"));
+    // the inventory never sees another channel
+    use ghast_protocol::v1_8::play::clientbound as cb;
+    let mut inv = ghast_inventory::Inventory::new(ghast_inventory::Version::V1_8).unwrap();
+    let other = RawPacket::from_packet(&cb::CustomPayload {
+        channel: "MC|Brand".into(),
+        data: bytes::Bytes::from_static(b"\x05vanil"),
+    })
+    .unwrap();
+    assert!(V1_8::inventory_packet(&mut inv, &other).unwrap().is_none());
 }
 
 /// 1.16.5 workstations through the engine: the lectern's take-book button and a loom pattern

@@ -38,6 +38,9 @@ trait Fake: ClientVersion {
     /// A 27-slot chest window.
     fn open_chest(window_id: u8) -> RawPacket;
     fn close_window(window_id: u8) -> RawPacket;
+    /// A villager's window and its one offer (`MC|TrList` / `trade_list`).
+    fn open_merchant(window_id: u8) -> RawPacket;
+    fn merchant_offers(window_id: u8) -> RawPacket;
     /// A stone block.
     fn stone(x: i32, y: i32, z: i32) -> RawPacket;
     /// An experience orb (a simple entity spawn).
@@ -49,6 +52,24 @@ trait Fake: ClientVersion {
     fn sb_play_name(raw: &RawPacket) -> &'static str;
     fn handshake_protocol(raw: &RawPacket) -> i32;
     fn login_start_name(raw: &RawPacket) -> String;
+}
+
+/// A 1.8 / 1.12 `MC|TrList` body: one offer (one stone for one dirt).
+fn legacy_trade_list(window_id: u8) -> Bytes {
+    let mut b = BytesMut::new();
+    b.put_i32(i32::from(window_id));
+    b.put_u8(1);
+    for id in [1i16, 3] {
+        b.put_i16(id);
+        b.put_u8(1);
+        b.put_i16(0);
+        b.put_u8(0); // no NBT
+    }
+    b.put_u8(0); // no second payment
+    b.put_u8(0); // not disabled
+    b.put_i32(0);
+    b.put_i32(7);
+    b.freeze()
 }
 
 fn raw<P: ghast_protocol::Packet>(p: &P) -> RawPacket {
@@ -150,6 +171,21 @@ impl Fake for V1_8 {
             window_title: ByteString::from(r#"{"text":"Vault"}"#),
             slot_count: 27,
             entity_id: None,
+        })
+    }
+    fn open_merchant(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::OpenWindow {
+            window_id,
+            inventory_type: ByteString::from("minecraft:villager"),
+            window_title: ByteString::from(r#"{"text":"Villager"}"#),
+            slot_count: 3,
+            entity_id: None,
+        })
+    }
+    fn merchant_offers(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_8::play::clientbound::CustomPayload {
+            channel: "MC|TrList".into(),
+            data: legacy_trade_list(window_id),
         })
     }
     fn close_window(window_id: u8) -> RawPacket {
@@ -307,6 +343,21 @@ impl Fake for V1_12_2 {
             entity_id: None,
         })
     }
+    fn open_merchant(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::OpenWindow {
+            window_id,
+            inventory_type: ByteString::from("minecraft:villager"),
+            window_title: ByteString::from(r#"{"text":"Villager"}"#),
+            slot_count: 3,
+            entity_id: None,
+        })
+    }
+    fn merchant_offers(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_12_2::play::clientbound::CustomPayload {
+            channel: "MC|TrList".into(),
+            data: legacy_trade_list(window_id),
+        })
+    }
     fn close_window(window_id: u8) -> RawPacket {
         raw(&ghast_protocol::v1_12_2::play::clientbound::CloseWindow { window_id })
     }
@@ -462,6 +513,37 @@ impl Fake for V1_16_5 {
             window_id: i32::from(window_id),
             inventory_type: 2, // generic_9x3
             window_title: ByteString::from(r#"{"text":"Vault"}"#),
+        })
+    }
+    fn open_merchant(window_id: u8) -> RawPacket {
+        raw(&ghast_protocol::v1_16_5::play::clientbound::OpenWindow {
+            window_id: i32::from(window_id),
+            inventory_type: 18, // merchant
+            window_title: ByteString::from(r#"{"text":"Villager"}"#),
+        })
+    }
+    fn merchant_offers(window_id: u8) -> RawPacket {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        let slot =
+            |id: i32| ghast_inventory::to_modern_slot(Some(&ghast_inventory::Stack::new(id, 1, 0)));
+        raw(&cb::TradeList {
+            window_id: i32::from(window_id),
+            trades: vec![cb::TradeListTrades {
+                input_item1: slot(1),
+                output_item: slot(9),
+                input_item2: None,
+                trade_disabled: false,
+                nb_trade_uses: 0,
+                maximum_nb_trade_uses: 7,
+                xp: 1,
+                special_price: 0,
+                price_multiplier: 0.05,
+                demand: 0,
+            }],
+            villager_level: 1,
+            experience: 0,
+            is_regular_villager: true,
+            can_restock: true,
         })
     }
     fn close_window(window_id: u8) -> RawPacket {
@@ -1654,3 +1736,42 @@ async fn v1_12_2_glide_starts_on_the_servers_immediate_answer() {
         b.gliding_at
     );
 }
+
+/// A villager's offers pass the filter only while its window is open: the client adds them
+/// when `open_window` arrives and the offers right behind it in the same read are decoded.
+async fn merchant_offers_follow_the_window<V: Fake>(v: GameVersion) {
+    struct Trader;
+    impl Behavior for Trader {
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            if ctx.inventory().trade_offers().is_some_and(|o| o.len() == 1) {
+                ctx.disconnect("offers");
+            }
+        }
+    }
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V>("Tester", 128).await;
+        spawn::<V>(&mut c).await;
+        c.until::<V>("position_look").await;
+        // offers without a window: dropped by the filter
+        c.send(&V::merchant_offers(3)).await;
+        // the window and its offers in one write
+        c.enc.write_raw(&V::open_merchant(3)).unwrap();
+        c.enc.write_raw(&V::merchant_offers(3)).unwrap();
+        c.flush().await;
+        let r = tokio::time::timeout(Duration::from_secs(5), async {
+            while c.recv().await.is_some() {}
+        })
+        .await;
+        assert!(r.is_ok(), "the client never saw the offers");
+    };
+    let cl = client(addr, v, "Tester");
+    let mut b = Trader;
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Quit(_))), "{end:?}");
+}
+both!(
+    merchant_offers_follow_the_window,
+    merchant_offers_follow_the_window
+);

@@ -129,8 +129,6 @@ impl ClientVersion for V1_12_2 {
             .with(cb::id::WINDOW_ITEMS)
             .with(cb::id::SET_SLOT)
             .with(cb::id::CRAFT_PROGRESS_BAR)
-            // the villager offers (`MC|TrList`; the inventory reads them)
-            .with(cb::id::CUSTOM_PAYLOAD)
             .with(cb::id::ABILITIES)
             .with(cb::id::EXPERIENCE)
             .with(cb::id::KICK_DISCONNECT)
@@ -343,6 +341,17 @@ impl ClientVersion for V1_12_2 {
             .flatten()
     }
 
+    fn inventory_packet_ids(inv: &ghast_inventory::Inventory) -> &'static [i32] {
+        // the villager offers (`MC|TrList`), sent right after the merchant's `open_window`
+        if inv.window().map(ghast_inventory::Window::kind)
+            == Some(ghast_inventory::WindowKind::Merchant)
+        {
+            &[cb::id::CUSTOM_PAYLOAD]
+        } else {
+            &[]
+        }
+    }
+
     fn inventory_packet(
         inv: &mut ghast_inventory::Inventory,
         raw: &RawPacket,
@@ -359,8 +368,12 @@ impl ClientVersion for V1_12_2 {
             cb::id::TRANSACTION => P::Transaction(raw.decode_as()?),
             cb::id::HELD_ITEM_SLOT => P::HeldItemSlot(raw.decode_as()?),
             cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
-            // the villager offers (`MC|TrList`)
-            cb::id::CUSTOM_PAYLOAD => P::CustomPayload(raw.decode_as()?),
+            // the villager offers (`MC|TrList`; the filter passes them only while a merchant
+            // window is open): every other channel is skipped undecoded
+            cb::id::CUSTOM_PAYLOAD if super::payload_channel_is(&raw.body, b"MC|TrList") => {
+                P::CustomPayload(raw.decode_as()?)
+            }
+            cb::id::CUSTOM_PAYLOAD => return Ok(None),
             // the anvil's level check: the level and creative mode
             cb::id::EXPERIENCE => P::Experience(raw.decode_as()?),
             cb::id::ABILITIES => P::Abilities(raw.decode_as()?),

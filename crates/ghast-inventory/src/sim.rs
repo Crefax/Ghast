@@ -580,9 +580,9 @@ impl Sim<'_> {
             SlotKind::MountSaddle => return self.mount_saddle_accepts(s),
             SlotKind::MountArmor => return self.mount_armor_accepts(s),
             SlotKind::FurnaceFuel => {
-                crate::tags16::fuel(self.v, self.tags, s) || self.v.is_bucket(s)
+                crate::tags16::fuel(self.v, self.tags, s)? || self.v.is_bucket(s)
             }
-            SlotKind::BeaconPayment => crate::tags16::beacon_payment(self.v, self.tags, s),
+            SlotKind::BeaconPayment => crate::tags16::beacon_payment(self.v, self.tags, s)?,
             SlotKind::Special => return Err(Unpredictable),
         })
     }
@@ -606,11 +606,14 @@ impl Sim<'_> {
 
     /// A furnace's `isSmeltable`: 1.8 / 1.12 the client's smelting table, 1.16.5 the server's
     /// recipes of the furnace's type.
-    fn smeltable(&self, s: &Stack) -> bool {
+    fn smeltable(&self, s: &Stack) -> R<bool> {
         if self.v == Version::V1_16_5 {
-            return self.book.cooks(self.m.furnace, s.id);
+            if !self.book.declared {
+                return Err(Unpredictable);
+            }
+            return Ok(self.book.cooks(self.m.furnace, s.id));
         }
-        self.v.is_smeltable_legacy(s)
+        Ok(self.v.is_smeltable_legacy(s))
     }
 
     /// `Slot.canTakeItems` (reads the slot, so an unknown crafting result is unpredictable).
@@ -1246,8 +1249,8 @@ impl Sim<'_> {
                             0 | 1 => self.insert(&mut st, 3, 39, false)?,
                             // smelting recipes and fuel (26.x: its own simulation)
                             _ if !crate::menus::modelled(v, kind) => return Err(Unpredictable),
-                            _ if self.smeltable(&st) => self.insert(&mut st, 0, 1, false)?,
-                            _ if crate::tags16::fuel(v, self.tags, &st) => {
+                            _ if self.smeltable(&st)? => self.insert(&mut st, 0, 1, false)?,
+                            _ if crate::tags16::fuel(v, self.tags, &st)? => {
                                 self.insert(&mut st, 1, 2, false)?
                             }
                             3..30 => self.insert(&mut st, 30, 39, false)?,

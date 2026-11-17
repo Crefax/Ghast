@@ -1,10 +1,12 @@
 //! 1.16.5 item tags from the server (`tags`): the slot rules that read them on the client
-//! (beacon payment, furnace fuel, llama carpets) follow the server's data pack. Before any
-//! `tags` packet the vanilla tags apply (what a vanilla server sends).
+//! (beacon payment, furnace fuel, llama carpets) follow the server's data pack. Without a
+//! `tags` packet (not read: ghast-client's `Interests::RECIPES` is off) those rules are
+//! unpredictable on 1.16.5; 1.8 / 1.12 clients have them built in.
 
 #![cfg_attr(not(feature = "v1_16_5"), allow(dead_code))]
 
 use crate::rules::Version;
+use crate::sim::{R, Unpredictable};
 use crate::stack::Stack;
 
 /// `AbstractFurnaceBlockEntity.createFuelTimeMap`'s single items (1.16.5).
@@ -118,6 +120,19 @@ impl ItemTags16 {
         }
     }
 
+    /// The vanilla data pack's sets (the built-in tables), for tests.
+    #[cfg(test)]
+    pub(crate) fn vanilla(v: Version) -> ItemTags16 {
+        let ids = |f: &dyn Fn(&Stack) -> bool| -> Vec<i32> {
+            (1..2000).filter(|&i| f(&Stack::new(i, 1, 0))).collect()
+        };
+        ItemTags16 {
+            beacon_payment: ids(&|s| v.beacon_payment(s)),
+            carpets: ids(&|s| v.is_carpet(s)),
+            fuels: ids(&|s| v.is_fuel(s)),
+        }
+    }
+
     pub(crate) fn beacon_payment(&self, s: &Stack) -> bool {
         self.beacon_payment.binary_search(&s.id).is_ok()
     }
@@ -131,27 +146,30 @@ impl ItemTags16 {
     }
 }
 
-/// The rules with the server's tags when it sent them (1.16.5), else the vanilla tables.
-pub(crate) fn beacon_payment(v: Version, t: Option<&ItemTags16>, s: &Stack) -> bool {
+/// The rule with the server's tags (1.16.5: `Err` without them), else the built-in tables.
+pub(crate) fn beacon_payment(v: Version, t: Option<&ItemTags16>, s: &Stack) -> R<bool> {
     match t {
-        Some(t) if v == Version::V1_16_5 => t.beacon_payment(s),
-        _ => v.beacon_payment(s),
+        _ if v != Version::V1_16_5 => Ok(v.beacon_payment(s)),
+        Some(t) => Ok(t.beacon_payment(s)),
+        None => Err(Unpredictable),
     }
 }
 
 /// See [`beacon_payment`].
-pub(crate) fn fuel(v: Version, t: Option<&ItemTags16>, s: &Stack) -> bool {
+pub(crate) fn fuel(v: Version, t: Option<&ItemTags16>, s: &Stack) -> R<bool> {
     match t {
-        Some(t) if v == Version::V1_16_5 => t.fuel(s),
-        _ => v.is_fuel(s),
+        _ if v != Version::V1_16_5 => Ok(v.is_fuel(s)),
+        Some(t) => Ok(t.fuel(s)),
+        None => Err(Unpredictable),
     }
 }
 
 /// See [`beacon_payment`].
-pub(crate) fn carpet(v: Version, t: Option<&ItemTags16>, s: &Stack) -> bool {
+pub(crate) fn carpet(v: Version, t: Option<&ItemTags16>, s: &Stack) -> R<bool> {
     match t {
-        Some(t) if v == Version::V1_16_5 => t.carpet(s),
-        _ => v.is_carpet(s),
+        _ if v != Version::V1_16_5 => Ok(v.is_carpet(s)),
+        Some(t) => Ok(t.carpet(s)),
+        None => Err(Unpredictable),
     }
 }
 

@@ -1699,7 +1699,7 @@ impl Inventory {
     }
 
     /// 1.16.5 `tags`: the item tags the beacon, furnace and llama slots read (the client uses
-    /// the server's; until they arrive ghast uses the vanilla ones). [`Inventory::apply_v1_16_5`]
+    /// the server's; until they arrive those rules are refused as unpredictable). [`Inventory::apply_v1_16_5`]
     /// calls this.
     #[cfg(feature = "v1_16_5")]
     pub fn on_tags_v1_16_5(&mut self, p: &ghast_protocol::v1_16_5::play::clientbound::Tags) {
@@ -2691,8 +2691,9 @@ impl Inventory {
         &self.book
     }
 
-    /// 1.16.5 `declare_recipes`: replaces the client's crafting recipes (used for the remainders
-    /// of a taken crafting result).
+    /// 1.16.5 `declare_recipes`: replaces the client's recipes (the remainders of a taken
+    /// crafting result, a furnace's shift-click, the smithing table, the stonecutter; until a
+    /// declared book arrives those are refused as unpredictable).
     pub fn on_declare_recipes(&mut self, book: RecipeBook) {
         self.book = book;
     }

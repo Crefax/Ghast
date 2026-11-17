@@ -100,7 +100,7 @@ pub(crate) fn armor_accepts(
     s: &Stack,
 ) -> R<bool> {
     let horse = v.is_horse_armor(s);
-    let carpet = crate::tags16::carpet(v, tags, s);
+    let carpet = crate::tags16::carpet(v, tags, s)?;
     if !horse && !carpet {
         return Ok(false);
     }
