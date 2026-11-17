@@ -305,61 +305,6 @@ fn try_click(e: &mut Engine<Box<dyn Sim>>, click: Click) -> Result<(), ClickRefu
     r.unwrap()
 }
 
-/// 1.8.9 anvil: an input click is predicted; the output the client computes is unknown to ghast
-/// (refused) until the server's `set_slot`, and taking it (level cost) is always refused.
-#[test]
-fn anvil_1_8_9() {
-    let mut e = opened::<V1_8>(
-        GameVersion::V1_8_9,
-        &open_1_8(8, "minecraft:anvil", 0),
-        8,
-        vec![None, None, None],
-        &[(0, Stack::new(276, 1, 30)), (1, Stack::new(264, 3, 0))],
-    );
-    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::AnvilOutput));
-    // hotbar k is screen slot 3 + 27 + k
-    try_click(
-        &mut e,
-        Click::QuickMove {
-            slot: 30,
-            right: false,
-        },
-    )
-    .unwrap();
-    assert_eq!(e.core.inv.slot(0).map(Stack::id), Some(276));
-    assert!(!e.core.inv.result_known());
-    let _ = e.inventory_mut().on_transaction(8, 1, true);
-    let pick = Click::Pickup {
-        slot: 2,
-        right: false,
-    };
-    let refused = try_click(&mut e, pick);
-    assert!(
-        matches!(
-            refused,
-            Err(ClickRefused::Inventory(
-                ghast_inventory::ClickError::Unpredictable
-            ))
-        ),
-        "{refused:?}"
-    );
-    // the server's output
-    e.inventory_mut()
-        .on_set_slot(8, 2, Some(Stack::new(276, 1, 0)));
-    assert!(e.core.inv.result_known());
-    assert!(try_click(&mut e, pick).is_err());
-    // the second input still takes the diamonds
-    try_click(
-        &mut e,
-        Click::QuickMove {
-            slot: 31,
-            right: false,
-        },
-    )
-    .unwrap();
-    assert_eq!(e.core.inv.slot(1).map(Stack::count), Some(3));
-}
-
 /// Shift-clicks hotbar 0 (a stack of payment items) and hotbar 1 (a single one) in an open
 /// beacon; returns the payment slot and hotbar 0's new screen slot content afterwards.
 fn beacon_two(mut e: Engine<Box<dyn Sim>>, window: i8) -> Option<Stack> {
@@ -807,6 +752,58 @@ fn anvil_1_12_2() {
     let mut e = opened::<V1_12_2>(
         GameVersion::V1_12_2,
         &open_1_12(5, "minecraft:anvil", 0),
+        5,
+        vec![None, None, None],
+        &[(0, Stack::new(276, 1, 1200)), (1, Stack::new(276, 1, 1300))],
+    );
+    e.inventory_mut().set_experience_level(5);
+    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::MenuResult));
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 30,
+            right: false,
+        },
+    );
+    assert!(
+        matches!(
+            out.first(),
+            Some(Outbound::Inventory(ghast_inventory::Outgoing::RenameItem(n))) if n.is_empty()
+        ),
+        "{out:?}"
+    );
+    let _ = e.inventory_mut().on_transaction(5, 1, true);
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 31,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    let _ = e.inventory_mut().on_transaction(5, 2, true);
+    assert_eq!(e.core.inv.anvil_cost(), Some(2));
+    assert_eq!(
+        e.core.inv.slot(2).map(Stack::damage),
+        Some(1200 - 261 - 187 - 4 + 4)
+    );
+    let out = click_once(
+        &mut e,
+        Click::Pickup {
+            slot: 2,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.experience_level(), 3);
+}
+
+/// The 1.8.9 anvil: combining two swords (its cost rules), `MC|ItemName` before the click.
+#[test]
+fn anvil_1_8_9() {
+    let mut e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_1_8(5, "minecraft:anvil", 0),
         5,
         vec![None, None, None],
         &[(0, Stack::new(276, 1, 1200)), (1, Stack::new(276, 1, 1300))],

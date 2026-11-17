@@ -59,7 +59,7 @@ impl ClickPacket {
 }
 
 /// `PacketByteBuf.writeString`: a VarInt byte length, then the UTF-8 bytes.
-#[cfg(feature = "v1_12")]
+#[cfg(any(feature = "v1_8", feature = "v1_12"))]
 fn mc_string(s: &str) -> bytes::Bytes {
     let mut out = Vec::with_capacity(s.len() + 5);
     let mut n = s.len() as u32;
@@ -106,10 +106,16 @@ impl Outgoing {
                     data: bytes::Bytes::copy_from_slice(&i.to_be_bytes()),
                 })
             }
-            Outgoing::ContainerClick(_)
-            | Outgoing::Creative(_)
-            | Outgoing::RenameItem(_)
-            | Outgoing::ButtonClick { .. } => return None,
+            // the anvil screen's name field: `MC|ItemName` with the name as a string
+            Outgoing::RenameItem(n) => {
+                sb8::ServerboundPlayPacket::CustomPayload(sb8::CustomPayload {
+                    channel: "MC|ItemName".into(),
+                    data: mc_string(n),
+                })
+            }
+            Outgoing::ContainerClick(_) | Outgoing::Creative(_) | Outgoing::ButtonClick { .. } => {
+                return None;
+            }
         })
     }
 
@@ -220,6 +226,9 @@ impl Inventory {
                 self.on_window_property(i32::from(c.window_id), c.property, c.value);
             }
             P::CustomPayload(c) if c.channel == "MC|TrList" => self.on_trade_list_legacy(&c.data),
+            // the anvil's level check
+            P::Experience(x) => self.set_experience_level(x.level),
+            P::Abilities(a) => self.set_creative(a.flags & 0x08 != 0),
             _ => {}
         }
         None

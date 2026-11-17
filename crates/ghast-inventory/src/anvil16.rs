@@ -545,7 +545,7 @@ impl Sim<'_> {
 
     /// `AnvilScreenHandler.updateResult`, then (when it syncs) the screen's slot-0 listener.
     pub(crate) fn anvil_update(&mut self) {
-        if self.v == Version::V1_12 {
+        if matches!(self.v, Version::V1_12 | Version::V1_8) {
             return self.anvil12_update();
         }
         let mut st = self.anvil_state();
@@ -577,7 +577,7 @@ impl Sim<'_> {
     /// `sendContentUpdates` as the anvil screen sees it: slot 0 differs from the tracked copy
     /// → the name field gets the item's name → `onRenamed`.
     pub(crate) fn anvil_sync(&mut self) {
-        if self.v == Version::V1_12 {
+        if matches!(self.v, Version::V1_12 | Version::V1_8) {
             return self.anvil12_sync();
         }
         let mut st = self.anvil_state();
@@ -616,7 +616,7 @@ impl Sim<'_> {
 
     /// `setNewItemName` + `rename_item`.
     pub(crate) fn anvil_set_name(&mut self, name: String) {
-        if self.v == Version::V1_12 {
+        if matches!(self.v, Version::V1_12 | Version::V1_8) {
             return self.anvil12_set_name(name);
         }
         let mut st = self.anvil_state();

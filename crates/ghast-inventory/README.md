@@ -101,7 +101,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 |---|---|---|---|
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
-| anvil (inputs `Normal`, output `SlotKind::AnvilOutput`; 1.12.2 / 1.16.5 `MenuResult`) | inputs; output refused | yes | yes |
+| anvil (inputs `Normal`, output `SlotKind::MenuResult`) | yes (output computed) | yes | yes |
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 | horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
@@ -140,13 +140,11 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   on every change of its field (also an empty one) and when the first input changes (the
   field takes `getCustomName()` cut to 35 characters). An item with a `LocName` is refused
   (its name is translated on the client); item names are taken as at most 35 characters.
-- **Anvil** (1.8.9): the two inputs are plain slots (shift-click: player part into both inputs, inputs to
-  the player part). The client computes the output itself on every input change (repair,
-  enchantment combining, renaming, the level cost); ghast does not model that computation yet:
-  after an input change the output is unknown (`result_known()` false; an empty first input
-  empties it) until the server's `set_slot`, and any click that reads it is refused, as is taking
-  it (that needs the level cost and the player's level). Not sent either: the client's
-  `MC|ItemName` / `rename_item` that the anvil screen sends on every first-input change.
+- **1.8.9 anvil**: the 1.12.2 model (`src/anvil12.rs`) with the 1.8 rules read off its jar:
+  the enchantment cost comes from the enchantment's weight, a stack of several items and an
+  all-clashing book still give a result, the prior work penalty doubles on every use, and the
+  field takes 30 characters (`MC|ItemName`; `Inventory::anvil_rename`). Its result's tag is
+  written in Java `HashMap` order like the 1.8 client's.
 - **Beacon**: the payment slot takes emerald, diamond, iron and gold ingot (1.16.5: the vanilla
   `beacon_payment_items` tag, which adds the netherite ingot; ghast does not read the server's
   tags), one item; shift-click moves a single payment item into an empty payment slot and

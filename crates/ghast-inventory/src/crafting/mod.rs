@@ -531,7 +531,7 @@ fn java_hash(s: &str) -> i32 {
 /// Reorders every compound into `java.util.HashMap` iteration order: by bucket
 /// (`(h ^ h >>> 16) & (capacity - 1)`, capacity 16 doubling past a 0.75 load), insertion order
 /// within a bucket.
-fn java_order(t: &mut Tag) {
+pub(crate) fn java_order(t: &mut Tag) {
     match t {
         Tag::Compound(c) => {
             for (_, v) in &mut c.0 {

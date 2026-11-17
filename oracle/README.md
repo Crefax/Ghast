@@ -1898,6 +1898,15 @@ harness (the client screens are not opened; the handler is put into `openScreenH
 `currentScreenHandler` directly). `selftest` also reruns 500 click cases in reverse order on the
 same player (no state leaks between cases).
 
+Anvil menus (1.8.9, 1.12.2, 1.16.5): the anvil's facts line adds what `updateResult` reads (every
+enchantment's max level, weight / rarity, the ids it does not combine with, the item id × damage
+bits it accepts; every damageable item's repair materials). Each case sets a random level and
+creative flag, and the client's `AnvilScreen` listener is faked without rendering: on a first-input
+update it sets the name field to the item's name (1.8.9 / 1.12.2: cut to the field's 30 / 35 characters),
+makes it editable and sends the rename (`MC|ItemName` / `rename_item`, "" when the text is the
+item's own name) through the handler; some steps type into the field (`{"rename"}` steps). Each
+state carries `"renames"` (the packets sent in that step), `"level"` and `"cost"`.
+
 ## Window clicks (26.1): `clicks_seed1.jsonl.gz`
 
 `ClickDump` (`MC=26.1 oracle/run.sh clicks [--seed N] [--count N] [--out FILE] [--best true]`, in

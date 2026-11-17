@@ -255,7 +255,10 @@ impl Layout {
                         }
                         // 1.16.5: the anvil's output is computed like the client
                         SlotKind::AnvilOutput
-                            if matches!(self.v, Version::V1_16_5 | Version::V1_12) =>
+                            if matches!(
+                                self.v,
+                                Version::V1_16_5 | Version::V1_12 | Version::V1_8
+                            ) =>
                         {
                             SlotKind::MenuResult
                         }
@@ -510,7 +513,7 @@ impl Sim<'_> {
             self.station_touched(l);
         }
         if self.lay.screen == Screen::Container(WindowKind::Anvil)
-            && !matches!(self.v, Version::V1_16_5 | Version::V1_12)
+            && !matches!(self.v, Version::V1_16_5 | Version::V1_12 | Version::V1_8)
             && matches!(l, Loc::Container(0 | 1))
             && self.m.container.len() == 3
         {
@@ -1264,7 +1267,9 @@ impl Sim<'_> {
                             }
                         }
                     }
-                    WindowKind::Anvil if matches!(v, Version::V1_16_5 | Version::V1_12) => {
+                    WindowKind::Anvil
+                        if matches!(v, Version::V1_16_5 | Version::V1_12 | Version::V1_8) =>
+                    {
                         let ok = match i {
                             2 => self.insert(&mut st, 3, 39, true)?,
                             0 | 1 => self.insert(&mut st, 3, 39, false)?,

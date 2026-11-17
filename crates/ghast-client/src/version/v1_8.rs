@@ -100,6 +100,7 @@ impl ClientVersion for V1_8 {
             // the villager offers (`MC|TrList`; the inventory reads them)
             .with(cb::id::CUSTOM_PAYLOAD)
             .with(cb::id::ABILITIES)
+            .with(cb::id::EXPERIENCE)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::SET_COMPRESSION)
             // Knockback. Every entity's velocity passes the filter (it is per packet id) but
@@ -318,6 +319,9 @@ impl ClientVersion for V1_8 {
             cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
             // the villager offers (`MC|TrList`)
             cb::id::CUSTOM_PAYLOAD => P::CustomPayload(raw.decode_as()?),
+            // the anvil's level check: the level and creative mode
+            cb::id::EXPERIENCE => P::Experience(raw.decode_as()?),
+            cb::id::ABILITIES => P::Abilities(raw.decode_as()?),
             _ => return Ok(None),
         };
         Ok(inv.apply_v1_8(&p))

@@ -874,9 +874,9 @@ impl Inventory {
     /// server sends each new result as `set_slot`. The 1.12 client never computes results: the
     /// slot always holds what the server last sent (taking a result whose grid changed since is
     /// refused, its remainders depend on the recipes). While unknown, result clicks are
-    /// [`ClickError::Unpredictable`]. 1.8 – 1.16.5 anvil: whether its output is known (the
-    /// client computes it from the inputs, ghast does not: unknown after an input change until
-    /// the server's `set_slot`; empty, and known, when the first input is empty).
+    /// [`ClickError::Unpredictable`]. 1.8 – 1.16.5 anvil and grindstone: whether ghast could
+    /// compute the output like the client (false for inputs it cannot read, until the server's
+    /// `set_slot`).
     #[must_use]
     pub fn result_known(&self) -> bool {
         match &self.screen {
@@ -1538,9 +1538,9 @@ impl Inventory {
     }
 
     /// Anvil: types `name` into the name field like the screen (1.16.5: `onRenamed`; 26.x: as
-    /// [`Inventory::anvil_rename_modern`]). Returns the `rename_item` to send (`Ok(None)`:
-    /// nothing is sent: an empty name, or no first input). The field takes at most 35
-    /// characters, without `§` and control characters. Typing exactly the item's translated
+    /// [`Inventory::anvil_rename_modern`]). Returns the `rename_item` / `MC|ItemName` to send
+    /// (`Ok(None)`: nothing is sent: no first input, or an empty name on 1.16.5). The field
+    /// takes at most 35 characters (1.8.9: 30), without `§` and control characters. Typing exactly the item's translated
     /// name is not recognised (ghast has no translations): it renames.
     ///
     /// # Errors
@@ -1558,7 +1558,12 @@ impl Inventory {
         ) {
             return Err(ClickError::NoScreen);
         }
-        if name.chars().count() > 35
+        let field = if self.version == Version::V1_8 {
+            30
+        } else {
+            35
+        };
+        if name.chars().count() > field
             || name
                 .chars()
                 .any(|c| c == '\u{a7}' || c < ' ' || c == '\u{7f}')
@@ -1571,7 +1576,7 @@ impl Inventory {
             Some(crate::station::Station::Anvil(a)) if a.tracked.is_some()
         );
         // 1.16.5 sends nothing for an empty field; 1.12 sends every change
-        if (name.is_empty() && self.version != Version::V1_12) || !editable {
+        if (name.is_empty() && self.version == Version::V1_16_5) || !editable {
             return Ok(None);
         }
         let lay = self.layout();
@@ -2473,7 +2478,10 @@ impl Inventory {
             Screen::Container(WindowKind::Crafting)
         );
         let anvil = !self.version.is_modern()
-            && !matches!(self.version, Version::V1_16_5 | Version::V1_12)
+            && !matches!(
+                self.version,
+                Version::V1_16_5 | Version::V1_12 | Version::V1_8
+            )
             && matches!(self.layout().screen, Screen::Container(WindowKind::Anvil));
         match l {
             Loc::CraftResult => {

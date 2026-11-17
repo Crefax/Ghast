@@ -39,7 +39,7 @@ pub(crate) enum Station {
 impl Station {
     /// The state a freshly opened screen has (`None`: not a workstation menu ghast models).
     pub(crate) fn of(v: Version, kind: WindowKind) -> Option<Station> {
-        if v == Version::V1_12 && kind == WindowKind::Anvil {
+        if matches!(v, Version::V1_8 | Version::V1_12) && kind == WindowKind::Anvil {
             return Some(Station::Anvil(crate::anvil16::Anvil::default()));
         }
         if v != Version::V1_16_5 {
