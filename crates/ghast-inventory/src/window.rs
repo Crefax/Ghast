@@ -91,6 +91,12 @@ pub enum SlotKind {
     /// Villager trading output (2): the result of the offer the two payment slots buy, which
     /// the client looks up itself; taking it uses the payments up.
     TradeOutput,
+    /// Mount saddle slot (0): a saddle when the mount takes one
+    /// ([`MountRules`](crate::MountRules)), one at a time.
+    MountSaddle,
+    /// Mount armor slot (1): horse armor or carpet as the mount takes them
+    /// ([`MountRules`](crate::MountRules)).
+    MountArmor,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -251,13 +257,11 @@ impl WindowKind {
                     SlotKind::Normal
                 }
             }
-            WindowKind::Horse { .. } => {
-                if i < 2 {
-                    SlotKind::Special
-                } else {
-                    SlotKind::Normal
-                }
-            }
+            WindowKind::Horse { .. } => match i {
+                0 => SlotKind::MountSaddle,
+                1 => SlotKind::MountArmor,
+                _ => SlotKind::Normal,
+            },
             WindowKind::Crafter => {
                 if i < 9 {
                     SlotKind::Normal

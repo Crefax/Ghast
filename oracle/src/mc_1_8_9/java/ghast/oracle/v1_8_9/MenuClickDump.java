@@ -3,6 +3,8 @@ package ghast.oracle.v1_8_9;
 import ghast.oracle.Rng;
 import io.netty.buffer.Unpooled;
 import net.minecraft.entity.data.Merchant;
+import net.minecraft.entity.passive.HorseBaseEntity;
+import net.minecraft.inventory.AnimalInventory;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.player.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -15,6 +17,7 @@ import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingScreenHandler;
 import net.minecraft.screen.EnchantingScreenHandler;
+import net.minecraft.screen.HorseScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.VillagerScreenHandler;
 import net.minecraft.util.PacketByteBuf;
@@ -49,7 +52,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse"};
 
     /** Potion damage values (water, awkward, thick, mundane, a few effects, splash). */
     static final int[] POTION_DATA = {0, 16, 32, 64, 8193, 8194, 8197, 8201, 8225, 8257, 16385, 16388, 16417};
@@ -73,13 +76,32 @@ final class MenuClickDump {
     /** Villager sales (emerald, bread, enchanted book, diamond sword, bow, filled map, book, diamond). */
     static final int[] SELL = {388, 297, 403, 276, 261, 358, 340, 264};
 
+    /** Saddles, horse armor, carpets, chests, horse food, a few others. */
+    static final int[] HORSE = {329, 329, 417, 418, 419, 171, 54, 296, 322, 1, 3};
+
+    /** The mount of the current horse case: type (0 horse, 1 donkey, 2 mule, 3 zombie, 4 skeleton) and chest. */
+    private static int horseType;
+    private static boolean horseChest;
+
     /** The trader of the current merchant case (the client's {@code Merchant}). */
     private static Merchant trader;
 
     /** All lines for {@code menu}: the facts line, then {@code count} cases. */
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
-        sink.accept(facts(run, menu));
+        if (menu.equals("horse")) {
+            // one facts line per mount (the slot rules ask the entity)
+            for (int t = 0; t < 5; t++) {
+                for (int c = 0; c < (t == 1 || t == 2 ? 2 : 1); c++) {
+                    horseType = t;
+                    horseChest = c == 1;
+                    String f = facts(run, menu);
+                    sink.accept(f.substring(0, f.length() - 1) + ",\"type\":" + t + ",\"chest\":" + horseChest + "}");
+                }
+            }
+        } else {
+            sink.accept(facts(run, menu));
+        }
         long salt = menu.hashCode() & 0xffffffffL;
         for (int i = 0; i < count; i++) {
             sink.accept(one(run, new Rng(seed * 1_000_037L + salt * 7919L + i), menu + "_s" + seed + "_" + i, menu));
@@ -102,6 +124,14 @@ final class MenuClickDump {
             case "anvil" -> new AnvilScreenHandler(inv, run.world, run.player);
             case "beacon" -> new BeaconScreenHandler(inv,
                     new ClientNetworkSyncedInventory("minecraft:beacon", new LiteralText("b"), 1));
+            case "horse" -> {
+                // ClientPlayNetworkHandler.onOpenScreen "EntityHorse": the entity's screen over an
+                // AnimalInventory of the packet's slot count
+                HorseBaseEntity horse = new HorseBaseEntity(run.world);
+                horse.setType(horseType);
+                horse.setHasChest(horseChest);
+                yield new HorseScreenHandler(inv, new AnimalInventory("h", containerSlots(menu)), horse, run.player);
+            }
             case "merchant" -> {
                 // ClientPlayNetworkHandler.onOpenScreen: openTradingScreen(new Merchant(player, title))
                 trader = new Merchant(run.player, new LiteralText("v"));
@@ -118,6 +148,7 @@ final class MenuClickDump {
             case "anvil" -> 3;
             case "beacon" -> 1;
             case "merchant" -> 3;
+            case "horse" -> horseChest ? 17 : 2;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -164,6 +195,13 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("horse")) {
+            ItemStack s = ClickDump.stack(r, new int[] {r.pick(HORSE)});
+            if (s.getItem() == Item.byRawId(171)) {
+                s.setDamage(r.nextInt(16));
+            }
+            return s;
+        }
         if (menu.equals("merchant")) {
             TraderOfferList offers = trader == null ? null : trader.getOffers(null);
             if (offers != null && !offers.isEmpty() && r.chance(0.7)) {
@@ -286,6 +324,13 @@ final class MenuClickDump {
         Reflect.set(ScreenHandler.class, w0, "actionId", (short) 0);
         inv.setCursorStack(null);
         boolean merchant = menu.equals("merchant");
+        boolean known = true;
+        if (menu.equals("horse")) {
+            horseType = r.nextInt(5);
+            horseChest = (horseType == 1 || horseType == 2) && r.chance(0.6);
+            // whether the replay is told the mount's rules (else it predicts without them)
+            known = r.chance(0.75);
+        }
         int sync = 0;
         ScreenHandler h = null;
         String offers = null;
@@ -342,6 +387,10 @@ final class MenuClickDump {
                 .append(",\"sync\":").append(sync).append(",\"selected\":").append(inv.selectedSlot);
         if (offers != null) {
             b.append(",\"offers\":\"").append(offers).append('"');
+        }
+        if (menu.equals("horse")) {
+            b.append(",\"slots\":").append(n).append(",\"mount\":{\"type\":").append(horseType).append(",\"chest\":")
+                    .append(horseChest).append(",\"known\":").append(known).append('}');
         }
         ClickDump.state(b, player, w0, h);
         if (merchant) {

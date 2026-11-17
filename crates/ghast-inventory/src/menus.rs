@@ -18,7 +18,8 @@ pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
         | WindowKind::Enchanting
         | WindowKind::Anvil
         | WindowKind::Beacon
-        | WindowKind::Merchant => {
+        | WindowKind::Merchant
+        | WindowKind::Horse { .. } => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
         _ => false,
@@ -272,6 +273,11 @@ mod tests {
                 continue;
             }
             let c: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if c["facts"] == "horse" {
+                check_mount_facts(v, &c);
+                menus += 1;
+                continue;
+            }
             let kind = match c["facts"].as_str().unwrap() {
                 "brewing" => WindowKind::BrewingStand,
                 "enchanting" => WindowKind::Enchanting,
@@ -320,6 +326,83 @@ mod tests {
             }
         }
         assert!(menus > 0, "no facts in {}", path.display());
+    }
+
+    /// The mount rules vanilla's entity gives (the facts line's or a case's `mount`): 1.8
+    /// horse `type`; 1.12 / 1.16.5 `entity` name, 1.16.5 also `tame` and `baby`.
+    #[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
+    fn mount_rules_of(v: Version, m: &serde_json::Value) -> crate::MountRules {
+        use crate::{MountArmor, MountRules};
+        if v == Version::V1_8 {
+            let t = m["type"].as_i64().unwrap();
+            return MountRules::new(
+                true,
+                if t == 0 {
+                    MountArmor::HorseArmor
+                } else {
+                    MountArmor::None
+                },
+            );
+        }
+        let e = m["entity"].as_str().unwrap();
+        let llama = matches!(e, "llama" | "trader_llama");
+        let saddle = !llama && (v != Version::V1_16_5 || (m["tame"] == true && m["baby"] == false));
+        let armor = match e {
+            "horse" => MountArmor::HorseArmor,
+            _ if llama => MountArmor::Carpet,
+            _ => MountArmor::None,
+        };
+        MountRules::new(saddle, armor)
+    }
+
+    /// A mount's facts line: the saddle and armor slots' `canInsert` for that entity (chest
+    /// slots are plain).
+    #[cfg(any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5"))]
+    fn check_mount_facts(v: Version, c: &serde_json::Value) {
+        let rules = Some(mount_rules_of(v, c));
+        for (k, list) in c["accepts"].as_array().unwrap().iter().enumerate() {
+            let mut want = std::collections::HashMap::new();
+            for e in list.as_array().unwrap() {
+                want.insert(e[0].as_i64().unwrap() as i32, e[1].as_u64().unwrap() as u32);
+            }
+            for id in 1..4096 {
+                if !v.known(id) {
+                    continue;
+                }
+                for d in 0..16i16 {
+                    let s = Stack::new(id, 1, d);
+                    let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
+                    let got = match k {
+                        0 => crate::mount::saddle_accepts(v, rules, &s, false).unwrap(),
+                        1 => crate::mount::armor_accepts(v, rules, &s).unwrap(),
+                        _ => true,
+                    };
+                    assert_eq!(got, w, "{c} slot {k} {id}:{d}");
+                    // without the rules: only what the rules decide is unknown
+                    if k < 2 {
+                        let blind = match k {
+                            0 => crate::mount::saddle_accepts(v, None, &s, false),
+                            _ => crate::mount::armor_accepts(v, None, &s),
+                        };
+                        assert!(
+                            blind.map_or(true, |b| b == w),
+                            "{c} slot {k} {id}:{d} blind"
+                        );
+                    }
+                }
+            }
+        }
+        let max: Vec<i64> = c["max"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_i64().unwrap())
+            .collect();
+        assert_eq!(
+            max[1],
+            if v == Version::V1_8 { 64 } else { 1 },
+            "{c} armor max"
+        );
     }
 
     #[cfg(feature = "v1_8")]

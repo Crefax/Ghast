@@ -54,6 +54,8 @@ pub(crate) struct Model {
     pub table_memo: Option<std::sync::Arc<CraftMemo>>,
     /// 1.8 – 1.16.5 villager trading screen: offers, selection, remembered offer.
     pub merchant: Option<Box<crate::merchant::Merchant>>,
+    /// 1.8 – 1.16.5 mount screen: what its saddle and armor slots take (`None`: unknown).
+    pub mount: Option<crate::mount::MountRules>,
 }
 
 /// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
@@ -100,6 +102,7 @@ impl Default for Model {
             craft_memo: None,
             table_memo: None,
             merchant: None,
+            mount: None,
         }
     }
 }
@@ -212,6 +215,8 @@ impl Layout {
                         | SlotKind::Lapis
                         | SlotKind::BeaconPayment
                         | SlotKind::TradeOutput
+                        | SlotKind::MountSaddle
+                        | SlotKind::MountArmor
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
@@ -512,6 +517,8 @@ impl Sim<'_> {
             SlotKind::AnvilOutput => false,
             SlotKind::Lapis => self.v.is_lapis(s),
             SlotKind::TradeOutput => false,
+            SlotKind::MountSaddle => return self.mount_saddle_accepts(s),
+            SlotKind::MountArmor => return self.mount_armor_accepts(s),
             SlotKind::BeaconPayment => self.v.beacon_payment(s),
             SlotKind::Special => return Err(Unpredictable),
         })
@@ -525,6 +532,8 @@ impl Sim<'_> {
             | SlotKind::Potion
             | SlotKind::EnchantItem
             | SlotKind::BeaconPayment => Ok(1),
+            // 1.12+ armor slot: one item (1.8: a plain slot's 64)
+            SlotKind::MountArmor if self.v != Version::V1_8 => Ok(1),
             SlotKind::Special => Err(Unpredictable),
             _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
@@ -1181,6 +1190,17 @@ impl Sim<'_> {
                             _ => false,
                         };
                         (ok, true)
+                    }
+                    WindowKind::Horse { .. } if crate::menus::modelled(v, kind) => {
+                        match self.transfer_mount(i, &mut st)? {
+                            Some(ok) => (ok, false),
+                            None => {
+                                // 1.16.5: moved within the player part, EMPTY returned
+                                let left = self.norm(st);
+                                self.set(i, left);
+                                return Ok(None);
+                            }
+                        }
                     }
                     WindowKind::Beacon if crate::menus::modelled(v, kind) => {
                         (self.transfer_beacon(i, &mut st)?, true)

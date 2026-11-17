@@ -70,6 +70,7 @@ mod menus;
 mod merchant;
 #[cfg(modern)]
 pub mod modern;
+mod mount;
 mod packets;
 mod rules;
 mod sim;
@@ -90,6 +91,7 @@ pub use inventory::{
 };
 pub use item::{Enchantment, EnchantmentId, ItemText};
 pub use merchant::TradeOffer;
+pub use mount::{MountArmor, MountRules};
 #[cfg(feature = "v26_1")]
 pub use packets::PACKET_IDS_26_1;
 pub use rules::{Version, VersionNotEnabled};

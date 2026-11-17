@@ -3,6 +3,11 @@ package ghast.oracle.v1_16_5;
 import ghast.oracle.Rng;
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.passive.AbstractDonkeyEntity;
+import net.minecraft.entity.passive.HorseBaseEntity;
+import net.minecraft.entity.passive.LlamaEntity;
+import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -14,6 +19,7 @@ import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
+import net.minecraft.screen.HorseScreenHandler;
 import net.minecraft.screen.MerchantScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
@@ -51,7 +57,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -80,12 +86,42 @@ final class MenuClickDump {
     static final String[] SELL = {"emerald", "bread", "enchanted_book", "diamond_sword", "bow", "filled_map", "book",
         "diamond"};
 
+    /** Saddles, horse armor, carpets, chests, horse food, a few others. */
+    static final String[] HORSE = {"saddle", "saddle", "leather_horse_armor", "iron_horse_armor", "golden_horse_armor",
+        "diamond_horse_armor", "white_carpet", "red_carpet", "chest", "wheat", "golden_apple", "white_wool", "stone",
+        "dirt"};
+
+    /** The mounts the screen exists for. */
+    static final String[] MOUNTS = {"horse", "donkey", "mule", "zombie_horse", "skeleton_horse", "llama", "trader_llama"};
+
+    /** The mount of the current horse case: entity, chest, llama strength, tame, baby. */
+    private static String mount = "horse";
+    private static boolean mountChest;
+    private static int mountStrength = 3;
+    private static boolean mountTame = true;
+    private static boolean mountBaby;
+
     /** The handler of the current merchant case. */
     private static MerchantScreenHandler trader;
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
-        sink.accept(facts(run, menu));
+        if (menu.equals("horse")) {
+            // one facts line per mount, tame and baby (the slot rules ask the entity)
+            for (String m : MOUNTS) {
+                for (int t = 0; t < 4; t++) {
+                    mount = m;
+                    mountChest = false;
+                    mountTame = (t & 1) != 0;
+                    mountBaby = (t & 2) != 0;
+                    String f = facts(run, menu);
+                    sink.accept(f.substring(0, f.length() - 1) + ",\"entity\":\"" + m + "\",\"tame\":" + mountTame
+                            + ",\"baby\":" + mountBaby + "}");
+                }
+            }
+        } else {
+            sink.accept(facts(run, menu));
+        }
         long salt = menu.hashCode() & 0xffffffffL;
         for (int i = 0; i < count; i++) {
             sink.accept(one(run, new Rng(seed * 1_000_037L + salt * 7919L + i), menu + "_s" + seed + "_" + i, menu));
@@ -105,6 +141,7 @@ final class MenuClickDump {
             case "anvil" -> 7;
             case "beacon" -> 8;
             case "merchant" -> 18;
+            case "horse" -> -1; // open_horse_window, not a menu type
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -115,6 +152,36 @@ final class MenuClickDump {
             case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
             case "anvil" -> new AnvilScreenHandler(sync, inv);
             case "beacon" -> new BeaconScreenHandler(sync, inv);
+            case "horse" -> {
+                // ClientPlayNetworkHandler.onOpenHorseScreen: the entity's screen over a
+                // SimpleInventory of the packet's slot count
+                net.minecraft.world.World w = inv.player.world;
+                HorseBaseEntity e = switch (mount) {
+                    case "horse" -> new net.minecraft.entity.passive.HorseEntity(EntityType.HORSE, w);
+                    case "donkey" -> new net.minecraft.entity.passive.DonkeyEntity(EntityType.DONKEY, w);
+                    case "mule" -> new net.minecraft.entity.passive.MuleEntity(EntityType.MULE, w);
+                    case "zombie_horse" -> new net.minecraft.entity.mob.ZombieHorseEntity(EntityType.ZOMBIE_HORSE, w);
+                    case "skeleton_horse" -> new net.minecraft.entity.mob.SkeletonHorseEntity(EntityType.SKELETON_HORSE, w);
+                    case "trader_llama" -> new net.minecraft.entity.passive.TraderLlamaEntity(EntityType.TRADER_LLAMA, w);
+                    default -> new LlamaEntity(EntityType.LLAMA, w);
+                };
+                if (e instanceof LlamaEntity l) {
+                    try {
+                        java.lang.reflect.Method m = LlamaEntity.class.getDeclaredMethod("setStrength", int.class);
+                        m.setAccessible(true);
+                        m.invoke(l, mountStrength);
+                    } catch (ReflectiveOperationException x) {
+                        throw new IllegalStateException(x);
+                    }
+                }
+                if (e instanceof AbstractDonkeyEntity d) {
+                    d.setHasChest(mountChest);
+                }
+                e.setTame(mountTame);
+                e.setBaby(mountBaby);
+                int slots = mountChest ? 2 + 3 * (e instanceof LlamaEntity ? mountStrength : 5) : 2;
+                yield new HorseScreenHandler(sync, inv, new SimpleInventory(slots), e);
+            }
             // the client constructor: a SimpleMerchant whose offers the server sends
             case "merchant" -> trader = new MerchantScreenHandler(sync, inv);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
@@ -149,6 +216,9 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("horse")) {
+            return ClickDump.stack(r, HORSE);
+        }
         if (menu.equals("merchant")) {
             TradeOfferList offers = trader == null ? null : trader.getRecipes();
             if (offers != null && !offers.isEmpty() && r.chance(0.7)) {
@@ -270,6 +340,16 @@ final class MenuClickDump {
         Reflect.set(ScreenHandler.class, w0, "actionId", (short) 0);
         inv.setCursorStack(ItemStack.EMPTY);
         boolean merchant = menu.equals("merchant");
+        boolean known = true;
+        if (menu.equals("horse")) {
+            mount = r.pick(MOUNTS);
+            mountChest = !mount.endsWith("horse") && r.chance(0.6);
+            mountStrength = r.range(1, 5);
+            mountTame = r.chance(0.8);
+            mountBaby = r.chance(0.15);
+            // whether the replay is told the mount's rules (else it predicts without them)
+            known = r.chance(0.75);
+        }
         int sync = 0;
         ScreenHandler h = null;
         String offers = null;
@@ -326,6 +406,11 @@ final class MenuClickDump {
                 .append(",\"sync\":").append(sync).append(",\"selected\":").append(inv.selectedSlot);
         if (offers != null) {
             b.append(",\"offers\":\"").append(offers).append('"');
+        }
+        if (menu.equals("horse")) {
+            b.append(",\"slots\":").append(n).append(",\"mount\":{\"entity\":\"").append(mount).append("\",\"chest\":")
+                    .append(mountChest).append(",\"tame\":").append(mountTame).append(",\"baby\":").append(mountBaby)
+                    .append(",\"known\":").append(known).append('}');
         }
         ClickDump.state(b, player, w0, h);
         if (merchant) {

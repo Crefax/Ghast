@@ -562,3 +562,100 @@ fn villager_1_16_5() {
         Outbound::Inventory(ghast_inventory::Outgoing::SelectTrade(0))
     )));
 }
+
+/// Runs `f` on the first tick's context.
+fn with_ctx(e: &mut Engine<Box<dyn Sim>>, f: impl FnOnce(&mut TickContext<'_>)) {
+    let t0 = std::time::Instant::now();
+    e.note_inbound(t0);
+    let mut f = Some(f);
+    let mut b = Script(|ctx: &mut TickContext<'_>| {
+        if let Some(f) = f.take() {
+            f(ctx);
+        }
+    });
+    e.tick(&mut b, t0);
+    let _ = b;
+    e.outbound().clear();
+}
+
+/// A 1.8 / 1.12 `open_window` of a mount's inventory (`EntityHorse`, the entity id 77).
+fn open_mount(v12: bool, id: u8, slots: u8) -> RawPacket {
+    let title = "{\"text\":\"\"}";
+    if v12 {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
+        return RawPacket::from_packet(&cb::OpenWindow {
+            window_id: id,
+            inventory_type: "EntityHorse".into(),
+            window_title: title.into(),
+            slot_count: slots,
+            entity_id: Some(77),
+        })
+        .unwrap();
+    }
+    use ghast_protocol::v1_8::play::clientbound as cb;
+    RawPacket::from_packet(&cb::OpenWindow {
+        window_id: id,
+        inventory_type: "EntityHorse".into(),
+        window_title: title.into(),
+        slot_count: slots,
+        entity_id: Some(77),
+    })
+    .unwrap()
+}
+
+/// Mount screens: a 1.8.9 horse's saddle slot needs no rules; its armor slot (and every
+/// 1.12.2 saddle) waits for the mount's rules, which the behaviour gives from the entity.
+#[test]
+fn mount_screens_legacy() {
+    use ghast_inventory::{MountArmor, MountRules};
+    // 1.8.9 horse (type 0), no chest: open_window "EntityHorse" with 2 slots
+    let mut e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_mount(false, 3, 2),
+        3,
+        vec![None, None],
+        &[(0, Stack::new(329, 1, 0)), (1, Stack::new(417, 1, 0))],
+    );
+    assert_eq!(e.core.inv.slot_kind(0), Some(SlotKind::MountSaddle));
+    // hotbar k is screen slot 2 + 27 + k: the saddle goes in without rules
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 29,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.slot(0).map(Stack::id), Some(329));
+    let _ = e.inventory_mut().on_transaction(3, 1, true);
+    let armor = Click::QuickMove {
+        slot: 30,
+        right: false,
+    };
+    assert!(try_click(&mut e, armor).is_err());
+    with_ctx(&mut e, |ctx| {
+        ctx.set_mount_rules(Some(MountRules::new(true, MountArmor::HorseArmor)));
+    });
+    try_click(&mut e, armor).unwrap();
+    assert_eq!(e.core.inv.slot(1).map(Stack::id), Some(417));
+    // 1.12.2 llama with a chest of 3 columns: carpet into the armor slot
+    let mut e = opened::<V1_12_2>(
+        GameVersion::V1_12_2,
+        &open_mount(true, 4, 11),
+        4,
+        vec![None; 11],
+        &[(0, Stack::new(171, 1, 14))],
+    );
+    with_ctx(&mut e, |ctx| {
+        ctx.set_mount_rules(Some(MountRules::new(false, MountArmor::Carpet)));
+    });
+    try_click(
+        &mut e,
+        Click::QuickMove {
+            slot: 11 + 27,
+            right: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(e.core.inv.slot(1).map(Stack::id), Some(171));
+}

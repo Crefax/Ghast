@@ -1409,6 +1409,26 @@ impl Inventory {
         }
     }
 
+    /// 1.8 – 1.16.5 mount screen (a `Horse` window): what its saddle and armor slots take, read
+    /// off the entity like vanilla's screen does (`None`: unknown, the default after the window
+    /// opens; clicks that would need them are refused). Vanilla: 1.8 `open_window`
+    /// `EntityHorse` names the entity; saddle always, horse armor for horse type 0. 1.12: saddle
+    /// for all but llamas, horse armor for horses, carpets for llamas. 1.16.5
+    /// (`open_horse_window`): saddle for a tame adult (not a llama), horse armor for horses,
+    /// carpets for llamas and trader llamas.
+    pub fn set_mount_rules(&mut self, rules: Option<crate::mount::MountRules>) {
+        if matches!(&self.screen, ScreenState::Window(w) if matches!(w.kind, WindowKind::Horse { .. }))
+        {
+            self.m.mount = rules;
+        }
+    }
+
+    /// The open mount screen's rules ([`Inventory::set_mount_rules`]).
+    #[must_use]
+    pub fn mount_rules(&self) -> Option<crate::mount::MountRules> {
+        self.m.mount
+    }
+
     /// 1.8 / 1.12 `MC|TrList` custom payload data (window id, then the offers).
     #[cfg(any(feature = "v1_8", feature = "v1_12"))]
     pub fn on_trade_list_legacy(&mut self, data: &bytes::Bytes) {
@@ -1907,6 +1927,7 @@ impl Inventory {
             ScreenState::Window(_) => {
                 self.m.container.clear();
                 self.m.merchant = None;
+                self.m.mount = None;
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
                 #[cfg(modern)]
@@ -2001,6 +2022,7 @@ impl Inventory {
         self.m.merchant = (kind == WindowKind::Merchant
             && crate::menus::modelled(self.version, kind))
         .then(Box::default);
+        self.m.mount = None;
         self.m.container_result_known = true;
         self.m.container_fresh = true;
         self.screen = ScreenState::Window(Window {

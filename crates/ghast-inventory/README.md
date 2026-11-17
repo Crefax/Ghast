@@ -104,6 +104,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | anvil (inputs `Normal`, `SlotKind::AnvilOutput`) | inputs; output refused | same | same |
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
+| horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -151,6 +152,18 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   hotbar (never into the payment slots); 1.16.5 double-click gathers nothing in this screen.
   Taking a filled map with NBT is refused (`Item.onCraft` reads the world's map data). The
   villager's experience, levels and restocking are the server's.
+- **Mounts**: the saddle and armor slots ask the entity, so their rules come from the caller:
+  `Inventory::set_mount_rules(Some(MountRules::new(saddle, armor)))` (ghast-client:
+  `TickContext::set_mount_rules`) after the window opened. Vanilla's entity answers: 1.8 a
+  saddle always, horse armor for horse type 0; 1.12 a saddle for every mount but llamas, horse
+  armor for horses, carpets for llamas; 1.16.5 a saddle for a tame adult (not a llama), horse
+  armor (also leather) for horses, carpets for llamas and trader llamas. Without rules, stacks
+  the rules cannot concern are predicted (1.8: the saddle slot needs none) and the rest is
+  refused. The saddle slot takes one saddle when empty; the armor slot one item (1.8: up to
+  64). Shift-click: the mount's slots to the player part, a player stack into an empty armor
+  slot it fits, else the saddle slot, else the chest (the window's slot count: 2, or 2 + 3 ×
+  columns with a chest); 1.16.5 then moves it between main inventory and hotbar (and the click
+  carries an empty stack), 1.8 / 1.12 stop. This screen's shift-click never compares counts.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
 shift-click from the player part of a furnace (smelting recipes, fuel), any interaction that

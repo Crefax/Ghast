@@ -2290,6 +2290,13 @@ impl TickContext<'_> {
         Ok(())
     }
 
+    /// 1.8 – 1.16.5: what the open mount screen's saddle and armor slots take, read off the
+    /// mount entity (see [`ghast_inventory::Inventory::set_mount_rules`]); until then clicks that
+    /// need them (a saddle, horse armor or carpet into those slots) are refused. Nothing is sent.
+    pub fn set_mount_rules(&mut self, rules: Option<ghast_inventory::MountRules>) {
+        self.core.inv.set_mount_rules(rules);
+    }
+
     /// Selects a trade in the open villager screen (1.8 / 1.12 `MC|TrSel`, 1.16.5 / 26.1
     /// `select_trade`, written now; the output is looked up again for that offer and, from
     /// 1.16.5 on, the payment slots are refilled like the real screen).

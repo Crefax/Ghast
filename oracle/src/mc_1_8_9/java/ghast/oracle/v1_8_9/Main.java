@@ -147,7 +147,7 @@ public final class Main {
                   recipes [--out FILE]                 crafting recipes in the client's match order
                   clicks [--seed N] [--count N] [--craft true] [--out FILE]  window click vectors (cache/<mc>/clicks/);
                                                        --craft: crafting grids from recipes, clicks on result/grid
-                                                       --menu M: special menu M (brewing, enchanting, anvil, beacon, merchant, all)
+                                                       --menu M: special menu M (brewing, enchanting, anvil, beacon, merchant, horse, all)
                   entity-sizes [--out FILE]            width/height/eye height of every entity type + variants
                   list                                 list hand-written scenarios
                   selftest                             generate everything twice and compare content

@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 use bytes::{Bytes, BytesMut};
 use ghast_inventory::{
-    Click, ClickError, Inventory, Outgoing, RecipeBook, Stack, Version, WindowKind,
-    from_legacy_slot, from_modern_slot,
+    Click, ClickError, Inventory, MountArmor, MountRules, Outgoing, RecipeBook, Stack, Version,
+    WindowKind, from_legacy_slot, from_modern_slot,
 };
 use ghast_protocol::codec::{Encode, decode_exact};
 use ghast_protocol::types::slot::{legacy, modern};
@@ -55,6 +55,9 @@ fn stacks(v: Version, a: &Value) -> Vec<Option<Stack>> {
 fn kind(v: Version, c: &Value) -> Option<WindowKind> {
     match c["kind"].as_str().unwrap() {
         "player" => None,
+        "horse" => Some(WindowKind::Horse {
+            slots: c["slots"].as_u64().unwrap() as u8,
+        }),
         _ if v == Version::V1_16_5 => WindowKind::from_v1_16_5(c["menu"].as_i64().unwrap() as i32),
         "chest" => Some(WindowKind::Chest {
             rows: c["rows"].as_u64().unwrap() as u8,
@@ -70,6 +73,30 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "merchant" => Some(WindowKind::Merchant),
         k => panic!("unknown kind {k}"),
     }
+}
+
+/// The mount rules vanilla's entity gives (as the crate's facts test maps them).
+fn mount_rules_of(v: Version, m: &Value) -> MountRules {
+    if v == Version::V1_8 {
+        let t = m["type"].as_i64().unwrap();
+        return MountRules::new(
+            true,
+            if t == 0 {
+                MountArmor::HorseArmor
+            } else {
+                MountArmor::None
+            },
+        );
+    }
+    let e = m["entity"].as_str().unwrap();
+    let llama = matches!(e, "llama" | "trader_llama");
+    let saddle = !llama && (v != Version::V1_16_5 || (m["tame"] == true && m["baby"] == false));
+    let armor = match e {
+        "horse" => MountArmor::HorseArmor,
+        _ if llama => MountArmor::Carpet,
+        _ => MountArmor::None,
+    };
+    MountRules::new(saddle, armor)
 }
 
 fn click_of(slot: i16, button: u8, mode: u8) -> Click {
@@ -204,6 +231,9 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
             inv.open_inventory().unwrap();
         }
         Some(k) => inv.on_open_window(sync, Some(k), "{}".into()),
+    }
+    if c["mount"]["known"] == true {
+        inv.set_mount_rules(Some(mount_rules_of(v, &c["mount"])));
     }
     if let Some(h) = c["offers"].as_str() {
         // the server's offers (1.8 / 1.12 `MC|TrList` data, 1.16.5 `trade_list` body)
