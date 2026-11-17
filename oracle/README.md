@@ -711,8 +711,8 @@ much of the movement code unnamed: `travel` is `LivingEntity.method_2657`, the i
 `Entity.method_2492`; see its "Names to read carefully" table). Output: `tests/golden/1.12.2/` with the
 same file names as 1.8.9 (`scenarios` 112 cases, `fuzz_seed1` and `fuzz_edges_seed1` 100 x 60,
 `collision_boxes`, `collision_boxes_far`, `selection_boxes`, `raytrace`, `entity_sizes`, `recipes`,
-`clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes` and
-`entities` (see "1.12.2 entities").
+`clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes`,
+`entities` (see "1.12.2 entities"), `elytra` and `boats` (see "1.12.2 elytra", "1.12.2 boats").
 
 Setup: the remapped jar needs `remap.stripParameterAnnotations` (javac rejects some inner-class
 constructor annotation tables), `remap.fixPackageAccess` and `remap.publicProtected` (protected members
@@ -741,8 +741,8 @@ The harness is the 1.8.9 one (same structure, same scenario model) with these di
   `interactItem` (`method_12234`, sends `use_item` with the hand); falling edge → `stopUsingItem`
   (`block_dig` status 5). While the hand is active the input is ×0.2.
 - Effects are sent by id like 1.8.9; 25 = levitation (in the fuzz and the `levitation*` scenarios).
-- Not covered: elytra / fall flying (needs the server flag), vehicles (riding), frost walker,
-  auto-jump on. Other entities around the player (pushes, boat and shulker collisions): see
+- Not covered: vehicles other than boats (riding), frost walker, auto-jump on. Elytra: "1.12.2
+  elytra"; boats: "1.12.2 boats" below. Other entities around the player (pushes, boat and shulker collisions): see
   "1.12.2 entities" below.
 
 ### 1.12.2 format differences (vs 1.8.9)
@@ -891,6 +891,38 @@ entities is refused on the client).
 
 ```sh
 for s in 71 72 73 74 75; do MC=1.12.2 oracle/run.sh fuzz --elytra true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-elytra/elytra_s$s.jsonl.gz"; done
+```
+
+### 1.12.2 boats (`boats.jsonl.gz`)
+
+`MC=1.12.2 oracle/run.sh boats` (22 hand cases + 100 fuzz cases × 60 ticks of seed 1) and
+`fuzz --boats true` (`Boats.fuzz`, cases `…_bo`). The player rides a boat it controls (entity 100,
+a spawn-object packet at setup) and boards it in the first tick: `{"type":"ride","vehicle",
+"passengers"}` is the set-passengers packet, decoded by its own `read` and applied as
+`onSetPassengers` does it minus the overlay text (it needs the language storage); an empty list
+is the server's dismount. `{"type":"vehicle_move","pos","yaw","pitch"}` is the server's
+correction, applied as `onVehicleMove` does it; its answer (`vehicle_move`, sent to the
+connection directly in vanilla) is captured with the tick's packets. The mouse turn of a
+passenger is clamped by the boat (`onPassengerLookAround`) after the tick's rotation is set (one
+render frame per tick). `setup.ext.ride` marks the kind; tick records add `vehicle` (the boat after
+the tick: position, motion, rotation, box, flags, fall distance, location / last location, yaw
+velocity, ticks under water, water level, land friction, fall velocity, paddle input, paddles,
+lerp steps) and list the entities. Packets per tick: `steer_boat` (from the boat's tick), `look`,
+`steer_vehicle`, `vehicle_move`. The 1.12 client never gets off by itself: sneak only reaches the
+server in `steer_vehicle`. Cases: paddling on still water, turning while looking around (the
+105-degree clamp), land, packed ice / ice, drops into water and onto land, walls, flowing water,
+under a water roof, a slab and soul sand, slime, another boat, a zombie, a minecart (blocks), an
+armor stand and a bat (do not), a zombie in a ladder (climbing: does not block), lava, server
+corrections, a server dismount, jump / sprint / sneak while riding on water and on land, lily
+pads (broken in the client's world by the boat's block contacts), cobwebs. Fuzz: pools, land
+patches (stone, grass, ice, packed ice, soul sand, slime, sand, magma, lava, flowing water, lily
+pads, cobwebs), walls, water roofs, random keys and looks, corrections, other entities (boats,
+zombie, pig, minecart, armor stand, bat, item), server dismounts. What is faked beyond the entity
+harness: nothing (the two handlers above are the vanilla steps without their side effects on the
+HUD and the connection). Cached run (`oracle/cache/1.12.2/fuzz-boats/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 81 82 83 84 85; do MC=1.12.2 oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-boats/boats_s$s.jsonl.gz"; done
 ```
 
 ### 1.12.2 quirks (observed in the vectors)

@@ -452,7 +452,14 @@ Large fuzz: the same commands with `MC=1.12.2` and `oracle/cache/1.12.2/` (seeds
 diffs. Gliding (`v1_12::PlayerExt` + `tick_ext`, `apply_shared_flags`, `rocket_boost` after the
 tick once per attached rocket; the 1.12 client only asks with `start_fall_flying`, the server's
 flag 7 starts the glide): `elytra.jsonl.gz` (25 hand cases + 100 fuzz cases) and
-`fuzz --elytra true` seeds 71-75 in `fuzz-elytra/` (1,000,000 ticks), 0 diffs.
+`fuzz --elytra true` seeds 71-75 in `fuzz-elytra/` (1,000,000 ticks), 0 diffs. Riding a boat
+(`v1_12::{Boat, tick_boat}`; module docs of `v1_12::Boat`): the turn clamp, the boat's tick
+(location, water flow push, floating, paddling with the previous tick's keys, `steer_boat`, a
+move without step-up, block effects twice, lily pads broken), the passenger tick (no water
+contact, no item slowdown, no flight) with `look` + `steer_vehicle` + `vehicle_move`, the seat.
+The 1.12 client never dismounts by itself (sneak only reaches the server in `steer_vehicle`).
+What blocks the boat: `blocks_boat` + `entity_climbing`. `boats.jsonl.gz` (22 hand cases + 100
+fuzz cases) and `fuzz --boats true` seeds 81-85 in `fuzz-boats/` (1,000,000 ticks), 0 diffs.
 
 **Total randomized oracle fuzz: 9,320,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
 1,000,000 extras, 1,000,000 edges), 1.12.2 4,160,000 and 1.16.5 1,000,000.
@@ -496,13 +503,13 @@ Even the 1.16.5 busy case at ~5 µs per tick is 0.01 % of a core per bot at 20 t
 
 Done since earlier versions of this list: speed modifiers of every operation (`attribute::Modifiers`,
 vanilla's hash order), depth strider, spectators, entity pushes and collisions (1.12.2, 1.16.5,
-26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats and
-minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
+26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats (1.12.2,
+1.16.5, 26.x), minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle on 1.8.9 / 1.12.2; on 1.16.5 everything but boats (bubble columns under a
-  boat not modelled).
+- Riding a vehicle on 1.8.9; on 1.12.2 / 1.16.5 everything but boats (bubble columns under a
+  1.16.5 boat not modelled).
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.

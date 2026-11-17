@@ -53,16 +53,18 @@ public final class Main {
                 boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
                 boolean entities = Boolean.parseBoolean(a.str("--entities", "false"));
                 boolean elytra = Boolean.parseBoolean(a.str("--elytra", "false"));
+                boolean boats = Boolean.parseBoolean(a.str("--boats", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 // Streamed: cases are generated and written one at a time (millions of ticks fit).
                 write(out, sink -> {
                     for (int i = 0; i < count; i++) {
-                        run(elytra ? Elytra.fuzz(seed, i, ticks) : entities ? EntityCases.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
+                        run(boats ? Boats.fuzz(seed, i, ticks) : elytra ? Elytra.fuzz(seed, i, ticks) : entities ? EntityCases.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
             }
             case "elytra" -> write(a.path("--out", golden.resolve("elytra.jsonl.gz")), sink -> runAll(Elytra.golden(), sink));
+            case "boats" -> write(a.path("--out", golden.resolve("boats.jsonl.gz")), sink -> runAll(Boats.golden(), sink));
             case "entities" -> {
                 Path out = a.path("--out", golden.resolve("entities.jsonl.gz"));
                 String only = a.str("--only", null);
@@ -151,8 +153,10 @@ public final class Main {
                   fuzz [--seed N] [--count N] [--ticks N] [--use-item true] [--palette edges] [--extras true] [--entities true] [--elytra true] [--out FILE(.gz)]
                                                        randomized cases (default into cache/%s/fuzz/); --entities: the
                                                        extras case with other entities (EntityCases.fuzz); --elytra: with
-                                                       an elytra, flag 7 and rockets (Elytra.fuzz)
+                                                       an elytra, flag 7 and rockets (Elytra.fuzz); --boats:
+                                                       riding a boat (Boats.fuzz)
                   elytra [--out FILE]                  elytra cases: glide requests, flag 7, rockets (cases + golden fuzz)
+                  boats [--out FILE]                   riding a boat the client controls (cases + golden fuzz)
                   entities [--out FILE] [--only NAME]  the hand-written entity cases (pushes, entity collisions)
                   boxes [--out FILE]                   collision box dump for every block id/meta
                   boxes-far [--out FILE]               the same (alone/settled) at far positions, absolute
@@ -227,6 +231,7 @@ public final class Main {
         write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         write(dir.resolve("entities.jsonl.gz"), Main::entities);
         write(dir.resolve("elytra.jsonl.gz"), sink -> runAll(Elytra.golden(), sink));
+        write(dir.resolve("boats.jsonl.gz"), sink -> runAll(Boats.golden(), sink));
         write(dir.resolve("face_shapes.jsonl.gz"), sink -> FaceDump.lines().forEach(sink));
         write(dir.resolve("selection_boxes.jsonl.gz"), sink -> SelectionDump.lines().forEach(sink));
         write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(GOLDEN_RAY_SEED, GOLDEN_RAY_WORLDS, GOLDEN_RAYS, sink));
@@ -338,6 +343,7 @@ public final class Main {
             all.add(EntityCases.fuzz(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
         }
         all.addAll(Elytra.golden());
+        all.addAll(Boats.golden());
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -358,7 +364,7 @@ public final class Main {
 
         // Round trip: the written files, read back as inputs and replayed, reproduce themselves.
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "entities.jsonl.gz", "elytra.jsonl.gz"}) {
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "entities.jsonl.gz", "elytra.jsonl.gz", "boats.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = sha256(replayed).equals(sha256(a.resolve(f)));

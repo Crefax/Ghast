@@ -85,6 +85,50 @@ pub fn collides(name: &str) -> bool {
     matches!(name, "boat" | "shulker")
 }
 
+/// `true` when an entity of type `name` (registry path, `"player"` for other players) blocks the
+/// boat the local player rides (`World.doesBoxCollide` for the boat: the entity's `getBox`, a
+/// boat's or a live shulker's, and the boat's `getHardCollisionBox`, the box of every
+/// `isPushable` entity). That is boats and minecarts (every kind); living entities while alive and not
+/// climbing ([`entity_climbing`]), except bats and armor stands (never), parrots (always, also
+/// dying or climbing) and horses, donkeys, mules and llamas (only without passengers). Items, rockets
+/// and the other objects do not. `living` is `instanceof LivingEntity` of the type; spectator
+/// players are skipped by the caller (`EXCEPT_SPECTATOR`), as is the boat's own passenger.
+#[must_use]
+pub fn blocks_boat(
+    name: &str,
+    living: bool,
+    alive: bool,
+    climbing: bool,
+    has_passengers: bool,
+) -> bool {
+    match name {
+        "boat" => true,
+        n if n.ends_with("minecart") => true,
+        "bat" | "armor_stand" => false,
+        "parrot" => true,
+        "horse" | "donkey" | "mule" | "skeleton_horse" | "zombie_horse" | "llama" => {
+            !has_passengers
+        }
+        _ => living && alive && !climbing,
+    }
+}
+
+/// `LivingEntity.isClimbing` of another entity at `pos` whose box starts at `min_y`: a ladder or
+/// vine at its feet, or an open trapdoor above a ladder with the same facing.
+#[must_use]
+pub fn entity_climbing<W: BlockView<State = BlockState>>(
+    world: &W,
+    pos: [f64; 3],
+    min_y: f64,
+) -> bool {
+    super::player::climbing_at(
+        world,
+        crate::math::floor(pos[0]),
+        crate::math::floor(min_y),
+        crate::math::floor(pos[2]),
+    )
+}
+
 /// The lily pads a boat's client tick breaks: `BoatEntity.tick` ends with
 /// `Entity.checkBlockCollision`, and `LilyPadBlock.onEntityCollision` removes a lily pad a boat
 /// touches from the client's world at once (the server breaks it too). Appends the position of

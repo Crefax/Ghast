@@ -55,3 +55,11 @@ fn entities_1_12_2() {
 fn elytra_1_12_2() {
     check("elytra.jsonl.gz");
 }
+
+/// Riding a boat the client controls: paddling on water, land and ice, falls into water and onto
+/// land, walls, other boats and mobs, flowing water, lily pads, cobwebs, server corrections and
+/// the server's dismount (hand cases + the golden boat fuzz).
+#[test]
+fn boats_1_12_2() {
+    check("boats.jsonl.gz");
+}

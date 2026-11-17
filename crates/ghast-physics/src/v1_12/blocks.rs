@@ -21,6 +21,7 @@ pub(crate) mod id {
     pub const TRAPDOOR: u8 = 96;
     pub const MELON_BLOCK: u8 = 103;
     pub const VINE: u8 = 106;
+    pub const LILY_PAD: u8 = 111;
     pub const END_STONE: u8 = 121;
     pub const SLIME: u8 = 165;
     pub const BARRIER: u8 = 166;

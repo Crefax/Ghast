@@ -8,13 +8,18 @@
 //! [`BlockView`]: crate::BlockView
 
 mod blocks;
+mod boat;
 pub mod entity;
 mod ext;
 mod fluid;
 mod player;
 mod ray;
 
-pub use entity::{PushKind, Pusher, collides, lily_pads_broken_by_boat, push_by, push_kind};
+pub use boat::{BOAT_HEIGHT, BOAT_WIDTH, Boat, BoatLocation, tick_boat};
+pub use entity::{
+    PushKind, Pusher, blocks_boat, collides, entity_climbing, lily_pads_broken_by_boat, push_by,
+    push_kind,
+};
 pub use ext::PlayerExt;
 pub use player::{
     Effects, GLIDE_HEIGHT, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT,

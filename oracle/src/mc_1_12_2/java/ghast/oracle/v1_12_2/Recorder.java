@@ -119,6 +119,7 @@ final class Recorder {
         run.net.sent.clear();
         Ent.tickRecord(j, run);
         Elytra.tickRecord(j, run);
+        Boats.tickRecord(j, run);
         return j.endObject().toString();
     }
 
@@ -288,6 +289,17 @@ final class Recorder {
             j.field("name", "block_dig");
             j.field("status", d.getAction().ordinal());
             j.field("status_name", d.getAction().name().toLowerCase());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket in) {
+            j.field("name", "steer_vehicle").fieldF32("sideways", in.getSideways()).fieldF32("forward", in.getForward())
+                    .field("jump", in.isJumping()).field("sneak", in.isSneaking());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket vm) {
+            j.field("name", "vehicle_move");
+            j.key("pos").beginArray().f64(vm.getX()).f64(vm.getY()).f64(vm.getZ()).endArray();
+            j.fieldF32("yaw", vm.getYaw()).fieldF32("pitch", vm.getPitch());
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.SteerBoatC2SPacket sb) {
+            // Legacy Yarn swaps the names: the constructor's first argument (paddle 0, written first) is
+            // "rightPaddleTurning". Recorded by wire order as left / right, as minecraft-data names them.
+            j.field("name", "steer_boat").field("left", sb.isRightPaddleTurning()).field("right", sb.isLeftPaddleTurning());
         } else {
             j.field("name", "other");
             j.field("class", pk.getClass().getName());

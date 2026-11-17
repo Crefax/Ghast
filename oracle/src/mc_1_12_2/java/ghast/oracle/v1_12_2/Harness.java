@@ -303,6 +303,7 @@ final class Harness {
             // Mouse look is applied by the renderer between ticks.
             player.yaw = t.yaw();
             player.pitch = t.pitch();
+            Boats.afterTurn(this);
             Ent.beforeTick(this);
             world.tickEntities();
             tick++;

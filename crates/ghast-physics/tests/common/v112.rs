@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use super::{Case, Mismatch, Summary, b, cases, diff, f3, f32_of, f64_of, i, jf32, jf64, keys_of};
 
 /// Packets ghast-physics produces plus the teleport confirmation the replay adds itself.
-const PACKETS: [&str; 7] = [
+const PACKETS: [&str; 10] = [
     "entity_action",
     "abilities",
     "flying",
@@ -16,7 +16,38 @@ const PACKETS: [&str; 7] = [
     "look",
     "position_look",
     "teleport_confirm",
+    "steer_vehicle",
+    "vehicle_move",
+    "steer_boat",
 ];
+
+/// The riding packets as the 1.12.2 recorder names them, the rest as the shared helper does.
+fn packet_json(p: &ghast_physics::Packet) -> Value {
+    use ghast_physics::Packet;
+    match *p {
+        Packet::SteerVehicle {
+            sideways,
+            forward,
+            jump,
+            sneak,
+        } => {
+            json!({"name": "steer_vehicle", "sideways": jf32(sideways), "forward": jf32(forward), "jump": jump, "sneak": sneak})
+        }
+        Packet::MoveVehicle {
+            pos, yaw, pitch, ..
+        } => json!({
+            "name": "vehicle_move", "pos": [jf64(pos[0]), jf64(pos[1]), jf64(pos[2])],
+            "yaw": jf32(yaw), "pitch": jf32(pitch),
+        }),
+        Packet::PaddleBoat { left, right } => {
+            json!({"name": "steer_boat", "left": left, "right": right})
+        }
+        ref other => super::packet_json(other),
+    }
+}
+
+/// The boat the player rides in the riding cases.
+const BOAT: i64 = 100;
 
 /// The case's world: `[x0, y0, z0, x1, y1, z1, id, meta]` fills inside the loaded rectangles.
 pub fn world_of(header: &Value) -> v1_12::MemoryWorld {
@@ -311,6 +342,9 @@ struct EntityInputs {
     after_order: Vec<Option<usize>>,
     /// Rockets that tick before the player.
     rockets_before: usize,
+    /// While riding: the boxes the ridden boat collides with (other boats and living entities
+    /// as they are when it ticks).
+    boat_solid: Vec<ghast_physics::math::Aabb>,
 }
 
 /// Removes the lily pads the boats with these boxes break.
@@ -324,7 +358,14 @@ fn break_lily_pads(world: &mut v1_12::MemoryWorld, boats: &[ghast_physics::math:
     }
 }
 
-fn entity_inputs(rec: &Value, rules: &EntityRules) -> EntityInputs {
+/// `riding`: the player is the passenger of [`BOAT`] and ticks right after it (its own place in
+/// the list is skipped).
+fn entity_inputs(
+    rec: &Value,
+    rules: &EntityRules,
+    riding: bool,
+    world: &v1_12::MemoryWorld,
+) -> EntityInputs {
     let mut out = EntityInputs::default();
     let Some(list) = rec.get("entities").and_then(Value::as_array) else {
         return out;
@@ -332,11 +373,44 @@ fn entity_inputs(rec: &Value, rules: &EntityRules) -> EntityInputs {
     let mut before_player = true;
     for e in list {
         if e.get("player").is_some() {
+            if !riding {
+                before_player = false;
+            }
+            continue;
+        }
+        if riding && e["id"].as_i64() == Some(BOAT) {
             before_player = false;
             continue;
         }
         let name = e["type"].as_str().unwrap();
         let removed = e.get("removed").is_some();
+        if riding && !removed {
+            // World.doesBoxCollide for the boat: getBox (boats) and getHardCollisionBox
+            // (pushable entities), as they are when the boat ticks.
+            let living = !matches!(name, "boat" | "item" | "minecart");
+            let bb = if before_player {
+                e.get("post")
+            } else {
+                e.get("pre")
+            };
+            if let Some(bb) = bb {
+                let bb = aabb_of(bb);
+                let alive = e.get("alive").is_none_or(b);
+                let pos = if before_player {
+                    f3(&e["pos"])
+                } else {
+                    [
+                        (bb.min_x + bb.max_x) / 2.0,
+                        bb.min_y,
+                        (bb.min_z + bb.max_z) / 2.0,
+                    ]
+                };
+                let climbing = v1_12::entity_climbing(world, pos, bb.min_y);
+                if v1_12::blocks_boat(name, living, alive, climbing, false) {
+                    out.boat_solid.push(bb);
+                }
+            }
+        }
         // Entities before the player have ticked when it moves.
         let at_tick = if before_player {
             e.get("post")
@@ -434,6 +508,16 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         e.fall_flying = x.get("fall_flying").and_then(Value::as_bool) == Some(true);
         e
     });
+    // Riding cases (`setup.ext.ride`): the boat the player boards.
+    let mut boat: Option<v1_12::Boat> = None;
+    let spawn_of = |id: i64| {
+        case.header["setup"]["entities"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|e| e["type"] == "spawn" && e["id"].as_i64() == Some(id))
+            .cloned()
+    };
     // A rocket in the hand: `FireworkItem.use` never starts an item use.
     let rocket_hand = x.and_then(|x| x.get("hand")).and_then(Value::as_str) == Some("fireworks");
     for rec in &case.ticks[1..] {
@@ -498,6 +582,33 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     }
                     // The rocket entity comes with the tick records.
                     "firework" => {}
+                    "ride" => {
+                        let on = e["passengers"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|v| v.as_i64() == Some(1));
+                        assert_eq!(e["vehicle"].as_i64(), Some(BOAT));
+                        if on && boat.is_none() {
+                            // The spawn packet's position; the angle byte's yaw.
+                            let sp = spawn_of(BOAT).expect("boat spawn");
+                            let yaw = (f32_of(&sp["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+                            let yaw = (i32::from(yaw) * 360) as f32 / 256.0;
+                            boat = Some(v1_12::Boat::new(f3(&sp["pos"]), yaw, 0.0));
+                        } else if !on {
+                            boat = None;
+                        }
+                    }
+                    "vehicle_move" => {
+                        if let Some(bt) = &mut boat {
+                            let reply = bt.server_move(
+                                f3(&e["pos"]),
+                                f32_of(&e["yaw"]),
+                                f32_of(&e["pitch"]),
+                            );
+                            sent.push(packet_json(&reply));
+                        }
+                    }
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -510,7 +621,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item,
         };
-        let ent = entity_inputs(rec, &rules);
+        let ent = entity_inputs(rec, &rules, boat.is_some(), &world);
         break_lily_pads(&mut world, &ent.boats_before);
         for pusher in &ent.before {
             if p.added_to_chunk {
@@ -527,6 +638,25 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             }
         }
         match &mut ext {
+            Some(x) if boat.is_some() => {
+                let bt = boat.as_mut().unwrap();
+                let still = v1_12::tick_boat(
+                    &mut p,
+                    x,
+                    bt,
+                    &ent.solid,
+                    &ent.boat_solid,
+                    &ti,
+                    &world,
+                    &mut out,
+                );
+                for &[x, y, z] in bt.broken_lily_pads() {
+                    world.set_raw(x, y, z, 0);
+                }
+                if !still {
+                    boat = None;
+                }
+            }
             Some(x) => v1_12::tick_ext(
                 &mut p,
                 x,
@@ -561,7 +691,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             }
         }
         break_lily_pads(&mut world, &ent.boats_after);
-        sent.extend(out.as_slice().iter().map(super::packet_json));
+        sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(from) = std::env::var("GHAST_DEBUG_FROM")
             .ok()
             .and_then(|s| s.parse::<i64>().ok())
@@ -589,6 +719,22 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         }
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(bt)) = (rec.get("vehicle"), &boat) {
+            let got = json!({
+                "pos": [jf64(bt.pos[0]), jf64(bt.pos[1]), jf64(bt.pos[2])],
+                "vel": [jf64(bt.vel[0]), jf64(bt.vel[1]), jf64(bt.vel[2])],
+                "yaw": jf32(bt.yaw),
+                "input": bt.input(),
+                "paddle": bt.paddles(),
+            });
+            let want = json!({
+                "pos": want["pos"], "vel": want["vel"], "yaw": want["yaw"],
+                "input": want["input"], "paddle": want["paddle"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
         }
         if let (Some(want), Some(x)) = (rec.get("ext"), &ext) {
             let got = json!({

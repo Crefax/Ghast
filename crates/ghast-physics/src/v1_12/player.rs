@@ -338,7 +338,12 @@ pub fn is_climbing<W: BlockView<State = BlockState>>(p: &PlayerState, w: &W) -> 
     if p.spectator {
         return false;
     }
-    let (x, y, z) = (floor(p.pos[0]), floor(p.bb.min_y), floor(p.pos[2]));
+    climbing_at(w, floor(p.pos[0]), floor(p.bb.min_y), floor(p.pos[2]))
+}
+
+/// The climbing test of `LivingEntity.isClimbing` at a block.
+#[inline(always)]
+pub(super) fn climbing_at<W: BlockView<State = BlockState>>(w: &W, x: i32, y: i32, z: i32) -> bool {
     let s = state_at(w, x, y, z);
     match s.block().id() {
         id::LADDER | id::VINE => true,
@@ -476,6 +481,9 @@ impl<W: BlockView> BlockView for Apart<'_, W> {
 trait Extra {
     /// `false` for [`NoExt`]: known at compile time.
     const ON: bool;
+    /// The passenger tick of a boat ([`tick_passenger`]): no water contact, no item slowdown,
+    /// no flight travel, the riding packets instead of the movement packets.
+    const RIDE: bool = false;
     /// The extension state (only called when [`Extra::ON`]).
     fn ext(&mut self) -> &mut PlayerExt;
 }
@@ -502,6 +510,43 @@ impl Extra for ExtCtx<'_> {
     fn ext(&mut self) -> &mut PlayerExt {
         self.0
     }
+}
+
+/// The extension state of the passenger tick.
+struct RideCtx<'a>(&'a mut PlayerExt);
+
+impl Extra for RideCtx<'_> {
+    const ON: bool = true;
+    const RIDE: bool = true;
+
+    #[inline(always)]
+    fn ext(&mut self) -> &mut PlayerExt {
+        self.0
+    }
+}
+
+/// The player's tick as the passenger of a boat (`Entity.tickRiding`): motion zeroed first, the
+/// player tick with the passenger rules (`entities`: the boxes it collides with, its own boat
+/// excluded), then the riding packets (`look`, `steer_vehicle`) instead of the movement
+/// packets. The caller places the player afterwards.
+pub(super) fn tick_passenger<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    entities: &[Aabb],
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    p.vel = [0.0; 3];
+    tick_solid(
+        p,
+        input,
+        &Apart(world),
+        &Options::default(),
+        entities,
+        RideCtx(x),
+        out,
+    );
 }
 
 /// The world of the tick next to entities: its own type, so that tick is compiled apart from
@@ -599,6 +644,22 @@ fn tick_solid<W: BlockView<State = BlockState>, E: Solids, X: Extra>(
     cx.movement(&input.keys, input.using_item, out);
     cx.clamp_position();
     cx.update_size();
+    if X::RIDE {
+        // ClientPlayerEntity.tick while riding: no movement packets, no sprint / sneak actions.
+        let p = &*cx.p;
+        out.push(Packet::Look {
+            yaw: p.yaw,
+            pitch: p.pitch,
+            on_ground: p.on_ground,
+        });
+        out.push(Packet::SteerVehicle {
+            sideways: p.sideways_speed,
+            forward: p.forward_speed,
+            jump: p.input.jump,
+            sneak: p.input.sneak,
+        });
+        return;
+    }
     cx.send_movement(out);
 }
 
@@ -630,6 +691,11 @@ impl<W: BlockView<State = BlockState>, E: Solids, X: Extra> Ctx<'_, W, E, X> {
     }
 
     fn update_water_state(&mut self) {
+        if X::RIDE {
+            // Entity.updateWaterState: a boat's passenger never touches water.
+            self.p.touching_water = false;
+            return;
+        }
         let probe = self
             .p
             .bb
@@ -660,7 +726,7 @@ impl<W: BlockView<State = BlockState>, E: Solids, X: Extra> Ctx<'_, W, E, X> {
         let prev = p.input;
         let prev_forward_strong = prev.forward >= SPRINT_INPUT;
         p.input = read_keys(keys);
-        if using_item {
+        if using_item && !X::RIDE {
             // A hand is active (eating, drinking, a shield, a bow): input ×0.2, no double tap.
             p.input.sideways *= 0.2;
             p.input.forward *= 0.2;
@@ -822,7 +888,7 @@ impl<W: BlockView<State = BlockState>, E: Solids, X: Extra> Ctx<'_, W, E, X> {
         p.forward_speed *= 0.98;
         let (strafe, up, forward) = (p.sideways_speed, p.upward_speed, p.forward_speed);
 
-        if p.abilities.flying {
+        if p.abilities.flying && !X::RIDE {
             let vy = p.vel[1];
             let air = p.flying_speed;
             p.flying_speed = p.abilities.fly_speed * if p.sprinting { 2.0 } else { 1.0 };

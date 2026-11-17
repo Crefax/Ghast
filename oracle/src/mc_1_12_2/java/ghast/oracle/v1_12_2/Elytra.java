@@ -211,7 +211,7 @@ final class Elytra {
         } else if (e instanceof Firework f) {
             firework(run, f.id());
         } else {
-            return false;
+            return Boats.apply(run, e);
         }
         return true;
     }
@@ -239,7 +239,7 @@ final class Elytra {
         } else if (e instanceof Firework f) {
             j.field("type", "firework").field("id", f.id());
         } else {
-            return false;
+            return Boats.event(j, e);
         }
         return true;
     }
@@ -250,7 +250,7 @@ final class Elytra {
             case "equip" -> new Equip(ev.get("slot").getAsString(), ev.has("item") ? ev.get("item").getAsString() : null,
                     ev.get("damage").getAsInt());
             case "firework" -> new Firework(ev.get("id").getAsInt());
-            default -> null;
+            default -> Boats.read(ev);
         };
     }
 
@@ -258,6 +258,7 @@ final class Elytra {
     static void header(Json j, Scenario sc) {
         Setup s = of(sc);
         if (s == null) {
+            Boats.header(j, sc);
             return;
         }
         j.key("ext").beginObject();
@@ -282,6 +283,10 @@ final class Elytra {
             return;
         }
         com.google.gson.JsonObject x = setup.getAsJsonObject("ext");
+        if (x.has("ride")) {
+            Boats.readHeader(sc);
+            return;
+        }
         // Keep the setup events Ent read already.
         Ent.Setup old = Ent.of(sc);
         Setup s = setup(sc);
