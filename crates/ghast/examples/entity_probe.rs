@@ -1,4 +1,4 @@
-//! Live entity checks for the lab (26.1; boat mode also 1.16.5), chosen with `GHAST_PROBE`:
+//! Live entity checks for the lab (26.1; boat mode also 1.8.9, 1.12.2 and 1.16.5), chosen with `GHAST_PROBE`:
 //!
 //! * `walk` (default): walks straight along +z for `--minutes` (through whatever stands there,
 //!   e.g. a crowd of NoAI mobs and a boat; `--entities` turns on entity tracking, which the 26.1
@@ -197,13 +197,19 @@ impl Probe {
         if t % 20 == 0
             && let Some(v) = ctx.vehicle()
         {
+            // The tracker's position of it: what the server last sent (1.8 drift check).
+            let tracked = ctx
+                .entities()
+                .and_then(|es| es.get(v.entity_id))
+                .map(ghast::entity::Entity::position);
             log::info!(
-                "vehicle at {:.3} {:.3} {:.3} yaw {:.1} ground {}",
+                "vehicle at {:.3} {:.3} {:.3} yaw {:.1} ground {} tracked {:?}",
                 v.pos.x,
                 v.pos.y,
                 v.pos.z,
                 v.yaw,
-                v.on_ground
+                v.on_ground,
+                tracked
             );
         }
         if t > 400 {
@@ -502,6 +508,12 @@ fn type_name(ctx: &TickContext<'_>, e: &ghast::entity::Entity) -> Option<&'stati
     match ctx.version() {
         #[cfg(feature = "v26_2")]
         ghast::GameVersion::V26_2 => ghast::entity::v26_2::entity_type(e).map(|t| t.name),
+        // 1.8.9 / 1.12.2 (boat mode): object type 1 is the boat.
+        #[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
+        ghast::GameVersion::V1_8_9 | ghast::GameVersion::V1_12_2 => match e.entity_type() {
+            ghast::entity::EntityType::LegacyObject(1) => Some("boat"),
+            _ => None,
+        },
         // 1.16.5 (boat mode): the registry id names the type.
         #[cfg(feature = "v1_16_5")]
         ghast::GameVersion::V1_16_5 => match e.entity_type() {
