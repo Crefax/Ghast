@@ -154,6 +154,17 @@ final class Boats {
 
     /** The player's vehicle after the tick (riding cases): everything the boat's client tick reads and writes. */
     static void tickRecord(Json j, Harness.Run run) {
+        if (of(run.sc) != null && run.player.getVehicle() instanceof net.minecraft.entity.vehicle.AbstractMinecartEntity m) {
+            Class<?> c = net.minecraft.entity.vehicle.AbstractMinecartEntity.class;
+            j.key("vehicle").beginObject().field("id", m.getEntityId()).field("type", "minecart");
+            j.key("pos").beginArray().f64(m.x).f64(m.y).f64(m.z).endArray();
+            j.fieldF32("yaw", m.yaw).fieldF32("pitch", m.pitch);
+            Box bb = m.getBoundingBox();
+            j.key("bb").beginArray().f64(bb.minX).f64(bb.minY).f64(bb.minZ).f64(bb.maxX).f64(bb.maxY).f64(bb.maxZ).endArray();
+            j.field("lerp_steps", Reflect.getInt(c, m, "clientInterpolationSteps"));
+            j.endObject();
+            return;
+        }
         if (of(run.sc) == null || !(run.player.getVehicle() instanceof BoatEntity b)) {
             return;
         }
@@ -426,6 +437,139 @@ final class Boats {
             addEvent(sc, x.range(ticks / 2, ticks - 1), new Ride(BOAT, new int[0]));
         }
         sc.description = "randomized boat case: pools, land, ice, walls, mobs; paddling keys, looks, corrections";
+        return sc;
+    }
+
+    // ---- minecarts: the local player sits in a minecart the server moves --------------------------
+
+    /** A case with a minecart at a position; the player boards it in the first tick (set-passengers). */
+    private static Scenario cart(Scenario sc, double x, double y, double z, float yaw) {
+        Setup st = setup(sc);
+        st.events.add(new Ent.Spawn(BOAT, "minecart", x, y, z, yaw));
+        addEvent(sc, 0, new Ride(BOAT, new int[] {Ent.PLAYER_ENTITY_ID}));
+        return sc;
+    }
+
+    /** The server rolling the cart: a relative move of (dx, dy, dz) blocks every tick in [from, to). */
+    private static void roll(Scenario sc, int from, int to, double dx, double dy, double dz) {
+        for (int t = from; t < to && t < sc.ticks.size(); t++) {
+            addEvent(sc, t, new Ent.Rel(BOAT, (int) Math.round(dx * 4096), (int) Math.round(dy * 4096), (int) Math.round(dz * 4096), true));
+        }
+    }
+
+    static List<Scenario> cartsGolden() {
+        List<Scenario> l = new ArrayList<>(carts());
+        for (int i = 0; i < GOLDEN_FUZZ; i++) {
+            l.add(cartFuzz(1, i, 60));
+        }
+        return l;
+    }
+
+    static List<Scenario> carts() {
+        Harness.init();
+        List<Scenario> l = new ArrayList<>();
+        l.add(cart(flat("minecart_still").desc("sit in a minecart on stone: idle, look around, keys").spawn(0.5, 64, 0.5, 0, 0)
+                .run(5, 0).run(10, FORWARD, 120, 20).run(10, LEFT | JUMP, -60, -40).run(10, SPRINT | FORWARD).run(10, SNEAK), 0.5, 64, 0.5, 0.0F));
+        Scenario rolling = cart(flat("minecart_rolling").desc("the server rolls the cart (relative moves every tick, then a stop)")
+                .spawn(0.5, 64, 0.5, 0, 0).run(5, 0).run(60, FORWARD), 0.5, 64, 0.5, 0.0F);
+        roll(rolling, 3, 40, 0.0, 0.0, 0.3);
+        l.add(rolling);
+        Scenario sparse = cart(flat("minecart_sparse_moves").desc("relative moves every third tick, a far and a near teleport, a zero move")
+                .spawn(0.5, 64, 0.5, 0, 0).run(70, 0), 0.5, 64, 0.5, 0.0F);
+        for (int t = 3; t < 45; t += 3) {
+            addEvent(sparse, t, new Ent.Rel(BOAT, 1229, 0, 600, true));
+        }
+        addEvent(sparse, 50, new Ent.Move(BOAT, 8.5, 64, 3.25, 90.0F, true));
+        addEvent(sparse, 58, new Ent.Move(BOAT, 8.51, 64, 3.25, 180.0F, true));
+        addEvent(sparse, 62, new Ent.Rel(BOAT, 0, 0, 0, true));
+        l.add(sparse);
+        Scenario wall = cart(flat("minecart_into_wall").desc("rolled under a low ceiling and against a wall: the passenger's own tick collides")
+                .fill(-3, 66, 4, 3, 66, 12, Blocks.STONE, 0).fill(-3, 64, 14, 3, 66, 14, Blocks.STONE, 0)
+                .spawn(0.5, 64, 0.5, 0, 0).run(70, JUMP), 0.5, 64, 0.5, 0.0F);
+        roll(wall, 3, 60, 0.0, 0.0, 0.25);
+        l.add(wall);
+        Scenario water = cart(flat("minecart_water").desc("rolled into and through water: the passenger touches water (not a boat)")
+                .fill(-3, 63, 4, 3, 63, 9, Blocks.WATER, 0).fill(-3, 64, 6, 3, 65, 7, Blocks.WATER, 0)
+                .spawn(0.5, 64, 0.5, 0, 0).run(60, JUMP | FORWARD), 0.5, 64, 0.5, 0.0F);
+        roll(water, 3, 50, 0.0, 0.0, 0.2);
+        l.add(water);
+        Scenario drop = cart(flat("minecart_falls").desc("the server drops the cart down a step (moves with dy)")
+                .fill(-3, 63, 5, 3, 63, 20, Blocks.AIR, 0).fill(-3, 60, 5, 3, 60, 20, Blocks.STONE, 0)
+                .spawn(0.5, 64, 0.5, 0, 0).run(60, 0), 0.5, 64, 0.5, 0.0F);
+        roll(drop, 3, 18, 0.0, 0.0, 0.4);
+        roll(drop, 18, 24, 0.0, -0.5, 0.3);
+        l.add(drop);
+        Scenario off = cart(flat("minecart_server_dismount").desc("sneak (sent in steer_vehicle only), then the server takes the player off")
+                .spawn(0.5, 64, 0.5, 0, 0).run(8, 0).run(5, SNEAK).run(20, FORWARD), 0.5, 64, 0.5, 0.0F);
+        roll(off, 3, 30, 0.2, 0.0, 0.0);
+        addEvent(off, 14, new Ride(BOAT, new int[0]));
+        l.add(off);
+        return l;
+    }
+
+    /**
+     * Randomized minecart cases: stone with patches of water, slabs, glass, soul sand, cobwebs, lava and
+     * ladders, ceilings, around a cart the player boards in the first tick; the server rolls it with relative
+     * moves (every 1-4 ticks), teleports it; random keys and looks; sometimes a server dismount. Cases get a
+     * {@code _mc} suffix.
+     */
+    static Scenario cartFuzz(long seed, int index, int ticks) {
+        Harness.init();
+        Rng x = new Rng(seed * 0x9E3779B97F4A7C15L + index ^ 0x6d696e6563L);
+        Scenario sc = new Scenario("fuzz_s" + seed + "_" + index + "_mc");
+        sc.fill(-32, 63, -32, 32, 63, 32, Blocks.STONE, 0);
+        int[][] blocks = {{Blocks.WATER, 0}, {Blocks.STONE, 0}, {Blocks.STONE_SLAB, 0}, {Blocks.GLASS, 0}, {Blocks.SOUL_SAND, 0},
+                {Blocks.WEB, 0}, {Blocks.LAVA, 0}, {Blocks.LADDER, 2}, {Blocks.AIR, 0}};
+        int patches = x.range(2, 10);
+        for (int i = 0; i < patches; i++) {
+            int cx = x.range(-12, 12), cz = x.range(-12, 12), r = x.range(1, 5);
+            int[] b = blocks[x.nextInt(blocks.length)];
+            int y0 = x.chance(0.5) ? 63 : 64, y1 = y0 + x.range(0, 2);
+            sc.fill(cx - r, y0, cz - r, cx + r, y1, cz + r, b[0], b[1]);
+        }
+        if (x.chance(0.3)) {
+            int cx = x.range(-8, 8), cz = x.range(-8, 8);
+            sc.fill(cx - 4, 65 + x.range(0, 1), cz - 4, cx + 4, 66, cz + 4, Blocks.STONE, 0);
+        }
+        double cx = x.range(-3, 3) + 0.5, cz = x.range(-3, 3) + 0.5;
+        float yaw = (float) (x.nextDouble() * 360 - 180);
+        sc.spawn(cx, 64.5, cz, yaw, 0);
+        float look = yaw, pitch = 0;
+        int[] keySets = {0, 0, FORWARD, FORWARD | LEFT, JUMP, JUMP | FORWARD, SPRINT | FORWARD, BACK, LEFT | RIGHT, SNEAK};
+        int keys = 0;
+        for (int t = 0; t < ticks; t++) {
+            if (x.chance(0.1)) {
+                keys = keySets[x.nextInt(keySets.length)];
+            }
+            if (x.chance(0.25)) {
+                look += (float) ((x.nextDouble() - 0.5) * 120);
+                pitch = (float) Math.max(-90, Math.min(90, pitch + (x.nextDouble() - 0.5) * 50));
+            }
+            sc.run(1, keys, look, pitch);
+        }
+        cart(sc, cx, 64, cz, yaw);
+        double vx = (x.nextDouble() - 0.5) * 0.8, vy = 0, vz = (x.nextDouble() - 0.5) * 0.8;
+        int every = x.chance(0.5) ? 1 : x.range(2, 4);
+        for (int t = 2; t < ticks; t++) {
+            if (x.chance(0.05)) {
+                vx = (x.nextDouble() - 0.5) * 0.8;
+                vz = (x.nextDouble() - 0.5) * 0.8;
+                vy = x.chance(0.2) ? (x.nextDouble() - 0.5) * 0.6 : 0;
+            }
+            if (t % every == 0) {
+                addEvent(sc, t, new Ent.Rel(BOAT, (int) Math.round(vx * every * 4096), (int) Math.round(vy * every * 4096),
+                        (int) Math.round(vz * every * 4096), x.chance(0.8)));
+            }
+            if (x.chance(0.02)) {
+                double near = x.chance(0.3) ? 0.01 : 8;
+                addEvent(sc, t, new Ent.Move(BOAT, cx + (x.nextDouble() - 0.5) * near, 64 + x.nextDouble() * Math.min(near, 1), cz + (x.nextDouble() - 0.5) * near,
+                        (float) (x.nextDouble() * 360 - 180), true));
+            }
+        }
+        if (x.chance(0.1)) {
+            addEvent(sc, x.range(ticks / 2, ticks - 1), new Ride(BOAT, new int[0]));
+        }
+        sc.description = "randomized minecart case: stone, water, slabs, ceilings; the server's moves and teleports; keys, looks";
         return sc;
     }
 }

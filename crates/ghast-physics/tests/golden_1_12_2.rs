@@ -63,3 +63,10 @@ fn elytra_1_12_2() {
 fn boats_1_12_2() {
     check("boats.jsonl.gz");
 }
+
+/// Sitting in a minecart the server moves: its interpolation, the passenger's own tick, the
+/// seat, the server's dismount (hand cases + the golden minecart fuzz).
+#[test]
+fn minecarts_1_12_2() {
+    check("minecarts.jsonl.gz");
+}

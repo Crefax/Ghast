@@ -478,7 +478,12 @@ flag 7 starts the glide): `elytra.jsonl.gz` (25 hand cases + 100 fuzz cases) and
 move without step-up, block effects twice, lily pads broken), the passenger tick (no water
 contact, no item slowdown, no flight) with `look` + `steer_vehicle` + `vehicle_move`, the seat.
 The 1.12 client never dismounts by itself (sneak only reaches the server in `steer_vehicle`).
-What blocks the boat: `blocks_boat` + `entity_climbing`. `boats.jsonl.gz` (22 hand cases + 100
+What blocks the boat: `blocks_boat` + `entity_climbing`. Sitting in a minecart (`v1_12::{Minecart,
+tick_minecart}`): the server moves it; the client interpolates its teleports (a teleport within
+1/32 only turns it) and relative moves on its 1/4096 server position (steps + 2), the passenger
+tick touches water (only a boat's passenger does not), `look` + `steer_vehicle`, the seat 0.35
+below; no dismount by the client: `minecarts.jsonl.gz` (7 hand cases + 100 fuzz cases) and
+`fuzz --minecarts true` seeds 91-95 in `fuzz-minecarts/` (1,000,000 ticks), 0 diffs. `boats.jsonl.gz` (22 hand cases + 100
 fuzz cases) and `fuzz --boats true` seeds 81-85 in `fuzz-boats/` (1,000,000 ticks), 0 diffs.
 
 **Total randomized oracle fuzz: 9,320,000 ticks, 0 diffs** — 1.8.9 4,160,000 (the 2,160,000 above,
@@ -528,7 +533,7 @@ vanilla's hash order), depth strider, spectators, entity pushes and collisions (
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle other than a boat (1.8.9, 1.12.2) or a boat or minecart (1.16.5); bubble
+- Riding a vehicle other than a boat (1.8.9) or a boat or minecart (1.12.2, 1.16.5); bubble
   columns under a 1.16.5 boat; other entities near a 1.8.9 boat.
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.

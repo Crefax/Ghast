@@ -510,6 +510,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     });
     // Riding cases (`setup.ext.ride`): the boat the player boards.
     let mut boat: Option<v1_12::Boat> = None;
+    // Or the minecart (entity 100) the player sits in.
+    let mut cart: Option<v1_12::Minecart> = None;
     let spawn_of = |id: i64| {
         case.header["setup"]["entities"]
             .as_array()
@@ -566,6 +568,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .collect();
                         p.apply_speed_attribute(f64_of(&e["base"]), &mods);
                     }
+                    // The server's moves of the minecart the player sits in.
+                    "entity_move" if cart.is_some() && e["id"].as_i64() == Some(BOAT) => {
+                        let yaw = (f32_of(&e["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+                        cart.as_mut()
+                            .unwrap()
+                            .server_teleport(f3(&e["pos"]), yaw, 0);
+                    }
+                    "entity_rel_move" if cart.is_some() && e["id"].as_i64() == Some(BOAT) => {
+                        cart.as_mut().unwrap().server_update(
+                            [i(&e["dx"]) as i16, i(&e["dy"]) as i16, i(&e["dz"]) as i16],
+                            None,
+                        );
+                    }
                     "spawn" | "entity_move" | "entity_rel_move" | "remove_entity" => {}
                     "tab" | "team" => rules.apply(e),
                     "shared_flags" => {
@@ -589,7 +604,16 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             .iter()
                             .any(|v| v.as_i64() == Some(1));
                         assert_eq!(e["vehicle"].as_i64(), Some(BOAT));
-                        if on && boat.is_none() {
+                        let sp = spawn_of(BOAT).expect("vehicle spawn");
+                        if sp["entity"] == "minecart" {
+                            if on && cart.is_none() {
+                                let yaw = (f32_of(&sp["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+                                let yaw = (i32::from(yaw) * 360) as f32 / 256.0;
+                                cart = Some(v1_12::Minecart::new(f3(&sp["pos"]), yaw, 0.0));
+                            } else if !on {
+                                cart = None;
+                            }
+                        } else if on && boat.is_none() {
                             // The spawn packet's position; the angle byte's yaw.
                             let sp = spawn_of(BOAT).expect("boat spawn");
                             let yaw = (f32_of(&sp["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
@@ -621,7 +645,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             pitch: f32_of(&input["pitch"]),
             using_item,
         };
-        let ent = entity_inputs(rec, &rules, boat.is_some(), &world);
+        let ent = entity_inputs(rec, &rules, boat.is_some() || cart.is_some(), &world);
         break_lily_pads(&mut world, &ent.boats_before);
         for pusher in &ent.before {
             if p.added_to_chunk {
@@ -638,6 +662,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             }
         }
         match &mut ext {
+            Some(x) if cart.is_some() => {
+                let c = cart.as_mut().unwrap();
+                v1_12::tick_minecart(&mut p, x, c, &ent.solid, &ti, &world, &mut out);
+            }
             Some(x) if boat.is_some() => {
                 let bt = boat.as_mut().unwrap();
                 let still = v1_12::tick_boat(
@@ -719,6 +747,21 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         }
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(c)) = (rec.get("vehicle"), &cart) {
+            let got = json!({
+                "pos": [jf64(c.pos[0]), jf64(c.pos[1]), jf64(c.pos[2])],
+                "yaw": jf32(c.yaw),
+                "pitch": jf32(c.pitch),
+                "lerp_steps": c.interpolation_steps(),
+            });
+            let want = json!({
+                "pos": want["pos"], "yaw": want["yaw"], "pitch": want["pitch"],
+                "lerp_steps": want["lerp_steps"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
         }
         if let (Some(want), Some(bt)) = (rec.get("vehicle"), &boat) {
             let got = json!({

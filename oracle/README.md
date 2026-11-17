@@ -766,7 +766,7 @@ much of the movement code unnamed: `travel` is `LivingEntity.method_2657`, the i
 same file names as 1.8.9 (`scenarios` 112 cases, `fuzz_seed1` and `fuzz_edges_seed1` 100 x 60,
 `collision_boxes`, `collision_boxes_far`, `selection_boxes`, `raytrace`, `entity_sizes`, `recipes`,
 `clicks_seed1`, `clicks_craft_seed1` 3000 cases each) plus the 1.12-only `face_shapes`,
-`entities` (see "1.12.2 entities"), `elytra` and `boats` (see "1.12.2 elytra", "1.12.2 boats").
+`entities` (see "1.12.2 entities"), `elytra`, `boats` and `minecarts` (see "1.12.2 elytra", "1.12.2 boats", "1.12.2 minecarts").
 
 Setup: the remapped jar needs `remap.stripParameterAnnotations` (javac rejects some inner-class
 constructor annotation tables), `remap.fixPackageAccess` and `remap.publicProtected` (protected members
@@ -977,6 +977,24 @@ HUD and the connection). Cached run (`oracle/cache/1.12.2/fuzz-boats/`, 1,000,00
 
 ```sh
 for s in 81 82 83 84 85; do MC=1.12.2 oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-boats/boats_s$s.jsonl.gz"; done
+```
+
+### 1.12.2 minecarts (`minecarts.jsonl.gz`)
+
+`MC=1.12.2 oracle/run.sh minecarts` (7 hand cases + 100 fuzz cases × 60 ticks of seed 1) and
+`fuzz --minecarts true` (`Boats.cartFuzz`, cases `…_mc`): the boat cases' setup and `ride` event
+with a minecart (spawn-object type 10) the server moves by `entity_rel_move` (1/4096 deltas) and
+`entity_move` (teleports, near and far) through the real handlers. Tick records add `vehicle` (the
+cart: position, rotation, box, interpolation steps left). Packets while riding: `look`,
+`steer_vehicle` (no `vehicle_move`); the 1.12 client never gets off by itself. Cases: idle with
+looks and keys, rolled and stopped, sparse moves with teleports and a zero move, under a ceiling
+against a wall, through water, down a step, the server's dismount. Fuzz: patches of water, stone,
+slabs, glass, soul sand, cobwebs, lava, ladders and air, ceilings, moves every 1-4 ticks,
+teleports, keys and looks, server dismounts. What is faked: nothing beyond the boat cases'. Cached
+run (`oracle/cache/1.12.2/fuzz-minecarts/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 91 92 93 94 95; do MC=1.12.2 oracle/run.sh fuzz --minecarts true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.12.2/fuzz-minecarts/minecarts_s$s.jsonl.gz"; done
 ```
 
 ### 1.12.2 quirks (observed in the vectors)

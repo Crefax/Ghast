@@ -484,6 +484,8 @@ trait Extra {
     /// The passenger tick of a boat ([`tick_passenger`]): no water contact, no item slowdown,
     /// no flight travel, the riding packets instead of the movement packets.
     const RIDE: bool = false;
+    /// The vehicle is a boat: its passenger touches no water.
+    const RIDE_BOAT: bool = false;
     /// The extension state (only called when [`Extra::ON`]).
     fn ext(&mut self) -> &mut PlayerExt;
 }
@@ -512,12 +514,13 @@ impl Extra for ExtCtx<'_> {
     }
 }
 
-/// The extension state of the passenger tick.
-struct RideCtx<'a>(&'a mut PlayerExt);
+/// The extension state of the passenger tick (`BOAT`: in a boat, else a minecart).
+struct RideCtx<'a, const BOAT: bool>(&'a mut PlayerExt);
 
-impl Extra for RideCtx<'_> {
+impl<const BOAT: bool> Extra for RideCtx<'_, BOAT> {
     const ON: bool = true;
     const RIDE: bool = true;
+    const RIDE_BOAT: bool = BOAT;
 
     #[inline(always)]
     fn ext(&mut self) -> &mut PlayerExt {
@@ -544,7 +547,29 @@ pub(super) fn tick_passenger<W: BlockView<State = BlockState>>(
         &Apart(world),
         &Options::default(),
         entities,
-        RideCtx(x),
+        RideCtx::<true>(x),
+        out,
+    );
+}
+
+/// The player's tick as the passenger of a minecart: as [`tick_passenger`], but it touches water
+/// like anyone (only a boat's passenger does not).
+pub(super) fn tick_cart_passenger<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    x: &mut PlayerExt,
+    entities: &[Aabb],
+    input: &TickInput,
+    world: &W,
+    out: &mut Packets,
+) {
+    p.vel = [0.0; 3];
+    tick_solid(
+        p,
+        input,
+        &Apart(world),
+        &Options::default(),
+        entities,
+        RideCtx::<false>(x),
         out,
     );
 }
@@ -691,7 +716,7 @@ impl<W: BlockView<State = BlockState>, E: Solids, X: Extra> Ctx<'_, W, E, X> {
     }
 
     fn update_water_state(&mut self) {
-        if X::RIDE {
+        if X::RIDE_BOAT {
             // Entity.updateWaterState: a boat's passenger never touches water.
             self.p.touching_water = false;
             return;

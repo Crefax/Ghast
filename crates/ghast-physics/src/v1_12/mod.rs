@@ -12,6 +12,7 @@ mod boat;
 pub mod entity;
 mod ext;
 mod fluid;
+mod minecart;
 mod player;
 mod ray;
 
@@ -21,6 +22,7 @@ pub use entity::{
     push_kind,
 };
 pub use ext::PlayerExt;
+pub use minecart::{MINECART_HEIGHT, MINECART_WIDTH, Minecart, tick_minecart};
 pub use player::{
     Effects, GLIDE_HEIGHT, HEIGHT, MovementInput, Options, PlayerState, SNEAK_HEIGHT, STEP_HEIGHT,
     SentState, WIDTH, box_at, is_climbing, is_touching_lava, rocket_boost, tick, tick_ext, tick_in,
