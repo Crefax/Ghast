@@ -381,7 +381,7 @@ pub fn nbt_eq(a: Option<&RawNbt>, b: Option<&RawNbt>) -> bool {
     }
 }
 
-fn tag_eq(a: &Tag, b: &Tag) -> bool {
+pub(crate) fn tag_eq(a: &Tag, b: &Tag) -> bool {
     match (a, b) {
         (Tag::Compound(x), Tag::Compound(y)) => {
             // Map semantics: the last value of each key, same key set.

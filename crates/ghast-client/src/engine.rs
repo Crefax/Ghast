@@ -2290,20 +2290,16 @@ impl TickContext<'_> {
         Ok(())
     }
 
-    /// Selects a trade in the open villager screen (26.1 `select_trade`, written now; the
-    /// payment slots are refilled like the real screen).
+    /// Selects a trade in the open villager screen (1.8 / 1.12 `MC|TrSel`, 1.16.5 / 26.1
+    /// `select_trade`, written now; the output is looked up again for that offer and, from
+    /// 1.16.5 on, the payment slots are refilled like the real screen).
     pub fn select_trade(&mut self, index: i32) -> Result<(), ClickRefused> {
-        #[cfg(ghast_modern)]
-        {
-            let o = self
-                .core
-                .inv
-                .select_trade_modern(index)
-                .map_err(ClickRefused::Inventory)?;
-            self.core.out.push(Outbound::Inventory(o));
-        }
-        #[cfg(not(ghast_modern))]
-        let _ = index;
+        let o = self
+            .core
+            .inv
+            .select_trade(index)
+            .map_err(ClickRefused::Inventory)?;
+        self.core.out.push(Outbound::Inventory(o));
         Ok(())
     }
 

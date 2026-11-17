@@ -81,11 +81,17 @@ impl Outgoing {
                     payload: sb8::ClientCommandPayload(2),
                 })
             }
+            // the trading screen's arrows: `MC|TrSel` with the offer index as an int
+            Outgoing::SelectTrade(i) => {
+                sb8::ServerboundPlayPacket::CustomPayload(sb8::CustomPayload {
+                    channel: "MC|TrSel".into(),
+                    data: bytes::Bytes::copy_from_slice(&i.to_be_bytes()),
+                })
+            }
             Outgoing::ContainerClick(_)
             | Outgoing::Creative(_)
             | Outgoing::RenameItem(_)
-            | Outgoing::ButtonClick { .. }
-            | Outgoing::SelectTrade(_) => return None,
+            | Outgoing::ButtonClick { .. } => return None,
         })
     }
 
@@ -106,12 +112,17 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb12::ServerboundPlayPacket::CloseWindow(sb12::CloseWindow { window_id: *id })
             }
+            Outgoing::SelectTrade(i) => {
+                sb12::ServerboundPlayPacket::CustomPayload(sb12::CustomPayload {
+                    channel: "MC|TrSel".into(),
+                    data: bytes::Bytes::copy_from_slice(&i.to_be_bytes()),
+                })
+            }
             Outgoing::OpenInventory
             | Outgoing::ContainerClick(_)
             | Outgoing::Creative(_)
             | Outgoing::RenameItem(_)
-            | Outgoing::ButtonClick { .. }
-            | Outgoing::SelectTrade(_) => {
+            | Outgoing::ButtonClick { .. } => {
                 return None;
             }
         })
@@ -134,12 +145,14 @@ impl Outgoing {
             Outgoing::CloseWindow(id) => {
                 sb16::ServerboundPlayPacket::CloseWindow(sb16::CloseWindow { window_id: *id })
             }
+            Outgoing::SelectTrade(i) => {
+                sb16::ServerboundPlayPacket::SelectTrade(sb16::SelectTrade { slot: *i })
+            }
             Outgoing::OpenInventory
             | Outgoing::ContainerClick(_)
             | Outgoing::Creative(_)
             | Outgoing::RenameItem(_)
-            | Outgoing::ButtonClick { .. }
-            | Outgoing::SelectTrade(_) => {
+            | Outgoing::ButtonClick { .. } => {
                 return None;
             }
         })
@@ -175,6 +188,7 @@ impl Inventory {
             P::CraftProgressBar(c) => {
                 self.on_window_property(i32::from(c.window_id), c.property, c.value);
             }
+            P::CustomPayload(c) if c.channel == "MC|TrList" => self.on_trade_list_legacy(&c.data),
             _ => {}
         }
         None
@@ -206,6 +220,7 @@ impl Inventory {
             P::CraftProgressBar(c) => {
                 self.on_window_property(i32::from(c.window_id), c.property, c.value);
             }
+            P::CustomPayload(c) if c.channel == "MC|TrList" => self.on_trade_list_legacy(&c.data),
             _ => {}
         }
         None
@@ -249,6 +264,7 @@ impl Inventory {
                 self.on_window_property(i32::from(c.window_id), c.property, c.value);
             }
             P::DeclareRecipes(d) => self.on_declare_recipes(crate::RecipeBook::from_v1_16_5(d)),
+            P::TradeList(t) => self.on_trade_list_v1_16_5(t),
             _ => {}
         }
         None

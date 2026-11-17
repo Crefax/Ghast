@@ -420,3 +420,145 @@ fn beacon_legacy() {
         Some((ingot, 1))
     );
 }
+
+/// Selects villager offer `index` on the first tick; returns what the tick sent.
+fn select_once(e: &mut Engine<Box<dyn Sim>>, index: i32) -> Vec<Outbound> {
+    let t0 = std::time::Instant::now();
+    e.note_inbound(t0);
+    let mut done = false;
+    let mut b = Script(|ctx: &mut TickContext<'_>| {
+        if !done {
+            done = true;
+            ctx.select_trade(index).unwrap();
+        }
+    });
+    e.tick(&mut b, t0);
+    let _ = b;
+    std::mem::take(e.outbound())
+}
+
+/// A 1.8 / 1.12 `MC|TrList` custom payload: one offer `first` → `result`.
+fn trade_list_legacy(window: i32, first: &Stack, result: &Stack) -> bytes::Bytes {
+    use ghast_protocol::codec::Encode;
+    let mut b = bytes::BytesMut::new();
+    b.extend_from_slice(&window.to_be_bytes());
+    b.extend_from_slice(&[1]);
+    ghast_inventory::to_legacy_slot(Some(first))
+        .encode(&mut b)
+        .unwrap();
+    ghast_inventory::to_legacy_slot(Some(result))
+        .encode(&mut b)
+        .unwrap();
+    b.extend_from_slice(&[0, 0]); // no second payment, not disabled
+    b.extend_from_slice(&0i32.to_be_bytes()); // uses
+    b.extend_from_slice(&7i32.to_be_bytes()); // max uses
+    b.freeze()
+}
+
+/// 1.8.9 villager: the offers arrive as `MC|TrList`, a payment shows the client's own output,
+/// taking it uses the payment up and counts a use; selecting an offer writes `MC|TrSel`.
+#[test]
+fn villager_1_8_9() {
+    use ghast_protocol::v1_8::play::clientbound as cb;
+    let mut e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_1_8(9, "minecraft:villager", 3),
+        9,
+        vec![None, None, None],
+        &[(0, Stack::new(296, 20, 0))],
+    );
+    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::TradeOutput));
+    let offers = RawPacket::from_packet(&cb::CustomPayload {
+        channel: "MC|TrList".into(),
+        data: trade_list_legacy(9, &Stack::new(296, 18, 0), &Stack::new(388, 1, 0)),
+    })
+    .unwrap();
+    assert!(
+        V1_8::inventory_packet(e.inventory_mut(), &offers)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(e.core.inv.trade_offers().map(<[_]>::len), Some(1));
+    // hotbar 0 (screen slot 3 + 27) into the first payment slot (shift-click would move it
+    // to the main inventory)
+    for (n, slot) in [30i16, 0].into_iter().enumerate() {
+        let out = click_once(&mut e, Click::Pickup { slot, right: false });
+        assert!(clicked(&out), "{out:?}");
+        let _ = e.inventory_mut().on_transaction(9, n as i16 + 1, true);
+    }
+    assert_eq!(
+        e.core.inv.slot(2).map(|s| (s.id(), s.count())),
+        Some((388, 1))
+    );
+    // take the emerald: 18 wheat paid, 2 left (too few for another), the offer used once
+    let out = click_once(
+        &mut e,
+        Click::Pickup {
+            slot: 2,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.cursor().map(Stack::id), Some(388));
+    assert_eq!(e.core.inv.slot(0).map(Stack::count), Some(2));
+    assert_eq!(e.core.inv.slot(2), None);
+    assert_eq!(e.core.inv.trade_offers().unwrap()[0].uses, 1);
+    let _ = e.inventory_mut().on_transaction(9, 3, true);
+    let out = select_once(&mut e, 0);
+    assert!(out.iter().any(|o| matches!(
+        o,
+        Outbound::Inventory(ghast_inventory::Outgoing::SelectTrade(0))
+    )));
+}
+
+/// 1.16.5 villager: `trade_list`, then picking the offer moves the payment out of the
+/// inventory like the screen (`switchTo`), and the output follows.
+#[test]
+fn villager_1_16_5() {
+    use ghast_protocol::v1_16_5::play::clientbound as cb;
+    let wheat = id16("wheat");
+    let emerald = id16("emerald");
+    let mut e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(4, 18),
+        4,
+        vec![None, None, None],
+        &[(5, Stack::new(wheat, 30, 0))],
+    );
+    let slot = |s: Stack| ghast_inventory::to_modern_slot(Some(&s));
+    let offers = RawPacket::from_packet(&cb::TradeList {
+        window_id: 4,
+        trades: vec![cb::TradeListTrades {
+            input_item1: slot(Stack::new(wheat, 20, 0)),
+            output_item: slot(Stack::new(emerald, 1, 0)),
+            input_item2: None,
+            trade_disabled: false,
+            nb_trade_uses: 0,
+            maximum_nb_trade_uses: 12,
+            xp: 2,
+            special_price: 0,
+            price_multiplier: 0.05,
+            demand: 0,
+        }],
+        villager_level: 1,
+        experience: 0,
+        is_regular_villager: true,
+        can_restock: true,
+    })
+    .unwrap();
+    assert!(
+        V1_16_5::inventory_packet(e.inventory_mut(), &offers)
+            .unwrap()
+            .is_none()
+    );
+    let out = select_once(&mut e, 0);
+    assert_eq!(
+        e.core.inv.slot(0).map(|s| (s.id(), s.count())),
+        Some((wheat, 30))
+    );
+    assert_eq!(e.core.inv.slot(2).map(Stack::id), Some(emerald));
+    assert!(out.iter().any(|o| matches!(
+        o,
+        Outbound::Inventory(ghast_inventory::Outgoing::SelectTrade(0))
+    )));
+}

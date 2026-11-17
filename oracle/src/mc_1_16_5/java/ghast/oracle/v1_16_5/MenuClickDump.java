@@ -1,21 +1,29 @@
 package ghast.oracle.v1_16_5;
 
 import ghast.oracle.Rng;
+import io.netty.buffer.Unpooled;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
+import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.packet.s2c.play.SetTradeOffersS2CPacket;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
+import net.minecraft.screen.MerchantScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.registry.Registry;
+import net.minecraft.village.TradeOffer;
+import net.minecraft.village.TradeOfferList;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.function.Consumer;
 
 /**
@@ -43,7 +51,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -63,6 +71,17 @@ final class MenuClickDump {
     /** Beacon payments (the vanilla tag), near misses (nuggets, blocks), others. */
     static final String[] BEACON = {"emerald", "emerald", "diamond", "diamond", "iron_ingot", "gold_ingot",
         "netherite_ingot", "gold_nugget", "netherite_scrap", "gold_block", "stone", "dirt", "white_wool", "diamond_sword"};
+
+    /** Villager payments. */
+    static final String[] PAY = {"emerald", "emerald", "wheat", "paper", "coal", "iron_ingot", "book", "diamond_sword",
+        "gold_nugget"};
+
+    /** Villager sales. */
+    static final String[] SELL = {"emerald", "bread", "enchanted_book", "diamond_sword", "bow", "filled_map", "book",
+        "diamond"};
+
+    /** The handler of the current merchant case. */
+    private static MerchantScreenHandler trader;
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
@@ -85,6 +104,7 @@ final class MenuClickDump {
             case "enchanting" -> 12;
             case "anvil" -> 7;
             case "beacon" -> 8;
+            case "merchant" -> 18;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -95,6 +115,8 @@ final class MenuClickDump {
             case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
             case "anvil" -> new AnvilScreenHandler(sync, inv);
             case "beacon" -> new BeaconScreenHandler(sync, inv);
+            // the client constructor: a SimpleMerchant whose offers the server sends
+            case "merchant" -> trader = new MerchantScreenHandler(sync, inv);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -127,6 +149,23 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("merchant")) {
+            TradeOfferList offers = trader == null ? null : trader.getRecipes();
+            if (offers != null && !offers.isEmpty() && r.chance(0.7)) {
+                TradeOffer o = offers.get(r.nextInt(offers.size()));
+                ItemStack want = !o.getSecondBuyItem().isEmpty() && r.chance(0.4) ? o.getSecondBuyItem()
+                        : o.getAdjustedFirstBuyItem();
+                ItemStack s = want.copy();
+                s.setCount(r.chance(0.2) ? want.getCount() : r.range(1, want.getMaxCount()));
+                if (s.hasTag() && r.chance(0.2)) {
+                    s.setTag(null);
+                } else if (r.chance(0.2)) {
+                    s.setCustomName(new net.minecraft.text.LiteralText(r.chance(0.5) ? "a" : "b"));
+                }
+                return s;
+            }
+            return offerStack(r, PAY);
+        }
         if (menu.equals("beacon")) {
             ItemStack s = ClickDump.stack(r, BEACON);
             if (r.chance(0.4)) {
@@ -152,6 +191,73 @@ final class MenuClickDump {
         return s;
     }
 
+    /** A villager offer's stack from {@code pool}: tools one at a time, maybe damaged or named. */
+    private static ItemStack offerStack(Rng r, String[] pool) {
+        Item item = Registry.ITEM.get(new Identifier(r.pick(pool)));
+        ItemStack s = new ItemStack(item, item.getMaxCount() == 1 ? 1 : r.range(1, 20));
+        if (item.getMaxDamage() > 0 && r.chance(0.3)) {
+            s.setDamage(r.nextInt(4));
+        }
+        if (r.chance(0.2)) {
+            s.setCustomName(new net.minecraft.text.LiteralText(r.chance(0.5) ? "a" : "b"));
+        }
+        return s;
+    }
+
+    /**
+     * Random offers with prices (demand, multiplier, special price), sent as the server's
+     * {@code trade_list} and stored like {@code ClientPlayNetworkHandler.onSetTradeOffers} does.
+     */
+    private static String offers(Rng r, int sync) {
+        TradeOfferList list = new TradeOfferList();
+        for (int k = r.range(1, 4); k > 0; k--) {
+            ItemStack second = r.chance(0.4) ? offerStack(r, PAY) : ItemStack.EMPTY;
+            int max = r.range(1, 6);
+            TradeOffer o = new TradeOffer(offerStack(r, PAY), second, offerStack(r, SELL), r.range(0, max + 1), max,
+                    r.nextInt(10), r.chance(0.5) ? 0.05F : 0.2F, r.chance(0.5) ? 0 : r.range(-5, 10));
+            if (r.chance(0.4)) {
+                o.setSpecialPrice(r.range(-4, 4));
+            }
+            list.add(o);
+        }
+        PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
+        try {
+            new SetTradeOffersS2CPacket(sync, list, r.nextInt(5), r.nextInt(100), r.chance(0.5), r.chance(0.5)).write(buf);
+            byte[] bytes = new byte[buf.readableBytes()];
+            buf.getBytes(0, bytes);
+            SetTradeOffersS2CPacket p = new SetTradeOffersS2CPacket();
+            p.read(new PacketByteBuf(Unpooled.wrappedBuffer(bytes)));
+            trader.setOffers(new TradeOfferList(p.getOffers().toNbt()));
+            StringBuilder h = new StringBuilder(bytes.length * 2);
+            for (byte x : bytes) {
+                h.append(Character.forDigit((x >> 4) & 15, 16)).append(Character.forDigit(x & 15, 16));
+            }
+            return h.toString();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** A payment for {@code want}: its item and NBT, at least as many (up to a stack). */
+    private static ItemStack pay(Rng r, ItemStack want) {
+        if (want.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack s = want.copy();
+        s.setCount(Math.min(want.getMaxCount(), want.getCount() * r.range(1, 3) + r.nextInt(3)));
+        return s;
+    }
+
+    /** The client's count of uses per offer. */
+    private static void uses(StringBuilder b) {
+        TradeOfferList list = trader.getRecipes();
+        b.append(",\"uses\":[");
+        for (int k = 0; k < list.size(); k++) {
+            b.append(k > 0 ? "," : "").append(list.get(k).getUses());
+        }
+        b.append(']');
+    }
+
     private static ItemStack anyStack(Rng r, String menu) {
         return r.chance(0.6) ? menuStack(r, menu) : ClickDump.stack(r, ClickDump.ITEMS);
     }
@@ -163,6 +269,17 @@ final class MenuClickDump {
         player.currentScreenHandler = w0;
         Reflect.set(ScreenHandler.class, w0, "actionId", (short) 0);
         inv.setCursorStack(ItemStack.EMPTY);
+        boolean merchant = menu.equals("merchant");
+        int sync = 0;
+        ScreenHandler h = null;
+        String offers = null;
+        if (merchant) {
+            // the trader first: the player's items are drawn from its offers
+            sync = r.range(1, 100);
+            h = handler(sync, inv, menu);
+            // the server's offers arrive before the payments are placed
+            offers = r.chance(0.92) ? offers(r, sync) : null;
+        }
         double fill = 0.2 + r.nextDouble() * 0.6;
         for (int k = 0; k < 36; k++) {
             inv.main.set(k, r.chance(fill) ? anyStack(r, menu) : ItemStack.EMPTY);
@@ -176,14 +293,28 @@ final class MenuClickDump {
         }
         inv.selectedSlot = r.nextInt(9);
 
-        int sync = r.range(1, 100);
-        ScreenHandler h = handler(sync, inv, menu);
+        if (!merchant) {
+            sync = r.range(1, 100);
+            h = handler(sync, inv, menu);
+        }
         int n = h.slots.size() - 36;
         double cfill = r.nextDouble();
-        // the anvil's output is what the handler computes from the inputs (a server sends the same)
-        int filled = menu.equals("anvil") ? 2 : n;
-        for (int k = 0; k < filled; k++) {
-            h.getSlot(k).setStack(r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY);
+        // the anvil's / villager's output is what the handler computes from the inputs (a server
+        // sends the same; without offers the client keeps the server's)
+        int filled = menu.equals("anvil") || offers != null ? 2 : n;
+        if (offers != null && r.chance(0.5)) {
+            // an offer's payments, enough of them (sometimes swapped)
+            TradeOfferList list = trader.getRecipes();
+            TradeOffer o = list.get(r.nextInt(list.size()));
+            ItemStack a = pay(r, o.getAdjustedFirstBuyItem());
+            ItemStack b2 = pay(r, o.getSecondBuyItem());
+            boolean swap = r.chance(0.2);
+            h.getSlot(0).setStack(swap ? b2 : a);
+            h.getSlot(1).setStack(swap ? a : b2);
+        } else {
+            for (int k = 0; k < filled; k++) {
+                h.getSlot(k).setStack(r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY);
+            }
         }
         player.currentScreenHandler = h;
         if (r.chance(0.4)) {
@@ -193,14 +324,31 @@ final class MenuClickDump {
         StringBuilder b = new StringBuilder(4096);
         b.append("{\"case\":\"").append(name).append("\",\"kind\":\"").append(menu).append("\",\"menu\":").append(menuId(menu))
                 .append(",\"sync\":").append(sync).append(",\"selected\":").append(inv.selectedSlot);
+        if (offers != null) {
+            b.append(",\"offers\":\"").append(offers).append('"');
+        }
         ClickDump.state(b, player, w0, h);
+        if (merchant) {
+            uses(b);
+        }
         b.append(",\"clicks\":[");
         int clicks = r.range(1, 10);
         SlotActionType[] types = SlotActionType.values();
         for (int c = 0; c < clicks; c++) {
+            if (offers != null && r.chance(0.15)) {
+                // MerchantScreen.syncRecipeIndex: setRecipeIndex, switchTo (+ select_trade, not captured)
+                int k = r.nextInt(trader.getRecipes().size());
+                trader.setRecipeIndex(k);
+                trader.switchTo(k);
+                b.append(c > 0 ? "," : "").append("{\"select\":").append(k);
+                ClickDump.state(b, player, w0, h);
+                uses(b);
+                b.append('}');
+                continue;
+            }
             int len = h.slots.size();
             int mode = r.pick(new int[] {0, 0, 0, 1, 1, 2, 4, 6});
-            int slot = r.chance(0.45) ? r.nextInt(n) : r.nextInt(len);
+            int slot = merchant && r.chance(0.25) ? 2 : r.chance(0.45) ? r.nextInt(n) : r.nextInt(len);
             int button = r.nextInt(2);
             switch (mode) {
                 case 0, 4 -> {
@@ -226,6 +374,9 @@ final class MenuClickDump {
             b.append("{\"slot\":").append(slot).append(",\"button\":").append(button).append(",\"mode\":").append(mode)
                     .append(",\"packet\":\"").append(ClickDump.packetHex(p)).append('"');
             ClickDump.state(b, player, w0, h);
+            if (merchant) {
+                uses(b);
+            }
             b.append('}');
         }
         b.append("]}");

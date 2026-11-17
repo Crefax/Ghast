@@ -67,6 +67,7 @@ mod item;
 #[cfg(modern)]
 mod item26;
 mod menus;
+mod merchant;
 #[cfg(modern)]
 pub mod modern;
 mod packets;
@@ -88,6 +89,7 @@ pub use inventory::{
     Inventory, Outgoing, Window,
 };
 pub use item::{Enchantment, EnchantmentId, ItemText};
+pub use merchant::TradeOffer;
 #[cfg(feature = "v26_1")]
 pub use packets::PACKET_IDS_26_1;
 pub use rules::{Version, VersionNotEnabled};

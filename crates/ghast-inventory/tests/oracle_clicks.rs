@@ -67,6 +67,7 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "enchanting" => Some(WindowKind::Enchanting),
         "anvil" => Some(WindowKind::Anvil),
         "beacon" => Some(WindowKind::Beacon),
+        "merchant" => Some(WindowKind::Merchant),
         k => panic!("unknown kind {k}"),
     }
 }
@@ -108,6 +109,7 @@ struct Stats {
     predicted: usize,
     byte_exact: usize,
     result_clicks: usize,
+    selects: usize,
     unpredictable: usize,
     unpredictable_by: std::collections::BTreeMap<String, usize>,
     by_mode: [usize; 7],
@@ -162,6 +164,17 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
             }
         }
     }
+    if let Some(uses) = st["uses"].as_array() {
+        // villager offers: the uses the client counted
+        let got: Vec<i32> = inv
+            .trade_offers()
+            .map(|o| o.iter().map(|o| o.uses).collect())
+            .unwrap_or_default();
+        let want: Vec<i32> = uses.iter().map(|u| u.as_i64().unwrap() as i32).collect();
+        if got != want {
+            out.push(format!("offer uses: ghast {got:?}, vanilla {want:?}"));
+        }
+    }
     let c = stack(v, &st["cursor"]);
     if !same(inv.cursor(), c.as_ref()) {
         out.push(format!("cursor: ghast {:?}, vanilla {:?}", inv.cursor(), c));
@@ -192,6 +205,16 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
         }
         Some(k) => inv.on_open_window(sync, Some(k), "{}".into()),
     }
+    if let Some(h) = c["offers"].as_str() {
+        // the server's offers (1.8 / 1.12 `MC|TrList` data, 1.16.5 `trade_list` body)
+        let b = hex(h);
+        match v {
+            Version::V1_16_5 => {
+                inv.on_trade_list_v1_16_5(&decode_exact::<cb16::TradeList>(&b).unwrap())
+            }
+            _ => inv.on_trade_list_legacy(&b),
+        }
+    }
     load(&mut inv, v, sync, c);
     let mut d = Vec::new();
     compare(&inv, v, c, &mut d);
@@ -199,6 +222,24 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
     s.cases += 1;
     for (n, k) in c["clicks"].as_array().unwrap().iter().enumerate() {
         inv.tick();
+        if let Some(idx) = k["select"].as_i64() {
+            // the trading screen picked an offer
+            let at = format!("{name} step {n} select {idx}");
+            match inv.select_trade(idx as i32) {
+                Ok(Outgoing::SelectTrade(i)) if i == idx as i32 => {}
+                other => s.diffs.push(format!("{at}: {other:?}")),
+            }
+            s.selects += 1;
+            let mut d = Vec::new();
+            compare(&inv, v, k, &mut d);
+            if !d.is_empty() {
+                for x in d {
+                    s.diffs.push(format!("{at}: {x}"));
+                }
+                load(&mut inv, v, sync, k);
+            }
+            continue;
+        }
         s.clicks += 1;
         let (slot, button, mode) = (
             k["slot"].as_i64().unwrap() as i16,
@@ -345,8 +386,8 @@ fn check(v: Version, path: PathBuf) {
         s.unpredictable_by
     );
     eprintln!(
-        "  clicks on a crafting result that carried a stack: {}",
-        s.result_clicks
+        "  clicks on a crafting result that carried a stack: {}, trade selections: {}",
+        s.result_clicks, s.selects
     );
     for d in s.diffs.iter().take(20) {
         eprintln!("  {d}");

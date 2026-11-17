@@ -103,6 +103,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
 | anvil (inputs `Normal`, `SlotKind::AnvilOutput`) | inputs; output refused | same | same |
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
+| villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -133,10 +134,27 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   set into it at one, also a server's `window_items` / `set_slot`. Choosing the effects
   (the screen's `MC|Beacon` / `update_beacon`; ghast-inventory does not build it) and using up
   the payment are the server's; the beacon's levels and effects are window properties.
+- **Villager trading**: the client looks the output up itself, and so does ghast: the offers
+  of `MC|TrList` (1.8 / 1.12, `Inventory::on_trade_list_legacy`) or `trade_list` (1.16.5,
+  `Inventory::on_trade_list_v1_16_5`; both through `apply_v1_*`) are matched against the two
+  payment slots (as placed, else swapped) on every change of the trading inventory, also the
+  server's slot packets: same item (1.8 / 1.12: and damage), enough of it, the offer's NBT
+  contained in the payment's, the selected offer only when one other than the first is
+  selected, disabled offers skipped; 1.16.5 prices include demand, the price multiplier and the
+  special price. Taking the output pays for it (in slot order, else swapped), counts a use of
+  the offer on the client (`Inventory::trade_offers`) and looks the output up again, so
+  shift-click trades as long as the payments last. Offers arriving do not update the output
+  (vanilla neither); without offers the server's output stays. `Inventory::select_trade`
+  picks an offer like the screen (1.8 / 1.12 `MC|TrSel`; 1.16.5 `select_trade`, and the
+  payments go back into the inventory and the offer's items come out of it). Shift-click moves
+  payments and output to the player part and the player part between main inventory and
+  hotbar (never into the payment slots); 1.16.5 double-click gathers nothing in this screen.
+  Taking a filled map with NBT is refused (`Item.onCraft` reads the world's map data). The
+  villager's experience, levels and restocking are the server's.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
 shift-click from the player part of a furnace (smelting recipes, fuel), any interaction that
-reads a fuel / unmodelled brewing / enchanting / anvil / trading / horse-equipment slot, a
+reads a fuel / unmodelled brewing / enchanting / anvil / horse-equipment slot, a
 crafting-result click while the result is unknown, taking a result whose grid matches no recipe
 ghast models (1.8 banners, map upscaling; 1.16.5 special recipes, a written book or banner in the
 grid, or no recipe at all — vanilla then aliases the grid stacks).

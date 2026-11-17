@@ -1396,6 +1396,89 @@ impl Inventory {
         }))
     }
 
+    /// 1.8 – 1.16.5 villager screen: the server's offers for window `window_id` (vanilla
+    /// keeps them only while that window's trading screen is open). The output is not looked up
+    /// again until the next slot change, like vanilla. [`Inventory::apply_v1_8`] /
+    /// [`Inventory::apply_v1_12_2`] (`MC|TrList`) and [`Inventory::apply_v1_16_5`]
+    /// (`trade_list`) call this.
+    pub fn on_trade_offers(&mut self, window_id: i32, offers: Vec<crate::merchant::TradeOffer>) {
+        if self.open_id() == window_id
+            && let Some(mer) = self.m.merchant.as_deref_mut()
+        {
+            mer.offers = Some(offers);
+        }
+    }
+
+    /// 1.8 / 1.12 `MC|TrList` custom payload data (window id, then the offers).
+    #[cfg(any(feature = "v1_8", feature = "v1_12"))]
+    pub fn on_trade_list_legacy(&mut self, data: &bytes::Bytes) {
+        if let Some((w, offers)) = crate::merchant::parse_legacy(data) {
+            self.on_trade_offers(w, offers);
+        }
+    }
+
+    /// 1.16.5 `trade_list`.
+    #[cfg(feature = "v1_16_5")]
+    pub fn on_trade_list_v1_16_5(
+        &mut self,
+        p: &ghast_protocol::v1_16_5::play::clientbound::TradeList,
+    ) {
+        self.on_trade_offers(p.window_id, crate::merchant::from_v1_16_5(p));
+    }
+
+    /// The open villager screen's offers as the client holds them (uses counted on the client),
+    /// `None` when no villager screen is open or the server has not sent them (1.8 – 1.16.5).
+    #[must_use]
+    pub fn trade_offers(&self) -> Option<&[crate::merchant::TradeOffer]> {
+        self.m.merchant.as_ref()?.offers.as_deref()
+    }
+
+    /// Villager screen: picks offer `index` like the screen's arrows / trade buttons and
+    /// returns the packet to send (1.8 / 1.12 `MC|TrSel`, 1.16.5 / 26.1 `select_trade`).
+    /// 1.8 / 1.12: the output is looked up again for that offer (0 = the first offer that
+    /// matches). 1.16.5: also the payments go back into the inventory and the offer's own
+    /// items come out of it (`switchTo`), as the screen does. 26.1: as
+    /// [`Inventory::select_trade_modern`].
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no villager screen is open; [`ClickError::InvalidSlot`]
+    /// when the offers are not known or `index` is not one of them.
+    pub fn select_trade(&mut self, index: i32) -> Result<Outgoing, ClickError> {
+        #[cfg(modern)]
+        if self.version.is_modern() {
+            return self.select_trade_modern(index);
+        }
+        let v = self.version;
+        let Some(mer) = self.m.merchant.as_deref_mut() else {
+            return Err(ClickError::NoScreen);
+        };
+        let n = mer.offers.as_ref().map_or(0, Vec::len);
+        if usize::try_from(index).map_or(true, |k| k >= n) {
+            return Err(ClickError::InvalidSlot);
+        }
+        mer.index = index;
+        crate::merchant::update(v, &mut self.m);
+        if v == Version::V1_16_5 {
+            let lay = self.layout();
+            let before = self.m.clone();
+            let mut sim = Sim {
+                v,
+                lay,
+                m: &mut self.m,
+                book: &self.book,
+                binding_curse: None,
+            };
+            sim.switch_trade(index as usize);
+            if self.m.container != before.container {
+                self.events.window_changed = true;
+            }
+            if self.m.player != before.player {
+                self.events.player_changed = true;
+            }
+        }
+        Ok(Outgoing::SelectTrade(index))
+    }
+
     /// 26.1 villager screen: picks trade `index` (`setSelectionHint`, `tryMoveItems`: the
     /// payment goes back to the inventory and the trade's costs come out of it). Returns the
     /// `select_trade` to send.
@@ -1823,6 +1906,7 @@ impl Inventory {
             }
             ScreenState::Window(_) => {
                 self.m.container.clear();
+                self.m.merchant = None;
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
                 #[cfg(modern)]
@@ -1914,6 +1998,9 @@ impl Inventory {
         }
         let n = kind.container_len(self.version);
         self.m.container = vec![None; n];
+        self.m.merchant = (kind == WindowKind::Merchant
+            && crate::menus::modelled(self.version, kind))
+        .then(Box::default);
         self.m.container_result_known = true;
         self.m.container_fresh = true;
         self.screen = ScreenState::Window(Window {
@@ -2027,6 +2114,10 @@ impl Inventory {
             self.m.container_result_known = true;
             self.m.container_fresh = true;
         }
+        // villager screen: every slot set marked the trading inventory dirty
+        if lay.screen != Screen::Player && self.m.merchant.is_some() {
+            crate::merchant::update(self.version, &mut self.m);
+        }
         // 1.16.5 beacon: the payment inventory caps at 1 (one check per packet, not per slot)
         if V == V1165 && window && lay.screen == Screen::Container(WindowKind::Beacon) {
             lay.clamp_menu(Loc::Container(0), self.m.at_mut(Loc::Container(0)));
@@ -2131,6 +2222,10 @@ impl Inventory {
             if is_grid(lay, l) {
                 crate::sim::recompute_1_8(&mut self.m, lay);
             }
+        }
+        // villager screen: `Slot.setStack` marks the trading inventory dirty
+        if matches!(l, Loc::Container(0..=2)) && self.m.merchant.is_some() {
+            crate::merchant::update(self.version, &mut self.m);
         }
     }
 

@@ -88,6 +88,9 @@ pub enum SlotKind {
     /// Beacon payment slot (0): emerald, diamond, gold and iron ingot (1.16.5: the
     /// `beacon_payment_items` tag, also netherite ingot), one item.
     BeaconPayment,
+    /// Villager trading output (2): the result of the offer the two payment slots buy, which
+    /// the client looks up itself; taking it uses the payments up.
+    TradeOutput,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -241,6 +244,13 @@ impl WindowKind {
                 _ => SlotKind::BrewingFuel,
             },
             WindowKind::Beacon => SlotKind::BeaconPayment,
+            WindowKind::Merchant => {
+                if i == 2 {
+                    SlotKind::TradeOutput
+                } else {
+                    SlotKind::Normal
+                }
+            }
             WindowKind::Horse { .. } => {
                 if i < 2 {
                     SlotKind::Special

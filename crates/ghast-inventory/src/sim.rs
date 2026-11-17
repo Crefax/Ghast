@@ -52,6 +52,8 @@ pub(crate) struct Model {
     pub craft_memo: Option<std::sync::Arc<CraftMemo>>,
     /// 1.8: the same for the open crafting table.
     pub table_memo: Option<std::sync::Arc<CraftMemo>>,
+    /// 1.8 – 1.16.5 villager trading screen: offers, selection, remembered offer.
+    pub merchant: Option<Box<crate::merchant::Merchant>>,
 }
 
 /// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
@@ -97,6 +99,7 @@ impl Default for Model {
             selected: 0,
             craft_memo: None,
             table_memo: None,
+            merchant: None,
         }
     }
 }
@@ -208,13 +211,16 @@ impl Layout {
                         | SlotKind::EnchantItem
                         | SlotKind::Lapis
                         | SlotKind::BeaconPayment
+                        | SlotKind::TradeOutput
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
                         }
-                        // the anvil's inputs are plain slots once the menu is modelled
+                        // the anvil's and the villager's inputs are plain slots once the menu
+                        // is modelled
                         SlotKind::Normal | SlotKind::AnvilOutput
-                            if k == WindowKind::Anvil && !crate::menus::modelled(self.v, k) =>
+                            if matches!(k, WindowKind::Anvil | WindowKind::Merchant)
+                                && !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
                         }
@@ -404,6 +410,19 @@ impl Sim<'_> {
         }
         *self.m.at_mut(l) = s;
         self.grid_touched(l);
+        // `Slot.setStack` marks the trading inventory dirty, whichever slot it is
+        if matches!(l, Loc::Container(0..=2)) {
+            self.merchant_update();
+        }
+    }
+
+    /// 1.8 – 1.16.5 villager screen: the trading inventory's offer lookup ran (any slot set
+    /// or marked dirty, a payment taken or changed).
+    #[inline]
+    fn merchant_update(&mut self) {
+        if self.m.merchant.is_some() {
+            crate::merchant::update(self.v, self.m);
+        }
     }
 
     /// The crafting grid of the screen: its slot numbers and width.
@@ -435,6 +454,9 @@ impl Sim<'_> {
     /// The anvil's input inventory ran `markDirty` -> `onContentChanged` -> `updateResult`:
     /// with an empty first input the output is empty (cost 0); otherwise ghast does not know it.
     fn anvil_touched(&mut self, l: Loc) {
+        if matches!(l, Loc::Container(0 | 1)) {
+            self.merchant_update();
+        }
         if self.lay.screen == Screen::Container(WindowKind::Anvil)
             && matches!(l, Loc::Container(0 | 1))
             && self.m.container.len() == 3
@@ -448,7 +470,7 @@ impl Sim<'_> {
         }
     }
 
-    fn slot_mut(&mut self, i: usize) -> &mut Option<Stack> {
+    pub(crate) fn slot_mut(&mut self, i: usize) -> &mut Option<Stack> {
         let l = self.loc(i);
         self.m.at_mut(l)
     }
@@ -461,7 +483,7 @@ impl Sim<'_> {
         }
     }
 
-    fn norm(&self, s: Stack) -> Option<Stack> {
+    pub(crate) fn norm(&self, s: Stack) -> Option<Stack> {
         (!self.gone(s.count)).then_some(s)
     }
 
@@ -489,6 +511,7 @@ impl Sim<'_> {
             SlotKind::EnchantItem => true,
             SlotKind::AnvilOutput => false,
             SlotKind::Lapis => self.v.is_lapis(s),
+            SlotKind::TradeOutput => false,
             SlotKind::BeaconPayment => self.v.beacon_payment(s),
             SlotKind::Special => return Err(Unpredictable),
         })
@@ -513,6 +536,15 @@ impl Sim<'_> {
         match self.lay.kind(i) {
             // `repairCost > 0 && experienceLevel >= repairCost`: computed with the output
             SlotKind::Special | SlotKind::AnvilOutput => Err(Unpredictable),
+            // taking it runs `ItemStack.onCraft`: a filled map may change with the world's
+            // map data
+            SlotKind::TradeOutput
+                if self
+                    .get(i)
+                    .is_some_and(|s| crate::merchant::take_needs_world(self.v, s)) =>
+            {
+                Err(Unpredictable)
+            }
             SlotKind::CraftResult if !self.result_known(i) => Err(Unpredictable),
             SlotKind::Armor(_) if self.v == Version::V1_16_5 => {
                 // binding curse keeps armor on (survival; ghast bots are never creative here)
@@ -543,9 +575,10 @@ impl Sim<'_> {
 
     fn take_raw(&mut self, i: usize, amount: i32) -> Option<Stack> {
         // CraftingResultInventory
+        // (the trading inventory gives its output away whole as well)
         let whole = matches!(
             self.lay.kind(i),
-            SlotKind::CraftResult | SlotKind::AnvilOutput
+            SlotKind::CraftResult | SlotKind::AnvilOutput | SlotKind::TradeOutput
         );
         let v = self.v;
         let slot = self.slot_mut(i);
@@ -587,6 +620,10 @@ impl Sim<'_> {
     fn on_take(&mut self, i: usize) -> R<()> {
         match self.lay.kind(i) {
             SlotKind::Special | SlotKind::AnvilOutput => Err(Unpredictable),
+            SlotKind::TradeOutput => {
+                crate::merchant::take_output(self.v, self.m);
+                Ok(())
+            }
             SlotKind::CraftResult => {
                 let (slots, width) = self.grid_slots().ok_or(Unpredictable)?;
                 let stacks: Vec<Option<Stack>> =
@@ -890,6 +927,10 @@ impl Sim<'_> {
                 }
             }
         }
+        // `slot.markDirty()` of the clicked slot
+        if i < 3 {
+            self.merchant_update();
+        }
         Ok(ret)
     }
 
@@ -970,6 +1011,10 @@ impl Sim<'_> {
                     }
                 }
             }
+        }
+        // `slot.markDirty()` of the clicked slot
+        if i < 3 {
+            self.merchant_update();
         }
         Ok(ret)
     }
@@ -1126,6 +1171,16 @@ impl Sim<'_> {
                     }
                     WindowKind::Enchanting if crate::menus::modelled(v, kind) => {
                         (self.transfer_enchanting(i, &mut st)?, true)
+                    }
+                    WindowKind::Merchant if crate::menus::modelled(v, kind) => {
+                        let ok = match i {
+                            2 => self.insert(&mut st, 3, 39, true)?,
+                            0 | 1 => self.insert(&mut st, 3, 39, false)?,
+                            3..30 => self.insert(&mut st, 30, 39, false)?,
+                            30..39 => self.insert(&mut st, 3, 30, false)?,
+                            _ => false,
+                        };
+                        (ok, true)
                     }
                     WindowKind::Beacon if crate::menus::modelled(v, kind) => {
                         (self.transfer_beacon(i, &mut st)?, true)
@@ -1480,6 +1535,10 @@ impl Sim<'_> {
             Some(_) => self.can_take(i)?,
         };
         if clicked_takeable {
+            return Ok(());
+        }
+        // 1.16.5 villager screen: `canInsertIntoSlot` is false for every slot
+        if v == Version::V1_16_5 && self.m.merchant.is_some() {
             return Ok(());
         }
         let len = self.lay.len;

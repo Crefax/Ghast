@@ -342,6 +342,7 @@ impl ClientVersion for V1_16_5 {
             cb::id::HELD_ITEM_SLOT => P::HeldItemSlot(raw.decode_as()?),
             cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
             cb::id::OPEN_HORSE_WINDOW => P::OpenHorseWindow(raw.decode_as()?),
+            cb::id::TRADE_LIST => P::TradeList(raw.decode_as()?),
             _ => return Ok(None),
         };
         Ok(inv.apply_v1_16_5(&p))
@@ -422,6 +423,7 @@ impl ClientVersion for V1_16_5 {
                 Some(sb::ServerboundPlayPacket::WindowClick(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::Transaction(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::SelectTrade(p)) => enc.write_packet(&p),
                 _ => Ok(()),
             },
             Outbound::UseEntity {

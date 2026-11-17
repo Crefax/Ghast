@@ -17,7 +17,8 @@ pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
         WindowKind::BrewingStand
         | WindowKind::Enchanting
         | WindowKind::Anvil
-        | WindowKind::Beacon => {
+        | WindowKind::Beacon
+        | WindowKind::Merchant => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
         _ => false,
@@ -244,6 +245,7 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::Lapis => v.is_lapis(s),
         K::AnvilOutput => false,
         K::BeaconPayment => v.beacon_payment(s),
+        K::TradeOutput => false,
         _ => return None,
     })
 }
@@ -275,6 +277,7 @@ mod tests {
                 "enchanting" => WindowKind::Enchanting,
                 "anvil" => WindowKind::Anvil,
                 "beacon" => WindowKind::Beacon,
+                "merchant" => WindowKind::Merchant,
                 m => panic!("unknown menu {m}"),
             };
             assert!(modelled(v, kind), "{kind:?} facts but not modelled");
