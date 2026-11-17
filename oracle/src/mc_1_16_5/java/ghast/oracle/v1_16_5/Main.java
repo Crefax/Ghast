@@ -130,7 +130,8 @@ public final class Main {
                   selection [--out FILE]               outline / raycast shapes of every block state
                   rays [--seed N] [--worlds N] [--rays N] [--out FILE]  crosshair picks in random worlds
                   clicks [--seed N] [--count N] [--craft true] [--out FILE]  window click vectors (cache/<mc>/clicks/);
-                                                       --menu M: special menu M (brewing, enchanting, anvil, beacon, merchant, horse, furnace, blast_furnace, smoker, all)
+                                                       --menu M: special menu M (brewing, enchanting, anvil, beacon, merchant, horse, furnace, blast_furnace, smoker,
+                                                       smithing, stonecutter, grindstone, loom, cartography, all)
                   list | selftest | compare DIR_A DIR_B
                 """.formatted(VERSION));
     }

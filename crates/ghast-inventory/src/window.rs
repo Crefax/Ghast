@@ -99,6 +99,12 @@ pub enum SlotKind {
     MountArmor,
     /// Furnace fuel slot (1): fuels and the bucket (one bucket at a time).
     FurnaceFuel,
+    /// 1.16.5 workstation result (smithing table, stonecutter, grindstone, loom, cartography
+    /// table): filled by the client from the menu's other slots; taking it uses them up.
+    MenuResult,
+    /// 1.16.5 workstation input with the menu's own rules (grindstone: damageable, enchanted
+    /// or an enchanted book; loom: banner, dye, banner pattern).
+    MenuInput,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -264,6 +270,35 @@ impl WindowKind {
                 1 => SlotKind::MountArmor,
                 _ => SlotKind::Normal,
             },
+            // 1.16.5 layouts
+            WindowKind::Smithing => {
+                if i == 2 {
+                    SlotKind::MenuResult
+                } else {
+                    SlotKind::Normal
+                }
+            }
+            WindowKind::Grindstone | WindowKind::Cartography => {
+                if i == 2 {
+                    SlotKind::MenuResult
+                } else {
+                    SlotKind::MenuInput
+                }
+            }
+            WindowKind::Loom => {
+                if i == 3 {
+                    SlotKind::MenuResult
+                } else {
+                    SlotKind::MenuInput
+                }
+            }
+            WindowKind::Stonecutter => {
+                if i == 1 {
+                    SlotKind::MenuResult
+                } else {
+                    SlotKind::Normal
+                }
+            }
             WindowKind::Crafter => {
                 if i < 9 {
                     SlotKind::Normal

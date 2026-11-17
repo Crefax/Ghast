@@ -23,6 +23,11 @@ pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
         | WindowKind::Furnace => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
+        WindowKind::Smithing
+        | WindowKind::Stonecutter
+        | WindowKind::Grindstone
+        | WindowKind::Loom
+        | WindowKind::Cartography => v == Version::V1_16_5,
         _ => false,
     }
 }
@@ -237,9 +242,9 @@ impl Sim<'_> {
 }
 
 #[cfg(all(test, any(feature = "v1_8", feature = "v1_12", feature = "v1_16_5")))]
-fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
+fn accepts(v: Version, window: WindowKind, k: usize, s: &Stack) -> Option<bool> {
     use crate::SlotKind as K;
-    Some(match kind {
+    Some(match window.slot_kind(k) {
         K::Potion => v.potion_slot_accepts(s),
         K::BrewingIngredient => v.brewing_ingredient(s),
         K::BrewingFuel => v.brewing_fuel(s),
@@ -249,7 +254,8 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::BeaconPayment => v.beacon_payment(s),
         K::TradeOutput => false,
         K::FurnaceFuel => v.is_fuel(s) || v.is_bucket(s),
-        K::Output => false,
+        K::Output | K::MenuResult => false,
+        K::MenuInput => crate::station::input_accepts(v, window, k, s).unwrap(),
         K::Shulker => !v.is_shulker_box(s),
         _ => return None,
     })
@@ -290,6 +296,11 @@ mod tests {
                 "merchant" => WindowKind::Merchant,
                 "furnace" | "blast_furnace" | "smoker" => WindowKind::Furnace,
                 "shulker" => WindowKind::ShulkerBox,
+                "smithing" => WindowKind::Smithing,
+                "stonecutter" => WindowKind::Stonecutter,
+                "grindstone" => WindowKind::Grindstone,
+                "loom" => WindowKind::Loom,
+                "cartography" => WindowKind::Cartography,
                 m => panic!("unknown menu {m}"),
             };
             // (the shulker box is an ordinary container, always modelled)
@@ -317,7 +328,7 @@ mod tests {
                     for d in 0..16i16 {
                         let s = Stack::new(id, 1, d);
                         let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
-                        match accepts(v, sk, &s) {
+                        match accepts(v, kind, k, &s) {
                             Some(got) => assert_eq!(got, w, "{kind:?} slot {k} {id}:{d}"),
                             None => assert!(sk == crate::SlotKind::Normal, "{kind:?} slot {k}"),
                         }

@@ -169,7 +169,11 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
         if i == 0 && result_slot && !inv.result_known() {
             continue; // the client computes it from recipes (1.8) / the server sends it (1.16)
         }
-        if inv.slot_kind(i) == Some(ghast_inventory::SlotKind::AnvilOutput) && !inv.result_known() {
+        if matches!(
+            inv.slot_kind(i),
+            Some(ghast_inventory::SlotKind::AnvilOutput | ghast_inventory::SlotKind::MenuResult)
+        ) && !inv.result_known()
+        {
             continue; // the client computes it from the inputs; ghast does not model it
         }
         if !same(inv.slot(i), w.as_ref()) {
@@ -257,6 +261,27 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
     s.cases += 1;
     for (n, k) in c["clicks"].as_array().unwrap().iter().enumerate() {
         inv.tick();
+        if let Some(b) = k["menu_button"].as_i64() {
+            // a menu button the screen pressed (stonecutter recipe, ...)
+            let at = format!("{name} step {n} button {b}");
+            let accepted = k["accepted"].as_bool().unwrap_or(true);
+            match inv.click_button(b as i32) {
+                Ok(Some(Outgoing::ButtonClick { button, .. }))
+                    if accepted && button == b as i32 => {}
+                Ok(None) if !accepted => {}
+                other => s.diffs.push(format!("{at}: {other:?}")),
+            }
+            s.selects += 1;
+            let mut d = Vec::new();
+            compare(&inv, v, k, &mut d);
+            if !d.is_empty() {
+                for x in d {
+                    s.diffs.push(format!("{at}: {x}"));
+                }
+                load(&mut inv, v, sync, k);
+            }
+            continue;
+        }
         if let Some(idx) = k["select"].as_i64() {
             // the trading screen picked an offer
             let at = format!("{name} step {n} select {idx}");

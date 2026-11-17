@@ -58,6 +58,8 @@ pub(crate) struct Model {
     pub mount: Option<crate::mount::MountRules>,
     /// 1.16.5 furnace screen: its recipe type (0 furnace, 1 blast furnace, 2 smoker).
     pub furnace: u8,
+    /// 1.16.5 workstation menu (smithing table, stonecutter, ...): its client-side state.
+    pub station: Option<Box<crate::station::Station>>,
 }
 
 /// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
@@ -106,6 +108,7 @@ impl Default for Model {
             merchant: None,
             mount: None,
             furnace: 0,
+            station: None,
         }
     }
 }
@@ -221,6 +224,8 @@ impl Layout {
                         | SlotKind::MountSaddle
                         | SlotKind::MountArmor
                         | SlotKind::FurnaceFuel
+                        | SlotKind::MenuResult
+                        | SlotKind::MenuInput
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
@@ -228,8 +233,13 @@ impl Layout {
                         // the anvil's and the villager's inputs are plain slots once the menu
                         // is modelled
                         SlotKind::Normal | SlotKind::AnvilOutput
-                            if matches!(k, WindowKind::Anvil | WindowKind::Merchant)
-                                && !crate::menus::modelled(self.v, k) =>
+                            if matches!(
+                                k,
+                                WindowKind::Anvil
+                                    | WindowKind::Merchant
+                                    | WindowKind::Smithing
+                                    | WindowKind::Stonecutter
+                            ) && !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
                         }
@@ -259,6 +269,12 @@ impl Layout {
             (Screen::Container(WindowKind::Crafting), _) => false,
             // the anvil's output is a `CraftingResultInventory`
             (Screen::Container(WindowKind::Anvil), Loc::Container(k)) => k != 2,
+            // so are the workstations' results
+            (Screen::Container(w), Loc::Container(k))
+                if w != WindowKind::Loom && self.kind(k) == SlotKind::MenuResult =>
+            {
+                false
+            }
             (_, Loc::Container(_)) => true,
             _ => false,
         }
@@ -423,6 +439,12 @@ impl Sim<'_> {
         if matches!(l, Loc::Container(0..=2)) {
             self.merchant_update();
         }
+        // `Slot.setStack` = the inventory's `setStack` (marks it dirty) + `markDirty`: a
+        // workstation's input inventory notifies the menu twice (the loom's second run can
+        // differ from its first)
+        if self.m.station.is_some() {
+            self.station_touched(l);
+        }
     }
 
     /// 1.8 – 1.16.5 villager screen: the trading inventory's offer lookup ran (any slot set
@@ -466,6 +488,9 @@ impl Sim<'_> {
         if matches!(l, Loc::Container(0 | 1)) {
             self.merchant_update();
         }
+        if self.m.station.is_some() {
+            self.station_touched(l);
+        }
         if self.lay.screen == Screen::Container(WindowKind::Anvil)
             && matches!(l, Loc::Container(0 | 1))
             && self.m.container.len() == 3
@@ -497,7 +522,10 @@ impl Sim<'_> {
     }
 
     fn result_known(&self, i: usize) -> bool {
-        if self.lay.kind(i) == SlotKind::AnvilOutput {
+        if matches!(
+            self.lay.kind(i),
+            SlotKind::AnvilOutput | SlotKind::MenuResult
+        ) {
             return self.m.container_result_known;
         }
         match self.loc(i) {
@@ -520,7 +548,13 @@ impl Sim<'_> {
             SlotKind::EnchantItem => true,
             SlotKind::AnvilOutput => false,
             SlotKind::Lapis => self.v.is_lapis(s),
-            SlotKind::TradeOutput => false,
+            SlotKind::TradeOutput | SlotKind::MenuResult => false,
+            SlotKind::MenuInput => {
+                let Screen::Container(w) = self.lay.screen else {
+                    return Err(Unpredictable);
+                };
+                return crate::station::input_accepts(self.v, w, i, s);
+            }
             SlotKind::MountSaddle => return self.mount_saddle_accepts(s),
             SlotKind::MountArmor => return self.mount_armor_accepts(s),
             SlotKind::FurnaceFuel => self.v.is_fuel(s) || self.v.is_bucket(s),
@@ -560,6 +594,7 @@ impl Sim<'_> {
         match self.lay.kind(i) {
             // `repairCost > 0 && experienceLevel >= repairCost`: computed with the output
             SlotKind::Special | SlotKind::AnvilOutput => Err(Unpredictable),
+            SlotKind::MenuResult => self.station_can_take(),
             // taking it runs `ItemStack.onCraft`: a filled map may change with the world's
             // map data
             SlotKind::TradeOutput
@@ -588,7 +623,7 @@ impl Sim<'_> {
     }
 
     /// `Slot.takeStack(amount)`: the backing inventory's `removeStack`.
-    fn take(&mut self, i: usize, amount: i32) -> Option<Stack> {
+    pub(crate) fn take(&mut self, i: usize, amount: i32) -> Option<Stack> {
         let out = self.take_raw(i, amount);
         if out.is_some() {
             let l = self.loc(i);
@@ -600,10 +635,12 @@ impl Sim<'_> {
     fn take_raw(&mut self, i: usize, amount: i32) -> Option<Stack> {
         // CraftingResultInventory
         // (the trading inventory gives its output away whole as well)
-        let whole = matches!(
-            self.lay.kind(i),
-            SlotKind::CraftResult | SlotKind::AnvilOutput | SlotKind::TradeOutput
-        );
+        let whole = match self.lay.kind(i) {
+            SlotKind::CraftResult | SlotKind::AnvilOutput | SlotKind::TradeOutput => true,
+            // the loom's output is a plain inventory
+            SlotKind::MenuResult => self.lay.screen != Screen::Container(WindowKind::Loom),
+            _ => false,
+        };
         let v = self.v;
         let slot = self.slot_mut(i);
         let s = slot.as_mut()?;
@@ -648,6 +685,7 @@ impl Sim<'_> {
                 crate::merchant::take_output(self.v, self.m);
                 Ok(())
             }
+            SlotKind::MenuResult => self.station_take(),
             SlotKind::CraftResult => {
                 let (slots, width) = self.grid_slots().ok_or(Unpredictable)?;
                 let stacks: Vec<Option<Stack>> =
@@ -703,7 +741,14 @@ impl Sim<'_> {
                 }
                 Ok(())
             }
-            _ => Ok(()),
+            // `Slot.onTakeItem` marks the slot dirty
+            _ => {
+                let l = self.loc(i);
+                if matches!(l, Loc::Container(_)) {
+                    self.anvil_touched(l);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -724,7 +769,11 @@ impl Sim<'_> {
         if let Ok(i) = usize::try_from(slot) {
             // Whatever reads an unknown crafting result (its content is computed from recipes)
             // cannot be predicted.
-            if (self.lay.is_result(i) || self.lay.kind(i) == SlotKind::AnvilOutput)
+            if (self.lay.is_result(i)
+                || matches!(
+                    self.lay.kind(i),
+                    SlotKind::AnvilOutput | SlotKind::MenuResult
+                ))
                 && !self.result_known(i)
             {
                 return Err(Unpredictable);
@@ -952,8 +1001,9 @@ impl Sim<'_> {
             }
         }
         // `slot.markDirty()` of the clicked slot
-        if i < 3 {
-            self.merchant_update();
+        let l = self.loc(i);
+        if matches!(l, Loc::Container(_)) {
+            self.anvil_touched(l);
         }
         Ok(ret)
     }
@@ -1012,9 +1062,9 @@ impl Sim<'_> {
                                 }
                                 c.count -= q;
                                 self.m.cursor = self.norm(c);
+                                // grown in place (the clicked slot's `markDirty` follows)
                                 let t = s.with_count(s.count + q);
-                                let t = self.norm(t);
-                                self.set(i, t);
+                                *self.slot_mut(i) = self.norm(t);
                             } else if c.count <= self.slot_limit(i, &c)? {
                                 self.set(i, Some(c));
                                 self.m.cursor = Some(s);
@@ -1037,8 +1087,9 @@ impl Sim<'_> {
             }
         }
         // `slot.markDirty()` of the clicked slot
-        if i < 3 {
-            self.merchant_update();
+        let l = self.loc(i);
+        if matches!(l, Loc::Container(_)) {
+            self.anvil_touched(l);
         }
         Ok(ret)
     }
@@ -1202,6 +1253,15 @@ impl Sim<'_> {
                     WindowKind::Enchanting if crate::menus::modelled(v, kind) => {
                         (self.transfer_enchanting(i, &mut st)?, true)
                     }
+                    WindowKind::Smithing
+                    | WindowKind::Stonecutter
+                    | WindowKind::Grindstone
+                    | WindowKind::Loom
+                    | WindowKind::Cartography
+                        if crate::menus::modelled(v, kind) =>
+                    {
+                        (self.station_route(i, &mut st)?.ok_or(Unpredictable)?, true)
+                    }
                     WindowKind::Merchant if crate::menus::modelled(v, kind) => {
                         let ok = match i {
                             2 => self.insert(&mut st, 3, 39, true)?,
@@ -1235,7 +1295,14 @@ impl Sim<'_> {
         }
         let changed = st.count != orig.count;
         let left = self.norm(st);
-        self.set(i, left);
+        if left.is_some() {
+            // shrunk in place, then `slot.markDirty()`
+            *self.slot_mut(i) = left;
+            let l = self.loc(i);
+            self.anvil_touched(l);
+        } else {
+            self.set(i, left);
+        }
         if eq_check && !changed {
             return Ok(None);
         }
@@ -1330,6 +1397,9 @@ impl Sim<'_> {
                         self.set(i, Some(st.with_count(n)));
                     }
                 }
+                // `slot.markDirty()` after the `setStack`
+                let l = self.loc(i);
+                self.anvil_touched(l);
                 moved = true;
                 break;
             }
@@ -1595,10 +1665,17 @@ impl Sim<'_> {
                     break;
                 }
                 // canInsertIntoSlot(stack, slot) is false for crafting results
-                if self.lay.is_result(x) {
+                if self.lay.is_result(x)
+                    || (self.lay.kind(x) == SlotKind::MenuResult
+                        && !self.m.station.as_ref().is_some_and(|s| s.gathers_result()))
+                {
                     continue;
                 }
-                if self.lay.kind(x) == SlotKind::AnvilOutput && !self.result_known(x) {
+                if matches!(
+                    self.lay.kind(x),
+                    SlotKind::AnvilOutput | SlotKind::MenuResult
+                ) && !self.result_known(x)
+                {
                     return Err(Unpredictable);
                 }
                 let Some(t) = self.get(x) else { continue };

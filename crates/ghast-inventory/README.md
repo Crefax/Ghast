@@ -106,7 +106,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 | horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
 | furnace (`SlotKind::FurnaceFuel`, output `Output`); 1.16.5 blast furnace, smoker | yes | yes | yes |
-| 1.16.5 smithing table, grindstone, stonecutter, loom, cartography table, lectern | — | — | no: their own slots are `Special` |
+| 1.16.5 smithing table, stonecutter, grindstone, loom, cartography table (`SlotKind::MenuInput`, `MenuResult`) | — | — | yes |
+| 1.16.5 lectern | — | — | buttons only (the screen sends no clicks) |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -176,9 +177,32 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   `apply_v1_16_5` so blast furnaces and smokers are told apart). Burn and cook progress are
   window properties; smelting itself is the server's.
 
+- **1.16.5 workstations** keep the state their handler keeps on the client and run its
+  `onContentChanged` / `updateResult` on every notification of the input inventory, as often as
+  vanilla does (`Slot.setStack` notifies twice, `markDirty` and `onTakeItem` once each; a
+  server `window_items` sets the slots one by one):
+  - smithing table: the server's smithing recipes (`declare_recipes`), the first match by
+    result translation key, the base's NBT on the result; taking it uses one base and one
+    addition; shift-click puts additions into the addition slot.
+  - stonecutter: the recipe list of the input item sorted by result translation key, the
+    selection (`Inventory::click_button`, like the screen; the server's window property 0),
+    taking a result uses one input and fills the result again.
+  - grindstone: merging two items (durability with the 5 % bonus, enchantments of the second
+    added), removing all but curses (repair cost per curse), an enchanted book without curses
+    becomes a book; refused: two curses on the result (vanilla orders them by identity hash)
+    and a named enchanted book turning into a book (its name is re-serialised).
+  - loom: the selected pattern (buttons 1–34, pattern items, the server's property 0), the
+    banner's added `BlockEntityTag`, the result with the new pattern; taking it uses a banner
+    and a dye.
+  - cartography table: its client has no world context, so it never computes a result; it
+    clears the server's result when an input is missing. Taking a result the server flagged
+    for scaling or locking is refused (`onCraft` needs the map data).
+  - lectern: no slots to click; `Inventory::click_button` builds the page and take-book
+    buttons (`enchant_item`), the server answers.
+
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
 any interaction that reads an anvil output ghast does not know, mount slots without
-`MountRules` (saddles, horse armor, carpets), the 1.16.5 workstation menus (below), a
+`MountRules` (saddles, horse armor, carpets), the workstation cases listed above, a
 crafting-result click while the result is unknown, taking a result whose grid matches no recipe
 ghast models (1.8 banners, map upscaling; 1.16.5 special recipes, a written book or banner in the
 grid, or no recipe at all — vanilla then aliases the grid stacks).
@@ -197,7 +221,8 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 | `Crafting` | `minecraft:crafting_table` (0 slots) | 11 | 10 (result + 3×3) | yes (1.16: into the grid first), not from the result |
 | `Furnace` | `minecraft:furnace` | 13, 9 (blast), 21 (smoker) | 3 | yes |
 | `BrewingStand`, `Enchanting`, `Anvil`, `Beacon`, `Merchant`, `Horse` | as vanilla | as vanilla | as vanilla | yes (special menus above) |
-| `Grindstone`, `Lectern`, `Loom`, `Smithing`, `Cartography`, `Stonecutter` | — | as vanilla | as vanilla | 1.16.5: no (player-part clicks of other modes work) |
+| `Grindstone`, `Loom`, `Smithing`, `Cartography`, `Stonecutter` | — | as vanilla | as vanilla | yes (1.16.5) |
+| `Lectern` | — | as vanilla | as vanilla | no slots to click |
 
 ### Confirm protocol and timing
 

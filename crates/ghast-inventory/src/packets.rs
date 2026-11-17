@@ -148,11 +148,17 @@ impl Outgoing {
             Outgoing::SelectTrade(i) => {
                 sb16::ServerboundPlayPacket::SelectTrade(sb16::SelectTrade { slot: *i })
             }
+            // `clickButton`: the enchanting table's packet, for every menu button
+            Outgoing::ButtonClick { window_id, button } => {
+                sb16::ServerboundPlayPacket::EnchantItem(sb16::EnchantItem {
+                    window_id: *window_id as i8,
+                    enchantment: *button as i8,
+                })
+            }
             Outgoing::OpenInventory
             | Outgoing::ContainerClick(_)
             | Outgoing::Creative(_)
-            | Outgoing::RenameItem(_)
-            | Outgoing::ButtonClick { .. } => {
+            | Outgoing::RenameItem(_) => {
                 return None;
             }
         })

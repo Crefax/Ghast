@@ -11,6 +11,7 @@ import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.network.Packet;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.packet.s2c.play.SetTradeOffersS2CPacket;
@@ -19,10 +20,15 @@ import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
 import net.minecraft.screen.BlastFurnaceScreenHandler;
+import net.minecraft.screen.CartographyTableScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
+import net.minecraft.screen.GrindstoneScreenHandler;
 import net.minecraft.screen.FurnaceScreenHandler;
+import net.minecraft.screen.SmithingScreenHandler;
 import net.minecraft.screen.SmokerScreenHandler;
+import net.minecraft.screen.StonecutterScreenHandler;
 import net.minecraft.screen.HorseScreenHandler;
+import net.minecraft.screen.LoomScreenHandler;
 import net.minecraft.screen.MerchantScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
@@ -60,7 +66,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "blast_furnace", "smoker"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "blast_furnace", "smoker", "smithing", "stonecutter", "grindstone", "loom", "cartography"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -110,6 +116,34 @@ final class MenuClickDump {
     private static boolean mountTame = true;
     private static boolean mountBaby;
 
+    /** Smithing: diamond gear (damaged, named, enchanted), netherite ingots, near misses. */
+    static final String[] SMITHING = {"diamond_sword", "diamond_pickaxe", "diamond_helmet", "diamond_chestplate",
+        "diamond_hoe", "netherite_ingot", "netherite_ingot", "netherite_ingot", "iron_sword", "netherite_scrap",
+        "netherite_sword", "diamond", "stone"};
+
+    /** Stonecutter inputs (with and without recipes) and a few others. */
+    static final String[] STONECUTTER = {"stone", "stone", "cobblestone", "andesite", "granite", "sandstone",
+        "quartz_block", "stone_bricks", "blackstone", "oak_planks", "dirt", "diamond"};
+
+    /** Grindstone: damageable gear, enchanted books, books, a few others. */
+    static final String[] GRINDSTONE = {"diamond_sword", "diamond_sword", "iron_pickaxe", "bow", "enchanted_book",
+        "enchanted_book", "enchanted_book", "book", "golden_apple", "stone", "stick"};
+
+    /** Loom: banners, dyes, pattern items, a few others. */
+    static final String[] LOOM = {"white_banner", "white_banner", "red_banner", "black_banner", "red_dye", "blue_dye",
+        "black_dye", "white_dye", "creeper_banner_pattern", "flower_banner_pattern", "globe_banner_pattern",
+        "mojang_banner_pattern", "white_wool", "stone"};
+
+    /** Cartography table: maps (some with the server's scale / lock flags), paper, glass panes. */
+    static final String[] CARTOGRAPHY = {"filled_map", "filled_map", "filled_map", "paper", "map", "glass_pane",
+        "stone", "compass"};
+
+    /** Enchantments for the grindstone cases (incl. both curses). */
+    static final net.minecraft.enchantment.Enchantment[] GRIND_ENCH = {
+        net.minecraft.enchantment.Enchantments.UNBREAKING, net.minecraft.enchantment.Enchantments.SHARPNESS,
+        net.minecraft.enchantment.Enchantments.MENDING, net.minecraft.enchantment.Enchantments.BINDING_CURSE,
+        net.minecraft.enchantment.Enchantments.VANISHING_CURSE, net.minecraft.enchantment.Enchantments.EFFICIENCY};
+
     /** The output that already got the recipes line. */
     private static Consumer<String> recipesSentTo;
 
@@ -118,13 +152,68 @@ final class MenuClickDump {
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
-        if ((menu.endsWith("furnace") || menu.equals("smoker")) && sink != recipesSentTo) {
+        if ((menu.endsWith("furnace") || menu.equals("smoker") || menu.equals("smithing")
+                || menu.equals("stonecutter")) && sink != recipesSentTo) {
             // the server's recipes (a real client always has them; isSmeltable reads them), once
             // per output
             sink.accept("{\"declare_recipes\":\"" + ClickDump.syncRecipes() + "\"}");
             recipesSentTo = sink;
         }
-        if (menu.equals("horse")) {
+        if (menu.equals("loom")) {
+            // the loom's data: patterns (id, has an item), banner / dye colours, pattern items
+            String f = facts(run, menu);
+            StringBuilder b = new StringBuilder(f.substring(0, f.length() - 1)).append(",\"patterns\":[");
+            net.minecraft.block.entity.BannerPattern[] ps = net.minecraft.block.entity.BannerPattern.values();
+            for (int k = 0; k < ps.length; k++) {
+                b.append(k > 0 ? "," : "").append("[\"").append(ps[k].getId()).append("\",")
+                        .append(k >= net.minecraft.block.entity.BannerPattern.COUNT
+                                - net.minecraft.block.entity.BannerPattern.field_24417).append("]");
+            }
+            b.append("],\"items\":[");
+            boolean first = true;
+            for (Item item : Registry.ITEM) {
+                String what = null;
+                int value = 0;
+                if (item instanceof net.minecraft.item.BannerItem bi) {
+                    what = "banner";
+                    value = bi.getColor().getId();
+                } else if (item instanceof net.minecraft.item.DyeItem di) {
+                    what = "dye";
+                    value = di.getColor().getId();
+                } else if (item instanceof net.minecraft.item.BannerPatternItem pi) {
+                    what = "pattern";
+                    value = pi.getPattern().ordinal();
+                }
+                if (what != null) {
+                    b.append(first ? "" : ",").append("[").append(Registry.ITEM.getRawId(item)).append(",\"").append(what)
+                            .append("\",").append(value).append("]");
+                    first = false;
+                }
+            }
+            sink.accept(b.append("]}").toString());
+        } else if (menu.equals("grindstone")) {
+            // the enchantment registry: names and curses (the result keeps only curses)
+            String f = facts(run, menu);
+            StringBuilder b = new StringBuilder(f.substring(0, f.length() - 1)).append(",\"enchantments\":[");
+            boolean first = true;
+            for (net.minecraft.enchantment.Enchantment e : Registry.ENCHANTMENT) {
+                b.append(first ? "" : ",").append("[\"").append(Registry.ENCHANTMENT.getId(e)).append("\",")
+                        .append(e.isCursed()).append("]");
+                first = false;
+            }
+            sink.accept(b.append("]}").toString());
+        } else if (menu.equals("stonecutter")) {
+            // the recipe list is sorted by the outputs' translation keys: every item's key
+            String f = facts(run, menu);
+            StringBuilder b = new StringBuilder(f.substring(0, f.length() - 1)).append(",\"keys\":[");
+            boolean first = true;
+            for (Item item : Registry.ITEM) {
+                b.append(first ? "" : ",").append("[").append(Registry.ITEM.getRawId(item)).append(",\"")
+                        .append(item.getTranslationKey()).append("\"]");
+                first = false;
+            }
+            sink.accept(b.append("]}").toString());
+        } else if (menu.equals("horse")) {
             // one facts line per mount, tame and baby (the slot rules ask the entity)
             for (String m : MOUNTS) {
                 for (int t = 0; t < 4; t++) {
@@ -163,6 +252,11 @@ final class MenuClickDump {
             case "furnace" -> 13;
             case "blast_furnace" -> 9;
             case "smoker" -> 21;
+            case "smithing" -> 20;
+            case "stonecutter" -> 23;
+            case "grindstone" -> 14;
+            case "loom" -> 17;
+            case "cartography" -> 22;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -177,6 +271,12 @@ final class MenuClickDump {
             case "furnace" -> new FurnaceScreenHandler(sync, inv);
             case "blast_furnace" -> new BlastFurnaceScreenHandler(sync, inv);
             case "smoker" -> new SmokerScreenHandler(sync, inv);
+            case "smithing" -> new SmithingScreenHandler(sync, inv);
+            case "stonecutter" -> new StonecutterScreenHandler(sync, inv);
+            case "grindstone" -> new GrindstoneScreenHandler(sync, inv);
+            case "loom" -> new LoomScreenHandler(sync, inv);
+            // the client constructor: no world context, so the client never computes a result
+            case "cartography" -> new CartographyTableScreenHandler(sync, inv);
             case "horse" -> {
                 // ClientPlayNetworkHandler.onOpenHorseScreen: the entity's screen over a
                 // SimpleInventory of the packet's slot count
@@ -241,6 +341,65 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("smithing")) {
+            ItemStack s = ClickDump.stack(r, SMITHING);
+            if (s.isDamageable() && r.chance(0.3)) {
+                s.addEnchantment(net.minecraft.enchantment.Enchantments.UNBREAKING, 2);
+            }
+            return s;
+        }
+        if (menu.equals("stonecutter")) {
+            return ClickDump.stack(r, STONECUTTER);
+        }
+        if (menu.equals("cartography")) {
+            ItemStack s = ClickDump.stack(r, CARTOGRAPHY);
+            if (s.getItem() == net.minecraft.item.Items.FILLED_MAP) {
+                s.getOrCreateTag().putInt("map", r.nextInt(3));
+                if (r.chance(0.15)) {
+                    s.getOrCreateTag().putInt("map_scale_direction", 1);
+                } else if (r.chance(0.15)) {
+                    s.getOrCreateTag().putBoolean("map_to_lock", true);
+                }
+            }
+            return s;
+        }
+        if (menu.equals("loom")) {
+            ItemStack s = ClickDump.stack(r, LOOM);
+            if (s.getItem() instanceof net.minecraft.item.BannerItem && r.chance(0.5)) {
+                // a banner with patterns already (up to 7)
+                NbtCompound be = s.getOrCreateSubTag("BlockEntityTag");
+                net.minecraft.nbt.NbtList l = new net.minecraft.nbt.NbtList();
+                for (int k = r.nextInt(8); k > 0; k--) {
+                    NbtCompound p = new NbtCompound();
+                    p.putString("Pattern", r.pick(new String[] {"bl", "cr", "mc", "glb"}));
+                    p.putInt("Color", r.nextInt(16));
+                    l.add(p);
+                }
+                be.put("Patterns", l);
+            }
+            return s;
+        }
+        if (menu.equals("grindstone")) {
+            ItemStack s = ClickDump.stack(r, GRINDSTONE);
+            if (r.chance(0.3)) {
+                s.setCount(1); // the grindstone only takes single items
+            }
+            boolean book = s.getItem() == net.minecraft.item.Items.ENCHANTED_BOOK;
+            for (int k = r.nextInt(book ? 3 : 4); k > 0; k--) {
+                net.minecraft.enchantment.Enchantment e = r.pick(GRIND_ENCH);
+                int lvl = r.range(1, 3);
+                if (book) {
+                    net.minecraft.item.EnchantedBookItem.addEnchantment(s,
+                            new net.minecraft.enchantment.EnchantmentLevelEntry(e, lvl));
+                } else {
+                    s.addEnchantment(e, lvl);
+                }
+            }
+            if (r.chance(0.1)) {
+                s.setRepairCost(r.range(1, 7));
+            }
+            return s;
+        }
         if (menu.equals("furnace") || menu.equals("blast_furnace") || menu.equals("smoker")) {
             return ClickDump.stack(r, FURNACE);
         }
@@ -421,7 +580,14 @@ final class MenuClickDump {
             h.getSlot(1).setStack(swap ? a : b2);
         } else {
             for (int k = 0; k < filled; k++) {
-                h.getSlot(k).setStack(r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY);
+                ItemStack put = r.chance(cfill) ? menuStack(r, menu) : ItemStack.EMPTY;
+                if ((menu.equals("loom") && k < 3 || menu.equals("cartography") && k < 2) && !put.isEmpty()
+                        && !h.getSlot(k).canInsert(put)) {
+                    // a vanilla server only puts what the slot takes (a non-dye in the dye slot
+                    // crashes the client's loom)
+                    put = ItemStack.EMPTY;
+                }
+                h.getSlot(k).setStack(put);
             }
         }
         player.currentScreenHandler = h;
@@ -448,6 +614,26 @@ final class MenuClickDump {
         int clicks = r.range(1, 10);
         SlotActionType[] types = SlotActionType.values();
         for (int c = 0; c < clicks; c++) {
+            if (h instanceof LoomScreenHandler lm && r.chance(0.25)) {
+                // LoomScreen.mouseClicked: onButtonClick for a pattern button (+ the button packet
+                // when it accepted it, not captured)
+                int k = r.range(0, net.minecraft.block.entity.BannerPattern.LOOM_APPLICABLE_COUNT + 1);
+                boolean ok = lm.onButtonClick(player, k);
+                b.append(c > 0 ? "," : "").append("{\"menu_button\":").append(k).append(",\"accepted\":").append(ok);
+                ClickDump.state(b, player, w0, h);
+                b.append(",\"selected\":").append(lm.getSelectedPattern());
+                b.append('}');
+                continue;
+            }
+            if (h instanceof StonecutterScreenHandler sc && sc.getAvailableRecipeCount() > 0 && r.chance(0.25)) {
+                // StonecutterScreen.mouseClicked: onButtonClick (+ the button packet, not captured)
+                int k = r.nextInt(sc.getAvailableRecipeCount());
+                sc.onButtonClick(player, k);
+                b.append(c > 0 ? "," : "").append("{\"menu_button\":").append(k);
+                ClickDump.state(b, player, w0, h);
+                b.append('}');
+                continue;
+            }
             if (offers != null && r.chance(0.15)) {
                 // MerchantScreen.syncRecipeIndex: setRecipeIndex, switchTo (+ select_trade, not captured)
                 int k = r.nextInt(trader.getRecipes().size());

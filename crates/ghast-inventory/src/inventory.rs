@@ -880,7 +880,10 @@ impl Inventory {
                 self.m.container_result_known
             }
             // 1.8 – 1.16.5 anvil: the output the client computed after an input change
-            ScreenState::Window(w) if w.kind == WindowKind::Anvil && !self.version.is_modern() => {
+            ScreenState::Window(w)
+                if matches!(w.kind, WindowKind::Anvil | WindowKind::Grindstone)
+                    && !self.version.is_modern() =>
+            {
                 self.m.container_result_known
             }
             ScreenState::Window(_) => true,
@@ -1423,6 +1426,136 @@ impl Inventory {
         }
     }
 
+    /// A workstation's `window_items`: vanilla's `updateSlotStacks` sets the slots in order
+    /// (`Slot.setStack`, which notifies the menu twice for an input), so each input change sees
+    /// the slots before it new and the ones after it old.
+    fn station_window_items(&mut self, before: Vec<Option<Stack>>) {
+        let Some(st) = self.m.station.as_deref() else {
+            return;
+        };
+        let inputs: Vec<bool> = (0..before.len()).map(|k| st.is_input(k)).collect();
+        let new = std::mem::replace(&mut self.m.container, before);
+        let lay = self.layout();
+        let mut sim = Sim {
+            v: self.version,
+            lay,
+            m: &mut self.m,
+            book: &self.book,
+            binding_curse: None,
+        };
+        for (k, s) in new.into_iter().enumerate() {
+            if k >= sim.m.container.len() {
+                break;
+            }
+            sim.m.container[k] = s;
+            if inputs[k] {
+                sim.station_touched(Loc::Container(k));
+                sim.station_touched(Loc::Container(k));
+            }
+        }
+        self.m.container_result_known = true;
+    }
+
+    /// A server `set_slot` of workstation container slot `k` (`None`: all of them): an input
+    /// change runs the menu's update; the result slot keeps what the packet set.
+    fn station_inbound(&mut self, k: Option<usize>) {
+        let Some(st) = self.m.station.as_deref() else {
+            return;
+        };
+        let out = st.output();
+        if k.is_some_and(|k| !st.is_input(k)) {
+            // the server's result
+            self.m.container_result_known = true;
+            return;
+        }
+        let keep = self.m.container.get(out).cloned();
+        let lay = self.layout();
+        let mut sim = Sim {
+            v: self.version,
+            lay,
+            m: &mut self.m,
+            book: &self.book,
+            binding_curse: None,
+        };
+        // `Slot.setStack`: twice
+        sim.station_touched(Loc::Container(0));
+        sim.station_touched(Loc::Container(0));
+        if k.is_none()
+            && let (Some(slot), Some(keep)) = (self.m.container.get_mut(out), keep)
+        {
+            *slot = keep;
+            self.m.container_result_known = true;
+        }
+    }
+
+    /// 1.16.5 menu buttons the client acts on itself (stonecutter recipe `index`, like its
+    /// screen; [`Outgoing::ButtonClick`] is the packet to send). `Ok(None)`: the menu does not
+    /// take that button (nothing to send).
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no such menu is open.
+    pub fn click_button(&mut self, index: i32) -> Result<Option<Outgoing>, ClickError> {
+        use crate::station::Station;
+        let id = self.open_id();
+        let lay = self.layout();
+        // the lectern screen only sends its buttons (page back 1, forward 2, take book 3,
+        // page 100 + n); the server answers
+        if matches!(&self.screen, ScreenState::Window(w) if w.kind == WindowKind::Lectern)
+            && self.version == Version::V1_16_5
+        {
+            return Ok(
+                matches!(index, 1..=3 | 100..).then_some(Outgoing::ButtonClick {
+                    window_id: id,
+                    button: index,
+                }),
+            );
+        }
+        if let Some(Station::Loom { .. }) = self.m.station.as_deref() {
+            let before = self.m.container.clone();
+            let mut sim = Sim {
+                v: self.version,
+                lay,
+                m: &mut self.m,
+                book: &self.book,
+                binding_curse: None,
+            };
+            let ok = sim.loom_button(index);
+            if self.m.container != before {
+                self.events.window_changed = true;
+            }
+            return Ok(ok.then_some(Outgoing::ButtonClick {
+                window_id: id,
+                button: index,
+            }));
+        }
+        let Some(Station::Stonecutter {
+            recipes, selected, ..
+        }) = self.m.station.as_deref_mut()
+        else {
+            return Err(ClickError::NoScreen);
+        };
+        if usize::try_from(index).map_or(true, |k| k >= recipes.len()) {
+            return Ok(None);
+        }
+        *selected = index;
+        let before = self.m.container.clone();
+        let mut sim = Sim {
+            v: self.version,
+            lay,
+            m: &mut self.m,
+            book: &self.book,
+            binding_curse: None,
+        };
+        sim.stonecutter_populate();
+        if self.m.container != before {
+            self.events.window_changed = true;
+        }
+        Ok(Some(Outgoing::ButtonClick {
+            window_id: id,
+            button: index,
+        }))
+    }
+
     /// 1.8 – 1.16.5 mount screen (a `Horse` window): what its saddle and armor slots take, read
     /// off the entity like vanilla's screen does (`None`: unknown, the default after the window
     /// opens; clicks that would need them are refused). Vanilla: 1.8 `open_window`
@@ -1942,6 +2075,7 @@ impl Inventory {
                 self.m.container.clear();
                 self.m.merchant = None;
                 self.m.mount = None;
+                self.m.station = None;
                 self.m.container_result_known = true;
                 self.m.container_fresh = true;
                 #[cfg(modern)]
@@ -2038,6 +2172,7 @@ impl Inventory {
         .then(Box::default);
         self.m.mount = None;
         self.m.furnace = 0;
+        self.m.station = crate::station::Station::of(self.version, kind).map(Box::new);
         self.m.container_result_known = true;
         self.m.container_fresh = true;
         self.screen = ScreenState::Window(Window {
@@ -2128,6 +2263,9 @@ impl Inventory {
         let mut player = false;
         let mut window = false;
         let mut touched_grid = false;
+        // a workstation sees its slots set one by one
+        let before = (lay.screen != Screen::Player && self.m.station.is_some())
+            .then(|| self.m.container.clone());
         for (i, s) in items.enumerate() {
             let Some(l) = lay.loc(i) else { break };
             touched_grid |= is_grid(lay, l);
@@ -2154,6 +2292,11 @@ impl Inventory {
         // villager screen: every slot set marked the trading inventory dirty
         if lay.screen != Screen::Player && self.m.merchant.is_some() {
             crate::merchant::update(self.version, &mut self.m);
+        }
+        // workstation: the inputs were set (the menu looked its result up), then the result
+        // slot got the packet's stack
+        if let Some(before) = before {
+            self.station_window_items(before);
         }
         // 1.16.5 beacon: the payment inventory caps at 1 (one check per packet, not per slot)
         if V == V1165 && window && lay.screen == Screen::Container(WindowKind::Beacon) {
@@ -2263,6 +2406,9 @@ impl Inventory {
         // villager screen: `Slot.setStack` marks the trading inventory dirty
         if matches!(l, Loc::Container(0..=2)) && self.m.merchant.is_some() {
             crate::merchant::update(self.version, &mut self.m);
+        }
+        if let Loc::Container(k) = l {
+            self.station_inbound(Some(k));
         }
     }
 
@@ -2427,6 +2573,15 @@ impl Inventory {
             match w.properties.iter_mut().find(|p| p.0 == property) {
                 Some(p) => p.1 = value,
                 None => w.properties.push((property, value)),
+            }
+            // 1.16.5 stonecutter / loom: the selected recipe / pattern (no result update)
+            if property == 0
+                && let Some(
+                    crate::station::Station::Stonecutter { selected, .. }
+                    | crate::station::Station::Loom { selected },
+                ) = self.m.station.as_deref_mut()
+            {
+                *selected = i32::from(value);
             }
             #[cfg(modern)]
             match w.menu {

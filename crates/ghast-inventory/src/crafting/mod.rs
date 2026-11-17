@@ -802,6 +802,9 @@ pub(crate) enum R16 {
     },
 }
 
+/// A 1.16.5 smithing recipe: base item ids, addition item ids, result.
+pub(crate) type SmithingRecipe = (Vec<i32>, Vec<i32>, Option<Stack>);
+
 /// The crafting recipes the server declared (1.16.5 `declare_recipes`), in packet order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecipeBook {
@@ -811,6 +814,10 @@ pub struct RecipeBook {
     /// The item ids of the smelting, blasting and smoking recipes' ingredients (sorted), which
     /// decide a furnace's shift-click (`isSmeltable`).
     pub(crate) cooking: Arc<[Vec<i32>; 3]>,
+    /// The stonecutting recipes (ingredient item ids, result), in packet order.
+    pub(crate) stonecutting: Arc<Vec<(Vec<i32>, Option<Stack>)>>,
+    /// The smithing recipes (base item ids, addition item ids, result), in packet order.
+    pub(crate) smithing: Arc<Vec<SmithingRecipe>>,
 }
 
 impl RecipeBook {
@@ -854,8 +861,17 @@ impl RecipeBook {
         let mut recipes = Vec::new();
         let mut specials = 0;
         let mut cooking: [Vec<i32>; 3] = Default::default();
+        let mut stonecutting = Vec::new();
+        let mut smithing = Vec::new();
+        let result = |s: &ghast_protocol::types::slot::modern::Slot| {
+            crate::stack::from_modern_slot(s.clone()).map(Stack::detached)
+        };
         for r in &p.recipes {
             match &r.data {
+                D::Stonecutting(c) => stonecutting.push((ing(&c.ingredient), result(&c.result))),
+                D::Smithing(c) => {
+                    smithing.push((ing(&c.base), ing(&c.addition), result(&c.result)))
+                }
                 D::Smelting(c) => cooking[0].extend(ing(&c.ingredient)),
                 D::Blasting(c) => cooking[1].extend(ing(&c.ingredient)),
                 D::Smoking(c) => cooking[2].extend(ing(&c.ingredient)),
@@ -892,6 +908,8 @@ impl RecipeBook {
             recipes: Arc::new(recipes),
             specials,
             cooking: Arc::new(cooking),
+            stonecutting: Arc::new(stonecutting),
+            smithing: Arc::new(smithing),
         }
     }
 }
