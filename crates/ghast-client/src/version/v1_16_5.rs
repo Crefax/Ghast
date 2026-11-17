@@ -372,7 +372,11 @@ impl ClientVersion for V1_16_5 {
             cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
             cb::id::OPEN_HORSE_WINDOW => P::OpenHorseWindow(raw.decode_as()?),
             cb::id::TRADE_LIST => P::TradeList(raw.decode_as()?),
-            cb::id::DECLARE_RECIPES => P::DeclareRecipes(raw.decode_as()?),
+            // one copy per process for every bot that got the same recipes (same server)
+            cb::id::DECLARE_RECIPES => {
+                inv.on_declare_recipes(ghast_inventory::RecipeBook::from_v1_16_5_body(&raw.body)?);
+                return Ok(None);
+            }
             cb::id::TAGS => P::Tags(raw.decode_as()?),
             // the anvil's level check: the level and creative mode
             cb::id::EXPERIENCE => P::Experience(raw.decode_as()?),

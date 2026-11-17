@@ -120,10 +120,10 @@ pub(crate) fn translation_key(v: Version, id: i32) -> (bool, &'static str) {
 }
 
 /// The sort key of a recipe result: `("block" | "item") + ".minecraft." + name` compared as a
-/// string, i.e. "block" before "item", then the name.
-fn result_key(v: Version, s: Option<&Stack>) -> (bool, &'static str) {
-    // an empty result is air: `block.minecraft.air`
-    translation_key(v, s.map_or(0, |s| s.id))
+/// string, i.e. "block" before "item", then the name. An empty result (id 0) is air:
+/// `block.minecraft.air`.
+fn result_key(v: Version, id: i32) -> (bool, &'static str) {
+    translation_key(v, id)
 }
 
 /// `Ingredient.test`: the item alone (an empty ingredient matches only an empty stack).
@@ -168,18 +168,19 @@ impl Sim<'_> {
             self.m.container_result_known = false;
             return;
         }
-        let book = &self.book.smithing;
+        let sets = self.book;
+        let book = self.book.smithing();
         let (a, b) = (self.m.container[0].as_ref(), self.m.container[1].as_ref());
         let mut matches: Vec<usize> = (0..book.len())
-            .filter(|&k| test(&book[k].0, a) && test(&book[k].1, b))
+            .filter(|&k| test(sets.set(book[k].0), a) && test(sets.set(book[k].1), b))
             .collect();
         let v = self.v;
-        matches.sort_by_key(|&k| result_key(v, book[k].2.as_ref()));
+        matches.sort_by_key(|&k| result_key(v, sets.result_id(book[k].2)));
         let Some(&first) = matches.first() else {
             self.m.container[2] = None;
             return;
         };
-        let mut out = book[first].2.clone();
+        let mut out = sets.result(book[first].2);
         // the result with the base's NBT
         if let (Some(o), Some(ItemData::Nbt(n))) = (&mut out, a.map(|a| &a.data)) {
             o.data = ItemData::Nbt(n.clone());
@@ -199,7 +200,8 @@ impl Sim<'_> {
         }
         let item = self.m.container[0].as_ref().map_or(0, |s| s.id);
         let v = self.v;
-        let book = &self.book.stonecutting;
+        let sets = self.book;
+        let book = self.book.stonecutting();
         let Some(Station::Stonecutter {
             input,
             recipes,
@@ -217,8 +219,10 @@ impl Sim<'_> {
         self.m.container[1] = None;
         if item != 0 {
             let s = self.m.container[0].as_ref();
-            *recipes = (0..book.len()).filter(|&k| test(&book[k].0, s)).collect();
-            recipes.sort_by_key(|&k| result_key(v, book[k].1.as_ref()));
+            *recipes = (0..book.len())
+                .filter(|&k| test(sets.set(book[k].0), s))
+                .collect();
+            recipes.sort_by_key(|&k| result_key(v, sets.result_id(book[k].1)));
         }
     }
 
@@ -228,7 +232,8 @@ impl Sim<'_> {
             self.m.container_result_known = false;
             return;
         }
-        let book = &self.book.stonecutting;
+        let sets = self.book;
+        let book = self.book.stonecutting();
         let Some(Station::Stonecutter {
             recipes, selected, ..
         }) = self.m.station.as_deref()
@@ -238,7 +243,7 @@ impl Sim<'_> {
         let out = usize::try_from(*selected)
             .ok()
             .and_then(|k| recipes.get(k))
-            .and_then(|&r| book[r].1.clone());
+            .and_then(|&r| book.get(r).and_then(|o| sets.result(o.1)));
         self.m.container[1] = out;
     }
 
@@ -247,7 +252,8 @@ impl Sim<'_> {
         if !self.book.declared {
             return Err(Unpredictable);
         }
-        Ok(self.book.stonecutting.iter().any(|r| test(&r.0, Some(s))))
+        let b = self.book;
+        Ok(b.stonecutting().iter().any(|r| test(b.set(r.0), Some(s))))
     }
 
     /// Whether a smithing recipe takes the stack as its addition (shift-click to slot 1).
@@ -255,7 +261,8 @@ impl Sim<'_> {
         if !self.book.declared {
             return Err(Unpredictable);
         }
-        Ok(self.book.smithing.iter().any(|r| test(&r.1, Some(s))))
+        let b = self.book;
+        Ok(b.smithing().iter().any(|r| test(b.set(r.1), Some(s))))
     }
 
     /// The result slot's `canTakeItems` (`Err`: taking it runs code ghast does not model: a
@@ -277,8 +284,12 @@ impl Sim<'_> {
         Ok(match self.m.station.as_deref() {
             Some(Station::Anvil(_)) => self.anvil_can_take(),
             Some(Station::Smithing { recipe: Some(k) }) => {
-                let r = &self.book.smithing[*k];
-                test(&r.0, self.m.container[0].as_ref()) && test(&r.1, self.m.container[1].as_ref())
+                let b = self.book;
+                let Some(r) = b.smithing().get(*k) else {
+                    return Ok(false);
+                };
+                test(b.set(r.0), self.m.container[0].as_ref())
+                    && test(b.set(r.1), self.m.container[1].as_ref())
             }
             Some(Station::Smithing { recipe: None }) => false,
             _ => true,

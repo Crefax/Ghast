@@ -788,46 +788,168 @@ fn book_cloning(g: &Grid<'_>) -> Craft {
 
 // ---------------------------------------------------------------- 1.16.5
 
-/// A crafting recipe from `declare_recipes`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum R16 {
-    Shaped {
-        w: usize,
-        h: usize,
-        /// Row-major ingredients: each the item ids it accepts (empty: only an empty slot).
-        ins: Vec<Vec<i32>>,
-    },
-    Shapeless {
-        ins: Vec<Vec<i32>>,
-    },
+/// A crafting recipe from `declare_recipes`: its ingredients are `len` set indices at `start`
+/// in [`Book16::refs`] (shaped: row-major, `w * h` of them; an empty set takes only an empty
+/// slot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Craft16 {
+    start: u32,
+    len: u8,
+    /// Shaped: its size (shapeless: 0 x 0).
+    w: u8,
+    h: u8,
+    shaped: bool,
 }
 
-/// A 1.16.5 smithing recipe: base item ids, addition item ids, result.
-pub(crate) type SmithingRecipe = (Vec<i32>, Vec<i32>, Option<Stack>);
+/// A recipe result: a plain stack inline (id, count; no NBT: vanilla's), else 1 + an index
+/// into [`Book16::full`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Out16 {
+    id: i32,
+    count: u8,
+    full: u16,
+}
 
-/// The crafting recipes the server declared (1.16.5 `declare_recipes`), in packet order.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RecipeBook {
-    pub(crate) recipes: Arc<Vec<R16>>,
-    /// Number of special (`crafting_special_*`) recipes declared.
-    pub(crate) specials: usize,
+/// A 1.16.5 stonecutting recipe: the ingredient's set index, the result.
+pub(crate) type Stonecutting16 = (u16, Out16);
+/// A 1.16.5 smithing recipe: base and addition set indices, the result.
+pub(crate) type Smithing16 = (u16, u16, Out16);
+
+/// The server's recipes in the form the predictions read: every distinct ingredient (the item
+/// ids it accepts) is stored once and the recipes refer to it by index (a vanilla book has 647
+/// recipes over a few hundred distinct ingredients).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Book16 {
+    /// The ingredient sets, concatenated: set `k` is `ids[ends[k - 1]..ends[k]]`.
+    ids: Box<[i32]>,
+    ends: Box<[u32]>,
+    /// Ingredient set indices of the crafting recipes, concatenated.
+    refs: Box<[u16]>,
+    crafting: Box<[Craft16]>,
     /// The item ids of the smelting, blasting and smoking recipes' ingredients (sorted), which
     /// decide a furnace's shift-click (`isSmeltable`).
-    pub(crate) cooking: Arc<[Vec<i32>; 3]>,
-    /// The stonecutting recipes (ingredient item ids, result), in packet order.
-    pub(crate) stonecutting: Arc<Vec<(Vec<i32>, Option<Stack>)>>,
-    /// The smithing recipes (base item ids, addition item ids, result), in packet order.
-    pub(crate) smithing: Arc<Vec<SmithingRecipe>>,
+    cooking: [Box<[i32]>; 3],
+    /// In packet order.
+    stonecutting: Box<[Stonecutting16]>,
+    /// In packet order.
+    smithing: Box<[Smithing16]>,
+    /// The results that are not plain stacks (NBT, or a count above 255).
+    full: Box<[Stack]>,
+}
+
+impl Book16 {
+    /// Heap bytes this book holds (its own allocation and the stored results' NBT excluded).
+    fn heap_bytes(&self) -> usize {
+        use std::mem::size_of_val;
+        size_of_val(&*self.ids)
+            + size_of_val(&*self.ends)
+            + size_of_val(&*self.refs)
+            + size_of_val(&*self.crafting)
+            + self
+                .cooking
+                .iter()
+                .map(|c| size_of_val(&**c))
+                .sum::<usize>()
+            + size_of_val(&*self.stonecutting)
+            + size_of_val(&*self.smithing)
+            + size_of_val(&*self.full)
+    }
+}
+
+/// The crafting recipes the server declared (1.16.5 `declare_recipes`), in packet order.
+///
+/// Cloning is cheap (the data is shared), and books built from the same packet body with
+/// [`RecipeBook::from_v1_16_5_body`] share one copy across the process.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecipeBook {
+    data: Option<Arc<Book16>>,
+    /// Number of special (`crafting_special_*`) recipes declared.
+    pub(crate) specials: usize,
     /// Built from the server's `declare_recipes` (the default book is not: what reads the
     /// server's recipes is then unpredictable).
     pub(crate) declared: bool,
 }
 
+/// Interns ingredient sets while a book is built.
+#[cfg(feature = "v1_16_5")]
+#[derive(Default)]
+struct SetBuilder {
+    ids: Vec<i32>,
+    ends: Vec<u32>,
+    index: std::collections::HashMap<Vec<i32>, u16>,
+}
+
+#[cfg(feature = "v1_16_5")]
+impl SetBuilder {
+    fn intern(&mut self, set: Vec<i32>) -> u16 {
+        if let Some(&k) = self.index.get(&set) {
+            return k;
+        }
+        // more distinct sets than u16 indices: a book this large is not a vanilla one; the
+        // extra sets all map to the last index (never happens below 65,535 distinct sets)
+        let k = u16::try_from(self.ends.len()).unwrap_or(u16::MAX);
+        if k == u16::MAX {
+            return k;
+        }
+        self.ids.extend_from_slice(&set);
+        self.ends
+            .push(u32::try_from(self.ids.len()).unwrap_or(u32::MAX));
+        self.index.insert(set, k);
+        k
+    }
+}
+
 impl RecipeBook {
+    fn data(&self) -> &Book16 {
+        static EMPTY: std::sync::OnceLock<Book16> = std::sync::OnceLock::new();
+        self.data
+            .as_deref()
+            .unwrap_or_else(|| EMPTY.get_or_init(Book16::default))
+    }
+
+    /// Ingredient set `k`: the item ids it accepts (empty: only an empty slot).
+    pub(crate) fn set(&self, k: u16) -> &[i32] {
+        let d = self.data();
+        let k = usize::from(k);
+        let Some(&end) = d.ends.get(k) else {
+            return &[];
+        };
+        let start = if k == 0 { 0 } else { d.ends[k - 1] };
+        &d.ids[start as usize..end as usize]
+    }
+
+    /// A recipe result.
+    pub(crate) fn result(&self, o: Out16) -> Option<Stack> {
+        match o.full {
+            0 if o.id == 0 => None,
+            0 => Some(Stack::new(o.id, i32::from(o.count), 0)),
+            k => self.data().full.get(usize::from(k - 1)).cloned(),
+        }
+    }
+
+    /// A recipe result's item id (0: none).
+    pub(crate) fn result_id(&self, o: Out16) -> i32 {
+        match o.full {
+            0 => o.id,
+            k => self.data().full.get(usize::from(k - 1)).map_or(0, |s| s.id),
+        }
+    }
+
+    /// The stonecutting recipes (ingredient set, result), in packet order.
+    pub(crate) fn stonecutting(&self) -> &[Stonecutting16] {
+        &self.data().stonecutting
+    }
+
+    /// The smithing recipes (base set, addition set, result), in packet order.
+    pub(crate) fn smithing(&self) -> &[Smithing16] {
+        &self.data().smithing
+    }
+
     /// 1.16.5: whether a recipe of the furnace type (0 furnace, 1 blast furnace, 2 smoker)
     /// takes the item (`Ingredient.test`: the item alone).
     pub(crate) fn cooks(&self, furnace: u8, id: i32) -> bool {
-        self.cooking
+        self.data()
+            .cooking
             .get(usize::from(furnace))
             .is_some_and(|c| c.binary_search(&id).is_ok())
     }
@@ -835,13 +957,26 @@ impl RecipeBook {
     /// Number of crafting recipes (shaped, shapeless, special).
     #[must_use]
     pub fn len(&self) -> usize {
-        self.recipes.len() + self.specials
+        self.data().crafting.len() + self.specials
     }
 
     /// Whether no recipe was declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Whether the book holds the server's recipes (a 1.16.5 `declare_recipes`).
+    #[must_use]
+    pub fn is_declared(&self) -> bool {
+        self.declared
+    }
+
+    /// Heap bytes the recipes take (shared by every clone; the results' item NBT, which
+    /// vanilla recipes do not have, excluded). For memory reports.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.data.as_deref().map_or(0, Book16::heap_bytes)
     }
 
     /// Builds the book from a 1.16.5 `declare_recipes` packet.
@@ -861,31 +996,86 @@ impl RecipeBook {
                 })
                 .collect()
         };
-        let mut recipes = Vec::new();
+        let mut sets = SetBuilder::default();
+        // set 0: the empty ingredient
+        sets.intern(Vec::new());
+        let mut refs: Vec<u16> = Vec::new();
+        let mut crafting = Vec::new();
         let mut specials = 0;
         let mut cooking: [Vec<i32>; 3] = Default::default();
         let mut stonecutting = Vec::new();
         let mut smithing = Vec::new();
-        let result = |s: &ghast_protocol::types::slot::modern::Slot| {
-            crate::stack::from_modern_slot(s.clone()).map(Stack::detached)
+        let mut full: Vec<Stack> = Vec::new();
+        let mut result = |s: &ghast_protocol::types::slot::modern::Slot| {
+            let none = Out16 {
+                id: 0,
+                count: 0,
+                full: 0,
+            };
+            let Some(st) = crate::stack::from_modern_slot(s.clone()).map(Stack::detached) else {
+                return none;
+            };
+            if let (crate::stack::ItemData::None, 0, Ok(count)) =
+                (&st.data, st.damage, u8::try_from(st.count))
+            {
+                return Out16 {
+                    id: st.id,
+                    count,
+                    full: 0,
+                };
+            }
+            // past u16::MAX - 1 full results (never in a real book) the result is unknown: none
+            let Ok(k) = u16::try_from(full.len() + 1) else {
+                return none;
+            };
+            full.push(st);
+            Out16 {
+                id: 0,
+                count: 0,
+                full: k,
+            }
         };
+        let mut craft =
+            |shaped: bool, w: i32, h: i32, sets: &mut SetBuilder, ins: Vec<Vec<i32>>| {
+                let start = u32::try_from(refs.len()).unwrap_or(u32::MAX);
+                // at most 3 x 3 ingredients (a longer list cannot match a crafting grid)
+                let len = u8::try_from(ins.len()).unwrap_or(u8::MAX);
+                refs.extend(ins.into_iter().map(|s| sets.intern(s)));
+                crafting.push(Craft16 {
+                    shaped,
+                    w: u8::try_from(w).unwrap_or(0),
+                    h: u8::try_from(h).unwrap_or(0),
+                    start,
+                    len,
+                });
+            };
         for r in &p.recipes {
             match &r.data {
-                D::Stonecutting(c) => stonecutting.push((ing(&c.ingredient), result(&c.result))),
-                D::Smithing(c) => {
-                    smithing.push((ing(&c.base), ing(&c.addition), result(&c.result)))
+                D::Stonecutting(c) => {
+                    stonecutting.push((sets.intern(ing(&c.ingredient)), result(&c.result)));
                 }
+                D::Smithing(c) => smithing.push((
+                    sets.intern(ing(&c.base)),
+                    sets.intern(ing(&c.addition)),
+                    result(&c.result),
+                )),
                 D::Smelting(c) => cooking[0].extend(ing(&c.ingredient)),
                 D::Blasting(c) => cooking[1].extend(ing(&c.ingredient)),
                 D::Smoking(c) => cooking[2].extend(ing(&c.ingredient)),
-                D::CraftingShaped(s) => recipes.push(R16::Shaped {
-                    w: usize::try_from(s.width).unwrap_or(0),
-                    h: usize::try_from(s.height).unwrap_or(0),
-                    ins: s.ingredients.iter().flatten().map(|o| ing(o)).collect(),
-                }),
-                D::CraftingShapeless(s) => recipes.push(R16::Shapeless {
-                    ins: s.ingredients.iter().map(|o| ing(o)).collect(),
-                }),
+                D::CraftingShaped(s) => craft(
+                    true,
+                    s.width,
+                    s.height,
+                    &mut sets,
+                    s.ingredients.iter().flatten().map(|o| ing(o)).collect(),
+                ),
+                D::CraftingShapeless(s) => craft(
+                    false,
+                    0,
+                    0,
+                    &mut sets,
+                    s.ingredients.iter().map(|o| ing(o)).collect(),
+                ),
                 D::CraftingSpecialArmordye
                 | D::CraftingSpecialBookcloning
                 | D::CraftingSpecialMapcloning
@@ -903,24 +1093,63 @@ impl RecipeBook {
                 _ => {}
             }
         }
-        for c in &mut cooking {
+        let cooking = cooking.map(|mut c| {
             c.sort_unstable();
             c.dedup();
-        }
+            c.into_boxed_slice()
+        });
         RecipeBook {
-            recipes: Arc::new(recipes),
+            data: Some(Arc::new(Book16 {
+                ids: sets.ids.into_boxed_slice(),
+                ends: sets.ends.into_boxed_slice(),
+                refs: refs.into_boxed_slice(),
+                crafting: crafting.into_boxed_slice(),
+                cooking,
+                stonecutting: stonecutting.into_boxed_slice(),
+                smithing: smithing.into_boxed_slice(),
+                full: full.into_boxed_slice(),
+            })),
             specials,
-            cooking: Arc::new(cooking),
-            stonecutting: Arc::new(stonecutting),
-            smithing: Arc::new(smithing),
             declared: true,
         }
     }
 
-    /// Whether the book holds the server's recipes (a 1.16.5 `declare_recipes`).
-    #[must_use]
-    pub fn is_declared(&self) -> bool {
-        self.declared
+    /// Builds the book from a 1.16.5 `declare_recipes` body, shared across the process: a body
+    /// equal to one an existing book was built from (bots on the same server) gets that book's
+    /// data without decoding. Bodies are matched by a 128-bit keyed hash (SipHash with keys
+    /// random per process, so no server can aim at another's book).
+    ///
+    /// # Errors
+    /// The body does not decode as `declare_recipes`.
+    #[cfg(feature = "v1_16_5")]
+    pub fn from_v1_16_5_body(body: &[u8]) -> Result<RecipeBook, ghast_protocol::DecodeError> {
+        use std::hash::BuildHasher;
+        use std::sync::{Mutex, OnceLock, Weak};
+        type Shared = Vec<(u128, Weak<Book16>, usize)>;
+        static KEYS: OnceLock<[std::collections::hash_map::RandomState; 2]> = OnceLock::new();
+        static SHARED: Mutex<Shared> = Mutex::new(Vec::new());
+        let [a, b] = KEYS.get_or_init(Default::default);
+        let key = (u128::from(a.hash_one(body)) << 64) | u128::from(b.hash_one(body));
+        if let Ok(shared) = SHARED.lock()
+            && let Some((_, w, specials)) = shared.iter().find(|e| e.0 == key)
+            && let Some(data) = w.upgrade()
+        {
+            return Ok(RecipeBook {
+                data: Some(data),
+                specials: *specials,
+                declared: true,
+            });
+        }
+        let p: ghast_protocol::v1_16_5::play::clientbound::DeclareRecipes =
+            ghast_protocol::codec::decode_exact(&bytes::Bytes::copy_from_slice(body))?;
+        let book = RecipeBook::from_v1_16_5(&p);
+        if let Ok(mut shared) = SHARED.lock()
+            && let Some(data) = &book.data
+        {
+            shared.retain(|e| e.1.strong_count() > 0);
+            shared.push((key, Arc::downgrade(data), book.specials));
+        }
+        Ok(book)
     }
 }
 
@@ -931,7 +1160,7 @@ fn test16(options: &[i32], s: Option<&Stack>) -> bool {
     }
 }
 
-fn shaped16(g: &Grid<'_>, w: usize, h: usize, ins: &[Vec<i32>]) -> bool {
+fn shaped16(book: &RecipeBook, g: &Grid<'_>, w: usize, h: usize, ins: &[u16]) -> bool {
     if w == 0 || h == 0 || ins.len() != w * h || w > g.width || h > g.height() {
         return false;
     }
@@ -944,9 +1173,9 @@ fn shaped16(g: &Grid<'_>, w: usize, h: usize, ins: &[Vec<i32>]) -> bool {
                         let opts: &[i32] = if x >= ox && y >= oy && x - ox < w && y - oy < h {
                             let (k, l) = (x - ox, y - oy);
                             if mirror {
-                                &ins[w - k - 1 + l * w]
+                                book.set(ins[w - k - 1 + l * w])
                             } else {
-                                &ins[k + l * w]
+                                book.set(ins[k + l * w])
                             }
                         } else {
                             empty
@@ -965,7 +1194,9 @@ fn shaped16(g: &Grid<'_>, w: usize, h: usize, ins: &[Vec<i32>]) -> bool {
 
 /// Shapeless: as many stacks as ingredients and an assignment of stacks to ingredients
 /// (vanilla's `RecipeMatcher`).
-fn shapeless16(g: &Grid<'_>, ins: &[Vec<i32>]) -> bool {
+fn shapeless16(book: &RecipeBook, g: &Grid<'_>, ins: &[u16]) -> bool {
+    let ins: Vec<&[i32]> = ins.iter().map(|&k| book.set(k)).collect();
+    let ins = &ins[..];
     let items: Vec<&Stack> = g.items().collect();
     if items.len() != ins.len() {
         return false;
@@ -974,7 +1205,7 @@ fn shapeless16(g: &Grid<'_>, ins: &[Vec<i32>]) -> bool {
     let mut owner: Vec<Option<usize>> = vec![None; items.len()];
     fn augment(
         ing: usize,
-        ins: &[Vec<i32>],
+        ins: &[&[i32]],
         items: &[&Stack],
         owner: &mut [Option<usize>],
         seen: &mut [bool],
@@ -1014,9 +1245,14 @@ pub(crate) fn remainders_1_16(book: &RecipeBook, g: &Grid<'_>) -> Result<Vec<Rem
     {
         return Err(());
     }
-    let hit = book.recipes.iter().any(|r| match r {
-        R16::Shaped { w, h, ins } => shaped16(g, *w, *h, ins),
-        R16::Shapeless { ins } => shapeless16(g, ins),
+    let d = book.data();
+    let hit = d.crafting.iter().any(|r| {
+        let ins = &d.refs[r.start as usize..][..usize::from(r.len)];
+        if r.shaped {
+            shaped16(book, g, usize::from(r.w), usize::from(r.h), ins)
+        } else {
+            shapeless16(book, g, ins)
+        }
     });
     if !hit {
         return Err(());
@@ -1039,6 +1275,110 @@ pub(crate) fn remainders_1_16(book: &RecipeBook, g: &Grid<'_>) -> Result<Vec<Rem
 #[cfg(all(test, feature = "v1_8", feature = "v1_16_5"))]
 mod tests {
     use super::*;
+
+    /// The vanilla `declare_recipes` the oracle recorded.
+    fn vanilla_recipes() -> Vec<u8> {
+        use std::io::BufRead;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/golden/1.16.5/clicks_menus_seed1.jsonl.gz");
+        let r = std::io::BufReader::new(flate2::read::GzDecoder::new(
+            std::fs::File::open(&path).unwrap(),
+        ));
+        for line in r.lines() {
+            let line = line.unwrap();
+            if let Some(h) = line
+                .strip_prefix("{\"declare_recipes\":\"")
+                .and_then(|l| l.split('"').next())
+            {
+                return (0..h.len() / 2)
+                    .map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())
+                    .collect();
+            }
+        }
+        panic!("no declare_recipes line");
+    }
+
+    /// The compact book reads like the packet: every recipe's ingredients and results, and
+    /// books from the same body share one copy.
+    #[test]
+    fn compact_book_matches_the_packet() {
+        use ghast_protocol::v1_16_5::play::clientbound::{
+            DeclareRecipes, DeclareRecipesRecipesData as D,
+        };
+        let body = vanilla_recipes();
+        let p: DeclareRecipes =
+            ghast_protocol::codec::decode_exact(&bytes::Bytes::from(body.clone())).unwrap();
+        let book = RecipeBook::from_v1_16_5(&p);
+        let ids = |o: &[ghast_protocol::types::slot::modern::Slot]| -> Vec<i32> {
+            o.iter()
+                .filter_map(|s| {
+                    s.0.as_ref()
+                        .filter(|i| i.id != 0 && i.count > 0)
+                        .map(|i| i.id)
+                })
+                .collect()
+        };
+        let res = |s: &ghast_protocol::types::slot::modern::Slot| {
+            crate::stack::from_modern_slot(s.clone()).map(Stack::detached)
+        };
+        let d = book.data();
+        let (mut c, mut st, mut sm) = (0, 0, 0);
+        for r in &p.recipes {
+            match &r.data {
+                D::CraftingShaped(s) => {
+                    let k = d.crafting[c];
+                    c += 1;
+                    assert!(k.shaped);
+                    assert_eq!((i32::from(k.w), i32::from(k.h)), (s.width, s.height));
+                    let refs = &d.refs[k.start as usize..][..usize::from(k.len)];
+                    let want: Vec<Vec<i32>> =
+                        s.ingredients.iter().flatten().map(|o| ids(o)).collect();
+                    let got: Vec<Vec<i32>> = refs.iter().map(|&x| book.set(x).to_vec()).collect();
+                    assert_eq!(got, want);
+                }
+                D::CraftingShapeless(s) => {
+                    let k = d.crafting[c];
+                    c += 1;
+                    assert!(!k.shaped);
+                    let refs = &d.refs[k.start as usize..][..usize::from(k.len)];
+                    let want: Vec<Vec<i32>> = s.ingredients.iter().map(|o| ids(o)).collect();
+                    let got: Vec<Vec<i32>> = refs.iter().map(|&x| book.set(x).to_vec()).collect();
+                    assert_eq!(got, want);
+                }
+                D::Stonecutting(s) => {
+                    let (i, o) = book.stonecutting()[st];
+                    st += 1;
+                    assert_eq!(book.set(i), ids(&s.ingredient));
+                    assert_eq!(book.result(o), res(&s.result));
+                    assert_eq!(book.result_id(o), res(&s.result).map_or(0, |s| s.id));
+                }
+                D::Smithing(s) => {
+                    let (a, b, o) = book.smithing()[sm];
+                    sm += 1;
+                    assert_eq!(book.set(a), ids(&s.base));
+                    assert_eq!(book.set(b), ids(&s.addition));
+                    assert_eq!(book.result(o), res(&s.result));
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            (c, st, sm),
+            (d.crafting.len(), d.stonecutting.len(), d.smithing.len())
+        );
+        assert!(book.heap_bytes() < 32 * 1024, "{}", book.heap_bytes());
+        // shared: the same body gives the same data, another body a book of its own
+        let a = RecipeBook::from_v1_16_5_body(&body).unwrap();
+        let b = RecipeBook::from_v1_16_5_body(&body).unwrap();
+        assert!(Arc::ptr_eq(
+            a.data.as_ref().unwrap(),
+            b.data.as_ref().unwrap()
+        ));
+        assert_eq!(a, book);
+        let o = RecipeBook::from_v1_16_5_body(&[0]).unwrap(); // no recipes
+        assert!(o.is_declared() && o.is_empty());
+        assert!(RecipeBook::from_v1_16_5_body(&[0xff]).is_err());
+    }
 
     fn grid(v: &[Option<Stack>]) -> Grid<'_> {
         Grid {
