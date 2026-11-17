@@ -247,14 +247,78 @@ final class MenuClickDump {
     private static net.minecraft.tag.TagManager datapackTags() {
         net.minecraft.tag.TagManager v = Harness.vanillaTags();
         java.util.Map<Identifier, net.minecraft.tag.Tag<Item>> m = new java.util.HashMap<>(v.getItems().getTags());
-        m.put(new Identifier("beacon_payment_items"), net.minecraft.tag.Tag.of(java.util.Set.of(
+        // ordered sets (registry order): java.util.Set.of iterates in a per-JVM random order, and
+        // the tags packet writes a tag's entries in its set's order
+        m.put(new Identifier("beacon_payment_items"), net.minecraft.tag.Tag.of(ordered(
                 net.minecraft.item.Items.STONE, net.minecraft.item.Items.DIRT, net.minecraft.item.Items.EMERALD)));
-        m.put(new Identifier("carpets"), net.minecraft.tag.Tag.of(java.util.Set.of(
+        m.put(new Identifier("carpets"), net.minecraft.tag.Tag.of(ordered(
                 net.minecraft.item.Items.STONE, net.minecraft.item.Items.WHITE_CARPET)));
-        m.put(new Identifier("planks"), net.minecraft.tag.Tag.of(java.util.Set.of(
+        m.put(new Identifier("planks"), net.minecraft.tag.Tag.of(ordered(
                 net.minecraft.item.Items.COBBLESTONE, net.minecraft.item.Items.OAK_PLANKS)));
         return net.minecraft.tag.TagManager.create(v.getBlocks(), net.minecraft.tag.TagGroup.create(m), v.getFluids(),
                 v.getEntityTypes());
+    }
+
+    private static java.util.Set<Item> ordered(Item... items) {
+        return new java.util.LinkedHashSet<>(java.util.Arrays.asList(items));
+    }
+
+    /**
+     * Puts a grindstone result's curses in enchantment id order. {@code GrindstoneScreenHandler.grind}
+     * collects the kept curses with {@code Collectors.toMap} into a HashMap keyed by the enchantment
+     * objects, so with two curses the result's list order follows their identity hash codes and
+     * changes from one JVM run to the next. Either order is one vanilla can produce; ghast refuses
+     * clicks on such a result as unpredictable (and does not compare the slot), so fixing the
+     * order only makes the golden file byte-stable. Applied to everything stored in the result
+     * slot (see {@link #grindstone}); a list with fewer than two entries or with a non-curse (not
+     * something {@code grind} made) is left alone.
+     */
+    private static void canonicalCurses(ItemStack s) {
+        if (s.isEmpty() || s.getTag() == null) {
+            return;
+        }
+        for (String key : new String[] {"Enchantments", "StoredEnchantments"}) {
+            if (!s.getTag().contains(key, 9)) {
+                continue;
+            }
+            net.minecraft.nbt.NbtList l = s.getTag().getList(key, 10);
+            if (l.size() < 2) {
+                continue;
+            }
+            java.util.List<net.minecraft.nbt.NbtCompound> es = new java.util.ArrayList<>();
+            for (int i = 0; i < l.size(); i++) {
+                net.minecraft.nbt.NbtCompound e = l.getCompound(i);
+                net.minecraft.enchantment.Enchantment en =
+                        Registry.ENCHANTMENT.getOrEmpty(Identifier.tryParse(e.getString("id"))).orElse(null);
+                if (en == null || !en.isCursed()) {
+                    return;
+                }
+                es.add(e);
+            }
+            es.sort(java.util.Comparator.comparingInt(
+                    e -> Registry.ENCHANTMENT.getRawId(Registry.ENCHANTMENT.get(Identifier.tryParse(e.getString("id"))))));
+            net.minecraft.nbt.NbtList sorted = new net.minecraft.nbt.NbtList();
+            sorted.addAll(es);
+            s.getTag().put(key, sorted);
+        }
+    }
+
+    /**
+     * A grindstone whose result inventory puts curses in a fixed order as the result is stored
+     * ({@link #canonicalCurses}), before any click can move it elsewhere.
+     */
+    private static GrindstoneScreenHandler grindstone(int sync, PlayerInventory inv) {
+        GrindstoneScreenHandler g = new GrindstoneScreenHandler(sync, inv);
+        net.minecraft.inventory.Inventory result = new net.minecraft.inventory.CraftingResultInventory() {
+            @Override
+            public void setStack(int slot, ItemStack stack) {
+                canonicalCurses(stack);
+                super.setStack(slot, stack);
+            }
+        };
+        Reflect.set(GrindstoneScreenHandler.class, g, "result", result);
+        Reflect.set(net.minecraft.screen.slot.Slot.class, g.getSlot(2), "inventory", result);
+        return g;
     }
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
@@ -450,7 +514,7 @@ final class MenuClickDump {
             case "smoker" -> new SmokerScreenHandler(sync, inv);
             case "smithing" -> new SmithingScreenHandler(sync, inv);
             case "stonecutter" -> new StonecutterScreenHandler(sync, inv);
-            case "grindstone" -> new GrindstoneScreenHandler(sync, inv);
+            case "grindstone" -> grindstone(sync, inv);
             case "loom" -> new LoomScreenHandler(sync, inv);
             // the client constructor: no world context, so the client never computes a result
             case "cartography" -> new CartographyTableScreenHandler(sync, inv);
