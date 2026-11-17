@@ -312,6 +312,15 @@ pub fn packet_json(p: &Packet) -> Value {
             "name": "position_look", "pos": [jf64(x), jf64(y), jf64(z)],
             "yaw": jf32(yaw), "pitch": jf32(pitch), "on_ground": on_ground,
         }),
+        Packet::SteerVehicle {
+            sideways,
+            forward,
+            jump,
+            sneak,
+        } => json!({
+            "name": "steer_vehicle", "sideways": jf32(sideways), "forward": jf32(forward),
+            "jump": jump, "sneak": sneak,
+        }),
         other => unimplemented!("{other:?}"),
     }
 }
@@ -424,11 +433,59 @@ pub const MOVEMENT_PACKETS: [&str; 6] = [
     "position_look",
 ];
 
+/// The JVM's `Math.sin` / `Math.cos` of one 1.8.9 boat tick (the record's `jvm`): the
+/// rider-input angle and the seat angle with the values the oracle's JVM computed.
+#[cfg(feature = "v1_8")]
+struct JvmTrig(Vec<(u64, f64, f64)>);
+
+#[cfg(feature = "v1_8")]
+impl JvmTrig {
+    fn of(rec: &Value) -> JvmTrig {
+        let mut v = Vec::new();
+        if let Some(j) = rec.get("jvm") {
+            if j.get("in_arg").is_some() {
+                let a = f64::from(f32_of(&j["in_arg"]));
+                v.push((a.to_bits(), f64_of(&j["in_sin"]), f64_of(&j["in_cos"])));
+            }
+            v.push((
+                f64_of(&j["seat_arg"]).to_bits(),
+                f64_of(&j["seat_sin"]),
+                f64_of(&j["seat_cos"]),
+            ));
+        }
+        JvmTrig(v)
+    }
+    fn find(&self, x: f64) -> Option<&(u64, f64, f64)> {
+        self.0.iter().find(|e| e.0 == x.to_bits())
+    }
+}
+
+#[cfg(feature = "v1_8")]
+impl v1_8::JavaTrig for JvmTrig {
+    fn sin(&self, x: f64) -> f64 {
+        self.find(x).map_or_else(|| x.sin(), |e| e.1)
+    }
+    fn cos(&self, x: f64) -> f64 {
+        self.find(x).map_or_else(|| x.cos(), |e| e.2)
+    }
+}
+
 #[cfg(feature = "v1_8")]
 /// Replays one case. Returns the number of ticks compared or the first mismatch.
 pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     let name = case.header["name"].as_str().unwrap_or("?").to_string();
-    let world = world_of(&case.header);
+    let mut world = world_of(&case.header);
+    // Riding cases (`setup.ext.boat`): the boat the server spawned at setup.
+    let mut boat = case.header["setup"]
+        .get("ext")
+        .and_then(|x| x.get("boat"))
+        .map(|bt| {
+            let pos = f3(&bt["pos"]);
+            let fixed = pos.map(|v| (v * 32.0).floor() as i32);
+            let yaw = (f32_of(&bt["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+            v1_8::Boat::spawned(fixed, yaw, 0)
+        });
+    let mut riding = false;
     let t0 = &case.ticks[0];
     assert_eq!(t0["t"], 0);
     let mut p = player_of(&case.header, t0);
@@ -470,6 +527,28 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         fly_speed: f32_of(&e["fly_speed"]),
                         walk_speed: f32_of(&e["walk_speed"]),
                     }),
+                    "ride" => riding = b(&e["on"]) && boat.is_some(),
+                    "boat_teleport" => {
+                        let bt = boat.as_mut().expect("boat");
+                        bt.server_teleport(
+                            [i(&e["x"]), i(&e["y"]), i(&e["z"])],
+                            i(&e["yaw"]) as i8,
+                            i(&e["pitch"]) as i8,
+                            b(&e["on_ground"]),
+                        );
+                    }
+                    "boat_move" => {
+                        let bt = boat.as_mut().expect("boat");
+                        bt.server_move(
+                            [i(&e["dx"]) as i8, i(&e["dy"]) as i8, i(&e["dz"]) as i8],
+                            b(&e["on_ground"]),
+                        );
+                    }
+                    "boat_velocity" => {
+                        let bt = boat.as_mut().expect("boat");
+                        let c = |k: &str| f64::from(i(&e[k])) / 8000.0;
+                        bt.server_velocity([c("x"), c("y"), c("z")]);
+                    }
                     other => panic!("unknown event {other}"),
                 }
             }
@@ -485,10 +564,42 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let options = v1_8::Options {
             history_shapes: v1_8::HistoryShapes::Constructor,
         };
-        v1_8::tick_with(&mut p, &ti, &world, &options, &mut out);
+        match boat.as_mut() {
+            Some(bt) if riding => {
+                let trig = JvmTrig::of(rec);
+                if !v1_8::tick_boat_with(&mut p, bt, &ti, &world, &options, &trig, &mut out) {
+                    riding = false;
+                }
+                for &[x, y, z] in bt.broken_blocks() {
+                    world.set_raw(x, y, z, 0);
+                }
+            }
+            _ => v1_8::tick_with(&mut p, &ti, &world, &options, &mut out),
+        }
         sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(bt), true) = (rec.get("vehicle"), &boat, riding) {
+            let got = json!({
+                "pos": [jf64(bt.pos[0]), jf64(bt.pos[1]), jf64(bt.pos[2])],
+                "vel": [jf64(bt.vel[0]), jf64(bt.vel[1]), jf64(bt.vel[2])],
+                "yaw": jf32(bt.yaw),
+                "pitch": jf32(bt.pitch),
+                "on_ground": bt.on_ground,
+                "horizontal_collision": bt.horizontal_collision,
+                "fall_distance": jf32(bt.fall_distance),
+                "speed": jf64(bt.speed()),
+            });
+            let want = json!({
+                "pos": want["pos"], "vel": want["vel"], "yaw": want["yaw"], "pitch": want["pitch"],
+                "on_ground": want["on_ground"],
+                "horizontal_collision": want["horizontal_collision"],
+                "fall_distance": want["fall_distance"], "speed": want["speed"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
         }
         // Item-use packets (block_place / release) are interactions the client crate sends
         // before the movement; ghast-physics only produces movement-related packets.
@@ -496,7 +607,10 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|p| MOVEMENT_PACKETS.contains(&p["name"].as_str().unwrap_or("")))
+            .filter(|p| {
+                let n = p["name"].as_str().unwrap_or("");
+                MOVEMENT_PACKETS.contains(&n) || n == "steer_vehicle"
+            })
             .cloned()
             .collect();
         if let Some(d) = diff("packets", &Value::Array(expected), &Value::Array(sent)) {

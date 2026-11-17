@@ -76,6 +76,7 @@ tests/golden/1.8.9/
   selection_boxes.jsonl.gz   ray-test bounds + canCollide for every block id/meta (crosshair)
   raytrace.jsonl.gz          crosshair raytrace vectors (50 worlds x 40 viewpoints)
   entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
+  boats.jsonl.gz             riding a boat the client simulates (hand cases + 100 fuzz cases)
   entity_tracking.jsonl.gz   (26.1) random entity packets through the real client, entity state per tick
   joins.jsonl.gz             (26.1) joins through the level-load gate (delayed load)
   net_crypto.jsonl.gz        (26.1) login encryption: session hash, hello / key packets, AES/CFB8
@@ -153,6 +154,40 @@ not using calls the real `ClientPlayerInteractionManager.interactItem` (sends `b
 starts blocking for 72000 ticks), a falling edge while using calls `stopUsingItem` (sends `block_dig`
 status 5). While using, `tickMovement` scales the input by 0.2, resets the sprint double-tap timer and
 blocks sprint starts; forward 0.2 < 0.8 also stops an active sprint.
+
+### Boats (`boats.jsonl.gz`, 1.8.9)
+
+`oracle/run.sh boats` (18 hand cases + 100 fuzz cases × 60 ticks of seed 1) and `fuzz --boats true`
+(`Boats.fuzz`, cases `…_bo`). Setup `setup.ext.boat` (`pos`, `yaw`): the server spawns boat 100
+with the real spawn-object handler (fixed-point position, angle byte, no motion); the player's
+entity id is set to 1 (the JVM-wide entity counter would otherwise reach 100 in long runs). Events:
+`{"type":"ride","on"}` is the attach-entity packet (`onEntityAttach` for the local player minus
+its overlay text, which needs the HUD: the boat's "empty" flag is cleared, the player starts
+riding; `on: false` sends holding entity -1 and the player stays where it sat),
+`boat_teleport` (`x`, `y`, `z` fixed point, `yaw` / `pitch` angle bytes, `on_ground`),
+`boat_move` (`dx`, `dy`, `dz` bytes, `on_ground`), `boat_velocity` (1/8000) — each written as wire
+bytes, decoded by the packet's `read` and applied by the real handler. In 1.8 the client simulates
+the boat its player rides (the physics branch of `BoatEntity.tick`); the server's teleport snaps
+it and zeroes its motion, a relative move only restores the server's last motion when the boat is
+more than a block off, both set its ground flag. Tick records add `vehicle` (the boat after the
+tick: position, motion, rotation, box, flags, fall distance, web, removed, empty flag, speed
+factor, lerp steps, the server motion it keeps) and `jvm`: the boat calls `Math.sin` /
+`Math.cos` (the rider's input angle, the seat angle), whose last bit is the JVM's; the harness
+computes the same expressions with the same JVM (`in_arg`, `in_sin`, `in_cos` before the world
+tick from the rider's yaw and sideways speed; `seat_arg`, `seat_cos`, `seat_sin` from the boat's
+yaw after it) so a replay can use the JVM's values. Packets while riding: `look`, `steer_vehicle`.
+Cases: still water (paddle, turns, look steering), land, ice, drops into water and onto land,
+walls at speed, flowing water, under a water roof, a slab and soul sand, slime, lily pads and snow
+layers (removed by the client), cobwebs, lava, rider keys on water and land, server moves, a
+server dismount. Fuzz: pools, land patches (stone, grass, ice, packed ice, soul sand, slime, sand,
+lava, snow layers, flowing water, lily pads, cobwebs), walls, water roofs, random keys and looks,
+server teleports, relative moves and motion, a dismount near the end. What is faked: nothing
+beyond the attach handler's HUD text. Cached run (`oracle/cache/1.8.9/fuzz-boats/`, 1,000,000
+ticks, 0 diffs):
+
+```sh
+for s in 81 82 83 84 85; do oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.8.9/fuzz-boats/boats_s$s.jsonl.gz"; done
+```
 
 ## History-dependent shapes (anvil, chest, trapped chest)
 

@@ -78,3 +78,12 @@ fn lab_soulsand_restart_with_box() {
     assert_eq!(s.cases, 1);
     assert!(s.failures.is_empty());
 }
+
+/// Riding a boat the 1.8 client simulates: paddling on water and land, falls, walls, flowing
+/// water, lily pads and snow layers removed, cobwebs, lava, the server's teleports, relative
+/// moves and motion, the server's dismount (hand cases + the golden boat fuzz). The JVM's
+/// `Math.sin` / `Math.cos` come from the records.
+#[test]
+fn boats_1_8_9() {
+    check("boats.jsonl.gz");
+}

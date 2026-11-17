@@ -16,6 +16,8 @@ pub(crate) mod id {
     pub const WEB: u8 = 30;
     pub const LADDER: u8 = 65;
     pub const SOUL_SAND: u8 = 88;
+    pub const SNOW_LAYER: u8 = 78;
+    pub const LILY_PAD: u8 = 111;
     pub const STAINED_GLASS: u8 = 95;
     pub const VINE: u8 = 106;
     pub const NETHER_BRICK_FENCE: u8 = 113;

@@ -80,6 +80,7 @@ final class Recorder {
         j.key("effects").beginArray();
         sc.effects.forEach((id, amp) -> j.beginArray().value(id).value(amp).endArray());
         j.endArray();
+        Boats.header(j, sc);
         j.endObject();
         j.field("ticks", sc.ticks.size());
         return j.endObject().toString();
@@ -112,6 +113,7 @@ final class Recorder {
         }
         j.endArray();
         run.net.sent.clear();
+        Boats.tickRecord(j, run);
         return j.endObject().toString();
     }
 
@@ -144,6 +146,8 @@ final class Recorder {
             j.field("type", "abilities").field("invulnerable", a.invulnerable()).field("flying", a.flying())
                     .field("allow_flying", a.allowFlying()).field("creative", a.creative())
                     .fieldF32("fly_speed", a.flySpeed()).fieldF32("walk_speed", a.walkSpeed());
+        } else {
+            Boats.event(j, e);
         }
         j.endObject();
     }
@@ -252,6 +256,9 @@ final class Recorder {
             j.key("location").beginArray().value(b.getPos().getX()).value(b.getPos().getY()).value(b.getPos().getZ()).endArray();
             j.field("direction", b.getDirectionId());
             j.field("item", b.getStack() == null ? -1 : net.minecraft.item.Item.getRawId(b.getStack().getItem()));
+        } else if (pk instanceof net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket in) {
+            j.field("name", "steer_vehicle").fieldF32("sideways", in.getSideways()).fieldF32("forward", in.getForward())
+                    .field("jump", in.isJumping()).field("sneak", in.isSneaking());
         } else if (pk instanceof PlayerActionC2SPacket d) {
             j.field("name", "block_dig");
             j.field("status", d.getAction().ordinal());

@@ -127,6 +127,9 @@ final class ScenarioReader {
         for (JsonElement e : s.getAsJsonArray("effects")) {
             sc.effect(e.getAsJsonArray().get(0).getAsInt(), e.getAsJsonArray().get(1).getAsInt());
         }
+        if (s.has("ext")) {
+            Boats.readHeader(sc, s.getAsJsonObject("ext"));
+        }
         return sc;
     }
 
@@ -173,7 +176,13 @@ final class ScenarioReader {
                         }
                         events.add(new Scenario.Effects(List.copyOf(fx)));
                     }
-                    default -> throw new IllegalArgumentException("unknown event " + ev);
+                    default -> {
+                        Scenario.Event v = Boats.read(ev);
+                        if (v == null) {
+                            throw new IllegalArgumentException("unknown event " + ev);
+                        }
+                        events.add(v);
+                    }
                 }
             }
         }

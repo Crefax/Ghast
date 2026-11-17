@@ -371,6 +371,7 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
         border: world.world_border(),
         boxes: BoxList::new(),
         history: options.history_shapes,
+        riding: Walking,
     };
     cx.base_tick();
     cx.movement(&input.keys, input.using_item, out);
@@ -378,15 +379,95 @@ pub fn tick_with<W: BlockView<State = BlockState>>(
     cx.send_movement(out);
 }
 
-struct Ctx<'a, W> {
+/// The player's tick as the rider of a boat (`Entity.tickRiding`): motion zeroed, the whole
+/// player tick (the 1.8 rider touches water like anyone; a held item does not slow its input),
+/// then `look` and `steer_vehicle` instead of the movement packets (sprint and sneak changes are
+/// not sent while riding). The caller places the player on its seat afterwards.
+pub(super) fn tick_rider<W: BlockView<State = BlockState>>(
+    p: &mut PlayerState,
+    input: &TickInput,
+    world: &W,
+    options: &Options,
+    entities: &[Aabb],
+    out: &mut Packets,
+) {
+    p.vel = [0.0; 3];
+    p.yaw = input.yaw;
+    p.pitch = input.pitch;
+    p.ticks_alive += 1;
+    p.no_clip = p.spectator;
+    if p.spectator {
+        p.on_ground = false;
+    }
+    if !is_valid_pos(floor(p.pos[0]), 0, floor(p.pos[2])) {
+        return;
+    }
+    let mut cx = Ctx {
+        p,
+        w: world,
+        border: world.world_border(),
+        boxes: BoxList::new(),
+        history: options.history_shapes,
+        riding: Riding(entities),
+    };
+    cx.base_tick();
+    cx.movement(&input.keys, input.using_item, out);
+    cx.clamp_position();
+    let p = &*cx.p;
+    out.push(Packet::Look {
+        yaw: p.yaw,
+        pitch: p.pitch,
+        on_ground: p.on_ground,
+    });
+    out.push(Packet::SteerVehicle {
+        sideways: p.sideways_speed,
+        forward: p.forward_speed,
+        jump: p.input.jump,
+        sneak: p.input.sneak,
+    });
+}
+
+/// Walking or riding, known at compile time: the plain tick's [`Walking`] is a zero-sized type.
+trait Mode {
+    /// The rider's tick ([`tick_rider`]).
+    const RIDE: bool;
+    /// The entity boxes the rider's queries collide with.
+    fn entities(&self) -> &[Aabb];
+}
+
+/// The plain tick.
+struct Walking;
+
+impl Mode for Walking {
+    const RIDE: bool = false;
+    #[inline(always)]
+    fn entities(&self) -> &[Aabb] {
+        &[]
+    }
+}
+
+/// The rider's tick with the boxes it collides with.
+struct Riding<'a>(&'a [Aabb]);
+
+impl Mode for Riding<'_> {
+    const RIDE: bool = true;
+    #[inline(always)]
+    fn entities(&self) -> &[Aabb] {
+        self.0
+    }
+}
+
+/// One tick's context.
+struct Ctx<'a, W, M> {
     p: &'a mut PlayerState,
     w: &'a W,
     border: WorldBorder,
     boxes: BoxList,
     history: HistoryShapes,
+    riding: M,
 }
 
-impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
+impl<W: BlockView<State = BlockState>, M: Mode> Ctx<'_, W, M> {
     #[inline]
     fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
         state_at(self.w, x, y, z)
@@ -438,7 +519,7 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
         let prev = p.input;
         let prev_forward_strong = prev.forward >= SPRINT_INPUT;
         p.input = read_keys(keys);
-        if using_item {
+        if using_item && !M::RIDE {
             // Eating, drinking, blocking or drawing a bow: input ×0.2, no sprint double tap.
             p.input.sideways *= 0.2;
             p.input.forward *= 0.2;
@@ -757,6 +838,15 @@ impl<W: BlockView<State = BlockState>> Ctx<'_, W> {
                 self.p.outside_world_border = false;
             } else if !was_outside && !inside {
                 self.p.outside_world_border = true;
+            }
+        }
+        if M::RIDE && !(first_only && !self.boxes.is_empty()) {
+            // World.doesBoxCollide then adds the entity boxes intersecting the query (1.8 never
+            // leaves out the rider's own vehicle).
+            for e in self.riding.entities() {
+                if e.intersects(&query) {
+                    self.boxes.push(*e);
+                }
             }
         }
         !self.boxes.is_empty()

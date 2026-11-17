@@ -220,6 +220,7 @@ final class Harness {
             // empty chunk until terrain arrives). Do the chunk bookkeeping an earlier tick would have
             // done, without ticking, so tick 1 of the scenario is a normal tick.
             world.checkChunk(player, false);
+            Boats.setup(this);
             net.sent.clear();
         }
 
@@ -308,6 +309,7 @@ final class Harness {
             // Mouse look is applied by the renderer between ticks.
             player.yaw = t.yaw();
             player.pitch = t.pitch();
+            Boats.beforeTick(this);
             world.tickEntities();
             tick++;
         }
@@ -396,6 +398,8 @@ final class Harness {
                 player.abilities.allowFlying = a.allowFlying();
                 player.abilities.setFlySpeed(a.flySpeed());
                 player.abilities.setWalkSpeed(a.walkSpeed());
+            } else {
+                Boats.apply(this, e);
             }
         }
     }

@@ -409,6 +409,20 @@ Edge fuzz (partial-height blocks next to each other and to full blocks, landing 
 (about 320 landing step-ups per 200k ticks). The committed `fuzz_edges_seed1.jsonl.gz` and the
 `landing_step_*` scenarios cover the case a live Grim test raised.
 
+Riding a boat (`v1_8::{Boat, tick_boat, tick_boat_with}`; module docs of `v1_8::Boat`): the 1.8
+client simulates the boat its player rides (buoyancy over five slices, the rider's forward input
+along its yaw, the 0.35 cap and the growing speed factor, snow layers and lily pads removed, a
+move without step-up, the yaw turned towards the motion with 1.8's table `atan2`), then the
+rider's own tick (`look` + `steer_vehicle`) and the seat. 1.8 never leaves the rider's own vehicle
+out of `doesBoxCollide` (it compares the entity list, not its entries): the rider collides with
+its boat's box and the boat with its rider's. The server's teleport, relative move and velocity of
+the boat are `Boat::server_*`. The boat calls `Math.sin` / `Math.cos`, whose last bit depends on
+the JVM (58 of 29,340 values in the golden file differ from the correctly rounded ones on HotSpot
+21 x86-64): `tick_boat` uses the platform's functions, `tick_boat_with` takes a `JavaTrig`, and the
+replay feeds the oracle's recorded values. `boats.jsonl.gz` (18 hand cases + 100 fuzz cases) and
+`fuzz --boats true` seeds 81-85 in `fuzz-boats/` (1,000,000 ticks), 0 diffs. Other entities near
+the boat are not modelled on 1.8.9 (as for walking).
+
 Last run (2026-11-03): 24,000 cases, **2,160,000 ticks, 0 diffs** (oracle fuzz 1,000,000 ticks,
 oracle fuzz with `--use-item true` 200,000 ticks (seed 21), extra fuzz 960,000 ticks; per 160k extra ticks about 14k in water with flow, 4.5k in lava, 7k in
 cobweb, 21k flying, 1.8k outside the border, 1,100 teleports, 1,300 abilities and 2,400 velocity
@@ -503,13 +517,13 @@ Even the 1.16.5 busy case at ~5 µs per tick is 0.01 % of a core per bot at 20 t
 
 Done since earlier versions of this list: speed modifiers of every operation (`attribute::Modifiers`,
 vanilla's hash order), depth strider, spectators, entity pushes and collisions (1.12.2, 1.16.5,
-26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats (1.12.2,
-1.16.5, 26.x), minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
+26.x), riptide (1.16.5, 26.x), the moving world border (26.x `BorderState`), boats (1.8.9,
+1.12.2, 1.16.5, 26.x), minecarts (26.x), gliding (elytra) and rockets (1.12.2, 1.16.5, 26.x).
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle on 1.8.9; on 1.12.2 / 1.16.5 everything but boats (bubble columns under a
-  1.16.5 boat not modelled).
+- Riding a vehicle other than a boat (1.8.9, 1.12.2, 1.16.5); bubble columns under a 1.16.5
+  boat; other entities near a 1.8.9 boat.
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.
