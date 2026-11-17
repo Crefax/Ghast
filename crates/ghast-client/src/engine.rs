@@ -2579,11 +2579,11 @@ impl TickContext<'_> {
         self.core.sequence
     }
 
-    /// The vehicle the player rides (26.1 boats and rafts, 1.16.5 and 1.12.2 boats with entity
-    /// tracking: boarded when the server's `set_passengers` names the player, e.g. after a
-    /// right click on the boat with the crosshair on it; the client then moves the boat with
-    /// the movement keys). Leave it with the sneak key (on 1.12.2 the server takes the player
-    /// off). `None` when not riding or on older versions.
+    /// The vehicle the player rides (26.1 boats and rafts; 1.16.5, 1.12.2 and 1.8.9 boats with
+    /// entity tracking: boarded when the server's `set_passengers` (1.8.9: `attach_entity`)
+    /// names the player, e.g. after a right click on the boat with the crosshair on it; the
+    /// client then moves the boat with the movement keys). Leave it with the sneak key (on
+    /// 1.12.2 and 1.8.9 the server takes the player off). `None` when not riding.
     #[must_use]
     pub fn vehicle(&self) -> Option<crate::common::Vehicle> {
         self.world.vehicle()
@@ -2907,6 +2907,17 @@ mod tests_record;
 ))]
 #[path = "engine_tests_1_12.rs"]
 mod tests_1_12;
+
+/// The engine replay of the 1.8.9 boat goldens (`engine_tests_1_8.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1"
+))]
+#[path = "engine_tests_1_8.rs"]
+mod tests_1_8;
 
 /// The engine replay of the 1.16.5 entity goldens (`engine_tests_1_16_5.rs`).
 #[cfg(all(

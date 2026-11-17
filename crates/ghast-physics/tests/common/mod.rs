@@ -440,8 +440,12 @@ struct JvmTrig(Vec<(u64, f64, f64)>);
 
 #[cfg(feature = "v1_8")]
 impl JvmTrig {
+    /// `GHAST_STD_TRIG=1`: the platform's functions instead (what the client crate computes).
     fn of(rec: &Value) -> JvmTrig {
         let mut v = Vec::new();
+        if std::env::var_os("GHAST_STD_TRIG").is_some() {
+            return JvmTrig(v);
+        }
         if let Some(j) = rec.get("jvm") {
             if j.get("in_arg").is_some() {
                 let a = f64::from(f32_of(&j["in_arg"]));

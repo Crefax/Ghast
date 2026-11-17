@@ -43,6 +43,39 @@ pub(crate) struct Sim18 {
     session: SessionPackets,
     /// The world keeps block entities (signs, tile entity NBT).
     block_entities: bool,
+    /// The boat we ride (the 1.8 client simulates it; with entity tracking).
+    ride: Option<Box<Ride18>>,
+    /// Test hook: the JVM's `Math.sin` / `Math.cos` of the next boat tick (argument bits, sine,
+    /// cosine), from an oracle record.
+    #[cfg(test)]
+    trig: Vec<(u64, f64, f64)>,
+}
+
+/// Test hook: `Math.sin` / `Math.cos` from a table, the platform's for other arguments.
+#[cfg(test)]
+struct TableTrig<'a>(&'a [(u64, f64, f64)]);
+
+#[cfg(test)]
+impl ghast_physics::v1_8::JavaTrig for TableTrig<'_> {
+    fn sin(&self, x: f64) -> f64 {
+        self.0
+            .iter()
+            .find(|e| e.0 == x.to_bits())
+            .map_or_else(|| x.sin(), |e| e.1)
+    }
+    fn cos(&self, x: f64) -> f64 {
+        self.0
+            .iter()
+            .find(|e| e.0 == x.to_bits())
+            .map_or_else(|| x.cos(), |e| e.2)
+    }
+}
+
+/// The boat the player rides: its entity id and its client-side state.
+#[derive(Debug)]
+struct Ride18 {
+    id: i32,
+    boat: ghast_physics::v1_8::Boat,
 }
 
 impl std::fmt::Debug for Sim18 {
@@ -59,6 +92,13 @@ impl Sim18 {
     /// Test hook: the physics player.
     pub(crate) fn test_player(&self) -> &ghast_physics::v1_8::PlayerState {
         &self.player
+    }
+
+    /// Test hook: the JVM's sine / cosine values of the next boat ticks (argument bits, sine,
+    /// cosine).
+    #[cfg(all(feature = "v1_12_2", feature = "v1_16_5", feature = "v26_1"))]
+    pub(crate) fn test_set_trig(&mut self, t: Vec<(u64, f64, f64)>) {
+        self.trig = t;
     }
 
     /// Test hook: replaces the physics player and syncs `pose`.
@@ -97,6 +137,9 @@ impl Sim18 {
             updates: BlockUpdates::default(),
             session: SessionPackets::default(),
             block_entities: false,
+            ride: None,
+            #[cfg(test)]
+            trig: Vec::new(),
         }
     }
 
@@ -119,6 +162,147 @@ impl Sim18 {
             }
         }
         s
+    }
+}
+
+impl Sim18 {
+    /// The boat packets (with entity tracking): `attach_entity` naming us (boarding a tracked
+    /// boat, or leaving it with vehicle -1), and while riding the server's teleport, relative
+    /// moves, looks and velocity of that boat and its destruction (vanilla's
+    /// `World.removeEntity` takes the rider off).
+    #[cold]
+    #[inline(never)]
+    fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_8::play::clientbound as cb;
+        let Some(t) = &self.entities else {
+            return Ok(());
+        };
+        if raw.id == cb::id::ATTACH_ENTITY {
+            let p: cb::AttachEntity = raw.decode_as()?;
+            if p.leash || t.self_id() != Some(p.entity_id) {
+                return Ok(());
+            }
+            if p.vehicle_id == -1 {
+                if let Some(r) = self.ride.take() {
+                    log::debug!("left boat {}", r.id);
+                }
+                return Ok(());
+            }
+            // onEntityAttach: a boat the client knows starts its physics; the client's
+            // interpolation of an empty boat ends at the server's last position.
+            let boat = t.get(p.vehicle_id).and_then(|e| {
+                (e.entity_type() == ghast_entity::EntityType::LegacyObject(1)).then(|| {
+                    let fixed = e.position().map(|v| (v * 32.0).round() as i32);
+                    let yaw = (e.yaw() * 256.0 / 360.0).round() as i32 as i8;
+                    let pitch = (e.pitch() * 256.0 / 360.0).round() as i32 as i8;
+                    ghast_physics::v1_8::Boat::spawned(fixed, yaw, pitch)
+                })
+            });
+            match boat {
+                Some(boat) => {
+                    log::debug!("riding boat {}", p.vehicle_id);
+                    self.ride = Some(Box::new(Ride18 {
+                        id: p.vehicle_id,
+                        boat,
+                    }));
+                }
+                None => {
+                    self.ride = None;
+                    log::debug!("riding {} (not simulated: not a boat)", p.vehicle_id);
+                }
+            }
+            return Ok(());
+        }
+        let Some(r) = self.ride.as_deref_mut() else {
+            return Ok(());
+        };
+        let b = &mut r.boat;
+        match raw.id {
+            cb::id::ENTITY_TELEPORT => {
+                let p: cb::EntityTeleport = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    b.server_teleport([p.x, p.y, p.z], p.yaw, p.pitch, p.on_ground);
+                }
+            }
+            cb::id::REL_ENTITY_MOVE => {
+                let p: cb::RelEntityMove = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    b.server_move([p.d_x, p.d_y, p.d_z], p.on_ground);
+                }
+            }
+            cb::id::ENTITY_MOVE_LOOK => {
+                let p: cb::EntityMoveLook = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    b.server_move([p.d_x, p.d_y, p.d_z], p.on_ground);
+                }
+            }
+            cb::id::ENTITY_LOOK => {
+                let p: cb::EntityLook = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    b.server_move([0; 3], p.on_ground);
+                }
+            }
+            cb::id::ENTITY => {
+                // The bare entity packet: no move, its ground flag is false.
+                let p: cb::Entity = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    b.server_move([0; 3], false);
+                }
+            }
+            cb::id::ENTITY_VELOCITY => {
+                let p: cb::EntityVelocity = raw.decode_as()?;
+                if p.entity_id == r.id {
+                    let v = p.velocity;
+                    let c = |x: i16| f64::from(x) / 8000.0;
+                    b.server_velocity([c(v.x), c(v.y), c(v.z)]);
+                }
+            }
+            cb::id::ENTITY_DESTROY => {
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                if p.entity_ids.contains(&r.id) {
+                    log::debug!("boat {} destroyed", r.id);
+                    self.ride = None;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// A tick in the boat the 1.8 client simulates (`ghast_physics::v1_8::tick_boat`).
+    #[cold]
+    #[inline(never)]
+    fn step_ride(&mut self, input: &ghast_physics::TickInput) {
+        let Some(r) = self.ride.as_deref_mut() else {
+            return;
+        };
+        #[cfg(test)]
+        let still = ghast_physics::v1_8::tick_boat_with(
+            &mut self.player,
+            &mut r.boat,
+            input,
+            &self.world,
+            &ghast_physics::v1_8::Options::default(),
+            &TableTrig(&self.trig),
+            &mut self.packets,
+        );
+        #[cfg(not(test))]
+        let still = ghast_physics::v1_8::tick_boat(
+            &mut self.player,
+            &mut r.boat,
+            input,
+            &self.world,
+            &ghast_physics::v1_8::Options::default(),
+            &mut self.packets,
+        );
+        for &[x, y, z] in r.boat.broken_blocks() {
+            self.world
+                .set_block_state(x, y, z, ghast_data::v1_8::BlockState::AIR);
+        }
+        if !still {
+            log::debug!("boat {} fell out of the world", r.id);
+            self.ride = None;
+        }
     }
 }
 
@@ -211,12 +395,30 @@ impl Sim for Sim18 {
             t.apply(raw)?;
         }
         use ghast_protocol::v1_8::play::clientbound as cb;
+        if self.entities.is_some()
+            && (raw.id == cb::id::ATTACH_ENTITY
+                || (self.ride.is_some()
+                    && matches!(
+                        raw.id,
+                        cb::id::ENTITY_TELEPORT
+                            | cb::id::REL_ENTITY_MOVE
+                            | cb::id::ENTITY_MOVE_LOOK
+                            | cb::id::ENTITY_LOOK
+                            | cb::id::ENTITY
+                            | cb::id::ENTITY_VELOCITY
+                            | cb::id::ENTITY_DESTROY
+                    )))
+        {
+            return self.vehicle_packet(raw);
+        }
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
+                self.ride = None;
                 w.apply_login(&raw.decode_as()?);
             }
             cb::id::RESPAWN => {
+                self.ride = None;
                 w.apply_respawn(&raw.decode_as()?);
             }
             cb::id::MAP_CHUNK => {
@@ -265,6 +467,20 @@ impl Sim for Sim18 {
         self.player = ghast_physics::v1_8::PlayerState::new([0.0; 3], 0.0, 0.0);
         self.player.abilities = abilities;
         self.player.food_level = food;
+        self.ride = None;
+    }
+
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        let r = self.ride.as_deref()?;
+        let b = &r.boat;
+        Some(crate::common::Vehicle {
+            entity_id: r.id,
+            pos: Vec3::new(b.pos[0], b.pos[1], b.pos[2]),
+            yaw: b.yaw,
+            pitch: b.pitch,
+            on_ground: b.on_ground,
+            controlled: true,
+        })
     }
 
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
@@ -547,8 +763,16 @@ impl Sim for Sim18 {
                     .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.raw())))
             });
         }
-        ghast_physics::v1_8::tick(&mut self.player, &input, &self.world, &mut self.packets);
-        if self.force_step_position != ForceStepPosition::Off {
+        let riding = self.ride.is_some();
+        if riding {
+            if let Some(r) = &mut self.rec {
+                r.note_once("riding not representable");
+            }
+            self.step_ride(&input);
+        } else {
+            ghast_physics::v1_8::tick(&mut self.player, &input, &self.world, &mut self.packets);
+        }
+        if self.force_step_position != ForceStepPosition::Off && !riding {
             let p = &mut self.player;
             let cur = [p.pos[0], p.bb.min_y, p.pos[2]];
             force_position(

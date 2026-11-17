@@ -345,6 +345,18 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   hand cases + 100 fuzz, and the 1 M tick cached boat fuzz, 0 differences). Not modelled:
   entities that ride something (their seat is not followed) are left out of the boat's
   collisions.
+- **Boats on 1.8.9** (`ghast_physics::v1_8::{Boat, tick_boat}`, needs `Interests::ENTITIES`):
+  the 1.8 client simulates the boat its player rides. Boarded when `attach_entity` names the
+  player and a tracked boat (at the server's last position of it: the client's interpolation of
+  an empty boat ends there); `look` + `steer_vehicle` every tick; the server's teleport, relative
+  moves, looks and velocity of that boat are applied as the 1.8 client does (a relative move only
+  restores the server's motion when the boat is more than a block off); `attach_entity` with
+  vehicle -1 or the boat's destruction takes the player off (it walks from its seat). The boat's
+  `Math.sin` / `Math.cos` are the platform's; the real client's are its JVM's, which differ in
+  the last bit for about 0.2 % of the values. Proven through the engine with the oracle JVM's
+  values (`boats.jsonl.gz` and the 1 M tick cached boat fuzz, 0 differences); with the
+  platform's, the packets of 2 of the 10,000 cached cases differ (a 1-ulp seat position sent
+  after a dismount). Not modelled: other entities near the boat.
 - `ctx.world()` (`WorldView`): loaded columns and raw block states; `None` = not loaded.
 
 ## What the physics is fed
