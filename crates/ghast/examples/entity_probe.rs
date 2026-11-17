@@ -151,8 +151,17 @@ impl Probe {
                 );
                 let (dx, dy, dz) = (c.x - eyes.x, c.y - eyes.y, c.z - eyes.z);
                 let yaw = (-dx).atan2(dz).to_degrees() as f32;
-                let pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
-                let cur = ctx.pose().yaw;
+                let mut pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
+                // A teleport answered after our aim tick (e.g. the scene's /tp racing Paper's
+                // "moved too quickly" re-teleports) leaves the server with the teleport's
+                // rotation while ours is back on the aim: vanilla sends no look packet then
+                // (its last reported rotation is untouched), and the server's crosshair stays
+                // off the boat for good. Aim half a degree lower until the server has ours.
+                let (sent, pose) = (*ctx.sent(), ctx.pose());
+                if sent.yaw != pose.yaw || sent.pitch != pose.pitch {
+                    pitch += 0.5;
+                }
+                let cur = pose.yaw;
                 ctx.set_aim(cur + ghast::rotation::wrap_degrees(yaw - cur), pitch);
                 let on = ctx.target_entity().is_some_and(|e| e.id == id);
                 ctx.set_buttons(Buttons {
