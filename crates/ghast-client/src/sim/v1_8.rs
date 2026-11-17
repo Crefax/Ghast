@@ -75,7 +75,14 @@ impl ghast_physics::v1_8::JavaTrig for TableTrig<'_> {
 #[derive(Debug)]
 struct Ride18 {
     id: i32,
-    boat: ghast_physics::v1_8::Boat,
+    seat: Seat18,
+}
+
+/// The boat the 1.8 client simulates, or the minecart the server moves.
+#[derive(Debug)]
+enum Seat18 {
+    Boat(ghast_physics::v1_8::Boat),
+    Cart(ghast_physics::v1_8::Minecart),
 }
 
 impl std::fmt::Debug for Sim18 {
@@ -188,22 +195,29 @@ impl Sim18 {
                 }
                 return Ok(());
             }
-            // onEntityAttach: a boat the client knows starts its physics; the client's
-            // interpolation of an empty boat ends at the server's last position.
-            let boat = t.get(p.vehicle_id).and_then(|e| {
-                (e.entity_type() == ghast_entity::EntityType::LegacyObject(1)).then(|| {
-                    let fixed = e.position().map(|v| (v * 32.0).round() as i32);
-                    let yaw = (e.yaw() * 256.0 / 360.0).round() as i32 as i8;
-                    let pitch = (e.pitch() * 256.0 / 360.0).round() as i32 as i8;
-                    ghast_physics::v1_8::Boat::spawned(fixed, yaw, pitch)
-                })
+            // onEntityAttach: a boat the client knows starts its physics; a minecart follows
+            // the server. The client's interpolation of either at rest ends at the server's
+            // last position.
+            let seat = t.get(p.vehicle_id).and_then(|e| {
+                let fixed = e.position().map(|v| (v * 32.0).round() as i32);
+                let yaw = (e.yaw() * 256.0 / 360.0).round() as i32 as i8;
+                let pitch = (e.pitch() * 256.0 / 360.0).round() as i32 as i8;
+                match e.entity_type() {
+                    ghast_entity::EntityType::LegacyObject(1) => Some(Seat18::Boat(
+                        ghast_physics::v1_8::Boat::spawned(fixed, yaw, pitch),
+                    )),
+                    ghast_entity::EntityType::LegacyObject(10) => Some(Seat18::Cart(
+                        ghast_physics::v1_8::Minecart::spawned(fixed, yaw, pitch),
+                    )),
+                    _ => None,
+                }
             });
-            match boat {
-                Some(boat) => {
-                    log::debug!("riding boat {}", p.vehicle_id);
+            match seat {
+                Some(seat) => {
+                    log::debug!("riding {}", p.vehicle_id);
                     self.ride = Some(Box::new(Ride18 {
                         id: p.vehicle_id,
-                        boat,
+                        seat,
                     }));
                 }
                 None => {
@@ -216,7 +230,54 @@ impl Sim18 {
         let Some(r) = self.ride.as_deref_mut() else {
             return Ok(());
         };
-        let b = &mut r.boat;
+        if let Seat18::Cart(c) = &mut r.seat {
+            let id = r.id;
+            match raw.id {
+                cb::id::ENTITY_TELEPORT => {
+                    let p: cb::EntityTeleport = raw.decode_as()?;
+                    if p.entity_id == id {
+                        c.server_teleport([p.x, p.y, p.z], p.yaw, p.pitch);
+                    }
+                }
+                cb::id::REL_ENTITY_MOVE => {
+                    let p: cb::RelEntityMove = raw.decode_as()?;
+                    if p.entity_id == id {
+                        c.server_update([p.d_x, p.d_y, p.d_z], None);
+                    }
+                }
+                cb::id::ENTITY_MOVE_LOOK => {
+                    let p: cb::EntityMoveLook = raw.decode_as()?;
+                    if p.entity_id == id {
+                        c.server_update([p.d_x, p.d_y, p.d_z], Some((p.yaw, p.pitch)));
+                    }
+                }
+                cb::id::ENTITY_LOOK => {
+                    let p: cb::EntityLook = raw.decode_as()?;
+                    if p.entity_id == id {
+                        c.server_update([0; 3], Some((p.yaw, p.pitch)));
+                    }
+                }
+                cb::id::ENTITY => {
+                    let p: cb::Entity = raw.decode_as()?;
+                    if p.entity_id == id {
+                        c.server_update([0; 3], None);
+                    }
+                }
+                cb::id::ENTITY_DESTROY => {
+                    let p: cb::EntityDestroy = raw.decode_as()?;
+                    if p.entity_ids.contains(&id) {
+                        log::debug!("minecart {id} destroyed");
+                        self.ride = None;
+                    }
+                }
+                // A minecart's client motion does not move it.
+                _ => {}
+            }
+            return Ok(());
+        }
+        let Seat18::Boat(b) = &mut r.seat else {
+            return Ok(());
+        };
         match raw.id {
             cb::id::ENTITY_TELEPORT => {
                 let p: cb::EntityTeleport = raw.decode_as()?;
@@ -276,10 +337,26 @@ impl Sim18 {
         let Some(r) = self.ride.as_deref_mut() else {
             return;
         };
+        let id = r.id;
+        let boat = match &mut r.seat {
+            Seat18::Boat(b) => b,
+            Seat18::Cart(c) => {
+                // The minecart the server moves (`ghast_physics::v1_8::tick_minecart`).
+                ghast_physics::v1_8::tick_minecart(
+                    &mut self.player,
+                    c,
+                    input,
+                    &self.world,
+                    &ghast_physics::v1_8::Options::default(),
+                    &mut self.packets,
+                );
+                return;
+            }
+        };
         #[cfg(test)]
         let still = ghast_physics::v1_8::tick_boat_with(
             &mut self.player,
-            &mut r.boat,
+            boat,
             input,
             &self.world,
             &ghast_physics::v1_8::Options::default(),
@@ -289,18 +366,18 @@ impl Sim18 {
         #[cfg(not(test))]
         let still = ghast_physics::v1_8::tick_boat(
             &mut self.player,
-            &mut r.boat,
+            boat,
             input,
             &self.world,
             &ghast_physics::v1_8::Options::default(),
             &mut self.packets,
         );
-        for &[x, y, z] in r.boat.broken_blocks() {
+        for &[x, y, z] in boat.broken_blocks() {
             self.world
                 .set_block_state(x, y, z, ghast_data::v1_8::BlockState::AIR);
         }
         if !still {
-            log::debug!("boat {} fell out of the world", r.id);
+            log::debug!("boat {id} fell out of the world");
             self.ride = None;
         }
     }
@@ -491,7 +568,19 @@ impl Sim for Sim18 {
 
     fn vehicle(&self) -> Option<crate::common::Vehicle> {
         let r = self.ride.as_deref()?;
-        let b = &r.boat;
+        let b = match &r.seat {
+            Seat18::Boat(b) => b,
+            Seat18::Cart(c) => {
+                return Some(crate::common::Vehicle {
+                    entity_id: r.id,
+                    pos: Vec3::new(c.pos[0], c.pos[1], c.pos[2]),
+                    yaw: c.yaw,
+                    pitch: c.pitch,
+                    on_ground: false,
+                    controlled: false,
+                });
+            }
+        };
         Some(crate::common::Vehicle {
             entity_id: r.id,
             pos: Vec3::new(b.pos[0], b.pos[1], b.pos[2]),

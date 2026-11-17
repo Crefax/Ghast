@@ -380,6 +380,12 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   server). Proven through the engine (`minecarts.jsonl.gz` and the 1 M tick cached minecart
   fuzz, 0 differences). Not modelled: an interpolation still running when the player boards
   (the cart starts from where the client has it).
+- **Minecarts on 1.8.9** (`ghast_physics::v1_8::{Minecart, tick_minecart}`, needs
+  `Interests::ENTITIES`): boarded by `attach_entity` naming the player and a tracked minecart
+  (at the server's position of it); the server's teleports, relative moves, looks and bare entity
+  packets of the cart are interpolated as the 1.8 client does; `look` + `steer_vehicle` every
+  tick; vehicle -1 or the cart's removal takes the player off. Proven through the engine
+  (`minecarts.jsonl.gz` and the 1 M tick cached minecart fuzz, 0 differences).
 - **Mount screens on 1.8.9 – 1.16.5** with entity tracking: when a mount's window opens
   (`open_window` `EntityHorse`, 1.16.5 `open_horse_window`), the saddle and armor slot rules
   (`ghast_inventory::MountRules`) are read off the tracked entity like `HorseScreenHandler`

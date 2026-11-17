@@ -114,9 +114,14 @@ fn spawn_packet(boat: &Value) -> RawPacket {
     let p = &boat["pos"];
     let fixed = |k: usize| (f64v(&p[k]) * 32.0).floor() as i32;
     let yaw = (f32v(&boat["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+    let ty = if boat.get("minecart").and_then(Value::as_bool) == Some(true) {
+        10
+    } else {
+        1
+    };
     Body::default()
         .varint(BOAT)
-        .i8(1)
+        .i8(ty)
         .i32(fixed(0))
         .i32(fixed(1))
         .i32(fixed(2))
@@ -465,4 +470,51 @@ fn boats_cache_platform_trig_1_8_9() {
         }
     }
     eprintln!("1.8.9 boat fuzz cache, platform trig: {differ} of {cases} cases differ");
+}
+
+/// The 1.8.9 minecart goldens through the engine: boarding by `attach_entity`, the cart's
+/// interpolation of the server's moves, `look` + `steer_vehicle` every tick, the dismount.
+#[test]
+fn minecarts_match_the_oracle_1_8_9() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.8.9/minecarts.jsonl.gz");
+    let (cases, ticks, failed) = replay_file(&path, true);
+    assert!(
+        failed.is_empty(),
+        "{} cases differ:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
+    assert!(cases >= 107 && ticks > 6000, "{cases} cases, {ticks} ticks");
+}
+
+/// The cached minecart fuzz (`oracle/cache/1.8.9/fuzz-minecarts/`) through the engine.
+#[test]
+#[ignore = "needs the oracle cache"]
+fn minecarts_cache_match_the_oracle_1_8_9() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../oracle/cache/1.8.9/fuzz-minecarts");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {} not found", dir.display());
+        return;
+    };
+    let mut files: Vec<_> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz"))
+        .collect();
+    files.sort();
+    let (mut cases, mut ticks, mut failed) = (0, 0, Vec::new());
+    for f in &files {
+        let (c, t, x) = replay_file(f, true);
+        cases += c;
+        ticks += t;
+        failed.extend(x);
+    }
+    eprintln!("1.8.9 minecart fuzz cache through the engine: {cases} cases, {ticks} ticks");
+    assert!(
+        failed.is_empty(),
+        "{} cases differ:\n{}",
+        failed.len(),
+        failed.join("\n")
+    );
 }
