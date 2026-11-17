@@ -12,6 +12,13 @@ JAVA="$(java_home "$JAVA_MAJOR")/bin/java"; JDK21="$(java_home 21)"
 fetch "$PAPER_URL" "$DL/$PAPER_JAR" "$PAPER_SHA"
 fetch "$GRIM_URL" "$DL/$GRIM_JAR" "$GRIM_SHA"
 ln -sf "$DL/$PAPER_JAR" "$DIR/$PAPER_JAR"
+# Old Paperclip builds (1.12.1) fetch the vanilla server from a retired URL: hand it Mojang's own jar.
+if [ -n "${VANILLA_SERVER_SHA1:-}" ] && [ ! -f "$DIR/cache/mojang_$GAME.jar" ]; then
+  mkdir -p "$DIR/cache"
+  curl -fsSL -o "$DIR/cache/mojang_$GAME.jar.part" "https://piston-data.mojang.com/v1/objects/$VANILLA_SERVER_SHA1/server.jar"
+  echo "$VANILLA_SERVER_SHA1  $DIR/cache/mojang_$GAME.jar.part" | sha1sum -c --quiet
+  mv "$DIR/cache/mojang_$GAME.jar.part" "$DIR/cache/mojang_$GAME.jar"
+fi
 # LAB_GRIM_JAR=<file in lab/servers/dl>: run that Grim build instead of the pinned one (cross-checks
 # against a newer build); exactly one Grim jar is left in plugins/.
 grim=${LAB_GRIM_JAR:-$GRIM_JAR}
@@ -55,7 +62,11 @@ mkdir -p "$DIR/plugins/GhastLabFly"
   for n in $LAB_FLY; do printf '  - %s\n' "$n"; done; } > "$DIR/plugins/GhastLabFly/config.yml"
 
 echo "eula=true" > "$DIR/eula.txt"
-cp "$here/templates/server-$VER.properties" "$DIR/server.properties"
+cp "$here/templates/server-$FAMILY.properties" "$DIR/server.properties"
+# A sub-version server of a family: its own port and motd.
+if [ "$FAMILY" != "$VER" ]; then
+  sed -i -e "s/^server-port=.*/server-port=$PORT/" -e "s/^motd=.*/motd=ghast lab $GAME (Paper + GrimAC)/" "$DIR/server.properties"
+fi
 # LAB_PROPS="key=value ...": per-run overrides of the template (e.g. spawn-protection=16).
 for kv in ${LAB_PROPS:-}; do
   k=${kv%%=*}
@@ -81,12 +92,18 @@ fresh=0; [ -d "$DIR/world" ] || fresh=1
 had_grim_cfg=0; grim_cfg >/dev/null && had_grim_cfg=1
 
 cd "$DIR"
+launch=$PAPER_JAR
+if [ -n "${PATCHED_JAR:-}" ]; then
+  [ -f "$PATCHED_JAR" ] || "$JAVA" -Dpaperclip.patchonly=true -jar "$PAPER_JAR" > /dev/null 2>&1 || true
+  [ -f "$PATCHED_JAR" ] || { echo "Paperclip wrote no $PATCHED_JAR" >&2; exit 1; }
+  launch=$PATCHED_JAR
+fi
 [ -p console.in ] || { rm -f console.in; mkfifo console.in; }
 mkdir -p logs; : > logs/stdout.txt
 # stdin = the console FIFO held open read+write, so the console reader blocks instead of seeing EOF.
 setsid nohup bash -c 'exec 3<>console.in; exec "$0" -Xms256M -Xmx'"$LAB_HEAP"' -XX:+UseG1GC -XX:MaxGCPauseMillis=50 \
   -Dfile.encoding=UTF-8 '"$JAVA_FLAGS"' \
-  -jar '"$PAPER_JAR"' nogui <&3' "$JAVA" >> logs/stdout.txt 2>&1 < /dev/null &
+  -jar '"$launch"' nogui <&3' "$JAVA" >> logs/stdout.txt 2>&1 < /dev/null &
 echo $! > server.pid
 for _ in $(seq 1 180); do
   if grep -qa 'Done (' logs/stdout.txt; then

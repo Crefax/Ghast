@@ -17,10 +17,10 @@ if is_modern; then
   grass=minecraft:grass_block; slime=minecraft:slime_block; item=item; slab="minecraft:smooth_stone_slab[type=bottom]"; fence=minecraft:oak_fence; water=minecraft:water
   base=$'forceload add -16 -16 47 47\ngamerule advance_time false\ngamerule spawn_mobs false\ngamerule fire_spread_radius_around_player 0\ngamerule mob_griefing false\ngamerule keep_inventory true\ngamerule log_admin_commands false\ngamerule random_tick_speed 0'
   rules=$'gamerule respawn_radius 0\ngamerule advance_weather false\ngamerule spawn_phantoms false\ngamerule spawn_patrols false\ngamerule spawn_wandering_traders false\ngamerule show_advancement_messages false\nweather clear'
-elif [ "$VER" = 1.8 ]; then
+elif [ "$FAMILY" = 1.8 ]; then
   grass=minecraft:grass; slime=minecraft:slime; item=Item; slab="minecraft:stone_slab 0"; fence=minecraft:fence; water="minecraft:water 0"
   rules="weather clear 1000000"
-elif [ "$VER" = 1.12 ]; then
+elif [ "$FAMILY" = 1.12 ]; then
   # 1.12: pre-flattening block names like 1.8, lower-case entity ids, 1.9+ game rules.
   grass=minecraft:grass; slime=minecraft:slime; item=item; slab="minecraft:stone_slab 0"; fence=minecraft:fence; water="minecraft:water 0"
   rules=$'gamerule spawnRadius 0\ngamerule doWeatherCycle false\ngamerule announceAdvancements false\nweather clear 1000000'

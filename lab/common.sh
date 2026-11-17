@@ -14,9 +14,10 @@ GRIM_JAR=grimac-bukkit-2.3.73.jar
 GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/1FIGlM6Q/grimac-bukkit-2.3.73.jar
 GRIM_SHA=a095331a8ba47286b27bdb9b51f0d35ae4a227632a2c50b25cedba85439f1810
 
-# lab_select <1.8|1.12|1.16|26.1|26.2>: sets VER, GAME (the client's version name), DIR, PORT, PAPER_JAR,
-# PAPER_URL, PAPER_SHA, JAVA, GRIM_*
+# lab_select <1.8|1.12|1.16|26.1|26.2|1.12.1|1.16.2|1.16.3|1.16.4>: sets VER, GAME (the client's version
+# name), FAMILY, DIR, PORT, PAPER_JAR, PAPER_URL, PAPER_SHA, JAVA, GRIM_*
 lab_select() {
+  VANILLA_SERVER_SHA1=""; PATCHED_JAR=""
   case "${1:-}" in
     1.8|1.8.8|1.8.9|18)
       VER=1.8; PORT=25618; JAVA_MAJOR=21; JAVA_FLAGS="-DIReallyKnowWhatIAmDoingISwear=true"
@@ -27,6 +28,30 @@ lab_select() {
       VER=1.12; PORT=25612; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
       PAPER_JAR=paper-1.12.2-1620.jar
       PAPER_SHA=3a2041807f492dcdc34ebb324a287414946e3e05ec3df6fd03f5b5f7d9afc210 ;;
+    1.12.1)
+      # Protocol 338 (VarInt keep-alive): the GameVersion::V1_12_1 row, served by the 1.12.2 code.
+      VER=1.12.1; PORT=25611; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
+      PAPER_JAR=paper-1.12.1-1204.jar
+      PAPER_SHA=dba2219d674ad85e4ef2c41931d34b6fa4be75a887973ecaaf286727a03812da
+      VANILLA_SERVER_SHA1=561c7b2d54bae80cc06b05d950633a9ac95da816
+      # Its Paperclip refuses Java 9+ (SystemClassLoader not URLClassLoader): the patched server
+      # jar it writes is started directly.
+      PATCHED_JAR=cache/patched_1.12.1.jar ;;
+    1.16.2)
+      # Protocol 751 (GameVersion::V1_16_2), served by the 1.16.5 code; Java 17 like the 1.16 lab.
+      VER=1.16.2; PORT=25642; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
+      PAPER_JAR=paper-1.16.2-189.jar
+      PAPER_SHA=e5e10517daaa9bd6d54a8a0d22d866e31da7c1b47cb9e425ffaac236fde75ec9 ;;
+    1.16.3)
+      # Protocol 753 (GameVersion::V1_16_3), served by the 1.16.5 code.
+      VER=1.16.3; PORT=25643; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
+      PAPER_JAR=paper-1.16.3-253.jar
+      PAPER_SHA=940303ee5f5bcc08377e388ea1c1daa109c1ac8c4d189dc67de1106853f2fc23 ;;
+    1.16.4)
+      # Protocol 754 like 1.16.5 (the client's V1_16_5 row): a 1.16.4 server build.
+      VER=1.16.4; PORT=25644; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
+      PAPER_JAR=paper-1.16.4-416.jar
+      PAPER_SHA=963268ed564ac7d2ec076463e921ffa09570235f587bbd1a4d91a23ca4264b66 ;;
     1.16|1.16.5|116)
       # Grim 2.3.73 needs Java 17; Paper 1.16.5 runs on it but refuses it without -DPaper.IgnoreJavaVersion
       VER=1.16; PORT=25616; JAVA_MAJOR=17; JAVA_FLAGS="-DPaper.IgnoreJavaVersion=true"
@@ -49,11 +74,13 @@ lab_select() {
       GRIM_JAR=grimac-bukkit-2.3.74.jar
       GRIM_URL=https://cdn.modrinth.com/data/LJNGWSvH/versions/baDrVvfo/grimac-bukkit-2.3.74.jar
       GRIM_SHA=3ac71c0b6ef8ab586c1dd3ab4c0b3254394ef39d048e4985efb2898b9fef628c ;;
-    *) echo "usage: $(basename "$0") <1.8|1.12|1.16|26.1|26.2> ..." >&2; exit 2 ;;
+    *) echo "usage: $(basename "$0") <1.8|1.12|1.16|26.1|26.2|1.12.1|1.16.2|1.16.3|1.16.4> ..." >&2; exit 2 ;;
   esac
   PAPER_URL="https://fill-data.papermc.io/v1/objects/$PAPER_SHA/$PAPER_JAR"
   DIR="$SERVERS/$VER"
   case "$VER" in 1.8) GAME=1.8.9 ;; 1.12) GAME=1.12.2 ;; 1.16) GAME=1.16.5 ;; *) GAME=$VER ;; esac
+  # The lab family whose server template and field commands this server takes.
+  case "$VER" in 1.12.*) FAMILY=1.12 ;; 1.16.*) FAMILY=1.16 ;; *) FAMILY=$VER ;; esac
 }
 
 is_modern() { # the selected lab runs a 26.x server
@@ -73,7 +100,7 @@ java_home() { # java_home <major>: prints a Temurin home for that major, downloa
 
 lab_pid() { # prints the server's pid if it is running
   local p; p=$(cat "$DIR/server.pid" 2>/dev/null) || return 1
-  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && grep -qa "$PAPER_JAR" "/proc/$p/cmdline" 2>/dev/null && echo "$p"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && grep -qa "${PATCHED_JAR:-$PAPER_JAR}" "/proc/$p/cmdline" 2>/dev/null && echo "$p"
 }
 
 fetch() { # fetch <url> <dest> <sha256>
