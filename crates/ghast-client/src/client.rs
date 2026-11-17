@@ -1265,7 +1265,8 @@ where
                 self.engine.outbound().push(o);
             }
             // 1.20.2+ mount screens read the entity (type, saddle / body slots).
-            if let Some(eid) = V::mount_screen_entity(&raw) {
+            let mount_eid = V::mount_screen_entity(&raw);
+            if let Some(eid) = mount_eid {
                 let mount = self.engine.sim.mount_info(eid);
                 V::open_mount_screen(self.engine.inventory_mut(), &raw, mount).map_err(
                     |source| ClientError::Decode {
@@ -1287,6 +1288,10 @@ where
                 self.engine
                     .outbound()
                     .push(crate::common::Outbound::Inventory(o));
+            }
+            // 1.8 – 1.16.5 mount screens: their slot rules from the tracked entity.
+            if let Some(eid) = mount_eid {
+                self.engine.mount_screen_opened(eid);
             }
             // 1.8 – 1.16 resource packs are answered here (no id; nothing to decode for later).
             let accept = self.engine.accept_required_packs();

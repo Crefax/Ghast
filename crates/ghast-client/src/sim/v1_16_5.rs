@@ -1751,6 +1751,29 @@ impl Sim for Sim16 {
         })
     }
 
+    fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
+        // HorseScreenHandler: the saddle slot asks canBeSaddled (alive, not a baby (entity data
+        // 15), tame (horse flags 16, bit 2); never for llamas), the armor slot isHorseArmor
+        // (horse armor for horses, carpets for llamas and trader llamas).
+        use ghast_inventory::{MountArmor, MountRules};
+        let t = self.entities.as_ref()?;
+        let e = t.get(entity_id)?;
+        let armor = match ghast_entity::v1_16_5::info(e.entity_type())?.name {
+            "llama" | "trader_llama" => return Some(MountRules::new(false, MountArmor::Carpet)),
+            "horse" => MountArmor::HorseArmor,
+            "donkey" | "mule" | "zombie_horse" | "skeleton_horse" => MountArmor::None,
+            _ => return None,
+        };
+        if !t.config().metadata {
+            return None;
+        }
+        let m = e.metadata();
+        let alive = ghast_entity::v1_16_5::health(e).is_none_or(|h| h > 0.0);
+        let baby = matches!(m.get(15), Some(ghast_entity::MetaValue::Bool(true)));
+        let tame = m.byte(16).unwrap_or(0) & 2 != 0;
+        Some(MountRules::new(alive && !baby && tame, armor))
+    }
+
     fn take_reply(&mut self) -> Option<Outbound> {
         self.reply.take()
     }

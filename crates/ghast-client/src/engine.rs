@@ -838,6 +838,15 @@ impl<S: Sim> Engine<S> {
         &mut self.core.inv
     }
 
+    /// 1.8 – 1.16.5: the inventory has just opened the mount screen of entity `entity_id`; its
+    /// slot rules are read off the tracked entity when the sim can (a behaviour's
+    /// `TickContext::set_mount_rules` later still wins).
+    pub(crate) fn mount_screen_opened(&mut self, entity_id: i32) {
+        if let Some(r) = self.sim.mount_rules(entity_id) {
+            self.core.inv.set_mount_rules(Some(r));
+        }
+    }
+
     /// Outbound packets produced since the last call, in send order.
     pub(crate) fn outbound(&mut self) -> &mut Vec<Outbound> {
         &mut self.core.out
@@ -2895,6 +2904,11 @@ mod tests_26_2;
 ))]
 #[path = "engine_tests_actions.rs"]
 mod tests_actions;
+
+/// Mount screen rules read off the tracked entity (`engine_tests_mounts.rs`).
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[path = "engine_tests_mounts.rs"]
+mod tests_mounts;
 
 /// The legacy special menus through the open-window path (`engine_tests_menus.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]

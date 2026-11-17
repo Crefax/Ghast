@@ -357,6 +357,15 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   values (`boats.jsonl.gz` and the 1 M tick cached boat fuzz, 0 differences); with the
   platform's, the packets of 2 of the 10,000 cached cases differ (a 1-ulp seat position sent
   after a dismount). Not modelled: other entities near the boat.
+- **Mount screens on 1.8.9 – 1.16.5** with entity tracking: when a mount's window opens
+  (`open_window` `EntityHorse`, 1.16.5 `open_horse_window`), the saddle and armor slot rules
+  (`ghast_inventory::MountRules`) are read off the tracked entity like `HorseScreenHandler`
+  does: 1.8.9 saddle always, horse armor for horse type 0 (entity data 19, needs the metadata
+  store); 1.12.2 by type (saddle for all but llamas, horse armor for horses, carpets for
+  llamas); 1.16.5 saddle for a live, tame (horse flags 16, bit 2), adult (entity data 15) horse,
+  donkey, mule, zombie or skeleton horse (needs the metadata store), never for llamas; horse
+  armor for horses, carpets for llamas and trader llamas. Unknown entity or missing data: no
+  rules (as before). `TickContext::set_mount_rules` still replaces them.
 - `ctx.world()` (`WorldView`): loaded columns and raw block states; `None` = not loaded.
 
 ## What the physics is fed

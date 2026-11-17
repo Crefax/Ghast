@@ -905,6 +905,21 @@ impl Sim for Sim12 {
         std::mem::take(&mut self.glide.filter_dirty)
     }
 
+    fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
+        // HorseScreenHandler: the saddle slot asks canBeSaddled (every mount but llamas), the
+        // armor slot isArmor (horse armor for horses, carpets for llamas): the type decides.
+        use ghast_inventory::{MountArmor, MountRules};
+        let e = self.entities.as_ref()?.get(entity_id)?;
+        Some(match ghast_entity::v1_12::info(e.entity_type())?.name {
+            "horse" => MountRules::new(true, MountArmor::HorseArmor),
+            "donkey" | "mule" | "zombie_horse" | "skeleton_horse" => {
+                MountRules::new(true, MountArmor::None)
+            }
+            "llama" => MountRules::new(false, MountArmor::Carpet),
+            _ => return None,
+        })
+    }
+
     fn take_reply(&mut self) -> Option<Outbound> {
         self.reply.take()
     }

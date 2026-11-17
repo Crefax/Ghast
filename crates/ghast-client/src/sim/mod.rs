@@ -307,6 +307,13 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         let _ = entity_id;
         None
     }
+    /// 1.8 – 1.16.5: a mount screen's slot rules read off the tracked entity `entity_id` like
+    /// the client's `HorseScreenHandler` does (`None`: not tracked, not a mount, or the rules
+    /// need entity data that is not kept).
+    fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
+        let _ = entity_id;
+        None
+    }
     /// The answer a world packet asks for at once (26.1 `move_vehicle`), taken after each one.
     #[inline(always)]
     fn take_reply(&mut self) -> Option<Outbound> {
@@ -1217,6 +1224,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn mount_info(&self, entity_id: i32) -> Option<(i32, bool, bool)> {
         (**self).mount_info(entity_id)
+    }
+    fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
+        (**self).mount_rules(entity_id)
     }
     #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {

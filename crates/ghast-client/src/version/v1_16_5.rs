@@ -331,6 +331,17 @@ impl ClientVersion for V1_16_5 {
 
     const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V1_16_5;
 
+    /// `open_horse_window`: the entity whose rules the screen reads.
+    fn mount_screen_entity(raw: &RawPacket) -> Option<i32> {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        if raw.id != cb::id::OPEN_HORSE_WINDOW {
+            return None;
+        }
+        raw.decode_as::<cb::OpenHorseWindow>()
+            .ok()
+            .map(|p| p.entity_id)
+    }
+
     fn inventory_packet(
         inv: &mut ghast_inventory::Inventory,
         raw: &RawPacket,

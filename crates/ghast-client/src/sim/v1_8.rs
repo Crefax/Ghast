@@ -470,6 +470,25 @@ impl Sim for Sim18 {
         self.ride = None;
     }
 
+    fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
+        // HorseScreenHandler: the saddle slot always takes a saddle; the armor slot horse armor
+        // when the horse type (entity data 19) is 0.
+        use ghast_inventory::{MountArmor, MountRules};
+        let t = self.entities.as_ref()?;
+        let e = t.get(entity_id)?;
+        if ghast_entity::v1_8::info(e.entity_type())?.name != "EntityHorse" || !t.config().metadata
+        {
+            return None;
+        }
+        let horse = e.metadata().byte(19).unwrap_or(0) == 0;
+        let armor = if horse {
+            MountArmor::HorseArmor
+        } else {
+            MountArmor::None
+        };
+        Some(MountRules::new(true, armor))
+    }
+
     fn vehicle(&self) -> Option<crate::common::Vehicle> {
         let r = self.ride.as_deref()?;
         let b = &r.boat;
