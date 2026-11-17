@@ -1,4 +1,5 @@
-//! Live entity checks for the lab (26.1; boat mode also 1.8.9, 1.12.2 and 1.16.5), chosen with `GHAST_PROBE`:
+//! Live entity checks for the lab (26.1; boat and cart modes also 1.8.9, 1.12.2 and 1.16.5),
+//! chosen with `GHAST_PROBE`:
 //!
 //! * `walk` (default): walks straight along +z for `--minutes` (through whatever stands there,
 //!   e.g. a crowd of NoAI mobs and a boat; `--entities` turns on entity tracking, which the 26.1
@@ -9,6 +10,11 @@
 //! * `villager`: finds the nearest villager, right-clicks it (the trade screen), selects trade 0
 //!   and shift-takes the result. `PASS` when the screen opened, the trade was selected and the
 //!   take was confirmed as predicted.
+//! * `boat`: boards the nearest boat (a right click with `--entities`, or the server seats
+//!   us), paddles straight / left / right, sneaks off (`lab/boats.sh`).
+//! * `cart`: boards the nearest rideable minecart by a right click (`--entities`), pushes it
+//!   forward, looks around for 60 s with jump and sprint presses while the server moves it,
+//!   then sneaks off and stands a second (`lab/carts.sh`).
 //!
 //! ```text
 //! GHAST_PROBE=villager cargo run -p ghast --release --example entity_probe -- \
@@ -29,6 +35,7 @@ enum Mode {
     Horse,
     Villager,
     Boat,
+    Cart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +68,10 @@ struct Probe {
     /// Boat mode: ticks since boarding (`None`: not on yet), whether it was ever on.
     ride_ticks: Option<u32>,
     rode: bool,
+    /// Ticks on foot after a dismount.
+    off_ticks: u32,
+    /// Cart mode: the yaw the look-around swings about.
+    cart_yaw: Option<f32>,
     /// Walk direction (`GHAST_YAW`, default 0 = +z).
     yaw: f32,
 }
@@ -92,7 +103,7 @@ impl Probe {
     }
 
     fn ok(&self) -> bool {
-        if self.mode == Mode::Boat {
+        if matches!(self.mode, Mode::Boat | Mode::Cart) {
             return self.rode && self.failures.is_empty();
         }
         self.mode == Mode::Walk
@@ -140,7 +151,7 @@ impl Probe {
                 self.wait += 1;
                 return;
             }
-            if let Some((id, b)) = Self::find_boat(ctx) {
+            if let Some((id, b)) = Self::find_boat(ctx, self.mode == Mode::Cart) {
                 let eyes = ctx.eyes(ctx.pose());
                 // The box point nearest the eyes, pulled 0.1 inside (the pick range is 3).
                 let near = |lo: f64, hi: f64, v: f64| v.clamp(lo + 0.1, hi - 0.1);
@@ -173,11 +184,22 @@ impl Probe {
         };
         ctx.set_buttons(Buttons::default());
         if !riding {
-            println!("dismounted after {t} ticks");
-            self.finish(ctx);
+            if self.off_ticks == 0 {
+                println!("dismounted after {t} ticks at {:?}", ctx.pose().pos);
+            }
+            // A second on foot (the first position packets from the seat), then done.
+            self.off_ticks += 1;
+            ctx.set_controls(Controls::NONE);
+            if self.off_ticks > 20 {
+                self.finish(ctx);
+            }
             return;
         }
         self.ride_ticks = Some(t + 1);
+        if self.mode == Mode::Cart {
+            self.cart(ctx, t);
+            return;
+        }
         let (forward, left, right, sneak) = match t {
             0..20 => (false, false, false, false),
             20..80 => (true, false, false, false),
@@ -219,12 +241,67 @@ impl Probe {
         }
     }
 
-    fn find_boat(ctx: &TickContext<'_>) -> Option<(i32, [f64; 6])> {
+    /// The first tracked boat (`cart`: rideable minecart).
+    /// Cart mode, riding: a push forward, then 60 s of looking around (whole mouse steps) with
+    /// jump presses and a sprint press while the server moves the cart, then sneak until the
+    /// server takes us off.
+    fn cart(&mut self, ctx: &mut TickContext<'_>, t: u32) {
+        // Face east (+x) for the push: the scene's cart stands on an east-west rail.
+        let base = *self.cart_yaw.get_or_insert(-90.0);
+        let look = (60..1200).contains(&t);
+        if t < 60 {
+            ctx.set_aim(base, 10.0);
+        } else if look {
+            let f = t as f32;
+            ctx.set_aim(
+                base + 70.0 * (f / 40.0).sin(),
+                15.0 + 25.0 * (f / 27.0).sin(),
+            );
+        }
+        ctx.set_controls(Controls {
+            forward: (20..60).contains(&t),
+            jump: look && t % 100 < 4,
+            sprint: (300..340).contains(&t),
+            sneak: t >= 1200,
+            ..Controls::NONE
+        });
+        if t.is_multiple_of(20)
+            && let Some(v) = ctx.vehicle()
+        {
+            let tracked = ctx
+                .entities()
+                .and_then(|es| es.get(v.entity_id))
+                .map(ghast::entity::Entity::position);
+            log::info!(
+                "cart at {:.3} {:.3} {:.3} yaw {:.1}; seat sent {:.3} {:.3} {:.3}; tracked {:?}",
+                v.pos.x,
+                v.pos.y,
+                v.pos.z,
+                v.yaw,
+                ctx.sent().pos.x,
+                ctx.sent().pos.y,
+                ctx.sent().pos.z,
+                tracked
+            );
+        }
+        if t > 1400 {
+            self.failures
+                .push("not dismounted after 200 sneaking ticks".into());
+            self.finish(ctx);
+        }
+    }
+
+    fn find_boat(ctx: &TickContext<'_>, cart: bool) -> Option<(i32, [f64; 6])> {
         let ents = ctx.entities()?;
         ents.iter()
             .filter(|e| {
-                type_name(ctx, e)
-                    .is_some_and(|t| t == "boat" || t.ends_with("_boat") || t.ends_with("_raft"))
+                type_name(ctx, e).is_some_and(|t| {
+                    if cart {
+                        t == "minecart"
+                    } else {
+                        t == "boat" || t.ends_with("_boat") || t.ends_with("_raft")
+                    }
+                })
             })
             .filter_map(|e| Some((e.id(), e.bounding_box()?)))
             .next()
@@ -278,7 +355,7 @@ impl Behavior for Probe {
         if ev.opened.is_some() {
             self.opened = true;
         }
-        if self.mode == Mode::Boat {
+        if matches!(self.mode, Mode::Boat | Mode::Cart) {
             self.boat(ctx);
             return;
         }
@@ -463,9 +540,10 @@ fn main() {
         Ok("horse") => Mode::Horse,
         Ok("villager") => Mode::Villager,
         Ok("boat") => Mode::Boat,
+        Ok("cart") => Mode::Cart,
         Ok("walk") | Err(_) => Mode::Walk,
         Ok(other) => {
-            eprintln!("GHAST_PROBE: walk | horse | villager | boat, not {other}");
+            eprintln!("GHAST_PROBE: walk | horse | villager | boat | cart, not {other}");
             std::process::exit(2);
         }
     };
@@ -499,6 +577,8 @@ fn main() {
             reported: false,
             ride_ticks: None,
             rode: false,
+            off_ticks: 0,
+            cart_yaw: None,
             yaw: std::env::var("GHAST_YAW")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -519,6 +599,8 @@ fn type_name(ctx: &TickContext<'_>, e: &ghast::entity::Entity) -> Option<&'stati
         #[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
         ghast::GameVersion::V1_8_9 | ghast::GameVersion::V1_12_2 => match e.entity_type() {
             ghast::entity::EntityType::LegacyObject(1) => Some("boat"),
+            // Object type 10 with data 0: the rideable minecart (the probe only rides that one).
+            ghast::entity::EntityType::LegacyObject(10) => Some("minecart"),
             _ => None,
         },
         // 1.16.5 (boat mode): the registry id names the type.
