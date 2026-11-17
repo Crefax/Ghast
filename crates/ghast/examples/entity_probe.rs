@@ -1,4 +1,4 @@
-//! Live entity checks for the lab (26.1), chosen with `GHAST_PROBE`:
+//! Live entity checks for the lab (26.1; boat mode also 1.16.5), chosen with `GHAST_PROBE`:
 //!
 //! * `walk` (default): walks straight along +z for `--minutes` (through whatever stands there,
 //!   e.g. a crowd of NoAI mobs and a boat; `--entities` turns on entity tracking, which the 26.1
@@ -208,7 +208,8 @@ impl Probe {
         let ents = ctx.entities()?;
         ents.iter()
             .filter(|e| {
-                type_name(ctx, e).is_some_and(|t| t.ends_with("_boat") || t.ends_with("_raft"))
+                type_name(ctx, e)
+                    .is_some_and(|t| t == "boat" || t.ends_with("_boat") || t.ends_with("_raft"))
             })
             .filter_map(|e| Some((e.id(), e.bounding_box()?)))
             .next()
@@ -492,6 +493,14 @@ fn type_name(ctx: &TickContext<'_>, e: &ghast::entity::Entity) -> Option<&'stati
     match ctx.version() {
         #[cfg(feature = "v26_2")]
         ghast::GameVersion::V26_2 => ghast::entity::v26_2::entity_type(e).map(|t| t.name),
+        // 1.16.5 (boat mode): the registry id names the type.
+        #[cfg(feature = "v1_16_5")]
+        ghast::GameVersion::V1_16_5 => match e.entity_type() {
+            ghast::entity::EntityType::Registry(id) => {
+                ghast::data::v1_16_5::entity(ghast::data::EntityKind::Mob, id).map(|t| t.name)
+            }
+            _ => None,
+        },
         _ => ghast::entity::v26_1::entity_type(e).map(|t| t.name),
     }
 }

@@ -1569,3 +1569,88 @@ async fn v1_16_2_session() {
 async fn v1_16_3_session() {
     sub_version_session::<V1_16_5>(GameVersion::V1_16_3).await;
 }
+
+/// Falls, asks to glide on tick 6 and records the first tick `is_gliding` holds.
+struct GlideAsk {
+    ticks: u64,
+    gliding_at: Option<u64>,
+}
+
+impl Behavior for GlideAsk {
+    fn tick(&mut self, ctx: &mut TickContext<'_>) {
+        self.ticks += 1;
+        ctx.set_controls(Controls::NONE);
+        if self.ticks == 6 {
+            ctx.start_gliding();
+        }
+        if self.gliding_at.is_none() && ctx.is_gliding() {
+            self.gliding_at = Some(self.ticks);
+        }
+        if self.ticks >= 20 {
+            ctx.disconnect("done");
+        }
+    }
+}
+
+/// 1.12.2: the server starts a glide by our entity data's flag 7, which it sends right after
+/// the client's `start_fall_flying` request (a server answers in the same read). The client
+/// starts reading its entity data at that jump press: the packet filter must already let the
+/// answer in, or the client falls on while the server (and an anticheat) has it gliding.
+#[tokio::test]
+async fn v1_12_2_glide_starts_on_the_servers_immediate_answer() {
+    use ghast_protocol::v1_12_2::play::{clientbound as cb, serverbound as sb};
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V1_12_2>("Tester", 256).await;
+        c.send(&V1_12_2::join(42)).await;
+        c.send(&V1_12_2::chunk(0, 0)).await;
+        c.send(&V1_12_2::position(8.5, 200.0, 8.5, 1)).await;
+        // An elytra in the chest slot (window 0 slot 6: item 443, count 1, damage 0, no tag).
+        let mut b = BytesMut::new();
+        b.put_i8(0);
+        b.put_i16(6);
+        b.put_i16(443);
+        b.put_i8(1);
+        b.put_i16(0);
+        b.put_u8(0);
+        c.send(&RawPacket::new(cb::id::SET_SLOT, b.freeze())).await;
+        let mut asked = 0;
+        while let Some(p) = c.recv().await {
+            if p.id != sb::id::ENTITY_ACTION {
+                continue;
+            }
+            let a: sb::EntityAction = p.decode_as().unwrap();
+            if a.action_id.0 == 8 {
+                asked += 1;
+                // Entity 42, index 0, type byte, flag 7 (fall flying); end of the list.
+                let mut b = BytesMut::new();
+                b.put_u8(42);
+                b.put_u8(0);
+                b.put_u8(0);
+                b.put_u8(0x80);
+                b.put_u8(0xff);
+                c.send(&RawPacket::new(cb::id::ENTITY_METADATA, b.freeze()))
+                    .await;
+            }
+        }
+        asked
+    };
+    let cl = client(addr, GameVersion::V1_12_2, "Tester").silent_hold(Duration::from_secs(10));
+    let mut b = GlideAsk {
+        ticks: 0,
+        gliding_at: None,
+    };
+    let (end, asked) = tokio::join!(cl.run(&mut b), server);
+    assert!(
+        matches!(end, Ok(SessionEnd::Quit(ref r)) if r == "done"),
+        "{end:?}"
+    );
+    assert_eq!(asked, 1, "one glide request");
+    // The answer arrives before the next tick (a local socket): gliding from tick 7.
+    assert!(
+        b.gliding_at.is_some_and(|t| t <= 8),
+        "gliding from tick {:?}",
+        b.gliding_at
+    );
+}

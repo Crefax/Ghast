@@ -1161,6 +1161,14 @@ where
         self.dec.set_filter(filter);
     }
 
+    /// Applies a packet filter change the sim asked for (it reads more packets from now on).
+    fn refilter_if_dirty(&mut self) {
+        if self.engine.sim.take_filter_dirty() {
+            let raw = self.raw_ids.clone();
+            self.set_filter(self.interests, &raw);
+        }
+    }
+
     /// Logs (rate-limited) and optionally dumps a world packet the world rejected.
     fn bad_world_packet(&mut self, raw: &RawPacket, e: &ghast_world::WorldError) {
         self.world_errors += 1;
@@ -1247,6 +1255,9 @@ where
                     continue;
                 }
             }
+            // The sim may read more packets from this one on (26.1: the first boat seen starts
+            // the vehicle tracker): the rest of this read is decoded with the new filter.
+            self.refilter_if_dirty();
             // A prediction answer may have moved the player back (a restored block held it).
             self.engine.sync_snap();
             // 26.1 handleMoveVehicle answers at once (sent with this read's replies).
@@ -1469,10 +1480,6 @@ where
                     if let Some(end) = self.drain_inbound()? {
                         return Ok(end);
                     }
-                    if self.engine.sim.take_filter_dirty() {
-                        let raw = self.raw_ids.clone();
-                        self.set_filter(self.interests, &raw);
-                    }
                     if let Some(end) = self.reconfigure_if_asked(behavior).await? {
                         return Ok(end);
                     }
@@ -1514,6 +1521,11 @@ where
                         let check = |c: &str| V::check_command(&mut wire.borrow_mut(), c);
                         self.engine.tick_with(behavior, now, &check);
                     }
+                    // The tick may start reading more packets (1.12.2 / 1.16.5: a jump press
+                    // with an elytra on asks for our entity data, where a 1.12.2 server answers
+                    // the glide request with flag 7): the filter changes before the next read,
+                    // or the answer to this tick's packets is dropped by the old one.
+                    self.refilter_if_dirty();
                     self.encode_outbound()?;
                     flush(&mut self.wr, &mut self.enc).await?;
                     if let Some(reason) = self.engine.quit_requested() {
