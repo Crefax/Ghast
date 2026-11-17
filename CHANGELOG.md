@@ -6,6 +6,110 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.6 — unreleased
+
+Older-version parity: what the vanilla client does on 1.8.9, 1.12.2 and 1.16.5 that ghast did
+not model yet. Everything is additive. "Oracle-verified" means bit-identical to the real client
+classes on the stated number of randomized ticks or clicks.
+
+### Added
+
+- **Minecraft 1.12.1 (protocol 338), 1.16.2 (751) and 1.16.3 (753)**: `GameVersion::V1_12_1`,
+  `V1_16_2`, `V1_16_3`, served by the 1.12.2 / 1.16.5 code with their own protocol number
+  (1.12.1: VarInt keep-alive ids; `ghast-protocol` module `v1_12_1` on the `v1_12_2` feature,
+  table rows 751 / 753 on the `v1_16_5` module). Oracle-verified on their own jars (every golden
+  of their row and 1.0 – 1.2 M fuzz ticks give identical records) and lab-tested with Grim.
+  1.8.2 – 1.8.8 and 1.16.4 are now oracle-verified on their own jars too (1.16.4 also
+  lab-tested); 1.8 and 1.8.1 are listed as protocol only. Known difference: before 1.8.5 the
+  movement speed attribute has no upper limit (ghast caps at 1024 on every 1.8.x).
+- **Elytra gliding and firework rockets on 1.12.2 and 1.16.5** (`ghast-physics`, `ghast-client`):
+  `TickContext::start_gliding` / `is_gliding` now work there. 1.16.5: the client's own glide
+  start, the glide pose, creative flight clearing it, attached rockets in entity order. 1.12.2:
+  the glide request, the server's flag starting it, the 0.6 box, rockets. 1 M fuzz ticks per
+  version, 0 differences, also through the engine; lab-tested with Grim. Not modelled: a glide
+  the server starts before the bot's first jump press in the air with an elytra on.
+- **Riding boats on 1.8.9, 1.12.2 and 1.16.5** with entity tracking (`v1_8::Boat`,
+  `v1_12::Boat`, `v1_16_5::Boat`, `tick_boat`): boarding from the server's attach / passengers
+  packet, the client's own boat simulation, the steering packets every tick, the server's
+  corrections, dismount. 1 M fuzz ticks per version, 0 differences, also through the engine;
+  lab-tested with Grim. On 1.8.9 the boat uses Java's `Math.sin` / `Math.cos`, whose last bit
+  depends on the JVM: the oracle replay takes the JVM's values as an input
+  (`tick_boat_with`, `JavaTrig`), a running bot uses the platform's.
+- **Sitting in minecarts on 1.8.9, 1.12.2 and 1.16.5** with entity tracking: the server moves
+  the cart, the client interpolates it, sends look + `steer_vehicle` and (1.16.5) gets off on
+  sneak. 1 M fuzz ticks per version, 0 differences, also through the engine; lab-tested with
+  Grim.
+- **Placed blocks are predicted on every version** (`ghast-client`) for blocks with a single
+  full-cube state; 26.x settles them with `block_changed_ack` like vanilla (oracle: about
+  12,500 placements per version, 0 differences), older versions with the server's block
+  updates. Blocks with placement rules (facing, slabs, stairs, logs; on 1.8.9 / 1.12.2 also
+  the variant blocks) are left to the server. New: `ghast_physics::modern::state_collides`,
+  `ghast_physics::v1_16_5::state_collides`.
+- **Every container menu is predicted on 1.8.9, 1.12.2 and 1.16.5** (`ghast-inventory`), each
+  oracle-verified on 20,000+ clicks and lab-tested: brewing stand, enchanting table, beacon,
+  furnace fuel slot and shift-click (1.16.5: blast furnace, smoker), mount inventories (saddle,
+  horse armor, llama carpets, chest), villager trading (the output the client computes, trade
+  use-up, `Inventory::select_trade` / `trade_offers`), the anvil (result, level cost, taking
+  it, the rename packet; `Inventory::anvil_rename`, `set_experience_level`, `set_creative`,
+  `anvil_cost`, `take_screen_packets`), and on 1.16.5 the smithing table, stonecutter,
+  grindstone, loom, cartography table and lectern buttons (`Inventory::click_button`). The
+  1.12.2 shulker box is now proven as well. Mount slot rules are read off the tracked mount
+  when its window opens; `Inventory::set_mount_rules` / `TickContext::set_mount_rules`
+  (`MountRules`, `MountArmor`) override them. New slot kinds: `SlotKind::BeaconPayment`,
+  `TradeOutput`. Left to the server: effect choice in the beacon, anvil damage, villager
+  restocks, cartography results that need map data.
+- **`Interests::RECIPES`** (1.16.5, default off): reads the server's recipes and item tags.
+  The menus that need them (furnace, smithing table, stonecutter, beacon payment, llama
+  carpets, crafting remainders) refuse a click instead of guessing without it. With the flag,
+  the recipe book is kept in a compact form (vanilla: 17.7 kB instead of 239.5 kB per bot) and
+  shared between bots that receive the same recipes; switching the flag off frees it
+  (`Inventory::clear_server_data`). `RecipeBook::is_declared`.
+- **`Client::record` on every version** (1.12.2 and 26.x added): the recordings replay in the
+  vanilla client with identical state and movement packets.
+- `Capabilities::spectator_block_click_swings` and `spectator_switch_stops_use`.
+- A `replay` cargo profile (thin LTO, parallel codegen) for the oracle-cache replays; see
+  CONTRIBUTING.md.
+
+### Changed
+
+- Villager offers are read only while a merchant window is open; on 1.8.9 / 1.12.2 other
+  plugin channels are skipped without decoding. A raw packet tap does not make the inventory
+  decode recipes, tags or offers. A bot that opens no window decodes the same packets as in
+  0.4.5 plus the experience packet (the anvil's level check).
+
+### Fixed
+
+- **A refused block break is restored from the server's answer** on 26.x and 1.16.5 (0.4.5)
+  is now lab-proven; in addition a broken waterlogged block (and kelp, seagrass) leaves water,
+  and the move-back after a refused break or placement uses the block's real collision shape
+  for the player (model offset, scaffolding context).
+- **1.12.2 elytra**: the packet filter is rebuilt right after the tick and after every packet
+  inside a read, so the server's answer to this tick's request is not dropped (the glide never
+  started and the server set the bot back every tick). The same rebuild covers a window's
+  offers that arrive in the same read as `open_window`.
+- 1.8.9 and 1.12.2: the player keeps ticking below y = -64 (the tick used to stop there).
+- 1.8.9 / 1.12.2: no `block_place` when vanilla's placement check fails (the spot is not
+  replaceable, a full block would overlap the player, or on 1.12.2 with entity tracking a
+  living entity, player, boat or shulker stands there); the item use follows as in vanilla.
+- A spectator's right click on a block sends the block packet and ends there; switching to
+  spectator stops an item use only on 26.x.
+- With the immediate-respawn rule the client asks to respawn every tick while dead and no
+  screen is open, also when it joined already dead.
+- Inventory: a number-key swap of a hotbar slot with itself over the slot limit.
+- `ghast-ext`: no unused import in a build without a version feature.
+
+### Known limitations
+
+- Pistons and living mounts (horse, pig, strider) do not move the player on any version.
+- Legacy placement prediction has no oracle vectors yet; 1.8.9 / 1.12.2 still send
+  `block_place` in some cases vanilla would not (anvils, slabs, support rules, and on 1.8.9
+  any entity in the spot).
+- Refused as unpredictable: taking a filled map with data from a villager, a grindstone
+  result with two curses, anvil names that are not plain text.
+- An aim equal to the last rotation the client reported sends no look packet, as in vanilla:
+  after a server teleport that changed the rotation, re-aiming at the old angles does not
+  reach the server until the rotation changes.
+
 ## 0.4.5 — 2026-11-16
 
 ### Added
