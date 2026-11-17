@@ -332,6 +332,19 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   the server moves it. Other vehicles are not simulated (the walking tick goes on). Proven
   through the engine (`boats.jsonl.gz` and the 1 M tick cached boat fuzz, 0 differences).
   Not modelled: bubble columns under a boat.
+- **Boats on 1.12.2** (`ghast_physics::v1_12::{Boat, tick_boat}`, needs `Interests::ENTITIES`):
+  the same boarding and packets (`steer_boat`, `look`, `steer_vehicle`, `vehicle_move` every
+  tick; the server's `vehicle_move` applied and answered at once). The boat ticks at its place
+  in the client world's entity list: the entities spawned before it step first, then it
+  collides with the boats, minecarts and pushable living entities around it
+  (`v1_12::blocks_boat`), the entities after it push the passenger (that motion carries into a
+  walking tick when the server takes the player off in between). The 1.12 client never gets off
+  by itself: sneak only goes to the server in `steer_vehicle`, whose `set_passengers` then takes
+  the player off; the boat stays where it was driven (the server's moves of it are ignored
+  while the client controls it, as vanilla). Proven through the engine (`boats.jsonl.gz`, 22
+  hand cases + 100 fuzz, and the 1 M tick cached boat fuzz, 0 differences). Not modelled:
+  entities that ride something (their seat is not followed) are left out of the boat's
+  collisions.
 - `ctx.world()` (`WorldView`): loaded columns and raw block states; `None` = not loaded.
 
 ## What the physics is fed

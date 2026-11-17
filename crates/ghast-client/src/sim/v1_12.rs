@@ -77,6 +77,17 @@ pub(crate) struct Sim12 {
     glide_on: bool,
     /// Movement recording ([`crate::Client::record`]).
     rec: Option<crate::record::Recorder>,
+    /// The boat we ride and control (`set_passengers` naming us, with entity tracking).
+    ride: Option<Box<Ride12>>,
+    /// The answer to a server packet that goes out at once (`vehicle_move`).
+    reply: Option<Outbound>,
+}
+
+/// The boat the player rides: its entity id and its client-side state.
+#[derive(Debug)]
+struct Ride12 {
+    id: i32,
+    boat: ghast_physics::v1_12::Boat,
 }
 
 /// What the 1.12.2 glide reads beyond the physics state, decoded once an elytra was seen in the
@@ -189,6 +200,8 @@ impl Sim12 {
             glide: Box::default(),
             glide_on: false,
             rec: None,
+            ride: None,
+            reply: None,
         }
     }
 
@@ -360,8 +373,171 @@ impl Sim12 {
         );
     }
 
+    /// A tick in the boat we control (`ghast_physics::v1_12::tick_boat`), at the boat's place
+    /// in the client world's entity list: the tracked entities before it step first (their
+    /// interpolation, the lily pads their boats break), then the boat collides with the
+    /// entities around it as they are then and the passenger with the boats and shulkers.
+    /// Their pushes on the passenger are not applied (its motion is zeroed before its next
+    /// tick, they change no packet).
+    #[cold]
+    #[inline(never)]
+    fn step_ride(&mut self, pose: &Pose, controls: Controls) {
+        let Some(r) = self.ride.as_deref_mut() else {
+            return;
+        };
+        let input = ghast_physics::TickInput {
+            keys: keys(controls),
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            // The passenger tick has no item slowdown.
+            using_item: false,
+        };
+        let (solids, boat_solids): (&[_], &[_]) =
+            match (self.near.as_deref_mut(), self.entities.as_ref()) {
+                (Some(n), Some(t)) => {
+                    if let Some(&k) = n.index.get(&r.id) {
+                        let seq = n.list[k as usize].seq;
+                        n.tick(t, &self.world, &self.player.bb, false, "", 0..seq);
+                        for &[x, y, z] in &n.lily_pads {
+                            self.world
+                                .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
+                        }
+                    }
+                    n.solids(t, &self.world, &self.player);
+                    // As far as the boat can move this tick (its velocity grows by at most
+                    // the paddle and the flow push before the move).
+                    let b = &r.boat;
+                    let reach = |v: f64| v.abs() + 3.0;
+                    n.boat_solids(
+                        t,
+                        &self.world,
+                        &b.bb,
+                        [reach(b.vel[0]), reach(b.vel[1]), reach(b.vel[2])],
+                    );
+                    (&n.solids, &n.boat_solids)
+                }
+                _ => (&[], &[]),
+            };
+        let still = ghast_physics::v1_12::tick_boat(
+            &mut self.player,
+            &mut self.ext,
+            &mut r.boat,
+            solids,
+            boat_solids,
+            &input,
+            &self.world,
+            &mut self.packets,
+        );
+        for &[x, y, z] in r.boat.broken_lily_pads() {
+            self.world
+                .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
+        }
+        let (id, pos, bb) = (r.id, r.boat.pos, r.boat.bb);
+        if let Some(n) = self.near.as_deref_mut()
+            && let Some(c) = n.get_mut(id)
+        {
+            // The entry follows the client's boat (its interpolation stays where it was).
+            c.follow(pos, bb);
+        }
+        if !still {
+            log::debug!("boat {id} fell out of the world");
+            self.leave_boat();
+        }
+    }
+
+    /// The player is off the boat it drove: the boat stays where it is on the client.
+    fn leave_boat(&mut self) {
+        self.ride = None;
+        if let Some(n) = self.near.as_deref_mut() {
+            n.ridden = None;
+        }
+    }
+
+    /// Our entity id: the tracker's, else the join packet's.
+    fn own_id(&self) -> i32 {
+        self.entities
+            .as_ref()
+            .and_then(|t| t.self_id())
+            .unwrap_or(self.glide.own_id)
+    }
+
+    /// `set_passengers` (boarding / leaving a boat) and `vehicle_move` (the server's correction
+    /// of the boat we control: `onVehicleMove` applies it and answers with the boat's position at
+    /// once).
+    #[cold]
+    #[inline(never)]
+    fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
+        if raw.id == cb::id::VEHICLE_MOVE {
+            if let Some(r) = self.ride.as_deref_mut() {
+                let p: cb::VehicleMove = raw.decode_as()?;
+                if let ghast_physics::Packet::MoveVehicle {
+                    pos,
+                    yaw,
+                    pitch,
+                    on_ground,
+                } = r.boat.server_move([p.x, p.y, p.z], p.yaw, p.pitch)
+                {
+                    self.reply = Some(Outbound::VehicleMove {
+                        pos: Vec3::new(pos[0], pos[1], pos[2]),
+                        yaw,
+                        pitch,
+                        on_ground,
+                    });
+                }
+                let (id, pos, bb) = (r.id, r.boat.pos, r.boat.bb);
+                if let Some(n) = self.near.as_deref_mut()
+                    && let Some(c) = n.get_mut(id)
+                {
+                    c.follow(pos, bb);
+                }
+            }
+            return Ok(());
+        }
+        let p: cb::SetPassengers = raw.decode_as()?;
+        let on = p.passengers.contains(&self.own_id());
+        let riding_it = self.ride.as_ref().is_some_and(|r| r.id == p.entity_id);
+        if on && !riding_it {
+            // startRiding a boat the client knows: at its client position, with the rotation the
+            // server last sent. Other vehicles are not simulated (the walking tick goes on).
+            let boat = self.entities.as_ref().and_then(|t| {
+                let e = t.get(p.entity_id)?;
+                if e.entity_type() != ghast_entity::EntityType::LegacyObject(1) {
+                    return None;
+                }
+                let pos = self
+                    .near
+                    .as_deref()
+                    .and_then(|n| n.index.get(&p.entity_id).map(|&k| n.list[k as usize].pos))
+                    .unwrap_or(e.position());
+                Some(ghast_physics::v1_12::Boat::new(pos, e.yaw(), 0.0))
+            });
+            match boat {
+                Some(boat) => {
+                    log::debug!("riding boat {}", p.entity_id);
+                    self.ride = Some(Box::new(Ride12 {
+                        id: p.entity_id,
+                        boat,
+                    }));
+                    if let Some(n) = self.near.as_deref_mut() {
+                        n.ridden = Some(p.entity_id);
+                    }
+                }
+                None => log::debug!(
+                    "riding {} (not simulated: no entity tracking or not a boat)",
+                    p.entity_id
+                ),
+            }
+        } else if !on && riding_it {
+            log::debug!("left boat {}", p.entity_id);
+            self.leave_boat();
+        }
+        Ok(())
+    }
+
     /// `World.tickEntities` after the player: the entities interpolate, the boats break lily
-    /// pads, then they push the player.
+    /// pads, then they push the player. In a boat we control, only the entities after the boat
+    /// in the entity list (the ones before it ticked before it, [`Sim12::step_ride`]).
     #[cold]
     #[inline(never)]
     fn tick_near(&mut self, pose: &mut Pose) {
@@ -373,16 +549,24 @@ impl Sim12 {
         if n.list.is_empty() {
             return;
         }
+        let seqs = match n.ridden.and_then(|id| n.index.get(&id)) {
+            Some(&k) => n.list[k as usize].seq + 1..u64::MAX,
+            None => 0..u64::MAX,
+        };
         let p = &mut self.player;
         // Only a ticking player is in its chunk's entity list, where the pushers find it; the
-        // bot riding or carrying something is not pushed (not modelled).
+        // bot riding a vehicle the client does not move or carrying something is not pushed
+        // (not modelled). In the boat we control, the entities after the boat push the
+        // passenger: its next tick in the boat zeroes that motion, a walking one (the server
+        // took it off in between) starts with it.
+        let riding_ours = n.ridden.is_some();
         let pushing = self.entity_push
             && p.added_to_chunk
             && !p.removed
-            && !t
-                .me()
-                .is_some_and(|m| m.vehicle().is_some() || !m.passengers().is_empty());
-        n.tick(t, &self.world, &p.bb, pushing, &self.profile_name);
+            && !t.me().is_some_and(|m| {
+                (m.vehicle().is_some() && !riding_ours) || !m.passengers().is_empty()
+            });
+        n.tick(t, &self.world, &p.bb, pushing, &self.profile_name, seqs);
         let mut changed = false;
         for (_, pusher) in &n.pushers {
             changed |= ghast_physics::v1_12::push_by(p, &self.world, pusher);
@@ -505,6 +689,9 @@ impl Sim for Sim12 {
             }
         }
         use ghast_protocol::v1_12_2::play::clientbound as cb;
+        if matches!(raw.id, cb::id::SET_PASSENGERS | cb::id::VEHICLE_MOVE) {
+            return self.vehicle_packet(raw);
+        }
         if raw.id == cb::id::TEAMS {
             if let Some(n) = &mut self.near
                 && !n
@@ -530,12 +717,14 @@ impl Sim for Sim12 {
         let w = &mut self.world;
         match raw.id {
             cb::id::LOGIN => {
+                self.ride = None;
                 let p: cb::Login = raw.decode_as()?;
                 // Our entity id (our entity data names us by it).
                 self.glide.own_id = p.entity_id;
                 w.apply_login(&p);
             }
             cb::id::RESPAWN => {
+                self.ride = None;
                 w.apply_respawn(&raw.decode_as()?);
             }
             cb::id::MAP_CHUNK => {
@@ -579,7 +768,8 @@ impl Sim for Sim12 {
         self.player = fresh_player_1_12();
         self.player.abilities = abilities;
         self.player.food_level = food;
-        // A new client player: not gliding, no rockets.
+        // A new client player: not gliding, no rockets, not riding.
+        self.leave_boat();
         self.ext.fall_flying = false;
         self.glide.rockets.clear();
         self.glide.pending.clear();
@@ -696,10 +886,12 @@ impl Sim for Sim12 {
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
         let mut ids: Vec<i32> = self.world.packet_ids().collect();
+        // Riding: boarding and the server's boat corrections.
+        ids.extend([cb::id::SET_PASSENGERS, cb::id::VEHICLE_MOVE]);
         if self.glide.watch {
             // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.
-            use ghast_protocol::v1_12_2::play::clientbound as cb;
             ids.extend([
                 cb::id::SPAWN_ENTITY,
                 cb::id::ENTITY_DESTROY,
@@ -711,6 +903,23 @@ impl Sim for Sim12 {
 
     fn take_filter_dirty(&mut self) -> bool {
         std::mem::take(&mut self.glide.filter_dirty)
+    }
+
+    fn take_reply(&mut self) -> Option<Outbound> {
+        self.reply.take()
+    }
+
+    fn vehicle(&self) -> Option<crate::common::Vehicle> {
+        let r = self.ride.as_deref()?;
+        let b = &r.boat;
+        Some(crate::common::Vehicle {
+            entity_id: r.id,
+            pos: Vec3::new(b.pos[0], b.pos[1], b.pos[2]),
+            yaw: b.yaw,
+            pitch: b.pitch,
+            on_ground: b.on_ground,
+            controlled: true,
+        })
     }
 
     #[inline(always)]
@@ -906,13 +1115,18 @@ impl Sim for Sim12 {
                 w.is_column_loaded(x >> 4, z >> 4)
                     .then(|| w.block_state(x, y, z).map_or(0, |s| u32::from(s.raw())))
             });
-            if self.glide_on {
+            if self.ride.is_some() {
+                r.note_once("riding not representable");
+            } else if self.glide_on {
                 r.note_once("gliding not representable");
             } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
                 r.note_once("entity pushes and collisions not representable");
             }
         }
-        if self.glide_on {
+        let riding = self.ride.is_some();
+        if riding {
+            self.step_ride(pose, controls);
+        } else if self.glide_on {
             self.step_ext(pose, controls, using_item);
         } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
             self.step_near(pose, controls, using_item);
@@ -925,7 +1139,7 @@ impl Sim for Sim12 {
             };
             ghast_physics::v1_12::tick(&mut self.player, &input, &self.world, &mut self.packets);
         }
-        if self.force_step_position != ForceStepPosition::Off {
+        if self.force_step_position != ForceStepPosition::Off && !riding {
             let p = &mut self.player;
             let cur = [p.pos[0], p.bb.min_y, p.pos[2]];
             force_position(
@@ -981,19 +1195,32 @@ enum Class12 {
     /// A shulker: pushes like a living entity, solid while alive; never interpolates (the
     /// client snaps it to its attached block).
     Shulker,
+    /// A minecart (every kind): only blocks a boat the player rides; interpolates over 5 ticks.
+    Cart,
+    /// A parrot: only blocks a boat the player rides; interpolates over 3 ticks.
+    Parrot,
 }
 
-/// The 1.12 class of a tracked entity, `None` when it neither pushes nor collides: bats,
-/// parrots, armor stands, the ender dragon, minecarts, items, projectiles, …
+impl Class12 {
+    /// Only matters for a boat the player rides (not pushing, not solid for the player).
+    fn boat_only(self) -> bool {
+        matches!(self, Class12::Cart | Class12::Parrot)
+    }
+}
+
+/// The 1.12 class of a tracked entity, `None` when it neither pushes nor collides nor blocks a
+/// boat: bats, armor stands, the ender dragon, items, projectiles, …
 fn class_12(e: &ghast_entity::Entity) -> Option<Class12> {
     use ghast_entity::EntityType as T;
     match e.entity_type() {
         T::Player => Some(Class12::Player),
         // Spawn-object type 1.
         T::LegacyObject(1) => Some(Class12::Boat),
+        T::LegacyObject(10) => Some(Class12::Cart),
         t @ T::LegacyMob(_) => match ghast_entity::v1_12::info(t)?.name {
             "shulker" => Some(Class12::Shulker),
-            "bat" | "parrot" | "armor_stand" | "ender_dragon" => None,
+            "parrot" => Some(Class12::Parrot),
+            "bat" | "armor_stand" | "ender_dragon" => None,
             _ => Some(Class12::Living),
         },
         _ => None,
@@ -1050,6 +1277,14 @@ impl Client12 {
         }
     }
 
+    /// The boat the client moves: its position and box as the move left them (the box is
+    /// not the one its position would give).
+    fn follow(&mut self, pos: [f64; 3], bb: ghast_physics::math::Aabb) {
+        self.pos = pos;
+        self.at = pos;
+        self.bb = bb;
+    }
+
     /// `updateTrackedPositionAndAngles` with the client's step count: 10 for boats, 3 else.
     /// A shulker ignores it; the client snaps it to its attached block, which the server keeps
     /// under the position it sends (so it follows that position here).
@@ -1064,9 +1299,14 @@ impl Client12 {
                 self.target = target;
                 self.steps = 10;
             }
-            Class12::Living | Class12::Player => {
+            Class12::Living | Class12::Player | Class12::Parrot => {
                 self.target = target;
                 self.steps = 3;
+            }
+            // AbstractMinecartEntity.updateTrackedPositionAndAngles: the packet's 3 steps + 2.
+            Class12::Cart => {
+                self.target = target;
+                self.steps = 5;
             }
         }
     }
@@ -1109,9 +1349,17 @@ pub(crate) struct Near12 {
     seq: u64,
     /// Boats in `list`.
     boats: usize,
-    /// Boats destroyed since the player's last tick: vanilla's world keeps them in their chunk's
-    /// entity list until its entity loop reaches them, after the player moved.
-    ghosts: Vec<ghast_physics::math::Aabb>,
+    /// Entries in `list` that only matter for a ridden boat ([`Class12::boat_only`]).
+    boat_only: usize,
+    /// Boats and minecarts destroyed since the player's last tick: vanilla's world keeps them in
+    /// their chunk's entity list until its entity loop reaches them, after the player moved.
+    ghosts: Vec<Ghost12>,
+    /// The boat the player rides and the client moves ([`Sim12`]'s): its entry follows the
+    /// client's boat, the server's moves of it are ignored (`onEntityPosition` /
+    /// `onEntityUpdate` skip an entity the client controls) and it is left out of the boxes.
+    pub(super) ridden: Option<i32>,
+    /// Scratch: the boxes the ridden boat collides with.
+    boat_solids: Vec<ghast_physics::math::Aabb>,
     /// Scratch: this tick's solid boxes, pushers and broken lily pads.
     solids: Vec<ghast_physics::math::Aabb>,
     pushers: Vec<(u64, ghast_physics::v1_12::Pusher)>,
@@ -1120,6 +1368,16 @@ pub(crate) struct Near12 {
     pub(super) world_version: u32,
     /// The teams' collision rules (`teams` packets).
     pub(super) teams: super::teams::Teams,
+}
+
+/// A destroyed boat or minecart still in its chunk's entity list (see [`Near12::ghosts`]).
+#[derive(Clone, Copy, Debug)]
+struct Ghost12 {
+    /// Its place in the entity list (it leaves the chunk when the loop reaches it).
+    seq: u64,
+    bb: ghast_physics::math::Aabb,
+    /// A minecart (blocks a ridden boat only), else a boat.
+    cart: bool,
 }
 
 /// The first VarInt of a body (the entity id of spawn and move packets).
@@ -1135,9 +1393,9 @@ fn first_varint(body: &[u8]) -> Option<i32> {
 }
 
 impl Near12 {
-    /// Nothing to tick and no ghost boxes.
+    /// Nothing that pushes the walking player or is solid for it.
     fn idle(&self) -> bool {
-        self.list.is_empty() && self.ghosts.is_empty()
+        self.list.len() == self.boat_only && self.ghosts.iter().all(|g| g.cart)
     }
 
     fn get_mut(&mut self, id: i32) -> Option<&mut Client12> {
@@ -1153,7 +1411,9 @@ impl Near12 {
                 self.list.clear();
                 self.index.clear();
                 self.boats = 0;
+                self.boat_only = 0;
                 self.ghosts.clear();
+                self.ridden = None;
                 if raw.id == id::LOGIN {
                     // A new play phase: a new client scoreboard.
                     self.teams.clear();
@@ -1171,6 +1431,7 @@ impl Near12 {
                 {
                     self.seq += 1;
                     self.boats += usize::from(class == Class12::Boat);
+                    self.boat_only += usize::from(class.boat_only());
                     let pos = e.position();
                     let mut c = Client12 {
                         id: eid,
@@ -1194,6 +1455,9 @@ impl Near12 {
                 let Some(eid) = first_varint(&raw.body) else {
                     return;
                 };
+                if self.ridden == Some(eid) {
+                    return;
+                }
                 if let (Some(c), Some(e)) = (self.get_mut(eid), t.get(eid)) {
                     let d = e.position();
                     // onEntityPosition: a teleport within 1/32 (1/64 vertically) of the client
@@ -1215,6 +1479,9 @@ impl Near12 {
                 let Some(eid) = first_varint(&raw.body) else {
                     return;
                 };
+                if self.ridden == Some(eid) {
+                    return;
+                }
                 if let (Some(c), Some(e)) = (self.get_mut(eid), t.get(eid)) {
                     c.interpolate_to(e.position());
                 }
@@ -1254,7 +1521,14 @@ impl Near12 {
         }
         if c.class == Class12::Boat {
             self.boats -= 1;
-            self.ghosts.push(c.bb);
+        }
+        self.boat_only -= usize::from(c.class.boat_only());
+        if matches!(c.class, Class12::Boat | Class12::Cart) {
+            self.ghosts.push(Ghost12 {
+                seq: c.seq,
+                bb: c.bb,
+                cart: c.class == Class12::Cart,
+            });
         }
     }
 
@@ -1279,7 +1553,8 @@ impl Near12 {
         cube: &ghast_physics::math::Aabb,
     ) -> bool {
         self.list.iter().any(|c| {
-            crate::sim::predict::boxes_intersect(&c.bb, cube)
+            !c.class.boat_only()
+                && crate::sim::predict::boxes_intersect(&c.bb, cube)
                 && Self::present(t, world, c)
                 && !(c.class == Class12::Player
                     && t.get(c.id)
@@ -1288,7 +1563,9 @@ impl Near12 {
     }
 
     /// This tick's boxes the player collides with: boats and live shulkers within reach of any
-    /// move of the tick, and the boats destroyed since the last tick.
+    /// move of the tick, and the boats destroyed since the last tick. In the boat the client
+    /// moves ([`Near12::ridden`], the passenger's tick at the boat's place in the entity list):
+    /// the same without that boat, and only the destroyed boats after it in the list.
     fn solids(
         &mut self,
         t: &ghast_entity::v1_12::Tracker,
@@ -1296,11 +1573,16 @@ impl Near12 {
         p: &ghast_physics::v1_12::PlayerState,
     ) {
         self.solids.clear();
-        let riding = t.me().is_some_and(|m| m.vehicle().is_some());
+        let own = self
+            .ridden
+            .and_then(|id| self.index.get(&id).map(|&k| (id, k)));
+        let after = own.map_or(0, |(_, k)| self.list[k as usize].seq);
+        let riding = own.is_none() && t.me().is_some_and(|m| m.vehicle().is_some());
         let reach = |v: f64| v.abs() + 3.0;
         let r = [reach(p.vel[0]), reach(p.vel[1]), reach(p.vel[2])];
         for c in &self.list {
             if !matches!(c.class, Class12::Boat | Class12::Shulker)
+                || own.is_some_and(|(id, _)| id == c.id)
                 || far(&c.bb, &p.bb, r)
                 || riding
                 || !Self::present(t, world, c)
@@ -1318,7 +1600,76 @@ impl Near12 {
             }
             self.solids.push(c.bb);
         }
-        self.solids.extend_from_slice(&self.ghosts);
+        self.solids.extend(
+            self.ghosts
+                .iter()
+                .filter(|g| !g.cart && g.seq > after)
+                .map(|g| g.bb),
+        );
+    }
+
+    /// The boxes the ridden boat collides with when it ticks (`World.doesBoxCollide` for the
+    /// boat, `v1_12::blocks_boat`): the entities within reach of its move (`bb` grown by
+    /// `reach`) whose column is loaded, at their client positions (the ones before the boat in
+    /// the entity list have stepped this tick), and the destroyed boats and minecarts after it
+    /// in the list. Left out: the boat itself, entities riding it with the player, spectator
+    /// players, and entities that ride something (their seat is not followed here).
+    fn boat_solids(
+        &mut self,
+        t: &ghast_entity::v1_12::Tracker,
+        world: &ghast_world::v1_12::World,
+        bb: &ghast_physics::math::Aabb,
+        reach: [f64; 3],
+    ) {
+        self.boat_solids.clear();
+        let Some(own) = self.ridden else { return };
+        let after = self
+            .index
+            .get(&own)
+            .map_or(0, |&k| self.list[k as usize].seq);
+        for c in &self.list {
+            if c.id == own || far(&c.bb, bb, reach) {
+                continue;
+            }
+            let Some(e) = t.get(c.id) else { continue };
+            if e.vehicle().is_some()
+                || !world
+                    .is_column_loaded((c.at[0].floor() as i32) >> 4, (c.at[2].floor() as i32) >> 4)
+            {
+                continue;
+            }
+            let alive = || ghast_entity::v1_12::health(e).is_none_or(|h| h > 0.0);
+            let blocks = match c.class {
+                Class12::Boat => true,
+                Class12::Cart => true,
+                Class12::Parrot => true,
+                Class12::Shulker => alive(),
+                Class12::Player => {
+                    t.tab_game_mode(&e.uuid()) != Some(3)
+                        && alive()
+                        && !ghast_physics::v1_12::entity_climbing(world, c.at, c.bb.min_y)
+                }
+                Class12::Living => {
+                    let name = ghast_entity::v1_12::info(e.entity_type()).map_or("", |i| i.name);
+                    ghast_physics::v1_12::blocks_boat(
+                        name,
+                        true,
+                        alive(),
+                        ghast_physics::v1_12::entity_climbing(world, c.at, c.bb.min_y),
+                        !e.passengers().is_empty(),
+                    )
+                }
+            };
+            if blocks {
+                self.boat_solids.push(c.bb);
+            }
+        }
+        self.boat_solids.extend(
+            self.ghosts
+                .iter()
+                .filter(|g| g.seq > after && !far(&g.bb, bb, reach))
+                .map(|g| g.bb),
+        );
     }
 
     /// The entities' client ticks after the player's: one interpolation step each, the lily
@@ -1332,12 +1683,18 @@ impl Near12 {
         p: &ghast_physics::math::Aabb,
         pushing: bool,
         profile_name: &str,
+        seqs: std::ops::Range<u64>,
     ) {
         use ghast_physics::v1_12::{PushKind, Pusher};
         self.pushers.clear();
         self.lily_pads.clear();
         let version = self.world_version;
+        let ridden = self.ridden;
         for c in &mut self.list {
+            // The boat the client moves ticks with the player (the sim's).
+            if !seqs.contains(&c.seq) || ridden == Some(c.id) {
+                continue;
+            }
             c.step();
             if c.class == Class12::Boat
                 && c.scanned != Some((c.bb, version))
@@ -1348,7 +1705,11 @@ impl Near12 {
                 c.scanned = Some((c.bb, version));
             }
             // Boats reach 0.2 farther; nothing else can touch the player.
-            if !pushing || far(&c.bb, p, [0.25; 3]) || !Self::present(t, world, c) {
+            if !pushing
+                || c.class.boat_only()
+                || far(&c.bb, p, [0.25; 3])
+                || !Self::present(t, world, c)
+            {
                 continue;
             }
             let Some(e) = t.get(c.id) else { continue };

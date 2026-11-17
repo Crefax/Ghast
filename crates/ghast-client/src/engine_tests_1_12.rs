@@ -55,6 +55,10 @@ impl Body {
         self.0.push(u8::from(v));
         self
     }
+    fn f32(mut self, v: f32) -> Self {
+        self.0.extend_from_slice(&v.to_be_bytes());
+        self
+    }
     fn string(self, s: &str) -> Self {
         let mut b = self.varint(s.len() as i32);
         b.0.extend_from_slice(s.as_bytes());
@@ -199,8 +203,35 @@ fn packet(ev: &Value) -> RawPacket {
             }
             b.raw(cb::id::TEAMS)
         }
+        "ride" => {
+            let ps = ev["passengers"].as_array().unwrap();
+            let mut b = Body::default()
+                .varint(id("vehicle"))
+                .varint(ps.len() as i32);
+            for v in ps {
+                b = b.varint(v.as_i64().unwrap() as i32);
+            }
+            b.raw(cb::id::SET_PASSENGERS)
+        }
+        "vehicle_move" => pos(Body::default())
+            .f32(f32v(&ev["yaw"]))
+            .f32(f32v(&ev["pitch"]))
+            .raw(cb::id::VEHICLE_MOVE),
         other => panic!("event {other}"),
     }
+}
+
+/// A 1.12.2 join packet: our entity id 1, survival, the overworld.
+fn login_packet() -> RawPacket {
+    Body::default()
+        .i32(1)
+        .i8(0)
+        .i32(0)
+        .i8(1)
+        .i8(20)
+        .string("flat")
+        .bool(false)
+        .raw(cb::id::LOGIN)
 }
 
 /// The movement packets of a tick, as comparable values.
@@ -232,6 +263,22 @@ fn ours(o: &Outbound) -> Option<Value> {
         Outbound::Move(MovePacket::Flying { on_ground, .. }) => {
             serde_json::json!(["flying", on_ground])
         }
+        Outbound::VehicleMove {
+            pos, yaw, pitch, ..
+        } => serde_json::json!(["vehicle_move", bits(pos), yaw.to_bits(), pitch.to_bits()]),
+        Outbound::SteerBoat { left, right } => serde_json::json!(["steer_boat", left, right]),
+        Outbound::SteerVehicle {
+            sideways,
+            forward,
+            jump,
+            sneak,
+        } => serde_json::json!([
+            "steer_vehicle",
+            sideways.to_bits(),
+            forward.to_bits(),
+            jump,
+            sneak
+        ]),
         Outbound::EntityAction { action, .. } => serde_json::json!([
             "entity_action",
             match action {
@@ -272,6 +319,20 @@ fn theirs(p: &Value) -> Option<Value> {
         ]),
         "flying" => serde_json::json!(["flying", og]),
         "entity_action" => serde_json::json!(["entity_action", p["action_name"]]),
+        "vehicle_move" => serde_json::json!([
+            "vehicle_move",
+            bits(&p["pos"]),
+            f32v(&p["yaw"]).to_bits(),
+            f32v(&p["pitch"]).to_bits()
+        ]),
+        "steer_boat" => serde_json::json!(["steer_boat", p["left"], p["right"]]),
+        "steer_vehicle" => serde_json::json!([
+            "steer_vehicle",
+            f32v(&p["sideways"]).to_bits(),
+            f32v(&p["forward"]).to_bits(),
+            p["jump"],
+            p["sneak"]
+        ]),
         _ => return None,
     })
 }
@@ -421,6 +482,15 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
                 .with_player_names(true)
                 .with_events(false),
         ));
+        // Riding cases: a join packet first (our entity id for set_passengers).
+        let ride = setup
+            .get("ext")
+            .and_then(|x| x.get("ride"))
+            .and_then(Value::as_bool)
+            == Some(true);
+        if ride {
+            e.sim.world_packet(&login_packet()).unwrap();
+        }
         // The oracle world: the loaded columns, air outside the fills (in order).
         for r in sc["loaded_chunks"].as_array().unwrap() {
             let r: Vec<i32> = (0..4).map(|k| r[k].as_i64().unwrap() as i32).collect();
@@ -468,7 +538,7 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
         }
         // Elytra cases: the chest item and boots in the inventory window, rockets in the hand,
         // the server's flag 7 at setup.
-        if let Some(x) = setup.get("ext") {
+        if let Some(x) = setup.get("ext").filter(|_| !ride) {
             e.sim.test_watch_glide();
             let damage = x.get("chest_damage").map_or(0, |v| v.as_i64().unwrap());
             e.inventory_mut().on_set_slot(
@@ -521,6 +591,7 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
                 break;
             }
             let input = &rec["input"];
+            let mut replies: Vec<Outbound> = Vec::new();
             for ev in input["events"].as_array().into_iter().flatten() {
                 match ev["type"].as_str().unwrap() {
                     "velocity" => {
@@ -552,7 +623,13 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
                             e.sim.world_packet(&raw).unwrap();
                         }
                     }
-                    _ => e.sim.world_packet(&packet(ev)).unwrap(),
+                    _ => {
+                        e.sim.world_packet(&packet(ev)).unwrap();
+                        // The client's answer to the server's vehicle move goes out at once.
+                        if let Some(o) = e.sim.take_reply() {
+                            replies.push(o);
+                        }
+                    }
                 }
             }
             let keys = input["keys"].as_str().unwrap();
@@ -573,7 +650,7 @@ fn replay_file(path: &str, metadata: bool) -> (usize, usize) {
             e.note_inbound(t0);
             e.tick(&mut b, t0);
             let out = std::mem::take(e.outbound());
-            let got: Vec<Value> = out.iter().filter_map(ours).collect();
+            let got: Vec<Value> = replies.iter().chain(out.iter()).filter_map(ours).collect();
             let want: Vec<Value> = rec["packets"]
                 .as_array()
                 .unwrap()
@@ -676,5 +753,47 @@ fn entities_cache_match_the_oracle_1_12_2() {
         ticks += t;
     }
     eprintln!("1.12.2 entity fuzz cache through the engine: {cases} cases, {ticks} ticks");
+    assert!(cases > 0);
+}
+
+/// The 1.12.2 boat goldens through the engine (entity tracking): boarding by `set_passengers`,
+/// the boat the client moves, `steer_boat` / `look` / `steer_vehicle` / `vehicle_move` every
+/// tick, the answer to the server's `vehicle_move`, the server's dismount.
+#[test]
+fn boats_match_the_oracle_1_12_2() {
+    let (cases, ticks) = replay_file(
+        &format!(
+            "{}/../../tests/golden/1.12.2/boats.jsonl.gz",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+        false,
+    );
+    assert!(cases >= 122 && ticks > 7000, "{cases} cases, {ticks} ticks");
+}
+
+/// The cached boat fuzz (`oracle/cache/1.12.2/fuzz-boats/`, git-ignored) through the engine.
+#[test]
+#[ignore = "needs the oracle cache"]
+fn boats_cache_match_the_oracle_1_12_2() {
+    let dir = format!(
+        "{}/../../oracle/cache/1.12.2/fuzz-boats",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {dir} not found");
+        return;
+    };
+    let mut files: Vec<_> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz"))
+        .collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in &files {
+        let (c, t) = replay_file(&f.to_string_lossy(), false);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.12.2 boat fuzz cache through the engine: {cases} cases, {ticks} ticks");
     assert!(cases > 0);
 }

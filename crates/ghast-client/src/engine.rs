@@ -2572,10 +2572,11 @@ impl TickContext<'_> {
         self.core.sequence
     }
 
-    /// The vehicle the player rides (26.1 boats and rafts, 1.16.5 boats with entity tracking:
-    /// boarded when the server's `set_passengers` names the player, e.g. after a right click
-    /// on the boat with the crosshair on it; the client then moves the boat with the movement
-    /// keys). Leave it with the sneak key. `None` when not riding or on older versions.
+    /// The vehicle the player rides (26.1 boats and rafts, 1.16.5 and 1.12.2 boats with entity
+    /// tracking: boarded when the server's `set_passengers` names the player, e.g. after a
+    /// right click on the boat with the crosshair on it; the client then moves the boat with
+    /// the movement keys). Leave it with the sneak key (on 1.12.2 the server takes the player
+    /// off). `None` when not riding or on older versions.
     #[must_use]
     pub fn vehicle(&self) -> Option<crate::common::Vehicle> {
         self.world.vehicle()

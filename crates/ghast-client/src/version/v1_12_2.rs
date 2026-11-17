@@ -514,6 +514,30 @@ impl ClientVersion for V1_12_2 {
                     data: data.freeze(),
                 })
             }
+            // Riding a boat the client controls.
+            Outbound::VehicleMove {
+                pos, yaw, pitch, ..
+            } => enc.write_packet(&sb::VehicleMove {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                yaw: *yaw,
+                pitch: *pitch,
+            }),
+            Outbound::SteerBoat { left, right } => enc.write_packet(&sb::SteerBoat {
+                left_paddle: *left,
+                right_paddle: *right,
+            }),
+            Outbound::SteerVehicle {
+                sideways,
+                forward,
+                jump,
+                sneak,
+            } => enc.write_packet(&sb::SteerVehicle {
+                sideways: *sideways,
+                forward: *forward,
+                jump: u8::from(*jump) | (u8::from(*sneak) << 1),
+            }),
             // Packets of newer versions: never produced for this one.
             Outbound::PlayerInput(_)
             | Outbound::TickEnd
@@ -524,9 +548,6 @@ impl ClientVersion for V1_12_2 {
             | Outbound::ResourcePackStatus { .. }
             | Outbound::CookieResponse { .. }
             | Outbound::LookAnswer { .. }
-            | Outbound::VehicleMove { .. }
-            | Outbound::SteerBoat { .. }
-            | Outbound::SteerVehicle { .. }
             | Outbound::CustomClickAction { .. }
             | Outbound::DialogCommand(_) => Ok(()),
         }
