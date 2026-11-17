@@ -696,40 +696,27 @@ fn furnace() {
             },
         );
         assert_eq!(count(&inv, 38), Some((STONE, 5)));
-        // player -> furnace needs smelting recipes and fuel: refused
-        inv.tick();
-        assert_eq!(
-            inv.click(Click::QuickMove {
-                slot: 3,
-                right: false
-            }),
-            Err(ClickError::Unpredictable)
-        );
-        // nothing can be put into the output
+        // player -> furnace: dirt neither smelts nor burns, so main inventory -> hotbar
         click(
             &mut inv,
-            Click::Pickup {
+            Click::QuickMove {
                 slot: 3,
                 right: false,
             },
         );
+        assert_eq!(count(&inv, 30), Some((DIRT, 3)));
         click(
             &mut inv,
             Click::Pickup {
-                slot: 2,
+                slot: 30,
                 right: false,
             },
         );
-        assert_eq!(count(&inv, 2), None);
-        // the fuel slot's rules are not modelled
-        inv.tick();
-        assert_eq!(
-            inv.click(Click::Pickup {
-                slot: 1,
-                right: false
-            }),
-            Err(ClickError::Unpredictable)
-        );
+        // nothing can be put into the output, dirt is no fuel
+        for (slot, at) in [(2i16, 2usize), (1, 1)] {
+            click(&mut inv, Click::Pickup { slot, right: false });
+            assert_eq!(count(&inv, at), None);
+        }
         // the input slot takes anything
         click(
             &mut inv,

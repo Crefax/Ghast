@@ -1409,6 +1409,20 @@ impl Inventory {
         }
     }
 
+    /// 1.16.5 `open_window` by menu type id ([`WindowKind::from_v1_16_5`]); also remembers
+    /// which recipes a furnace, blast furnace or smoker smelts (its shift-click reads them).
+    /// [`Inventory::apply_v1_16_5`] calls this.
+    pub fn on_open_window_v1_16_5(&mut self, id: i32, menu_type: i32, title: ByteString) {
+        self.on_open_window(id, WindowKind::from_v1_16_5(menu_type), title);
+        if self.open_id() == id {
+            self.m.furnace = match menu_type {
+                9 => 1,
+                21 => 2,
+                _ => 0,
+            };
+        }
+    }
+
     /// 1.8 – 1.16.5 mount screen (a `Horse` window): what its saddle and armor slots take, read
     /// off the entity like vanilla's screen does (`None`: unknown, the default after the window
     /// opens; clicks that would need them are refused). Vanilla: 1.8 `open_window`
@@ -2023,6 +2037,7 @@ impl Inventory {
             && crate::menus::modelled(self.version, kind))
         .then(Box::default);
         self.m.mount = None;
+        self.m.furnace = 0;
         self.m.container_result_known = true;
         self.m.container_fresh = true;
         self.screen = ScreenState::Window(Window {

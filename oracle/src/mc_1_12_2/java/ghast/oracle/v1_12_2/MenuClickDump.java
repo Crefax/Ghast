@@ -24,7 +24,10 @@ import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingScreenHandler;
 import net.minecraft.screen.EnchantingScreenHandler;
+import net.minecraft.screen.FurnaceScreenHandler;
+import net.minecraft.recipe.SmeltingRecipeRegistry;
 import net.minecraft.screen.HorseScreenHandler;
+import net.minecraft.screen.ShulkerBoxScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.VillagerScreenHandler;
 import net.minecraft.util.PacketByteBuf;
@@ -60,7 +63,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "shulker"};
 
     /**
      * Items that appear in brewing slots or are close to the rules: potion, splash, lingering, glass
@@ -83,6 +86,11 @@ final class MenuClickDump {
 
     /** Villager sales (emerald, bread, enchanted book, diamond sword, bow, filled map, book, diamond). */
     static final int[] SELL = {388, 297, 403, 276, 261, 358, 340, 264};
+
+    /** Smelting inputs (ores, logs, sand, food, fish types, wet sponge), fuels (coal / charcoal, sticks, planks,
+     * lava bucket, blaze rod, sapling, wooden tools, coal block), the bucket, outputs and others. */
+    static final int[] FURNACE = {15, 14, 17, 12, 4, 363, 349, 19, 337, 81, 263, 263, 280, 5, 327, 325, 369, 6, 270,
+        173, 265, 20, 1, 3};
 
     /** Saddles, horse armor, carpets, chests, horse food, a few others. */
     static final int[] HORSE = {329, 329, 417, 418, 419, 171, 171, 54, 296, 322, 1, 3};
@@ -109,6 +117,29 @@ final class MenuClickDump {
                 String f = facts(run, menu);
                 sink.accept(f.substring(0, f.length() - 1) + ",\"entity\":\"" + m + "\"}");
             }
+        } else if (menu.equals("furnace")) {
+            // the furnace's own rules: the smelting inputs (SmeltingRecipeRegistry) besides the slots
+            String f = facts(run, menu);
+            StringBuilder b = new StringBuilder(f.substring(0, f.length() - 1)).append(",\"smeltable\":[");
+            boolean first = true;
+            for (int id = 0; id < 4096; id++) {
+                Item item = Item.byRawId(id);
+                if (item == null) {
+                    continue;
+                }
+                int mask = 0;
+                for (int d = 0; d < 16; d++) {
+                    ItemStack r = SmeltingRecipeRegistry.getInstance().getResult(new ItemStack(item, 1, d));
+                    if (!(r.isEmpty())) {
+                        mask |= 1 << d;
+                    }
+                }
+                if (mask != 0) {
+                    b.append(first ? "" : ",").append('[').append(id).append(',').append(mask).append(']');
+                    first = false;
+                }
+            }
+            sink.accept(b.append("]}").toString());
         } else {
             sink.accept(facts(run, menu));
         }
@@ -134,6 +165,11 @@ final class MenuClickDump {
             case "anvil" -> new AnvilScreenHandler(inv, run.world, run.player);
             case "beacon" -> new BeaconScreenHandler(inv,
                     new ClientNetworkSyncedInventory("minecraft:beacon", new LiteralText("b"), 1));
+            // ClientPlayerEntity.openInventory "minecraft:shulker_box": ShulkerBoxScreen's handler
+            case "shulker" -> new ShulkerBoxScreenHandler(inv,
+                    new ClientNetworkSyncedInventory("minecraft:shulker_box", new LiteralText("s"), 27), run.player);
+            case "furnace" -> new FurnaceScreenHandler(inv,
+                    new ClientNetworkSyncedInventory("minecraft:furnace", new LiteralText("f"), 3));
             case "horse" -> {
                 // ClientPlayNetworkHandler.onOpenScreen "EntityHorse": the entity's screen over an
                 // AnimalInventory of the packet's slot count
@@ -174,7 +210,8 @@ final class MenuClickDump {
             case "enchanting" -> 2;
             case "anvil" -> 3;
             case "beacon" -> 1;
-            case "merchant" -> 3;
+            case "merchant", "furnace" -> 3;
+            case "shulker" -> 27;
             case "horse" -> mountChest ? 2 + 3 * (mount.equals("llama") ? mountStrength : 5) : 2;
             default -> throw new IllegalArgumentException(menu);
         };
@@ -222,6 +259,20 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("shulker")) {
+            // shulker boxes (219..234, refused by the slots) and anything else
+            return r.chance(0.3) ? ClickDump.stack(r, new int[] {r.range(219, 234)}) : ClickDump.stack(r, ClickDump.ITEMS);
+        }
+        if (menu.equals("furnace")) {
+            int id = r.pick(FURNACE);
+            ItemStack s = ClickDump.stack(r, new int[] {id});
+            if (id == 263 || id == 19 || id == 17 || id == 5 || id == 6) {
+                s.setDamage(r.nextInt(id == 263 || id == 19 ? 2 : 4));
+            } else if (id == 349) {
+                s.setDamage(r.nextInt(4));
+            }
+            return s;
+        }
         if (menu.equals("horse")) {
             ItemStack s = ClickDump.stack(r, new int[] {r.pick(HORSE)});
             if (s.getItem() == Item.byRawId(171)) {

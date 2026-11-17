@@ -105,6 +105,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 | horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
+| furnace (`SlotKind::FurnaceFuel`, output `Output`); 1.16.5 blast furnace, smoker | yes | yes | yes |
+| 1.16.5 smithing table, grindstone, stonecutter, loom, cartography table, lectern | — | — | no: their own slots are `Special` |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -165,9 +167,18 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   columns with a chest); 1.16.5 then moves it between main inventory and hotbar (and the click
   carries an empty stack), 1.8 / 1.12 stop. This screen's shift-click never compares counts.
 
+- **Furnace** (1.16.5 also blast furnace and smoker): the fuel slot takes fuels and the bucket
+  (one at a time); shift-click from the player part puts what the furnace smelts into the input
+  slot, else fuel into the fuel slot, else moves it between main inventory and hotbar. Fuels
+  and (1.8 / 1.12) smelting inputs are the real client's (`src/furnace.rs`; 1.16.5 fuels with the
+  vanilla item tags); 1.16.5 smelting inputs are the server's recipes of the furnace's type
+  (`declare_recipes`; open the window with `Inventory::on_open_window_v1_16_5` /
+  `apply_v1_16_5` so blast furnaces and smokers are told apart). Burn and cook progress are
+  window properties; smelting itself is the server's.
+
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
-shift-click from the player part of a furnace (smelting recipes, fuel), any interaction that
-reads a fuel / unmodelled brewing / enchanting / anvil / horse-equipment slot, a
+any interaction that reads an anvil output ghast does not know, mount slots without
+`MountRules` (saddles, horse armor, carpets), the 1.16.5 workstation menus (below), a
 crafting-result click while the result is unknown, taking a result whose grid matches no recipe
 ghast models (1.8 banners, map upscaling; 1.16.5 special recipes, a written book or banner in the
 grid, or no recipe at all — vanilla then aliases the grid stacks).
@@ -184,8 +195,9 @@ grid, or no recipe at all — vanilla then aliases the grid stacks).
 | `Hopper` | `minecraft:hopper` | 15 | 5 | yes |
 | `ShulkerBox` | — (1.12: `minecraft:shulker_box`) | 19 | 27 | yes |
 | `Crafting` | `minecraft:crafting_table` (0 slots) | 11 | 10 (result + 3×3) | yes (1.16: into the grid first), not from the result |
-| `Furnace` | `minecraft:furnace` | 13, 9 (blast), 21 (smoker) | 3 | from furnace slots only |
-| `BrewingStand`, `Enchanting`, `Anvil`, `Beacon`, `Merchant`, `Horse`, `Grindstone`, `Lectern`, `Loom`, `Smithing`, `Cartography`, `Stonecutter` | as vanilla | as vanilla | as vanilla | no (player-part clicks of other modes work) |
+| `Furnace` | `minecraft:furnace` | 13, 9 (blast), 21 (smoker) | 3 | yes |
+| `BrewingStand`, `Enchanting`, `Anvil`, `Beacon`, `Merchant`, `Horse` | as vanilla | as vanilla | as vanilla | yes (special menus above) |
+| `Grindstone`, `Lectern`, `Loom`, `Smithing`, `Cartography`, `Stonecutter` | — | as vanilla | as vanilla | 1.16.5: no (player-part clicks of other modes work) |
 
 ### Confirm protocol and timing
 

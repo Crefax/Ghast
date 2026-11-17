@@ -97,6 +97,8 @@ pub enum SlotKind {
     /// Mount armor slot (1): horse armor or carpet as the mount takes them
     /// ([`MountRules`](crate::MountRules)).
     MountArmor,
+    /// Furnace fuel slot (1): fuels and the bucket (one bucket at a time).
+    FurnaceFuel,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -227,7 +229,7 @@ impl WindowKind {
             }
             WindowKind::Furnace => match i {
                 0 => SlotKind::Normal,
-                1 => SlotKind::Special,
+                1 => SlotKind::FurnaceFuel,
                 _ => SlotKind::Output,
             },
             WindowKind::Anvil => {

@@ -62,6 +62,7 @@ mod crafting;
 mod data26;
 #[cfg(modern)]
 mod ench_value;
+mod furnace;
 mod inventory;
 mod item;
 #[cfg(modern)]

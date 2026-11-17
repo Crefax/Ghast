@@ -85,7 +85,7 @@ final class ClickDump {
     private static String declareHex;
 
     /** Loads the vanilla data pack's recipes (once) and syncs them to the client; returns the packet hex. */
-    private static String syncRecipes() {
+    static String syncRecipes() {
         try {
             if (serverRecipes == null) {
                 net.minecraft.resource.ServerResourceManager srm = net.minecraft.resource.ServerResourceManager.reload(

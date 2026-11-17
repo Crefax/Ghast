@@ -18,7 +18,10 @@ import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
+import net.minecraft.screen.BlastFurnaceScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
+import net.minecraft.screen.FurnaceScreenHandler;
+import net.minecraft.screen.SmokerScreenHandler;
 import net.minecraft.screen.HorseScreenHandler;
 import net.minecraft.screen.MerchantScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -57,7 +60,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "blast_furnace", "smoker"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -86,6 +89,12 @@ final class MenuClickDump {
     static final String[] SELL = {"emerald", "bread", "enchanted_book", "diamond_sword", "bow", "filled_map", "book",
         "diamond"};
 
+    /** Smelting / blasting / smoking inputs, fuels, the bucket, outputs and others. */
+    static final String[] FURNACE = {"iron_ore", "gold_ore", "oak_log", "sand", "cobblestone", "beef", "cod", "potato",
+        "wet_sponge", "clay_ball", "cactus", "iron_sword", "coal", "charcoal", "stick", "oak_planks", "lava_bucket",
+        "bucket", "blaze_rod", "oak_sapling", "wooden_pickaxe", "coal_block", "bamboo", "iron_ingot", "glass", "stone",
+        "dirt"};
+
     /** Saddles, horse armor, carpets, chests, horse food, a few others. */
     static final String[] HORSE = {"saddle", "saddle", "leather_horse_armor", "iron_horse_armor", "golden_horse_armor",
         "diamond_horse_armor", "white_carpet", "red_carpet", "chest", "wheat", "golden_apple", "white_wool", "stone",
@@ -101,11 +110,20 @@ final class MenuClickDump {
     private static boolean mountTame = true;
     private static boolean mountBaby;
 
+    /** The output that already got the recipes line. */
+    private static Consumer<String> recipesSentTo;
+
     /** The handler of the current merchant case. */
     private static MerchantScreenHandler trader;
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
+        if ((menu.endsWith("furnace") || menu.equals("smoker")) && sink != recipesSentTo) {
+            // the server's recipes (a real client always has them; isSmeltable reads them), once
+            // per output
+            sink.accept("{\"declare_recipes\":\"" + ClickDump.syncRecipes() + "\"}");
+            recipesSentTo = sink;
+        }
         if (menu.equals("horse")) {
             // one facts line per mount, tame and baby (the slot rules ask the entity)
             for (String m : MOUNTS) {
@@ -142,6 +160,9 @@ final class MenuClickDump {
             case "beacon" -> 8;
             case "merchant" -> 18;
             case "horse" -> -1; // open_horse_window, not a menu type
+            case "furnace" -> 13;
+            case "blast_furnace" -> 9;
+            case "smoker" -> 21;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -152,6 +173,10 @@ final class MenuClickDump {
             case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
             case "anvil" -> new AnvilScreenHandler(sync, inv);
             case "beacon" -> new BeaconScreenHandler(sync, inv);
+            // the client constructors; isSmeltable asks the client's recipe manager (the server's recipes)
+            case "furnace" -> new FurnaceScreenHandler(sync, inv);
+            case "blast_furnace" -> new BlastFurnaceScreenHandler(sync, inv);
+            case "smoker" -> new SmokerScreenHandler(sync, inv);
             case "horse" -> {
                 // ClientPlayNetworkHandler.onOpenHorseScreen: the entity's screen over a
                 // SimpleInventory of the packet's slot count
@@ -216,6 +241,9 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("furnace") || menu.equals("blast_furnace") || menu.equals("smoker")) {
+            return ClickDump.stack(r, FURNACE);
+        }
         if (menu.equals("horse")) {
             return ClickDump.stack(r, HORSE);
         }

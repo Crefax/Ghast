@@ -66,6 +66,7 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "hopper" => Some(WindowKind::Hopper),
         "crafting" => Some(WindowKind::Crafting),
         "furnace" => Some(WindowKind::Furnace),
+        "shulker" => Some(WindowKind::ShulkerBox),
         "brewing" => Some(WindowKind::BrewingStand),
         "enchanting" => Some(WindowKind::Enchanting),
         "anvil" => Some(WindowKind::Anvil),
@@ -229,6 +230,10 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
     match kind {
         None => {
             inv.open_inventory().unwrap();
+        }
+        // 1.16.5: by menu id (a blast furnace / smoker smelts its own recipes)
+        Some(_) if v == Version::V1_16_5 && c["menu"].as_i64().is_some_and(|m| m >= 0) => {
+            inv.on_open_window_v1_16_5(sync, c["menu"].as_i64().unwrap() as i32, "{}".into());
         }
         Some(k) => inv.on_open_window(sync, Some(k), "{}".into()),
     }

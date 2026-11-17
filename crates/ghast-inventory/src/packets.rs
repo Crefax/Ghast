@@ -233,11 +233,9 @@ impl Inventory {
         use cb16::ClientboundPlayPacket as P;
         match p {
             P::Login(_) | P::Respawn(_) => self.reset(),
-            P::OpenWindow(w) => self.on_open_window(
-                w.window_id,
-                WindowKind::from_v1_16_5(w.inventory_type),
-                w.window_title.clone(),
-            ),
+            P::OpenWindow(w) => {
+                self.on_open_window_v1_16_5(w.window_id, w.inventory_type, w.window_title.clone());
+            }
             P::OpenHorseWindow(w) => self.on_open_window(
                 i32::from(w.window_id),
                 // the slot count is a VarInt; vanilla horse inventories have at most 17

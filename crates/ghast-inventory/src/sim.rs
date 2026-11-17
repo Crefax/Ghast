@@ -56,6 +56,8 @@ pub(crate) struct Model {
     pub merchant: Option<Box<crate::merchant::Merchant>>,
     /// 1.8 – 1.16.5 mount screen: what its saddle and armor slots take (`None`: unknown).
     pub mount: Option<crate::mount::MountRules>,
+    /// 1.16.5 furnace screen: its recipe type (0 furnace, 1 blast furnace, 2 smoker).
+    pub furnace: u8,
 }
 
 /// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
@@ -103,6 +105,7 @@ impl Default for Model {
             table_memo: None,
             merchant: None,
             mount: None,
+            furnace: 0,
         }
     }
 }
@@ -217,6 +220,7 @@ impl Layout {
                         | SlotKind::TradeOutput
                         | SlotKind::MountSaddle
                         | SlotKind::MountArmor
+                        | SlotKind::FurnaceFuel
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
@@ -519,6 +523,7 @@ impl Sim<'_> {
             SlotKind::TradeOutput => false,
             SlotKind::MountSaddle => return self.mount_saddle_accepts(s),
             SlotKind::MountArmor => return self.mount_armor_accepts(s),
+            SlotKind::FurnaceFuel => self.v.is_fuel(s) || self.v.is_bucket(s),
             SlotKind::BeaconPayment => self.v.beacon_payment(s),
             SlotKind::Special => return Err(Unpredictable),
         })
@@ -526,8 +531,9 @@ impl Sim<'_> {
 
     /// `Slot.getMaxStackAmount(stack)` / `getMaxItemCount()` (26.1: `Container.getMaxStackSize`
     /// is 99; the stack's own limit is applied separately).
-    fn slot_limit(&self, i: usize) -> R<i32> {
+    fn slot_limit(&self, i: usize, s: &Stack) -> R<i32> {
         match self.lay.kind(i) {
+            SlotKind::FurnaceFuel if self.v.is_bucket(s) => Ok(1),
             SlotKind::Armor(_)
             | SlotKind::Potion
             | SlotKind::EnchantItem
@@ -538,6 +544,15 @@ impl Sim<'_> {
             _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
         }
+    }
+
+    /// A furnace's `isSmeltable`: 1.8 / 1.12 the client's smelting table, 1.16.5 the server's
+    /// recipes of the furnace's type.
+    fn smeltable(&self, s: &Stack) -> bool {
+        if self.v == Version::V1_16_5 {
+            return self.book.cooks(self.m.furnace, s.id);
+        }
+        self.v.is_smeltable_legacy(s)
     }
 
     /// `Slot.canTakeItems` (reads the slot, so an unknown crafting result is unpredictable).
@@ -871,7 +886,7 @@ impl Sim<'_> {
             (None, Some(mut c)) => {
                 if self.can_insert(i, &c)? {
                     let mut l = if button == 0 { c.count } else { 1 };
-                    let lim = self.slot_limit(i)?;
+                    let lim = self.slot_limit(i, &c)?;
                     if l > lim {
                         l = lim;
                     }
@@ -900,7 +915,7 @@ impl Sim<'_> {
                         if self.can_insert(i, &c)? {
                             if s.id == c.id && s.damage == c.damage && s.nbt_eq(&c) {
                                 let mut n = if button == 0 { c.count } else { 1 };
-                                let lim = self.slot_limit(i)?;
+                                let lim = self.slot_limit(i, &c)?;
                                 if n > lim - s.count {
                                     n = lim - s.count;
                                 }
@@ -915,7 +930,7 @@ impl Sim<'_> {
                                 }
                                 let l = self.loc(i);
                                 self.anvil_touched(l);
-                            } else if c.count <= self.slot_limit(i)? {
+                            } else if c.count <= self.slot_limit(i, &c)? {
                                 self.set(i, Some(c));
                                 self.m.cursor = Some(s);
                             }
@@ -953,7 +968,7 @@ impl Sim<'_> {
             (None, Some(mut c)) => {
                 if self.can_insert(i, &c)? {
                     let mut o = if button == 0 { c.count } else { 1 };
-                    let lim = self.slot_limit(i)?;
+                    let lim = self.slot_limit(i, &c)?;
                     if o > lim {
                         o = lim;
                     }
@@ -987,7 +1002,7 @@ impl Sim<'_> {
                                 && s.nbt_eq(&c)
                             {
                                 let mut q = if button == 0 { c.count } else { 1 };
-                                let lim = self.slot_limit(i)?;
+                                let lim = self.slot_limit(i, &c)?;
                                 if q > lim - s.count {
                                     q = lim - s.count;
                                 }
@@ -1000,7 +1015,7 @@ impl Sim<'_> {
                                 let t = s.with_count(s.count + q);
                                 let t = self.norm(t);
                                 self.set(i, t);
-                            } else if c.count <= self.slot_limit(i)? {
+                            } else if c.count <= self.slot_limit(i, &c)? {
                                 self.set(i, Some(c));
                                 self.m.cursor = Some(s);
                             }
@@ -1154,7 +1169,13 @@ impl Sim<'_> {
                         let ok = match i {
                             2 => self.insert(&mut st, 3, 39, true)?,
                             0 | 1 => self.insert(&mut st, 3, 39, false)?,
-                            _ => return Err(Unpredictable), // smelting recipes and fuel
+                            // smelting recipes and fuel (26.x: its own simulation)
+                            _ if !crate::menus::modelled(v, kind) => return Err(Unpredictable),
+                            _ if self.smeltable(&st) => self.insert(&mut st, 0, 1, false)?,
+                            _ if v.is_fuel(&st) => self.insert(&mut st, 1, 2, false)?,
+                            3..30 => self.insert(&mut st, 30, 39, false)?,
+                            30..39 => self.insert(&mut st, 3, 30, false)?,
+                            _ => false,
                         };
                         (ok, true)
                     }
@@ -1267,7 +1288,7 @@ impl Sim<'_> {
                 let j = tc + st.count;
                 // 26.1 `slot.getMaxStackSize(target)`: the slot's limit counts too
                 let max = if v.is_modern() {
-                    max.min(self.slot_limit(i)?)
+                    max.min(self.slot_limit(i, st)?)
                 } else {
                     max
                 };
@@ -1304,7 +1325,7 @@ impl Sim<'_> {
                         if !self.can_insert(i, st)? {
                             continue;
                         }
-                        let n = st.count.min(self.slot_limit(i)?);
+                        let n = st.count.min(self.slot_limit(i, st)?);
                         st.count -= n;
                         self.set(i, Some(st.with_count(n)));
                     }
@@ -1390,7 +1411,7 @@ impl Sim<'_> {
             }
             (Some(mut h), None) => {
                 if self.can_insert(i, &h)? {
-                    let lim = self.slot_limit(i)?;
+                    let lim = self.slot_limit(i, &h)?;
                     if h.count > lim {
                         h.count -= lim;
                         self.set(i, Some(h.with_count(lim)));
@@ -1403,7 +1424,7 @@ impl Sim<'_> {
             }
             (Some(mut h), Some(s)) => {
                 if self.can_take(i)? && self.can_insert(i, &h)? {
-                    let lim = self.slot_limit(i)?;
+                    let lim = self.slot_limit(i, &h)?;
                     if h.count > lim && self.loc(i) == Loc::Player(k) {
                         // the slot *is* hotbar slot k (one stack object): the split goes into the
                         // slot, the rest of the same object back through insertStack

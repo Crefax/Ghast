@@ -808,9 +808,20 @@ pub struct RecipeBook {
     pub(crate) recipes: Arc<Vec<R16>>,
     /// Number of special (`crafting_special_*`) recipes declared.
     pub(crate) specials: usize,
+    /// The item ids of the smelting, blasting and smoking recipes' ingredients (sorted), which
+    /// decide a furnace's shift-click (`isSmeltable`).
+    pub(crate) cooking: Arc<[Vec<i32>; 3]>,
 }
 
 impl RecipeBook {
+    /// 1.16.5: whether a recipe of the furnace type (0 furnace, 1 blast furnace, 2 smoker)
+    /// takes the item (`Ingredient.test`: the item alone).
+    pub(crate) fn cooks(&self, furnace: u8, id: i32) -> bool {
+        self.cooking
+            .get(usize::from(furnace))
+            .is_some_and(|c| c.binary_search(&id).is_ok())
+    }
+
     /// Number of crafting recipes (shaped, shapeless, special).
     #[must_use]
     pub fn len(&self) -> usize {
@@ -842,8 +853,12 @@ impl RecipeBook {
         };
         let mut recipes = Vec::new();
         let mut specials = 0;
+        let mut cooking: [Vec<i32>; 3] = Default::default();
         for r in &p.recipes {
             match &r.data {
+                D::Smelting(c) => cooking[0].extend(ing(&c.ingredient)),
+                D::Blasting(c) => cooking[1].extend(ing(&c.ingredient)),
+                D::Smoking(c) => cooking[2].extend(ing(&c.ingredient)),
                 D::CraftingShaped(s) => recipes.push(R16::Shaped {
                     w: usize::try_from(s.width).unwrap_or(0),
                     h: usize::try_from(s.height).unwrap_or(0),
@@ -869,9 +884,14 @@ impl RecipeBook {
                 _ => {}
             }
         }
+        for c in &mut cooking {
+            c.sort_unstable();
+            c.dedup();
+        }
         RecipeBook {
             recipes: Arc::new(recipes),
             specials,
+            cooking: Arc::new(cooking),
         }
     }
 }

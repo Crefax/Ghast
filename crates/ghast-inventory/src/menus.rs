@@ -19,7 +19,8 @@ pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
         | WindowKind::Anvil
         | WindowKind::Beacon
         | WindowKind::Merchant
-        | WindowKind::Horse { .. } => {
+        | WindowKind::Horse { .. }
+        | WindowKind::Furnace => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
         _ => false,
@@ -247,6 +248,9 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::AnvilOutput => false,
         K::BeaconPayment => v.beacon_payment(s),
         K::TradeOutput => false,
+        K::FurnaceFuel => v.is_fuel(s) || v.is_bucket(s),
+        K::Output => false,
+        K::Shulker => !v.is_shulker_box(s),
         _ => return None,
     })
 }
@@ -284,9 +288,15 @@ mod tests {
                 "anvil" => WindowKind::Anvil,
                 "beacon" => WindowKind::Beacon,
                 "merchant" => WindowKind::Merchant,
+                "furnace" | "blast_furnace" | "smoker" => WindowKind::Furnace,
+                "shulker" => WindowKind::ShulkerBox,
                 m => panic!("unknown menu {m}"),
             };
-            assert!(modelled(v, kind), "{kind:?} facts but not modelled");
+            // (the shulker box is an ordinary container, always modelled)
+            assert!(
+                modelled(v, kind) || kind == WindowKind::ShulkerBox,
+                "{kind:?} facts but not modelled"
+            );
             menus += 1;
             for (k, list) in c["accepts"].as_array().unwrap().iter().enumerate() {
                 let sk = kind.slot_kind(k);
@@ -311,6 +321,20 @@ mod tests {
                             Some(got) => assert_eq!(got, w, "{kind:?} slot {k} {id}:{d}"),
                             None => assert!(sk == crate::SlotKind::Normal, "{kind:?} slot {k}"),
                         }
+                    }
+                }
+            }
+            if let Some(list) = c["smeltable"].as_array() {
+                // 1.8 / 1.12 SmeltingRecipeRegistry
+                let want: std::collections::HashMap<i32, u32> = list
+                    .iter()
+                    .map(|e| (e[0].as_i64().unwrap() as i32, e[1].as_u64().unwrap() as u32))
+                    .collect();
+                for id in 1..4096 {
+                    for d in 0..16i16 {
+                        let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
+                        let s = Stack::new(id, 1, d);
+                        assert_eq!(v.is_smeltable_legacy(&s), w, "smeltable {id}:{d}");
                     }
                 }
             }
