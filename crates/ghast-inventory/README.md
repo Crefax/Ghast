@@ -101,7 +101,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 |---|---|---|---|
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
-| anvil (inputs `Normal`, output `SlotKind::AnvilOutput`; 1.16.5 `MenuResult`) | inputs; output refused | same | yes |
+| anvil (inputs `Normal`, output `SlotKind::AnvilOutput`; 1.12.2 / 1.16.5 `MenuResult`) | inputs; output refused | yes | yes |
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 | horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
@@ -135,7 +135,12 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   before the click's own packet (`Inventory::take_screen_packets`; ghast-client writes them),
   and `Inventory::anvil_rename` types a name (35 characters at most). The anvil breaking is the
   server's. Refused: custom names ghast cannot read as plain text (translations, scores).
-- **Anvil** (1.8.9, 1.12.2): the two inputs are plain slots (shift-click: player part into both inputs, inputs to
+- **1.12.2 anvil**: the same, over 1.12 stacks (`src/anvil12.rs`: damage values, `ench` /
+  `StoredEnchantments` with numeric ids, plain-string names); the screen sends `MC|ItemName`
+  on every change of its field (also an empty one) and when the first input changes (the
+  field takes `getCustomName()` cut to 35 characters). An item with a `LocName` is refused
+  (its name is translated on the client); item names are taken as at most 35 characters.
+- **Anvil** (1.8.9): the two inputs are plain slots (shift-click: player part into both inputs, inputs to
   the player part). The client computes the output itself on every input change (repair,
   enchantment combining, renaming, the level cost); ghast does not model that computation yet:
   after an input change the output is unknown (`result_known()` false; an empty first input

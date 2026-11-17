@@ -106,6 +106,95 @@ final class MenuClickDump {
     /** The trader of the current merchant case (the client's {@code Merchant}). */
     private static Merchant trader;
 
+    /** Anvil: enchanted and damaged gear, books, repair materials (leather for elytra), others. */
+    static final int[] ANVIL12 = {276, 276, 257, 310, 261, 359, 443, 264, 264, 265, 334, 403, 403, 403, 340, 1, 5, 268};
+
+    /** Enchantments for the anvil cases (incl. incompatible pairs and a curse). */
+    private static net.minecraft.enchantment.Enchantment[] anvilEnch;
+
+    /** After the bootstrap (the enchantment registry is filled then). */
+    private static net.minecraft.enchantment.Enchantment[] anvilEnch() {
+        if (anvilEnch == null) {
+            anvilEnch = anvilEnchantments();
+        }
+        return anvilEnch;
+    }
+
+    private static net.minecraft.enchantment.Enchantment[] anvilEnchantments() {
+        return new net.minecraft.enchantment.Enchantment[] {
+        net.minecraft.enchantment.Enchantments.SHARPNESS, net.minecraft.enchantment.Enchantments.SMITE,
+        net.minecraft.enchantment.Enchantments.UNBREAKING, net.minecraft.enchantment.Enchantments.MENDING,
+        net.minecraft.enchantment.Enchantments.INFINITY, net.minecraft.enchantment.Enchantments.PROTECTION,
+        net.minecraft.enchantment.Enchantments.FIRE_PROTECTION, net.minecraft.enchantment.Enchantments.EFFICIENCY,
+        net.minecraft.enchantment.Enchantments.SILK_TOUCH, net.minecraft.enchantment.Enchantments.FORTUNE,
+        net.minecraft.enchantment.Enchantments.POWER, net.minecraft.enchantment.Enchantments.BINDING_CURSE};
+    }
+
+    /** The MC|ItemName packets the emulated anvil screen sent during the current step. */
+    private static final java.util.List<String> renames = new java.util.ArrayList<>();
+
+    /** The emulated screen's name field: its text and whether it takes typing. */
+    private static String anvilText = "";
+    private static boolean anvilEditable;
+
+    /** {@code TextFieldWidget.setText} with the anvil's 35 characters. */
+    private static void anvilSetText(String t) {
+        anvilText = t.length() > 35 ? t.substring(0, 35) : t;
+    }
+
+    /** {@code AnvilScreen.sendRenameUpdates}. */
+    private static void anvilSendRename(AnvilScreenHandler h) {
+        String string = anvilText;
+        net.minecraft.inventory.slot.Slot slot = h.getSlot(0);
+        if (slot != null && slot.hasStack() && !slot.getStack().hasCustomName() && string.equals(slot.getStack().getCustomName())) {
+            string = "";
+        }
+        h.rename(string);
+        renames.add(string);
+    }
+
+    /**
+     * What {@code AnvilScreen} does on the client, faked without rendering: it listens to the
+     * handler and, when slot 0 changes, puts the item's name into its field and sends it.
+     */
+    private static void anvilScreen(AnvilScreenHandler h) {
+        anvilText = "";
+        anvilEditable = false;
+        h.addListener(new net.minecraft.screen.ScreenHandlerListener() {
+            @Override
+            public void method_13643(ScreenHandler handler, net.minecraft.util.collection.DefaultedList<ItemStack> stacks) {
+                onScreenHandlerSlotUpdate(handler, 0, handler.getSlot(0).getStack());
+            }
+
+            @Override
+            public void onScreenHandlerSlotUpdate(ScreenHandler handler, int slotId, ItemStack stack) {
+                if (slotId == 0) {
+                    anvilSetText(stack.isEmpty() ? "" : stack.getCustomName());
+                    anvilEditable = !stack.isEmpty();
+                    if (!stack.isEmpty()) {
+                        anvilSendRename(h);
+                    }
+                }
+            }
+
+            @Override
+            public void onScreenHandlerPropertyUpdate(ScreenHandler handler, int propertyId, int value) {}
+
+            @Override
+            public void onScreenHandlerInventoryUpdate(ScreenHandler handler, net.minecraft.inventory.Inventory inventory) {}
+        });
+    }
+
+    /** The anvil's client state after a step: rename packets sent, level, cost. */
+    private static void anvilState(StringBuilder b, AnvilScreenHandler h, ClientPlayerEntity player) {
+        b.append(",\"renames\":[");
+        for (int k = 0; k < renames.size(); k++) {
+            b.append(k > 0 ? "," : "").append(new com.google.gson.JsonPrimitive(renames.get(k)).toString());
+        }
+        b.append("],\"level\":").append(player.experienceLevel).append(",\"cost\":").append(h.repairCost);
+        renames.clear();
+    }
+
     /** All lines for {@code menu}: the facts line, then {@code count} cases. */
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
@@ -117,6 +206,72 @@ final class MenuClickDump {
                 String f = facts(run, menu);
                 sink.accept(f.substring(0, f.length() - 1) + ",\"entity\":\"" + m + "\"}");
             }
+        } else if (menu.equals("anvil")) {
+            // what updateResult reads: every enchantment's max level, rarity, incompatibilities
+            // and acceptable items (id, damage bits); every damageable item's repair materials
+            String f = facts(run, menu);
+            StringBuilder b = new StringBuilder(f.substring(0, f.length() - 1)).append(",\"enchantments\":[");
+            boolean first = true;
+            for (net.minecraft.enchantment.Enchantment e : net.minecraft.enchantment.Enchantment.REGISTRY) {
+                b.append(first ? "" : ",").append("[").append(net.minecraft.enchantment.Enchantment.getId(e)).append(",")
+                        .append(e.getMaximumLevel()).append(",\"").append(e.getRarity()).append("\",[");
+                boolean f2 = true;
+                for (net.minecraft.enchantment.Enchantment o : net.minecraft.enchantment.Enchantment.REGISTRY) {
+                    if (!e.isDifferent(o)) {
+                        b.append(f2 ? "" : ",").append(net.minecraft.enchantment.Enchantment.getId(o));
+                        f2 = false;
+                    }
+                }
+                b.append("],[");
+                f2 = true;
+                for (int id = 0; id < 4096; id++) {
+                    Item item = Item.byRawId(id);
+                    if (item == null) {
+                        continue;
+                    }
+                    int mask = 0;
+                    for (int d = 0; d < 16; d++) {
+                        if (e.isAcceptableItem(new ItemStack(item, 1, d))) {
+                            mask |= 1 << d;
+                        }
+                    }
+                    if (mask != 0) {
+                        b.append(f2 ? "" : ",").append("[").append(id).append(",").append(mask).append("]");
+                        f2 = false;
+                    }
+                }
+                b.append("]]");
+                first = false;
+            }
+            b.append("],\"repair\":[");
+            first = true;
+            for (int id = 0; id < 4096; id++) {
+                Item item = Item.byRawId(id);
+                if (item == null || item.getMaxDamage() <= 0) {
+                    continue;
+                }
+                b.append(first ? "" : ",").append("[").append(id).append(",[");
+                boolean f2 = true;
+                for (int m = 0; m < 4096; m++) {
+                    Item mi = Item.byRawId(m);
+                    if (mi == null) {
+                        continue;
+                    }
+                    int mask = 0;
+                    for (int d = 0; d < 16; d++) {
+                        if (item.canRepair(new ItemStack(item), new ItemStack(mi, 1, d))) {
+                            mask |= 1 << d;
+                        }
+                    }
+                    if (mask != 0) {
+                        b.append(f2 ? "" : ",").append("[").append(m).append(",").append(mask).append("]");
+                        f2 = false;
+                    }
+                }
+                b.append("]]");
+                first = false;
+            }
+            sink.accept(b.append("]}").toString());
         } else if (menu.equals("furnace")) {
             // the furnace's own rules: the smelting inputs (SmeltingRecipeRegistry) besides the slots
             String f = facts(run, menu);
@@ -304,9 +459,25 @@ final class MenuClickDump {
             return s;
         }
         if (menu.equals("anvil")) {
-            ItemStack s = ClickDump.stack(r, new int[] {r.pick(ANVIL)});
+            ItemStack s = ClickDump.stack(r, new int[] {r.pick(ANVIL12)});
+            boolean book = s.getItem() == net.minecraft.item.Items.ENCHANTED_BOOK;
+            for (int k = r.nextInt(book ? 3 : 4); k > 0; k--) {
+                net.minecraft.enchantment.Enchantment e = r.pick(anvilEnch());
+                int lvl = r.range(1, 6);
+                if (book) {
+                    net.minecraft.item.EnchantedBookItem.addEnchantment(s, new net.minecraft.enchantment.EnchantmentLevelEntry(e, lvl));
+                } else {
+                    s.addEnchantment(e, lvl);
+                }
+            }
             if (r.chance(0.3)) {
-                s.setCustomName(r.chance(0.5) ? "a" : "b");
+                s.setCustomName(r.chance(0.5) ? "a" : r.chance(0.5) ? "b" : "a name longer than thirty-five characters");
+            }
+            if (r.chance(0.2)) {
+                s.setRepairCost(r.range(0, 40));
+            }
+            if (r.chance(0.3)) {
+                s.setCount(1);
             }
             return s;
         }
@@ -444,12 +615,52 @@ final class MenuClickDump {
             h = handler(run, menu);
         }
         h.syncId = sync;
+        player.experienceLevel = 0;
+        player.abilities.creativeMode = false;
+        renames.clear();
+        if (h instanceof AnvilScreenHandler a) {
+            player.experienceLevel = r.range(0, 45);
+            player.abilities.creativeMode = r.chance(0.1);
+            anvilScreen(a);
+        }
         int n = containerSlots(menu);
         double cfill = r.nextDouble();
         // the anvil's / villager's output is what the handler computes from the inputs (a server
         // sends the same; without offers the client keeps the server's)
         int filled = menu.equals("anvil") || offers != null ? 2 : n;
-        if (offers != null && r.chance(0.5)) {
+        if (h instanceof AnvilScreenHandler && r.chance(0.6)) {
+            // a pair the anvil works with: gear and the same gear, a book or its repair material
+            int id = r.pick(new int[] {276, 257, 310, 261, 443});
+            ItemStack a0 = new ItemStack(Item.byRawId(id), 1, 0);
+            for (int k = r.nextInt(3); k > 0; k--) {
+                a0.addEnchantment(r.pick(anvilEnch()), r.range(1, 4));
+            }
+            if (r.chance(0.7)) {
+                a0.setDamage(r.nextInt(a0.getMaxDamage()));
+            }
+            ItemStack b0;
+            int pick = r.nextInt(3);
+            if (pick == 0) {
+                b0 = new ItemStack(a0.getItem(), 1, r.chance(0.7) ? r.nextInt(a0.getMaxDamage()) : 0);
+                for (int k = r.nextInt(3); k > 0; k--) {
+                    b0.addEnchantment(r.pick(anvilEnch()), r.range(1, 4));
+                }
+            } else if (pick == 1) {
+                b0 = new ItemStack(net.minecraft.item.Items.ENCHANTED_BOOK);
+                for (int k = r.range(1, 2); k > 0; k--) {
+                    net.minecraft.item.EnchantedBookItem.addEnchantment(b0,
+                            new net.minecraft.enchantment.EnchantmentLevelEntry(r.pick(anvilEnch()), r.range(1, 4)));
+                }
+            } else {
+                int m = id == 443 ? 334 : id == 257 ? 265 : 264;
+                b0 = new ItemStack(Item.byRawId(m), r.range(1, 5), 0);
+            }
+            if (r.chance(0.2)) {
+                a0.setCustomName("a");
+            }
+            h.getSlot(0).setStack(a0);
+            h.getSlot(1).setStack(b0);
+        } else if (offers != null && r.chance(0.5)) {
             // an offer's payments, enough of them (sometimes swapped)
             TraderOfferList list = trader.getOffers(null);
             TradeOffer o = list.get(r.nextInt(list.size()));
@@ -478,14 +689,31 @@ final class MenuClickDump {
             b.append(",\"slots\":").append(n).append(",\"mount\":{\"entity\":\"").append(mount).append("\",\"chest\":")
                     .append(mountChest).append(",\"known\":").append(known).append('}');
         }
+        if (h instanceof AnvilScreenHandler) {
+            b.append(",\"creative\":").append(player.abilities.creativeMode);
+        }
         ClickDump.state(b, player, w0, h);
         if (merchant) {
             uses(b);
+        }
+        if (h instanceof AnvilScreenHandler a) {
+            anvilState(b, a, player);
         }
         b.append(",\"clicks\":[");
         int clicks = r.range(1, 10);
         CapturingNetworkHandler net = run.net;
         for (int c = 0; c < clicks; c++) {
+            if (h instanceof AnvilScreenHandler a && anvilEditable && r.chance(0.15)) {
+                // typing into the name field (keyPressed: then sendRenameUpdates)
+                String typed = r.pick(new String[] {"", "a", "b", "Named", "a b", "x".repeat(35)});
+                anvilSetText(typed);
+                anvilSendRename(a);
+                b.append(c > 0 ? "," : "").append("{\"rename\":").append(new com.google.gson.JsonPrimitive(typed));
+                ClickDump.state(b, player, w0, h);
+                anvilState(b, a, player);
+                b.append('}');
+                continue;
+            }
             if (offers != null && r.chance(0.15)) {
                 // the trading screen's arrows: setRecipeIndex (+ MC|TrSel, not captured)
                 int k = r.nextInt(trader.getOffers(null).size());
@@ -498,7 +726,8 @@ final class MenuClickDump {
             }
             int len = h.slots.size();
             int mode = r.pick(new int[] {0, 0, 0, 1, 1, 2, 4, 6});
-            int slot = merchant && r.chance(0.25) ? 2 : r.chance(0.45) ? r.nextInt(n) : r.nextInt(len);
+            int slot = (merchant || h instanceof AnvilScreenHandler) && r.chance(0.25) ? 2
+                    : r.chance(0.45) ? r.nextInt(n) : r.nextInt(len);
             int button = r.nextInt(2);
             switch (mode) {
                 case 0, 4 -> {
@@ -526,6 +755,9 @@ final class MenuClickDump {
             ClickDump.state(b, player, w0, h);
             if (merchant) {
                 uses(b);
+            }
+            if (h instanceof AnvilScreenHandler a) {
+                anvilState(b, a, player);
             }
             b.append('}');
         }

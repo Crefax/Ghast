@@ -1570,7 +1570,8 @@ impl Inventory {
             self.m.station.as_deref(),
             Some(crate::station::Station::Anvil(a)) if a.tracked.is_some()
         );
-        if name.is_empty() || !editable {
+        // 1.16.5 sends nothing for an empty field; 1.12 sends every change
+        if (name.is_empty() && self.version != Version::V1_12) || !editable {
             return Ok(None);
         }
         let lay = self.layout();
@@ -2472,7 +2473,7 @@ impl Inventory {
             Screen::Container(WindowKind::Crafting)
         );
         let anvil = !self.version.is_modern()
-            && self.version != Version::V1_16_5
+            && !matches!(self.version, Version::V1_16_5 | Version::V1_12)
             && matches!(self.layout().screen, Screen::Container(WindowKind::Anvil));
         match l {
             Loc::CraftResult => {

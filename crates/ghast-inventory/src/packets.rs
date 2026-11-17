@@ -58,6 +58,24 @@ impl ClickPacket {
     }
 }
 
+/// `PacketByteBuf.writeString`: a VarInt byte length, then the UTF-8 bytes.
+#[cfg(feature = "v1_12")]
+fn mc_string(s: &str) -> bytes::Bytes {
+    let mut out = Vec::with_capacity(s.len() + 5);
+    let mut n = s.len() as u32;
+    loop {
+        let b = (n & 0x7f) as u8;
+        n >>= 7;
+        if n == 0 {
+            out.push(b);
+            break;
+        }
+        out.push(b | 0x80);
+    }
+    out.extend_from_slice(s.as_bytes());
+    bytes::Bytes::from(out)
+}
+
 impl Outgoing {
     /// The 1.8 serverbound packet (`None` for [`Outgoing::ContainerClick`], which only a 26.1
     /// inventory produces).
@@ -118,10 +136,16 @@ impl Outgoing {
                     data: bytes::Bytes::copy_from_slice(&i.to_be_bytes()),
                 })
             }
+            // the anvil screen's name field: `MC|ItemName` with the name as a string
+            Outgoing::RenameItem(n) => {
+                sb12::ServerboundPlayPacket::CustomPayload(sb12::CustomPayload {
+                    channel: "MC|ItemName".into(),
+                    data: mc_string(n),
+                })
+            }
             Outgoing::OpenInventory
             | Outgoing::ContainerClick(_)
             | Outgoing::Creative(_)
-            | Outgoing::RenameItem(_)
             | Outgoing::ButtonClick { .. } => {
                 return None;
             }
@@ -228,6 +252,9 @@ impl Inventory {
                 self.on_window_property(i32::from(c.window_id), c.property, c.value);
             }
             P::CustomPayload(c) if c.channel == "MC|TrList" => self.on_trade_list_legacy(&c.data),
+            // the anvil's level check
+            P::Experience(x) => self.set_experience_level(x.level),
+            P::Abilities(a) => self.set_creative(a.flags & 0x08 != 0),
             _ => {}
         }
         None

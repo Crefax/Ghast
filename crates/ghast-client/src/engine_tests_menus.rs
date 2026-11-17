@@ -799,3 +799,56 @@ fn anvil_1_16_5() {
     assert_eq!(e.core.inv.slot(1), None);
     assert_eq!(e.core.inv.cursor().map(Stack::id), Some(sword));
 }
+
+/// 1.12.2 anvil through the engine: the screen's `MC|ItemName` goes before the click, the
+/// client's own result (two damaged diamond swords combined), taking it costs levels.
+#[test]
+fn anvil_1_12_2() {
+    let mut e = opened::<V1_12_2>(
+        GameVersion::V1_12_2,
+        &open_1_12(5, "minecraft:anvil", 0),
+        5,
+        vec![None, None, None],
+        &[(0, Stack::new(276, 1, 1200)), (1, Stack::new(276, 1, 1300))],
+    );
+    e.inventory_mut().set_experience_level(5);
+    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::MenuResult));
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 30,
+            right: false,
+        },
+    );
+    assert!(
+        matches!(
+            out.first(),
+            Some(Outbound::Inventory(ghast_inventory::Outgoing::RenameItem(n))) if n.is_empty()
+        ),
+        "{out:?}"
+    );
+    let _ = e.inventory_mut().on_transaction(5, 1, true);
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 31,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    let _ = e.inventory_mut().on_transaction(5, 2, true);
+    assert_eq!(e.core.inv.anvil_cost(), Some(2));
+    assert_eq!(
+        e.core.inv.slot(2).map(Stack::damage),
+        Some(1200 - 261 - 187 - 4 + 4)
+    );
+    let out = click_once(
+        &mut e,
+        Click::Pickup {
+            slot: 2,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.experience_level(), 3);
+}

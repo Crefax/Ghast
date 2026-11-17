@@ -57,6 +57,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, unnameable_types)]
 
+mod anvil12;
 mod anvil16;
 mod crafting;
 #[cfg(modern)]

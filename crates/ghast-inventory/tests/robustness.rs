@@ -230,7 +230,22 @@ fn run(v: Version, ops: Vec<Op>, wild: bool) {
                 if let Ok(Outgoing::Click(p)) = inv.click(c) {
                     assert!(inv.pending());
                     last = Some((p.window_id as i8, p.action));
-                    let moves_only = !matches!(c, Click::Drop { .. })
+                    // taking a computed result uses inputs up (also a double-click that gathers
+                    // from it)
+                    let has_computed = (0..inv.slot_count()).any(|i| computed(&inv, i));
+                    let takes_computed = has_computed
+                        && (matches!(c, Click::PickupAll { .. })
+                            || match c {
+                                Click::Pickup { slot, .. }
+                                | Click::QuickMove { slot, .. }
+                                | Click::Swap { slot, .. }
+                                | Click::Drop { slot, .. } => {
+                                    usize::try_from(slot).is_ok_and(|i| computed(&inv, i))
+                                }
+                                _ => false,
+                            });
+                    let moves_only = !takes_computed
+                        && !matches!(c, Click::Drop { .. })
                         && !matches!(c, Click::Pickup { slot: OUTSIDE, .. })
                         && !matches!(c, Click::QuickMove { slot: OUTSIDE, .. });
                     let on_result = crafting
@@ -301,10 +316,22 @@ fn grid(inv: &Inventory) -> Vec<Option<Stack>> {
 
 /// All items of the current screen plus the cursor, by id (1.8 merges different damage values
 /// of items without subtypes, like vanilla); `skip_result`: without slot 0.
+fn computed(inv: &Inventory, i: usize) -> bool {
+    matches!(
+        inv.slot_kind(i),
+        Some(SlotKind::MenuResult | SlotKind::TradeOutput)
+    )
+}
+
 fn total(inv: &Inventory, skip_result: bool) -> Vec<(i32, i64)> {
     let mut m = std::collections::BTreeMap::new();
     let mut add = |s: &Stack| *m.entry(s.id()).or_insert(0i64) += i64::from(s.count());
     for i in usize::from(skip_result)..inv.slot_count() {
+        // a result the client computes from other slots (a workstation, a villager) is not
+        // counted either
+        if computed(inv, i) {
+            continue;
+        }
         if let Some(s) = inv.slot(i) {
             add(s);
         }
