@@ -8,6 +8,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.screen.AnvilScreenHandler;
+import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingStandScreenHandler;
 import net.minecraft.screen.EnchantmentScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -18,7 +19,7 @@ import net.minecraft.util.registry.Registry;
 import java.util.function.Consumer;
 
 /**
- * Window click vectors for the special menus (brewing stand, ...): the same click path and line
+ * Window click vectors for the special menus (brewing stand, enchanting table, anvil, beacon): the same click path and line
  * format as {@link ClickDump} ({@code "kind"} is the menu name, {@code "menu"} its menu type id),
  * over contents biased to the items the menu's slot rules look at, with clicks biased to the menu's
  * own slots.
@@ -33,14 +34,16 @@ import java.util.function.Consumer;
  * client context; {@code AnvilScreenHandler(syncId, playerInventory)}, whose output the handler
  * computes on every input change: the harness has no {@code AnvilScreen}, which would also call
  * {@code setNewItemName} and send {@code rename_item} on every first-input change; ghast does not
- * model the output, so the replay never compares it once an input changed); no server, no properties (brew time, fuel, enchantment offers and the seed only
+ * model the output, so the replay never compares it once an input changed;
+ * {@code BeaconScreenHandler(syncId, playerInventory)}: its own one-item payment inventory, tags as
+ * the harness loads them from the jar's vanilla data); no server, no properties (brew time, fuel, enchantment offers and the seed only
  * drive the GUI).
  * Contents are set slot by slot like {@code window_items} does.
  */
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -56,6 +59,10 @@ final class MenuClickDump {
     static final String[] ANVIL = {"diamond_sword", "diamond_sword", "iron_pickaxe", "diamond_helmet", "bow", "shears",
         "diamond", "diamond", "iron_ingot", "gold_ingot", "enchanted_book", "enchanted_book", "book", "stone", "dirt",
         "white_wool"};
+
+    /** Beacon payments (the vanilla tag), near misses (nuggets, blocks), others. */
+    static final String[] BEACON = {"emerald", "emerald", "diamond", "diamond", "iron_ingot", "gold_ingot",
+        "netherite_ingot", "gold_nugget", "netherite_scrap", "gold_block", "stone", "dirt", "white_wool", "diamond_sword"};
 
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
         Harness.Run run = ClickDump.newRun();
@@ -77,6 +84,7 @@ final class MenuClickDump {
             case "brewing" -> 10;
             case "enchanting" -> 12;
             case "anvil" -> 7;
+            case "beacon" -> 8;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -86,6 +94,7 @@ final class MenuClickDump {
             case "brewing" -> new BrewingStandScreenHandler(sync, inv);
             case "enchanting" -> new EnchantmentScreenHandler(sync, inv);
             case "anvil" -> new AnvilScreenHandler(sync, inv);
+            case "beacon" -> new BeaconScreenHandler(sync, inv);
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -118,6 +127,13 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("beacon")) {
+            ItemStack s = ClickDump.stack(r, BEACON);
+            if (r.chance(0.4)) {
+                s.setCount(1); // a single payment item is what shift-click moves into the slot
+            }
+            return s;
+        }
         if (menu.equals("enchanting")) {
             return ClickDump.stack(r, ENCHANTING);
         }

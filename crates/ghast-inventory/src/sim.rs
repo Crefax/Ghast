@@ -207,6 +207,7 @@ impl Layout {
                         | SlotKind::BrewingFuel
                         | SlotKind::EnchantItem
                         | SlotKind::Lapis
+                        | SlotKind::BeaconPayment
                             if !crate::menus::modelled(self.v, k) =>
                         {
                             SlotKind::Special
@@ -245,6 +246,21 @@ impl Layout {
             (Screen::Container(WindowKind::Anvil), Loc::Container(k)) => k != 2,
             (_, Loc::Container(_)) => true,
             _ => false,
+        }
+    }
+
+    /// A menu inventory with a smaller `getMaxCountPerStack` than 64, applied after
+    /// [`clamp`]: the 1.16.5 beacon's payment inventory caps every stack set into it at 1
+    /// (1.8 / 1.12 use a plain 64-stack inventory there).
+    #[inline]
+    pub fn clamp_menu(&self, l: Loc, s: &mut Option<Stack>) {
+        if self.v == Version::V1_16_5
+            && self.screen == Screen::Container(WindowKind::Beacon)
+            && l == Loc::Container(0)
+            && let Some(st) = s
+            && st.count > 1
+        {
+            st.count = 1;
         }
     }
 
@@ -384,6 +400,7 @@ impl Sim<'_> {
         let l = self.loc(i);
         if self.lay.clamps(l) {
             clamp_v(self.v, &mut s);
+            self.lay.clamp_menu(l, &mut s);
         }
         *self.m.at_mut(l) = s;
         self.grid_touched(l);
@@ -472,6 +489,7 @@ impl Sim<'_> {
             SlotKind::EnchantItem => true,
             SlotKind::AnvilOutput => false,
             SlotKind::Lapis => self.v.is_lapis(s),
+            SlotKind::BeaconPayment => self.v.beacon_payment(s),
             SlotKind::Special => return Err(Unpredictable),
         })
     }
@@ -480,7 +498,10 @@ impl Sim<'_> {
     /// is 99; the stack's own limit is applied separately).
     fn slot_limit(&self, i: usize) -> R<i32> {
         match self.lay.kind(i) {
-            SlotKind::Armor(_) | SlotKind::Potion | SlotKind::EnchantItem => Ok(1),
+            SlotKind::Armor(_)
+            | SlotKind::Potion
+            | SlotKind::EnchantItem
+            | SlotKind::BeaconPayment => Ok(1),
             SlotKind::Special => Err(Unpredictable),
             _ if self.v.is_modern() => Ok(99),
             _ => Ok(64),
@@ -1105,6 +1126,9 @@ impl Sim<'_> {
                     }
                     WindowKind::Enchanting if crate::menus::modelled(v, kind) => {
                         (self.transfer_enchanting(i, &mut st)?, true)
+                    }
+                    WindowKind::Beacon if crate::menus::modelled(v, kind) => {
+                        (self.transfer_beacon(i, &mut st)?, true)
                     }
                     _ => return Err(Unpredictable),
                 }

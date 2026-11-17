@@ -102,6 +102,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
 | anvil (inputs `Normal`, `SlotKind::AnvilOutput`) | inputs; output refused | same | same |
+| beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 
 - **Brewing stand**: bottle slots take potions and glass bottles, one at a time by hand; the
   ingredient slot takes the version's brewing ingredients (1.8: `Item.hasStatusEffectString`,
@@ -110,7 +111,8 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   `BrewingScreenHandler.transferSlot` (1.8: an ingredient only into an empty ingredient slot, and
   `insertItem` ignores slot limits, so a stack of bottles lands whole in one bottle slot; 1.12:
   bottles only one at a time, blaze powder is an ingredient before it is fuel; 1.16.5: the
-  ingredients of `BrewingRecipeRegistry` by item, blaze powder tried as fuel first).
+  ingredients of `BrewingRecipeRegistry` by item, blaze powder tried as fuel first). Brew time and
+  fuel are window properties the GUI shows; they never change slots on the client.
 - **Enchanting table**: the item slot takes anything, one item by hand; the lapis slot lapis
   (1.8 / 1.12: dye damage 4). Shift-click puts lapis into the lapis slot and one item of
   anything else into an empty item slot (1.8 / 1.12: a fresh stack without NBT unless the stack
@@ -124,11 +126,17 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   empties it) until the server's `set_slot`, and any click that reads it is refused, as is taking
   it (that needs the level cost and the player's level). Not sent either: the client's
   `MC|ItemName` / `rename_item` that the anvil screen sends on every first-input change.
-  Brew time and fuel are window properties the GUI shows; they never change slots on the client.
+- **Beacon**: the payment slot takes emerald, diamond, iron and gold ingot (1.16.5: the vanilla
+  `beacon_payment_items` tag, which adds the netherite ingot; ghast does not read the server's
+  tags), one item; shift-click moves a single payment item into an empty payment slot and
+  anything else between main inventory and hotbar. 1.16.5's payment inventory caps every stack
+  set into it at one, also a server's `window_items` / `set_slot`. Choosing the effects
+  (the screen's `MC|Beacon` / `update_beacon`; ghast-inventory does not build it) and using up
+  the payment are the server's; the beacon's levels and effects are window properties.
 
 **Refused instead of guessed** (`ClickError::Unpredictable`, nothing sent, nothing changed):
 shift-click from the player part of a furnace (smelting recipes, fuel), any interaction that
-reads a fuel / unmodelled brewing / enchanting / anvil / beacon / trading / horse-equipment slot, a
+reads a fuel / unmodelled brewing / enchanting / anvil / trading / horse-equipment slot, a
 crafting-result click while the result is unknown, taking a result whose grid matches no recipe
 ghast models (1.8 banners, map upscaling; 1.16.5 special recipes, a written book or banner in the
 grid, or no recipe at all — vanilla then aliases the grid stacks).

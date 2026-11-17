@@ -85,6 +85,9 @@ pub enum SlotKind {
     /// combining, renaming), which ghast does not model: unknown after an input changed until
     /// the server's `set_slot`; taking it (it needs the level cost) is refused.
     AnvilOutput,
+    /// Beacon payment slot (0): emerald, diamond, gold and iron ingot (1.16.5: the
+    /// `beacon_payment_items` tag, also netherite ingot), one item.
+    BeaconPayment,
     /// A slot whose rules need data this crate does not model (fuel, brewing ingredients,
     /// enchanting, trading, anvil, beacon, horse equipment, …): clicks whose outcome depends on
     /// it are refused as unpredictable.
@@ -237,6 +240,7 @@ impl WindowKind {
                 3 => SlotKind::BrewingIngredient,
                 _ => SlotKind::BrewingFuel,
             },
+            WindowKind::Beacon => SlotKind::BeaconPayment,
             WindowKind::Horse { .. } => {
                 if i < 2 {
                     SlotKind::Special

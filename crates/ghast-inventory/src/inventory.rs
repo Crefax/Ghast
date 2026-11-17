@@ -2027,6 +2027,10 @@ impl Inventory {
             self.m.container_result_known = true;
             self.m.container_fresh = true;
         }
+        // 1.16.5 beacon: the payment inventory caps at 1 (one check per packet, not per slot)
+        if V == V1165 && window && lay.screen == Screen::Container(WindowKind::Beacon) {
+            lay.clamp_menu(Loc::Container(0), self.m.at_mut(Loc::Container(0)));
+        }
         // 1.8: setting the grid slots made the client compute the result itself
         if V == V18 && touched_grid {
             crate::sim::recompute_1_8(&mut self.m, lay);
@@ -2068,6 +2072,7 @@ impl Inventory {
         let mut item = item;
         if self.layout().clamps(l) {
             crate::sim::clamp_v(self.version, &mut item);
+            self.layout().clamp_menu(l, &mut item);
         }
         let crafting_table = matches!(
             self.layout().screen,

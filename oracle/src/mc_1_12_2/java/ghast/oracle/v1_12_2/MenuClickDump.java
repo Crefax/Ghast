@@ -10,6 +10,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.Packet;
 import net.minecraft.network.packet.c2s.play.ClickWindowC2SPacket;
 import net.minecraft.screen.AnvilScreenHandler;
+import net.minecraft.screen.BeaconScreenHandler;
 import net.minecraft.screen.BrewingScreenHandler;
 import net.minecraft.screen.EnchantingScreenHandler;
 import net.minecraft.screen.ScreenHandler;
@@ -19,7 +20,7 @@ import net.minecraft.util.ItemAction;
 import java.util.function.Consumer;
 
 /**
- * Window click vectors for the special menus (brewing stand, ...): the same click path and line
+ * Window click vectors for the special menus (brewing stand, enchanting table, anvil, beacon): the same click path and line
  * format as {@link ClickDump} ({@code "kind"} is the menu name), over contents biased to the items
  * the menu's slot rules look at, with clicks biased to the menu's own slots.
  *
@@ -28,7 +29,7 @@ import java.util.function.Consumer;
  * checks its own tables against.
  *
  * <p>What is faked: the screen handler is built directly over the same inventory class the client
- * uses for the window ({@code ClientNetworkSyncedInventory} for the brewing stand, as
+ * uses for the window ({@code ClientNetworkSyncedInventory} for the brewing stand and the beacon, as
  * {@code ClientPlayNetworkHandler.onOpenScreen} does; the enchanting table's own inventory, over the
  * harness's client world at the origin; the anvil's own inventories, whose output the handler
  * computes on every input change: the harness has no {@code AnvilScreen}, which would also call
@@ -41,7 +42,7 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon"};
 
     /**
      * Items that appear in brewing slots or are close to the rules: potion, splash, lingering, glass
@@ -55,6 +56,9 @@ final class MenuClickDump {
 
     /** Damaged tools and armor, their repair materials, enchanted books, a few others. */
     static final int[] ANVIL = {276, 276, 278, 310, 261, 359, 264, 264, 265, 266, 403, 403, 340, 1, 3, 35};
+
+    /** Beacon payments (emerald, diamond, iron and gold ingot), near misses (nuggets, gold block), others. */
+    static final int[] BEACON = {388, 388, 264, 264, 265, 266, 371, 41, 1, 3, 35, 276};
 
     /** All lines for {@code menu}: the facts line, then {@code count} cases. */
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
@@ -80,6 +84,8 @@ final class MenuClickDump {
                     new ClientNetworkSyncedInventory("minecraft:brewing_stand", new LiteralText("b"), 5));
             case "enchanting" -> new EnchantingScreenHandler(inv, run.world);
             case "anvil" -> new AnvilScreenHandler(inv, run.world, run.player);
+            case "beacon" -> new BeaconScreenHandler(inv,
+                    new ClientNetworkSyncedInventory("minecraft:beacon", new LiteralText("b"), 1));
             default -> throw new IllegalArgumentException("unknown menu " + menu);
         };
     }
@@ -89,6 +95,7 @@ final class MenuClickDump {
             case "brewing" -> 5;
             case "enchanting" -> 2;
             case "anvil" -> 3;
+            case "beacon" -> 1;
             default -> throw new IllegalArgumentException(menu);
         };
     }
@@ -135,6 +142,13 @@ final class MenuClickDump {
     }
 
     private static ItemStack menuStack(Rng r, String menu) {
+        if (menu.equals("beacon")) {
+            ItemStack s = ClickDump.stack(r, BEACON);
+            if (r.chance(0.4)) {
+                s.setCount(1); // a single payment item is what shift-click moves into the slot
+            }
+            return s;
+        }
         if (menu.equals("anvil")) {
             ItemStack s = ClickDump.stack(r, new int[] {r.pick(ANVIL)});
             if (r.chance(0.3)) {

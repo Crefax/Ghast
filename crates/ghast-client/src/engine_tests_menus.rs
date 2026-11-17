@@ -359,3 +359,64 @@ fn anvil_1_8_9() {
     .unwrap();
     assert_eq!(e.core.inv.slot(1).map(Stack::count), Some(3));
 }
+
+/// Shift-clicks hotbar 0 (a stack of payment items) and hotbar 1 (a single one) in an open
+/// beacon; returns the payment slot and hotbar 0's new screen slot content afterwards.
+fn beacon_two(mut e: Engine<Box<dyn Sim>>, window: i8) -> Option<Stack> {
+    assert_eq!(e.core.inv.slot_kind(0), Some(SlotKind::BeaconPayment));
+    // hotbar k is screen slot 1 + 27 + k; a stack of several stays in the player part (moved
+    // to the main inventory), the single item goes into the empty payment slot
+    for (n, slot) in [28i16, 29].into_iter().enumerate() {
+        let out = click_once(&mut e, Click::QuickMove { slot, right: false });
+        assert!(clicked(&out), "{out:?}");
+        let _ = e.inventory_mut().on_transaction(window, n as i16 + 1, true);
+    }
+    e.core.inv.slot(0).cloned()
+}
+
+/// The beacon on every legacy version: one payment item into the payment slot by shift-click,
+/// a stack of them never; 1.16.5's payment inventory caps a server's stack at one.
+#[test]
+fn beacon_legacy() {
+    let e = opened::<V1_8>(
+        GameVersion::V1_8_9,
+        &open_1_8(5, "minecraft:beacon", 1),
+        5,
+        vec![None],
+        &[(0, Stack::new(264, 5, 0)), (1, Stack::new(388, 1, 0))],
+    );
+    assert_eq!(
+        beacon_two(e, 5).map(|s| (s.id(), s.count())),
+        Some((388, 1))
+    );
+    let e = opened::<V1_12_2>(
+        GameVersion::V1_12_2,
+        &open_1_12(6, "minecraft:beacon", 1),
+        6,
+        vec![None],
+        &[(0, Stack::new(264, 5, 0)), (1, Stack::new(265, 1, 0))],
+    );
+    assert_eq!(
+        beacon_two(e, 6).map(|s| (s.id(), s.count())),
+        Some((265, 1))
+    );
+    let ingot = id16("netherite_ingot");
+    let mut e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(7, 8),
+        7,
+        vec![None],
+        &[
+            (0, Stack::new(id16("diamond"), 5, 0)),
+            (1, Stack::new(ingot, 1, 0)),
+        ],
+    );
+    e.inventory_mut()
+        .on_set_slot(7, 0, Some(Stack::new(ingot, 4, 0)));
+    assert_eq!(e.core.inv.slot(0).map(Stack::count), Some(1));
+    e.inventory_mut().on_set_slot(7, 0, None);
+    assert_eq!(
+        beacon_two(e, 7).map(|s| (s.id(), s.count())),
+        Some((ingot, 1))
+    );
+}

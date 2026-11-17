@@ -14,7 +14,10 @@ use crate::window::WindowKind;
 /// [`SlotKind::Special`](crate::SlotKind::Special) and clicks reading them are refused).
 pub(crate) fn modelled(v: Version, kind: WindowKind) -> bool {
     match kind {
-        WindowKind::BrewingStand | WindowKind::Enchanting | WindowKind::Anvil => {
+        WindowKind::BrewingStand
+        | WindowKind::Enchanting
+        | WindowKind::Anvil
+        | WindowKind::Beacon => {
             matches!(v, Version::V1_8 | Version::V1_12 | Version::V1_16_5)
         }
         _ => false,
@@ -98,6 +101,21 @@ impl Version {
         }
     }
 
+    /// The beacon's payment slot (`PaymentSlot.canInsert`): 1.8 / 1.12 emerald (388), diamond
+    /// (264), iron ingot (265), gold ingot (266), any damage; 1.16.5 the vanilla
+    /// `beacon_payment_items` tag (those four and the netherite ingot). The 1.16.5 client reads
+    /// the tag the server synchronised; ghast assumes the vanilla tag.
+    pub(crate) fn beacon_payment(self, s: &Stack) -> bool {
+        match self {
+            Version::V1_8 | Version::V1_12 => matches!(s.id, 264 | 265 | 266 | 388),
+            Version::V1_16_5 => matches!(
+                self.name(s.id),
+                "emerald" | "diamond" | "iron_ingot" | "gold_ingot" | "netherite_ingot"
+            ),
+            _ => false,
+        }
+    }
+
     /// 1.12+ brewing stand fuel slot: blaze powder (1.12: 377, any damage).
     pub(crate) fn brewing_fuel(self, s: &Stack) -> bool {
         match self {
@@ -160,7 +178,26 @@ impl Sim<'_> {
     }
 }
 
-/// `Slot.canInsert` of a special menu slot kind (`None`: not a special menu slot).
+impl Sim<'_> {
+    /// `BeaconScreenHandler.transferSlot` (payment slot 0, then the player's 27 + 9): the
+    /// payment goes to the player part (last slot first); a single payment item goes into an
+    /// empty payment slot; anything else between main inventory and hotbar.
+    pub(crate) fn transfer_beacon(&mut self, i: usize, st: &mut Stack) -> R<bool> {
+        let len = self.lay.len;
+        if i == 0 {
+            return self.insert(st, 1, len, true);
+        }
+        if self.get(0).is_none() && self.v.beacon_payment(st) && st.count == 1 {
+            return self.insert(st, 0, 1, false);
+        }
+        if i < 28 {
+            self.insert(st, 28, len, false)
+        } else {
+            self.insert(st, 1, 28, false)
+        }
+    }
+}
+
 impl Sim<'_> {
     /// `EnchantingScreenHandler.transferSlot`: a menu slot goes to the player part (last slot
     /// first); lapis to the lapis slot; anything else, when the item slot is empty, puts one item
@@ -206,6 +243,7 @@ fn accepts(v: Version, kind: crate::SlotKind, s: &Stack) -> Option<bool> {
         K::EnchantItem => true,
         K::Lapis => v.is_lapis(s),
         K::AnvilOutput => false,
+        K::BeaconPayment => v.beacon_payment(s),
         _ => return None,
     })
 }
@@ -236,6 +274,7 @@ mod tests {
                 "brewing" => WindowKind::BrewingStand,
                 "enchanting" => WindowKind::Enchanting,
                 "anvil" => WindowKind::Anvil,
+                "beacon" => WindowKind::Beacon,
                 m => panic!("unknown menu {m}"),
             };
             assert!(modelled(v, kind), "{kind:?} facts but not modelled");
@@ -269,7 +308,9 @@ mod tests {
             for (k, m) in c["max"].as_array().unwrap().iter().enumerate() {
                 let want = m.as_i64().unwrap() as i32;
                 let got = match kind.slot_kind(k) {
-                    crate::SlotKind::Potion | crate::SlotKind::EnchantItem => 1,
+                    crate::SlotKind::Potion
+                    | crate::SlotKind::EnchantItem
+                    | crate::SlotKind::BeaconPayment => 1,
                     _ => 64,
                 };
                 assert_eq!(got, want, "{kind:?} slot {k} max");

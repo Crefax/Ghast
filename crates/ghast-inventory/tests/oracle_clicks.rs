@@ -66,6 +66,7 @@ fn kind(v: Version, c: &Value) -> Option<WindowKind> {
         "brewing" => Some(WindowKind::BrewingStand),
         "enchanting" => Some(WindowKind::Enchanting),
         "anvil" => Some(WindowKind::Anvil),
+        "beacon" => Some(WindowKind::Beacon),
         k => panic!("unknown kind {k}"),
     }
 }
