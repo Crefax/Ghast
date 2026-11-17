@@ -2691,6 +2691,14 @@ impl Inventory {
         &self.book
     }
 
+    /// Forgets the server's recipes and item tags (1.16.5): what reads them is refused again
+    /// until they are sent anew (ghast-client calls this when `Interests::RECIPES` is
+    /// switched off).
+    pub fn clear_server_data(&mut self) {
+        self.book = RecipeBook::default();
+        self.tags16 = None;
+    }
+
     /// 1.16.5 `declare_recipes`: replaces the client's recipes (the remainders of a taken
     /// crafting result, a furnace's shift-click, the smithing table, the stonecutter; until a
     /// declared book arrives those are refused as unpredictable).

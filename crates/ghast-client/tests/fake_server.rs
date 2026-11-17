@@ -1775,3 +1775,85 @@ both!(
     merchant_offers_follow_the_window,
     merchant_offers_follow_the_window
 );
+
+/// 1.16.5: a behaviour that taps `declare_recipes` without `Interests::RECIPES` gets the copy,
+/// but the inventory neither decodes nor keeps the recipes; switching the flag on reads them,
+/// switching it off again frees them.
+#[tokio::test]
+async fn recipes_follow_the_interest() {
+    use ghast_protocol::v1_16_5::play::clientbound as cb;
+    #[derive(PartialEq)]
+    enum Phase {
+        Tapped,
+        On,
+        Off,
+    }
+    struct Book {
+        phase: Phase,
+    }
+    impl Behavior for Book {
+        fn interests(&self) -> Interests {
+            if self.phase == Phase::On {
+                Interests::RECIPES
+            } else {
+                Interests::NONE
+            }
+        }
+        fn raw_packets(&self, _v: GameVersion) -> std::borrow::Cow<'static, [i32]> {
+            std::borrow::Cow::Borrowed(&[cb::id::DECLARE_RECIPES])
+        }
+        fn tick(&mut self, ctx: &mut TickContext<'_>) {
+            let declared = ctx.inventory().recipes().is_declared();
+            match self.phase {
+                Phase::Tapped => {
+                    if ctx
+                        .events()
+                        .raw
+                        .iter()
+                        .any(|r| r.id == cb::id::DECLARE_RECIPES)
+                    {
+                        assert!(!declared, "a tapped declare_recipes reached the inventory");
+                        self.phase = Phase::On;
+                    }
+                }
+                Phase::On => {
+                    if declared {
+                        self.phase = Phase::Off;
+                    }
+                }
+                Phase::Off => {
+                    assert!(!declared, "switching RECIPES off kept the recipes");
+                    ctx.disconnect("done");
+                }
+            }
+        }
+    }
+    let (l, addr) = listen().await;
+    let server = async {
+        let mut c = accept(&l).await;
+        c.login::<V1_16_5>("Tester", 128).await;
+        spawn::<V1_16_5>(&mut c).await;
+        c.until::<V1_16_5>("position_look").await;
+        let recipes = raw(&cb::DeclareRecipes {
+            recipes: Vec::new(),
+        });
+        // the server's recipes again and again (a join, `/reload`s) until the bot leaves
+        let r = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                c.send(&recipes).await;
+                if let Ok(None) = tokio::time::timeout(Duration::from_millis(100), c.recv()).await {
+                    return;
+                }
+            }
+        })
+        .await;
+        assert!(r.is_ok(), "the behaviour never finished");
+    };
+    let cl = client(addr, GameVersion::V1_16_5, "Tester");
+    let mut b = Book {
+        phase: Phase::Tapped,
+    };
+    let (end, ()) = tokio::join!(cl.run(&mut b), server);
+    assert!(matches!(end, Ok(SessionEnd::Quit(_))), "{end:?}");
+    assert!(b.phase == Phase::Off);
+}

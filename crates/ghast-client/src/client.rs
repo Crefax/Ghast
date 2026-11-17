@@ -588,6 +588,7 @@ where
         read_timeout: client.read_timeout,
         interests: Interests::NONE,
         inventory_ids: &[],
+        core_filter: PacketFilter::none(),
         raw_ids: Vec::new(),
         raw_mask: [0; 4],
         world_errors: 0,
@@ -977,6 +978,9 @@ struct Play<'c, V: ClientVersion + HasSim, R, W> {
     interests: Interests,
     /// The inventory's state-dependent packets in the filter ([`ClientVersion::inventory_packet_ids`]).
     inventory_ids: &'static [i32],
+    /// The filter without the behaviour's raw tap: only these packets reach the inventory (a
+    /// tapped `declare_recipes` without `Interests::RECIPES` is copied, not decoded and kept).
+    core_filter: PacketFilter,
     /// Packet ids copied for the behaviour (`Behavior::raw_packets`), as a bit set.
     raw_ids: Vec<i32>,
     raw_mask: [u64; 4],
@@ -1135,6 +1139,11 @@ where
     }
 
     fn set_filter(&mut self, interests: Interests, raw: &[i32]) {
+        // switching the server's recipes and tags off frees them (they come back only on the
+        // next join or `/reload`)
+        if self.interests.contains(Interests::RECIPES) && !interests.contains(Interests::RECIPES) {
+            self.engine.inventory_mut().clear_server_data();
+        }
         self.interests = interests;
         raw.clone_into(&mut self.raw_ids);
         self.raw_mask = [0; 4];
@@ -1162,6 +1171,7 @@ where
         for &id in self.inventory_ids {
             filter.insert(id);
         }
+        self.core_filter = filter;
         for &id in raw {
             filter.insert(id);
         }
@@ -1285,13 +1295,17 @@ where
                 )?;
             }
             // The inventory answers window confirms itself (exactly once).
-            let inv = V::inventory_packet(self.engine.inventory_mut(), &raw).map_err(|source| {
-                ClientError::Decode {
-                    state: State::Play,
-                    id: raw.id,
-                    source,
-                }
-            })?;
+            let inv = if self.core_filter.contains(raw.id) {
+                V::inventory_packet(self.engine.inventory_mut(), &raw).map_err(|source| {
+                    ClientError::Decode {
+                        state: State::Play,
+                        id: raw.id,
+                        source,
+                    }
+                })?
+            } else {
+                None
+            };
             if let Some(o) = inv {
                 self.engine
                     .outbound()
