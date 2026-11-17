@@ -325,8 +325,15 @@ impl Behavior for Probe {
                 );
                 let (dx, dy, dz) = (c.x - eyes.x, c.y - eyes.y, c.z - eyes.z);
                 let yaw = (-dx).atan2(dz).to_degrees() as f32;
-                let pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
-                let cur = ctx.pose().yaw;
+                let mut pitch = -(dy.atan2((dx * dx + dz * dz).sqrt())).to_degrees() as f32;
+                // As in boat mode: a teleport answered after the aim tick leaves the server
+                // with its rotation and no look packet follows; aim a little off until the
+                // server has ours.
+                let (sent, pose) = (*ctx.sent(), ctx.pose());
+                if sent.yaw != pose.yaw || sent.pitch != pose.pitch {
+                    pitch += 0.5;
+                }
+                let cur = pose.yaw;
                 ctx.set_aim(cur + ghast::rotation::wrap_degrees(yaw - cur), pitch);
                 // A tamed horse opens its inventory on a sneaking right click.
                 ctx.set_controls(Controls {

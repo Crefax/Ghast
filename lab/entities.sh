@@ -65,6 +65,9 @@ for phase in "${phases[@]}"; do
       done ;;
     horse)
       clean
+      # Join at the spawn: a bot saved at the scene would open the screen before the setup's
+      # clear / tp below reach it (26.x keeps player data under players/data).
+      rm -f "$DIR"/world/players/data/"$(offline_uuid "$BOT")".dat*
       since=$(date +%H:%M:%S)
       con "summon horse 4.5 4 -8.5 {NoAI:1b,PersistenceRequired:1b,Tame:1b,Silent:1b}" \
           "item replace entity @e[type=horse,limit=1] saddle with saddle"
@@ -74,6 +77,9 @@ for phase in "${phases[@]}"; do
       f=$(flags_since "$since"); [ -z "$f" ] || { echo "FAIL: Grim flags: $f"; fail=1; } ;;
     villager)
       clean
+      # Join at the spawn: a bot saved at the scene would open the screen before the setup's
+      # clear / tp below reach it (26.x keeps player data under players/data).
+      rm -f "$DIR"/world/players/data/"$(offline_uuid "$BOT")".dat*
       since=$(date +%H:%M:%S)
       con "summon villager 10.5 4 -8.5 {NoAI:1b,PersistenceRequired:1b,Silent:1b,VillagerData:{profession:\"minecraft:farmer\",level:2,type:\"minecraft:plains\"},Offers:{Recipes:[{buy:{id:\"minecraft:emerald\",count:1},sell:{id:\"minecraft:bread\",count:6},maxUses:99,rewardExp:0b}]}}"
       ( sleep 4; con "clear $BOT" "give $BOT emerald 4" "tp $BOT 10.5 4 -11.5 0 20" ) &
