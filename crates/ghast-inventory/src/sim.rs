@@ -412,6 +412,8 @@ pub(crate) struct Sim<'a> {
     pub book: &'a RecipeBook,
     /// 26.1: registry id of `minecraft:binding_curse` (`None`: enchantment names unknown).
     pub binding_curse: Option<i32>,
+    /// 1.16.5: the server's item tags (`None`: the vanilla ones).
+    pub tags: Option<&'a crate::tags16::ItemTags16>,
 }
 
 impl Sim<'_> {
@@ -557,8 +559,10 @@ impl Sim<'_> {
             }
             SlotKind::MountSaddle => return self.mount_saddle_accepts(s),
             SlotKind::MountArmor => return self.mount_armor_accepts(s),
-            SlotKind::FurnaceFuel => self.v.is_fuel(s) || self.v.is_bucket(s),
-            SlotKind::BeaconPayment => self.v.beacon_payment(s),
+            SlotKind::FurnaceFuel => {
+                crate::tags16::fuel(self.v, self.tags, s) || self.v.is_bucket(s)
+            }
+            SlotKind::BeaconPayment => crate::tags16::beacon_payment(self.v, self.tags, s),
             SlotKind::Special => return Err(Unpredictable),
         })
     }
@@ -1223,7 +1227,9 @@ impl Sim<'_> {
                             // smelting recipes and fuel (26.x: its own simulation)
                             _ if !crate::menus::modelled(v, kind) => return Err(Unpredictable),
                             _ if self.smeltable(&st) => self.insert(&mut st, 0, 1, false)?,
-                            _ if v.is_fuel(&st) => self.insert(&mut st, 1, 2, false)?,
+                            _ if crate::tags16::fuel(v, self.tags, &st) => {
+                                self.insert(&mut st, 1, 2, false)?
+                            }
                             3..30 => self.insert(&mut st, 30, 39, false)?,
                             30..39 => self.insert(&mut st, 3, 30, false)?,
                             _ => false,

@@ -269,6 +269,7 @@ impl Inventory {
             }
             P::DeclareRecipes(d) => self.on_declare_recipes(crate::RecipeBook::from_v1_16_5(d)),
             P::TradeList(t) => self.on_trade_list_v1_16_5(t),
+            P::Tags(t) => self.on_tags_v1_16_5(t),
             _ => {}
         }
         None

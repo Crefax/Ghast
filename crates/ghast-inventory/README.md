@@ -177,6 +177,11 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   `apply_v1_16_5` so blast furnaces and smokers are told apart). Burn and cook progress are
   window properties; smelting itself is the server's.
 
+- **1.16.5 item tags**: the client reads the server's synced tags for the beacon payment
+  (`beacon_payment_items`), the furnace fuels (`createFuelTimeMap`: its items and the wood,
+  wool, banner, boat, carpet, ... tags minus `non_flammable_wood`) and llama carpets
+  (`carpets`), so ghast does too (`Inventory::on_tags_v1_16_5`, through `apply_v1_16_5`);
+  before a `tags` packet the vanilla tags apply. Proven with a data pack's tags as well.
 - **1.16.5 workstations** keep the state their handler keeps on the client and run its
   `onContentChanged` / `updateResult` on every notification of the input inventory, as often as
   vanilla does (`Slot.setStack` notifies twice, `markDirty` and `onTakeItem` once each; a

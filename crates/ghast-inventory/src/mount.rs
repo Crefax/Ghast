@@ -93,9 +93,14 @@ pub(crate) fn saddle_accepts(
 }
 
 /// The armor slot's `canInsert`.
-pub(crate) fn armor_accepts(v: Version, rules: Option<MountRules>, s: &Stack) -> R<bool> {
+pub(crate) fn armor_accepts(
+    v: Version,
+    tags: Option<&crate::tags16::ItemTags16>,
+    rules: Option<MountRules>,
+    s: &Stack,
+) -> R<bool> {
     let horse = v.is_horse_armor(s);
-    let carpet = v.is_carpet(s);
+    let carpet = crate::tags16::carpet(v, tags, s);
     if !horse && !carpet {
         return Ok(false);
     }
@@ -112,7 +117,7 @@ impl Sim<'_> {
     }
 
     pub(crate) fn mount_armor_accepts(&self, s: &Stack) -> R<bool> {
-        armor_accepts(self.v, self.m.mount, s)
+        armor_accepts(self.v, self.tags, self.m.mount, s)
     }
 
     /// `HorseScreenHandler.transferSlot`: the mount's slots go to the player part (last slot

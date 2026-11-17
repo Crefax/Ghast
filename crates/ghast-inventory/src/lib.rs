@@ -82,6 +82,7 @@ mod stack;
 mod station;
 #[cfg(modern)]
 mod tables;
+mod tags16;
 #[cfg(feature = "v26_1")]
 pub mod v26_1;
 mod window;

@@ -195,7 +195,10 @@ impl Sim<'_> {
         if i == 0 {
             return self.insert(st, 1, len, true);
         }
-        if self.get(0).is_none() && self.v.beacon_payment(st) && st.count == 1 {
+        if self.get(0).is_none()
+            && crate::tags16::beacon_payment(self.v, self.tags, st)
+            && st.count == 1
+        {
             return self.insert(st, 0, 1, false);
         }
         if i < 28 {
@@ -409,7 +412,7 @@ mod tests {
                     let w = want.get(&id).is_some_and(|m| m & (1 << d) != 0);
                     let got = match k {
                         0 => crate::mount::saddle_accepts(v, rules, &s, false).unwrap(),
-                        1 => crate::mount::armor_accepts(v, rules, &s).unwrap(),
+                        1 => crate::mount::armor_accepts(v, None, rules, &s).unwrap(),
                         _ => true,
                     };
                     assert_eq!(got, w, "{c} slot {k} {id}:{d}");
@@ -417,7 +420,7 @@ mod tests {
                     if k < 2 {
                         let blind = match k {
                             0 => crate::mount::saddle_accepts(v, None, &s, false),
-                            _ => crate::mount::armor_accepts(v, None, &s),
+                            _ => crate::mount::armor_accepts(v, None, None, &s),
                         };
                         assert!(
                             blind.map_or(true, |b| b == w),

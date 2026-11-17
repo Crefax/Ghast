@@ -141,7 +141,7 @@ final class Harness {
         registries = DynamicRegistryManager.create();
         overworld = registries.getDimensionTypes().get(DimensionType.OVERWORLD_REGISTRY_KEY);
         plains = registries.get(Registry.BIOME_KEY).get(BiomeKeys.PLAINS);
-        loadVanillaTags().apply();
+        vanillaTags().apply();
 
         connection = new CapturingConnection();
         net = new ClientPlayNetworkHandler(client, null, connection, new GameProfile(PLAYER_UUID, PLAYER_NAME));
@@ -175,6 +175,16 @@ final class Harness {
      * The tags a vanilla server sends (synchronize tags packet), built with the vanilla tag loader from
      * the vanilla data pack inside the jar, then applied the way the client applies received tags.
      */
+    private static TagManager vanilla;
+
+    /** The vanilla tags (loaded once). */
+    static TagManager vanillaTags() {
+        if (vanilla == null) {
+            vanilla = loadVanillaTags();
+        }
+        return vanilla;
+    }
+
     private static TagManager loadVanillaTags() {
         ReloadableResourceManagerImpl resources = new ReloadableResourceManagerImpl(ResourceType.SERVER_DATA);
         resources.addPack(new DefaultResourcePack("minecraft"));

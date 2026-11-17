@@ -222,11 +222,14 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
     }
 }
 
-fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook) {
+fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Option<&cb16::Tags>) {
     let name = c["case"].as_str().unwrap().to_owned();
     let sync = c["sync"].as_i64().unwrap() as i32;
     let mut inv = Inventory::new(v).unwrap();
     inv.on_declare_recipes(book.clone());
+    if let Some(t) = tags {
+        inv.on_tags_v1_16_5(t);
+    }
     inv.on_held_slot(c["selected"].as_i64().unwrap() as i8);
     let kind = kind(v, c);
     inv.on_window_items(0, stacks(v, &c["w0"]));
@@ -406,6 +409,7 @@ fn replay(v: Version, path: &Path) -> Stats {
     let r = BufReader::new(flate2::read::GzDecoder::new(f));
     let mut s = Stats::default();
     let mut book = RecipeBook::default();
+    let mut tags: Option<cb16::Tags> = None;
     for line in r.lines() {
         let line = line.unwrap();
         let c: Value = serde_json::from_str(&line).unwrap();
@@ -420,7 +424,12 @@ fn replay(v: Version, path: &Path) -> Stats {
             // a special menu's slot rules, checked by the crate's own unit tests
             continue;
         }
-        replay_case(v, &c, &mut s, &book);
+        if let Some(h) = c["tags"].as_str() {
+            // the server's item tags (vanilla or a data pack's), from here on
+            tags = Some(decode_exact(&hex(h)).unwrap());
+            continue;
+        }
+        replay_case(v, &c, &mut s, &book, tags.as_ref());
     }
     s
 }

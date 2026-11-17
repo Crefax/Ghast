@@ -66,7 +66,8 @@ import java.util.function.Consumer;
 final class MenuClickDump {
     private MenuClickDump() {}
 
-    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "blast_furnace", "smoker", "smithing", "stonecutter", "grindstone", "loom", "cartography"};
+    static final String[] MENUS = {"brewing", "enchanting", "anvil", "beacon", "merchant", "horse", "furnace", "blast_furnace", "smoker", "smithing", "stonecutter", "grindstone", "loom", "cartography",
+        "beacon_datapack", "furnace_datapack", "horse_datapack"};
 
     /** Items that appear in brewing slots or are close to the rules. */
     static final String[] BREWING = {"potion", "potion", "splash_potion", "lingering_potion", "glass_bottle", "glass_bottle",
@@ -150,8 +151,66 @@ final class MenuClickDump {
     /** The handler of the current merchant case. */
     private static MerchantScreenHandler trader;
 
+    /** The {@code tags} packet of a tag manager (what the server sends; the client applies it). */
+    private static String tagsHex(net.minecraft.tag.TagManager tm) {
+        PacketByteBuf buf = new PacketByteBuf(Unpooled.buffer());
+        try {
+            new net.minecraft.network.packet.s2c.play.SynchronizeTagsS2CPacket(tm).write(buf);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        StringBuilder h = new StringBuilder(buf.readableBytes() * 2);
+        while (buf.isReadable()) {
+            int x = buf.readUnsignedByte();
+            h.append(Character.forDigit(x >> 4, 16)).append(Character.forDigit(x & 15, 16));
+        }
+        return h.toString();
+    }
+
+    /**
+     * A data pack's item tags: beacon payments stone, dirt and emerald only; carpets stone and the
+     * white carpet (fuel, llama armor); planks cobblestone and oak planks (fuel).
+     */
+    private static net.minecraft.tag.TagManager datapackTags() {
+        net.minecraft.tag.TagManager v = Harness.vanillaTags();
+        java.util.Map<Identifier, net.minecraft.tag.Tag<Item>> m = new java.util.HashMap<>(v.getItems().getTags());
+        m.put(new Identifier("beacon_payment_items"), net.minecraft.tag.Tag.of(java.util.Set.of(
+                net.minecraft.item.Items.STONE, net.minecraft.item.Items.DIRT, net.minecraft.item.Items.EMERALD)));
+        m.put(new Identifier("carpets"), net.minecraft.tag.Tag.of(java.util.Set.of(
+                net.minecraft.item.Items.STONE, net.minecraft.item.Items.WHITE_CARPET)));
+        m.put(new Identifier("planks"), net.minecraft.tag.Tag.of(java.util.Set.of(
+                net.minecraft.item.Items.COBBLESTONE, net.minecraft.item.Items.OAK_PLANKS)));
+        return net.minecraft.tag.TagManager.create(v.getBlocks(), net.minecraft.tag.TagGroup.create(m), v.getFluids(),
+                v.getEntityTypes());
+    }
+
     static void cases(long seed, String menu, int count, Consumer<String> sink) {
+        if (menu.endsWith("_datapack")) {
+            // the same menu under a data pack's tags (the client reads the server's tags)
+            String base = menu.substring(0, menu.length() - "_datapack".length());
+            Harness.Run run = ClickDump.newRun();
+            net.minecraft.tag.TagManager tm = datapackTags();
+            tm.apply();
+            try {
+                if (base.equals("furnace") && sink != recipesSentTo) {
+                    sink.accept("{\"declare_recipes\":\"" + ClickDump.syncRecipes() + "\"}");
+                    recipesSentTo = sink;
+                }
+                sink.accept("{\"tags\":\"" + tagsHex(tm) + "\"}");
+                long salt = menu.hashCode() & 0xffffffffL;
+                for (int i = 0; i < count; i++) {
+                    sink.accept(one(run, new Rng(seed * 1_000_037L + salt * 7919L + i), menu + "_s" + seed + "_" + i, base));
+                }
+            } finally {
+                Harness.vanillaTags().apply();
+            }
+            return;
+        }
         Harness.Run run = ClickDump.newRun();
+        if (menu.equals("beacon") || menu.endsWith("furnace") || menu.equals("smoker") || menu.equals("horse")) {
+            // the server's tags (vanilla here): beacon payments, fuels, llama carpets read them
+            sink.accept("{\"tags\":\"" + tagsHex(Harness.vanillaTags()) + "\"}");
+        }
         if ((menu.endsWith("furnace") || menu.equals("smoker") || menu.equals("smithing")
                 || menu.equals("stonecutter")) && sink != recipesSentTo) {
             // the server's recipes (a real client always has them; isSmeltable reads them), once

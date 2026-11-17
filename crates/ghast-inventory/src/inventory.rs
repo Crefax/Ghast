@@ -541,6 +541,8 @@ pub struct Inventory {
     settle: u32,
     events: Events,
     book: RecipeBook,
+    /// 1.16.5: the server's item tags (they belong to the connection, like the recipes).
+    tags16: Option<std::sync::Arc<crate::tags16::ItemTags16>>,
     /// 26.1 state ids: window 0 (`inventoryMenu`) and the open container.
     state_player: i32,
     state_window: i32,
@@ -603,6 +605,7 @@ impl Inventory {
             settle: DEFAULT_CLICK_SETTLE_TICKS,
             events: Events::default(),
             book: RecipeBook::default(),
+            tags16: None,
             state_player: 0,
             state_window: 0,
             #[cfg(modern)]
@@ -674,6 +677,7 @@ impl Inventory {
             timeout: self.timeout,
             settle: self.settle,
             book: std::mem::take(&mut self.book),
+            tags16: self.tags16.take(),
             #[cfg(modern)]
             reg26,
             #[cfg(modern)]
@@ -998,6 +1002,7 @@ impl Inventory {
                 m: &mut m,
                 book: &self.book,
                 binding_curse: self.binding_curse(),
+                tags: self.tags16.as_deref(),
             };
             sim.click(slot, button, mode)
         };
@@ -1442,6 +1447,7 @@ impl Inventory {
             m: &mut self.m,
             book: &self.book,
             binding_curse: None,
+            tags: self.tags16.as_deref(),
         };
         for (k, s) in new.into_iter().enumerate() {
             if k >= sim.m.container.len() {
@@ -1476,6 +1482,7 @@ impl Inventory {
             m: &mut self.m,
             book: &self.book,
             binding_curse: None,
+            tags: self.tags16.as_deref(),
         };
         // `Slot.setStack`: twice
         sim.station_touched(Loc::Container(0));
@@ -1518,6 +1525,7 @@ impl Inventory {
                 m: &mut self.m,
                 book: &self.book,
                 binding_curse: None,
+                tags: self.tags16.as_deref(),
             };
             let ok = sim.loom_button(index);
             if self.m.container != before {
@@ -1545,6 +1553,7 @@ impl Inventory {
             m: &mut self.m,
             book: &self.book,
             binding_curse: None,
+            tags: self.tags16.as_deref(),
         };
         sim.stonecutter_populate();
         if self.m.container != before {
@@ -1582,6 +1591,19 @@ impl Inventory {
         if let Some((w, offers)) = crate::merchant::parse_legacy(data) {
             self.on_trade_offers(w, offers);
         }
+    }
+
+    /// 1.16.5 `tags`: the item tags the beacon, furnace and llama slots read (the client uses
+    /// the server's; until they arrive ghast uses the vanilla ones). [`Inventory::apply_v1_16_5`]
+    /// calls this.
+    #[cfg(feature = "v1_16_5")]
+    pub fn on_tags_v1_16_5(&mut self, p: &ghast_protocol::v1_16_5::play::clientbound::Tags) {
+        self.tags16 = Some(std::sync::Arc::new(
+            crate::tags16::ItemTags16::from_item_tags(
+                self.version,
+                p.item_tags.iter().map(|t| (&*t.tag_name, &t.entries[..])),
+            ),
+        ));
     }
 
     /// 1.16.5 `trade_list`.
@@ -1634,6 +1656,7 @@ impl Inventory {
                 m: &mut self.m,
                 book: &self.book,
                 binding_curse: None,
+                tags: self.tags16.as_deref(),
             };
             sim.switch_trade(index as usize);
             if self.m.container != before.container {
