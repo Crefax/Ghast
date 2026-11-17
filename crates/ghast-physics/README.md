@@ -455,6 +455,12 @@ passenger tick (no water contact, no swimming, no auto-jump, no item slowdown, n
 `boats.jsonl.gz` (14 hand cases + 100 fuzz cases) and `fuzz --boats true` seeds 81-85 in
 `fuzz-boats/` (1,000,000 ticks), 0 diffs. `state_collides` and the boat's land friction use
 `VoxelShapes.matchesAnywhere` exactly (overlaps under 1e-7 do not count).
+Sitting in a minecart (`Minecart`, `tick_minecart`; module docs of `v1_16_5::Minecart`): the server
+moves a minecart (no `vehicle_move`); the client's part is the cart's interpolation (a position
+packet's 3 steps + 2, its own 1/4096 tracked position for relative moves), the passenger tick (it
+touches water, unlike a boat's), `look` + `steer_vehicle`, the seat 0.35 below the cart and the
+client's own dismount on sneak: `minecarts.jsonl.gz` (8 hand cases + 100 fuzz cases) and
+`fuzz --minecarts true` seeds 91-95 in `fuzz-minecarts/` (1,000,000 ticks), 0 diffs.
 
 1.12.2: `tests/golden_1_12_2.rs` replays the committed `tests/golden/1.12.2/` scenarios (122 cases),
 `fuzz_seed1`, `fuzz_edges_seed1` and `entities` (23 hand cases + 60 fuzz cases with other entities,
@@ -522,8 +528,8 @@ vanilla's hash order), depth strider, spectators, entity pushes and collisions (
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle other than a boat (1.8.9, 1.12.2, 1.16.5); bubble columns under a 1.16.5
-  boat; other entities near a 1.8.9 boat.
+- Riding a vehicle other than a boat (1.8.9, 1.12.2) or a boat or minecart (1.16.5); bubble
+  columns under a 1.16.5 boat; other entities near a 1.8.9 boat.
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.
 - Server-side corrections are the client's job (teleports), not this crate's.

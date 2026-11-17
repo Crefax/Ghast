@@ -243,6 +243,7 @@ pub fn tick_boat<W: BlockView<State = BlockState>>(
         return false;
     }
     let ride = super::player::RideCtx {
+        boat: true,
         bb: boat.bb,
         // BoatEntity.isSubmergedInWater: its location is under water.
         submerged: matches!(

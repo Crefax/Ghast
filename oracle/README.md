@@ -445,7 +445,7 @@ Run everything with `MC=1.16.5`, e.g. `MC=1.16.5 oracle/run.sh`, `MC=1.16.5 orac
 (CC0, mergedv2). Mojang's official mappings are not used. Name report: `YARN_COVERAGE_1.16.5.md`.
 Output: `tests/golden/1.16.5/` — `scenarios.jsonl.gz` (61 cases), `fuzz_seed1.jsonl.gz` and
 `fuzz_edges_seed1.jsonl.gz` (100 x 60 each), `entities.jsonl.gz`, `nether.jsonl.gz`,
-`riptide.jsonl.gz`, `elytra.jsonl.gz`, `boats.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
+`riptide.jsonl.gz`, `elytra.jsonl.gz`, `boats.jsonl.gz`, `minecarts.jsonl.gz`, `collision_shapes.jsonl.gz`, `collision_shapes_far.jsonl.gz`,
 `voxel_shapes.jsonl.gz`.
 
 Setup note: some 1.16.5 classes carry parameter-annotation tables that do not match their descriptor
@@ -627,6 +627,25 @@ looks, corrections, other boats, dismounts. Cached run (`oracle/cache/1.16.5/fuz
 
 ```sh
 for s in 81 82 83 84 85; do MC=1.16.5 oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-boats/boats_s$s.jsonl.gz"; done
+```
+
+**`minecarts`** (8 cases + 100 fuzz, `minecarts.jsonl.gz`, `MC=1.16.5 oracle/run.sh minecarts`): the
+player sits in a minecart (entity 100, spawned at setup) that it boards in the first tick (the same
+`ride` event as boats). The server moves the cart: `entity_rel` (relative moves in 1/4096, no
+rotation), `entity_look` (yaw angle byte `(int) (yaw * 256 / 360)`, pitch 0) and `entity_move`
+(teleport), all through the real `onEntityUpdate` / `onEntityPosition`. Tick records add `vehicle`
+(the cart after the tick: position, rotation, box, interpolation steps left). Packets while riding:
+`look`, `steer_vehicle` (no `vehicle_move`: a minecart has no controlling passenger). Cases: idle
+with looks and keys, rolled every tick and stopped, moves every third tick with a teleport and a
+look, rolled under a ceiling against a wall, through water (the passenger touches it), dropped
+down a step, the client's own dismount on sneak, the server's dismount. Fuzz (`Ext.minecartsFuzz`,
+`fuzz --minecarts true`, cases `…_mc`): patches of water, stone, slabs, glass, soul sand, cobwebs,
+lava, ladders and air, ceilings, the server's relative moves (every 1-4 ticks), looks and
+teleports, random keys and looks, server dismounts. What is faked: nothing beyond the boat cases'.
+Cached run (`oracle/cache/1.16.5/fuzz-minecarts/`, 1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 91 92 93 94 95; do MC=1.16.5 oracle/run.sh fuzz --minecarts true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.16.5/fuzz-minecarts/minecarts_s$s.jsonl.gz"; done
 ```
 
 Entity spawns (`Ents`) send an entity's velocity right after its spawn and entity data when its

@@ -467,6 +467,8 @@ pub fn tick_ext<W: BlockView<State = BlockState>>(
 pub(super) struct RideCtx {
     pub bb: Aabb,
     pub submerged: bool,
+    /// The vehicle is a boat (its passenger touches no water; a dry boat shields the eyes).
+    pub boat: bool,
 }
 
 /// The player's tick as the passenger of a boat (`tickRiding`): motion zeroed first, the player
@@ -851,7 +853,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
     }
 
     fn check_water(&mut self) {
-        if self.riding() {
+        if X::ON && self.x.ride().is_some_and(|r| r.boat) {
             // checkWaterState: a boat's passenger touches no water.
             self.p.touching_water = false;
             return;
@@ -903,6 +905,7 @@ impl<W: BlockView<State = BlockState>, E: EntityBoxes, X: Extra> Ctx<'_, W, E, X
         p.eye_fluid = None;
         // A boat whose own eyes are dry shields the eyes inside its box.
         if let Some(r) = ride
+            && r.boat
             && !r.submerged
             && r.bb.max_y >= eye
             && r.bb.min_y <= eye

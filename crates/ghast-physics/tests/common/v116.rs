@@ -528,6 +528,8 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
     }
     // Riding cases (`setup.ext.ride`): the boat (entity 100) and whether the player is on it.
     let mut boat: Option<v1_16_5::Boat> = None;
+    // Or the minecart (entity 100) the player sits in.
+    let mut cart: Option<v1_16_5::Minecart> = None;
     let mut riding = false;
     if let Some(x) = case.header["setup"].get("ext")
         && x.get("ride").and_then(Value::as_bool) == Some(true)
@@ -540,11 +542,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .expect("the boat");
         // The spawn packet's angle byte.
         let byte = (f32_of(&sp["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
-        boat = Some(v1_16_5::Boat::new(
-            f3(&sp["pos"]),
-            f32::from(byte) * 360.0 / 256.0,
-            0.0,
-        ));
+        if sp["entity"] == "minecart" {
+            cart = Some(v1_16_5::Minecart::new(
+                f3(&sp["pos"]),
+                f32::from(byte) * 360.0 / 256.0,
+                0.0,
+            ));
+        } else {
+            boat = Some(v1_16_5::Boat::new(
+                f3(&sp["pos"]),
+                f32::from(byte) * 360.0 / 256.0,
+                0.0,
+            ));
+        }
         if ext.is_none() {
             ext = Some(v1_16_5::PlayerExt::new());
         }
@@ -599,6 +609,25 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                     // Other entities: their boxes come with the tick record.
                     "spawn" => spawned(e, &mut kinds),
                     "team" => teams.apply(e),
+                    // The server's moves of the minecart the player sits in.
+                    "entity_move" | "entity_rel" | "entity_look"
+                        if e["id"] == 100 && cart.is_some() =>
+                    {
+                        let c = cart.as_mut().unwrap();
+                        // The harness's angle byte of these packets: `(int) (yaw * 256 / 360)`.
+                        let byte = |v: &Value| (f32_of(v) * 256.0 / 360.0) as i32 as i8;
+                        match e["type"].as_str().unwrap() {
+                            "entity_move" => c.server_teleport(f3(&e["pos"]), byte(&e["yaw"]), 0),
+                            "entity_rel" => {
+                                let d = &e["delta"];
+                                c.server_update(
+                                    Some([i(&d[0]) as i16, i(&d[1]) as i16, i(&d[2]) as i16]),
+                                    None,
+                                );
+                            }
+                            _ => c.server_update(None, Some((byte(&e["yaw"]), 0))),
+                        }
+                    }
                     "entity_move" | "entity_rel" | "entity_look" | "remove_entity"
                     | "game_mode" => {}
                     "shared_flags" => {
@@ -627,7 +656,7 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                             let [px, py, pz] = p.pos;
                             p.set_position(px, py, pz);
                         }
-                        riding = on && boat.is_some();
+                        riding = on && (boat.is_some() || cart.is_some());
                     }
                     "vehicle_move" => {
                         if riding {
@@ -793,6 +822,29 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             .with_entities(&colliders)
             .with_others(&others);
         match &mut ext {
+            Some(x) if riding && cart.is_some() => {
+                let c = cart.as_mut().unwrap();
+                if !v1_16_5::tick_minecart(&mut p, x, c, &around, &ti, &world, &mut out) {
+                    riding = false;
+                    // Got off: the player ticks in this tick when it comes after the cart.
+                    let ids: Vec<i64> = rec["entities"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|e| {
+                            if e.get("player").is_some() {
+                                1
+                            } else {
+                                e["id"].as_i64().unwrap()
+                            }
+                        })
+                        .collect();
+                    let at = |id: i64| ids.iter().position(|&v| v == id);
+                    if at(1) > at(100) {
+                        v1_16_5::tick_ext(&mut p, x, &around, &ti, &world, &mut out);
+                    }
+                }
+            }
             Some(x) if riding => {
                 // The boat collides with the other boats as they are when it ticks.
                 let mut boat_boxes: Vec<ghast_physics::math::Aabb> = Vec::new();
@@ -874,6 +926,21 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             &state_json_ext(&p, ext.as_ref(), &world, using_item),
         ) {
             return Err(mm(t, d));
+        }
+        if let (true, Some(want), Some(c)) = (riding, rec.get("vehicle"), &cart) {
+            let got = json!({
+                "pos": [jf64(c.pos[0]), jf64(c.pos[1]), jf64(c.pos[2])],
+                "yaw": jf32(c.yaw),
+                "pitch": jf32(c.pitch),
+                "lerp_steps": c.interpolation_steps(),
+            });
+            let want = json!({
+                "pos": want["pos"], "yaw": want["yaw"], "pitch": want["pitch"],
+                "lerp_steps": want["lerp_steps"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
         }
         if let (true, Some(want), Some(bt)) = (riding, rec.get("vehicle"), &boat) {
             let got = json!({

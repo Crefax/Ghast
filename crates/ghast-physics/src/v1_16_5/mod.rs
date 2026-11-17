@@ -10,6 +10,7 @@ mod collide;
 mod entity;
 mod ext;
 mod fluid;
+mod minecart;
 mod player;
 
 pub use blocks::{CollisionContext, state_collides};
@@ -20,6 +21,7 @@ pub use entity::{
 pub use ext::PlayerExt;
 /// The 1.16.5 block state the world view returns (re-exported from `ghast-data`).
 pub use ghast_data::v1_16_5::BlockState;
+pub use minecart::{MINECART_HEIGHT, MINECART_WIDTH, Minecart, tick_minecart};
 pub use player::{
     Effects, Enchantments, MovementInput, PlayerState, Pose, STEP_HEIGHT, SentState,
     SpeedModifiers, WIDTH, box_at, in_water_or_rain, is_climbing, riptide, rocket_boost, tick,
