@@ -155,10 +155,11 @@ impl Outgoing {
                     enchantment: *button as i8,
                 })
             }
-            Outgoing::OpenInventory
-            | Outgoing::ContainerClick(_)
-            | Outgoing::Creative(_)
-            | Outgoing::RenameItem(_) => {
+            // the anvil screen's name field
+            Outgoing::RenameItem(n) => sb16::ServerboundPlayPacket::NameItem(sb16::NameItem {
+                name: n.as_str().into(),
+            }),
+            Outgoing::OpenInventory | Outgoing::ContainerClick(_) | Outgoing::Creative(_) => {
                 return None;
             }
         })
@@ -270,6 +271,9 @@ impl Inventory {
             P::DeclareRecipes(d) => self.on_declare_recipes(crate::RecipeBook::from_v1_16_5(d)),
             P::TradeList(t) => self.on_trade_list_v1_16_5(t),
             P::Tags(t) => self.on_tags_v1_16_5(t),
+            P::Experience(x) => self.set_experience_level(x.level),
+            // flag 0x08: instant build (creative)
+            P::Abilities(a) => self.set_creative(a.flags & 0x08 != 0),
             _ => {}
         }
         None

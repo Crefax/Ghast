@@ -1495,6 +1495,105 @@ impl Inventory {
         }
     }
 
+    /// The packets the open screen sent by itself since the last call, to write before
+    /// anything else this tick (the 1.16.5 anvil screen's `rename_item` when its first input
+    /// changed, also through a server packet). A click's own packet comes after these.
+    pub fn take_screen_packets(&mut self) -> Vec<Outgoing> {
+        std::mem::take(&mut self.m.screen_out)
+    }
+
+    /// The player's experience level (the 1.16.5 anvil's cost check; also the 26.x anvil).
+    /// Set from the `experience` packet ([`Inventory::apply_v1_16_5`] does).
+    pub fn set_experience_level(&mut self, level: i32) {
+        self.m.xp_level = level;
+        #[cfg(modern)]
+        if self.version.is_modern() {
+            self.set_experience_level_modern(level);
+        }
+    }
+
+    /// The experience level as the client holds it (taking an anvil result lowers it).
+    #[must_use]
+    pub fn experience_level(&self) -> i32 {
+        self.m.xp_level
+    }
+
+    /// Creative mode (the 1.16.5 anvil: no level check, every enchantment fits; also 26.x).
+    /// Set from the `abilities` packet ([`Inventory::apply_v1_16_5`] does).
+    pub fn set_creative(&mut self, creative: bool) {
+        self.m.creative = creative;
+        #[cfg(modern)]
+        if self.version.is_modern() {
+            self.set_creative_modern(creative);
+        }
+    }
+
+    /// The 1.16.5 anvil's level cost as the client holds it (`None`: no 1.16.5 anvil open).
+    #[must_use]
+    pub fn anvil_cost(&self) -> Option<i32> {
+        match self.m.station.as_deref() {
+            Some(crate::station::Station::Anvil(a)) => Some(a.cost),
+            _ => None,
+        }
+    }
+
+    /// Anvil: types `name` into the name field like the screen (1.16.5: `onRenamed`; 26.x: as
+    /// [`Inventory::anvil_rename_modern`]). Returns the `rename_item` to send (`Ok(None)`:
+    /// nothing is sent: an empty name, or no first input). The field takes at most 35
+    /// characters, without `§` and control characters. Typing exactly the item's translated
+    /// name is not recognised (ghast has no translations): it renames.
+    ///
+    /// # Errors
+    /// [`ClickError::NoScreen`] when no anvil is open; [`ClickError::InvalidSlot`] for a name
+    /// the field does not take; [`ClickError::Unpredictable`] when the result cannot be
+    /// computed (an item name ghast cannot read).
+    pub fn anvil_rename(&mut self, name: &str) -> Result<Option<Outgoing>, ClickError> {
+        #[cfg(modern)]
+        if self.version.is_modern() {
+            return self.anvil_rename_modern(name);
+        }
+        if !matches!(
+            self.m.station.as_deref(),
+            Some(crate::station::Station::Anvil(_))
+        ) {
+            return Err(ClickError::NoScreen);
+        }
+        if name.chars().count() > 35
+            || name
+                .chars()
+                .any(|c| c == '\u{a7}' || c < ' ' || c == '\u{7f}')
+        {
+            return Err(ClickError::InvalidSlot);
+        }
+        // the field is editable while the screen last saw an item in slot 0
+        let editable = matches!(
+            self.m.station.as_deref(),
+            Some(crate::station::Station::Anvil(a)) if a.tracked.is_some()
+        );
+        if name.is_empty() || !editable {
+            return Ok(None);
+        }
+        let lay = self.layout();
+        let mut m = self.m.clone();
+        let mut sim = Sim {
+            v: self.version,
+            lay,
+            m: &mut m,
+            book: &self.book,
+            binding_curse: None,
+            tags: self.tags16.as_deref(),
+        };
+        // onRenamed: the item's own (custom) name typed again keeps it
+        sim.anvil_set_name(name.to_owned());
+        if !m.container_result_known {
+            return Err(ClickError::Unpredictable);
+        }
+        let out = std::mem::take(&mut m.screen_out);
+        self.m = m;
+        self.events.window_changed = true;
+        Ok(out.into_iter().last())
+    }
+
     /// 1.16.5 menu buttons the client acts on itself (stonecutter recipe `index`, like its
     /// screen; [`Outgoing::ButtonClick`] is the packet to send). `Ok(None)`: the menu does not
     /// take that button (nothing to send).
@@ -2373,6 +2472,7 @@ impl Inventory {
             Screen::Container(WindowKind::Crafting)
         );
         let anvil = !self.version.is_modern()
+            && self.version != Version::V1_16_5
             && matches!(self.layout().screen, Screen::Container(WindowKind::Anvil));
         match l {
             Loc::CraftResult => {
@@ -2596,6 +2696,12 @@ impl Inventory {
             match w.properties.iter_mut().find(|p| p.0 == property) {
                 Some(p) => p.1 = value,
                 None => w.properties.push((property, value)),
+            }
+            // 1.16.5 anvil: the level cost
+            if property == 0
+                && let Some(crate::station::Station::Anvil(a)) = self.m.station.as_deref_mut()
+            {
+                a.cost = i32::from(value);
             }
             // 1.16.5 stonecutter / loom: the selected recipe / pattern (no result update)
             if property == 0

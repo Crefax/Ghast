@@ -29,6 +29,8 @@ pub(crate) enum Station {
     Grindstone,
     /// Loom: the selected pattern (`selectedPattern`, 0 = none).
     Loom { selected: i32 },
+    /// 1.16.5 anvil: the name field, the tracked first input, the cost.
+    Anvil(crate::anvil16::Anvil),
     /// Cartography table: its client never computes a result (the screen's context is empty);
     /// it only clears the server's result when the inputs no longer pay for it.
     Cartography,
@@ -51,6 +53,7 @@ impl Station {
             WindowKind::Grindstone => Station::Grindstone,
             WindowKind::Loom => Station::Loom { selected: 0 },
             WindowKind::Cartography => Station::Cartography,
+            WindowKind::Anvil => Station::Anvil(crate::anvil16::Anvil::default()),
             _ => return None,
         })
     }
@@ -58,7 +61,7 @@ impl Station {
     /// Whether container slot `k` is one of the menu's inputs (its inventory notifies the menu).
     pub(crate) fn is_input(&self, k: usize) -> bool {
         match self {
-            Station::Smithing { .. } | Station::Grindstone => k < 2,
+            Station::Smithing { .. } | Station::Grindstone | Station::Anvil(_) => k < 2,
             Station::Stonecutter { .. } => k == 0,
             Station::Loom { .. } => k < 3,
             // its result inventory notifies the menu too
@@ -69,7 +72,10 @@ impl Station {
     /// The container slot of the result.
     pub(crate) fn output(&self) -> usize {
         match self {
-            Station::Smithing { .. } | Station::Grindstone | Station::Cartography => 2,
+            Station::Smithing { .. }
+            | Station::Grindstone
+            | Station::Cartography
+            | Station::Anvil(_) => 2,
             Station::Stonecutter { .. } => 1,
             Station::Loom { .. } => 3,
         }
@@ -78,7 +84,10 @@ impl Station {
     /// Whether double-click gathers from the result slot (`canInsertIntoSlot`: the smithing
     /// table and the stonecutter refuse it, the grindstone does not).
     pub(crate) fn gathers_result(&self) -> bool {
-        matches!(self, Station::Grindstone | Station::Loom { .. })
+        matches!(
+            self,
+            Station::Grindstone | Station::Loom { .. } | Station::Anvil(_)
+        )
     }
 }
 
@@ -134,6 +143,11 @@ impl Sim<'_> {
             Some(Station::Stonecutter { .. }) => self.stonecutter_changed(),
             Some(Station::Grindstone) => self.grindstone_update(),
             Some(Station::Loom { .. }) => self.loom_changed(),
+            // ForgingScreenHandler.onContentChanged: super (sendContentUpdates) first
+            Some(Station::Anvil(_)) => {
+                self.anvil_sync();
+                self.anvil_update();
+            }
             Some(Station::Cartography) => {
                 // onContentChanged: no result computed on the client, only cleared
                 let both = self.m.container[0].is_some() && self.m.container[1].is_some();
@@ -240,6 +254,7 @@ impl Sim<'_> {
             }
         }
         Ok(match self.m.station.as_deref() {
+            Some(Station::Anvil(_)) => self.anvil_can_take(),
             Some(Station::Smithing { recipe: Some(k) }) => {
                 let r = &self.book.smithing[*k];
                 test(&r.0, self.m.container[0].as_ref()) && test(&r.1, self.m.container[1].as_ref())
@@ -272,6 +287,10 @@ impl Sim<'_> {
             Some(Station::Grindstone) => {
                 self.set(0, None);
                 self.set(1, None);
+                Ok(())
+            }
+            Some(Station::Anvil(_)) => {
+                self.anvil_take();
                 Ok(())
             }
             Some(Station::Cartography) => {

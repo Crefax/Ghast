@@ -711,3 +711,91 @@ fn menu_buttons_1_16_5() {
     assert_eq!(e.inventory_mut().click_button(0), Ok(None));
     assert!(e.inventory_mut().click_button(5).unwrap().is_some());
 }
+
+/// 1.16.5 anvil through the engine: the client's own result (a diamond sword repaired with
+/// diamonds), taking it costs levels, a name typed into the field is written as `rename_item`,
+/// and the screen's own `rename_item` (its first input changed) goes before the click.
+#[test]
+fn anvil_1_16_5() {
+    let sword = id16("diamond_sword");
+    let diamond = id16("diamond");
+    let dmg = |d: i32| {
+        use ghast_protocol::nbt::{Compound, NamedTag, RawNbt, Tag};
+        Some(
+            RawNbt::from_named(&NamedTag {
+                name: String::new(),
+                tag: Tag::Compound(Compound(vec![("Damage".into(), Tag::Int(d))])),
+            })
+            .unwrap(),
+        )
+    };
+    let mut e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(5, 7),
+        5,
+        vec![None, None, None],
+        &[
+            (0, Stack::new(sword, 1, 0).with_nbt(dmg(1000))),
+            (1, Stack::new(diamond, 3, 0)),
+        ],
+    );
+    e.inventory_mut().set_experience_level(10);
+    assert_eq!(e.core.inv.slot_kind(2), Some(SlotKind::MenuResult));
+    // hotbar 0 (screen slot 3 + 27) into the first input: the screen renames ("") first
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 30,
+            right: false,
+        },
+    );
+    let order: Vec<bool> = out
+        .iter()
+        .filter_map(|o| match o {
+            Outbound::Inventory(ghast_inventory::Outgoing::RenameItem(_)) => Some(true),
+            Outbound::Inventory(ghast_inventory::Outgoing::Click(_)) => Some(false),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order.first(), Some(&true), "{out:?}");
+    assert_eq!(order.last(), Some(&false));
+    let _ = e.inventory_mut().on_transaction(5, 1, true);
+    // the diamonds into the second input: repaired (3 × a quarter of 1561)
+    let out = click_once(
+        &mut e,
+        Click::QuickMove {
+            slot: 31,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    let _ = e.inventory_mut().on_transaction(5, 2, true);
+    let cost = e.core.inv.anvil_cost().unwrap();
+    assert!(cost > 0 && cost <= 10, "{cost}");
+    assert_eq!(e.core.inv.slot(2).map(Stack::id), Some(sword));
+    // the name field
+    let t0 = std::time::Instant::now();
+    e.note_inbound(t0);
+    let mut b = Script(|ctx: &mut TickContext<'_>| ctx.anvil_rename("Blade").unwrap());
+    e.tick(&mut b, t0);
+    let _ = b;
+    let out = std::mem::take(e.outbound());
+    assert!(out.iter().any(|o| matches!(
+        o,
+        Outbound::Inventory(ghast_inventory::Outgoing::RenameItem(n)) if n == "Blade"
+    )));
+    let cost = e.core.inv.anvil_cost().unwrap();
+    // take it: levels paid, the inputs used up
+    let out = click_once(
+        &mut e,
+        Click::Pickup {
+            slot: 2,
+            right: false,
+        },
+    );
+    assert!(clicked(&out), "{out:?}");
+    assert_eq!(e.core.inv.experience_level(), 10 - cost);
+    assert_eq!(e.core.inv.slot(0), None);
+    assert_eq!(e.core.inv.slot(1), None);
+    assert_eq!(e.core.inv.cursor().map(Stack::id), Some(sword));
+}

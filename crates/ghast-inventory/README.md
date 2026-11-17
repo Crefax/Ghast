@@ -101,7 +101,7 @@ over every item id and damage, checked against the oracle's dump by the unit tes
 |---|---|---|---|
 | brewing stand (`SlotKind::Potion`, `BrewingIngredient`, `BrewingFuel`) | yes | yes | yes |
 | enchanting table (`SlotKind::EnchantItem`, `Lapis`) | yes | yes | yes |
-| anvil (inputs `Normal`, `SlotKind::AnvilOutput`) | inputs; output refused | same | same |
+| anvil (inputs `Normal`, output `SlotKind::AnvilOutput`; 1.16.5 `MenuResult`) | inputs; output refused | same | yes |
 | beacon (`SlotKind::BeaconPayment`) | yes | yes | yes |
 | villager trading (payments `Normal`, `SlotKind::TradeOutput`) | yes | yes | yes |
 | horse, donkey, mule, zombie / skeleton horse; 1.12+ llama, 1.16.5 trader llama (`SlotKind::MountSaddle`, `MountArmor`, chest `Normal`) | yes | yes | yes |
@@ -124,7 +124,18 @@ over every item id and damage, checked against the oracle's dump by the unit tes
   was a single item; 1.16: a copy with NBT). The offered enchantments, their costs and the seed
   are window properties for the GUI only; the enchantment itself (`enchant_item`) is the
   server's.
-- **Anvil**: the two inputs are plain slots (shift-click: player part into both inputs, inputs to
+- **1.16.5 anvil**: computed like the client (`src/anvil16.rs`): repair with materials (a
+  quarter of the durability per item), combining two items (+12 %) or a book, enchantments
+  (levels, max levels, compatibility, the item they fit, creative fits all), the rarity cost,
+  renaming, the prior work penalty, "too expensive" at 40 (not in creative), the result's
+  repair cost; taking it needs the cost in levels (`Inventory::set_experience_level`, from
+  `experience`; creative from `abilities`), takes them on the client, empties the first input
+  and uses the repair materials or the second input. The screen's name field is modelled:
+  when the first input changes it sends `rename_item` ("" for an item without a custom name)
+  before the click's own packet (`Inventory::take_screen_packets`; ghast-client writes them),
+  and `Inventory::anvil_rename` types a name (35 characters at most). The anvil breaking is the
+  server's. Refused: custom names ghast cannot read as plain text (translations, scores).
+- **Anvil** (1.8.9, 1.12.2): the two inputs are plain slots (shift-click: player part into both inputs, inputs to
   the player part). The client computes the output itself on every input change (repair,
   enchantment combining, renaming, the level cost); ghast does not model that computation yet:
   after an input change the output is unknown (`result_known()` false; an empty first input

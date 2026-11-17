@@ -133,6 +133,7 @@ impl ClientVersion for V1_16_5 {
             .with(cb::id::DECLARE_RECIPES)
             // the item tags (beacon payments, fuels, llama carpets follow the server's)
             .with(cb::id::TAGS)
+            .with(cb::id::EXPERIENCE)
             .with(cb::id::ABILITIES)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::COMBAT_EVENT)
@@ -362,6 +363,9 @@ impl ClientVersion for V1_16_5 {
             cb::id::TRADE_LIST => P::TradeList(raw.decode_as()?),
             cb::id::DECLARE_RECIPES => P::DeclareRecipes(raw.decode_as()?),
             cb::id::TAGS => P::Tags(raw.decode_as()?),
+            // the anvil's level check: the level and creative mode
+            cb::id::EXPERIENCE => P::Experience(raw.decode_as()?),
+            cb::id::ABILITIES => P::Abilities(raw.decode_as()?),
             _ => return Ok(None),
         };
         Ok(inv.apply_v1_16_5(&p))
@@ -445,6 +449,7 @@ impl ClientVersion for V1_16_5 {
                 Some(sb::ServerboundPlayPacket::SelectTrade(p)) => enc.write_packet(&p),
                 // menu buttons (stonecutter, loom, lectern)
                 Some(sb::ServerboundPlayPacket::EnchantItem(p)) => enc.write_packet(&p),
+                Some(sb::ServerboundPlayPacket::NameItem(p)) => enc.write_packet(&p),
                 _ => Ok(()),
             },
             Outbound::UseEntity {

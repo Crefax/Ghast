@@ -1335,6 +1335,11 @@ impl<S: Sim> Engine<S> {
                 self.sim.boots(depth, soul);
                 self.sim.feet_item(c.inv.armor(3).map(|s| s.id()));
             }
+            // what the open screen sent by itself while the server's packets were applied (the
+            // 1.16.5 anvil's rename_item), before this tick's actions
+            for o in c.inv.take_screen_packets() {
+                c.out.push(Outbound::Inventory(o));
+            }
             let started = self.state.started;
             self.state.started = true;
             if !started {
@@ -2250,6 +2255,10 @@ impl TickContext<'_> {
             .inv
             .click(click)
             .map_err(ClickRefused::Inventory)?;
+        // the screen's own packets of this click (1.16.5 anvil rename_item) go first
+        for s in self.core.inv.take_screen_packets() {
+            self.core.out.push(Outbound::Inventory(s));
+        }
         let ticket = match &o {
             ghast_inventory::Outgoing::Click(p) => ClickTicket {
                 window_id: i32::from(p.window_id),
@@ -2268,17 +2277,14 @@ impl TickContext<'_> {
     /// when the name did not change or the input slot is empty). An empty name removes a
     /// custom name.
     pub fn anvil_rename(&mut self, name: &str) -> Result<(), ClickRefused> {
-        #[cfg(ghast_modern)]
         if let Some(o) = self
             .core
             .inv
-            .anvil_rename_modern(name)
+            .anvil_rename(name)
             .map_err(ClickRefused::Inventory)?
         {
             self.core.out.push(Outbound::Inventory(o));
         }
-        #[cfg(not(ghast_modern))]
-        let _ = name;
         Ok(())
     }
 

@@ -60,6 +60,13 @@ pub(crate) struct Model {
     pub furnace: u8,
     /// 1.16.5 workstation menu (smithing table, stonecutter, ...): its client-side state.
     pub station: Option<Box<crate::station::Station>>,
+    /// Packets the open screen sends by itself during a click or a server packet (the 1.16.5
+    /// anvil's `rename_item`), before the click's own packet.
+    pub screen_out: Vec<crate::Outgoing>,
+    /// The player's experience level (1.16.5 anvil: taking the result costs levels).
+    pub xp_level: i32,
+    /// Creative mode (1.16.5 anvil: no level cost, every enchantment fits).
+    pub creative: bool,
 }
 
 /// 1.8: `RecipeDispatcher`'s result for a grid, and whether ghast knows it.
@@ -109,6 +116,9 @@ impl Default for Model {
             mount: None,
             furnace: 0,
             station: None,
+            screen_out: Vec::new(),
+            xp_level: 0,
+            creative: false,
         }
     }
 }
@@ -243,6 +253,8 @@ impl Layout {
                         {
                             SlotKind::Special
                         }
+                        // 1.16.5: the anvil's output is computed like the client
+                        SlotKind::AnvilOutput if self.v == Version::V1_16_5 => SlotKind::MenuResult,
                         kind => kind,
                     }
                 } else {
@@ -494,6 +506,7 @@ impl Sim<'_> {
             self.station_touched(l);
         }
         if self.lay.screen == Screen::Container(WindowKind::Anvil)
+            && self.v != Version::V1_16_5
             && matches!(l, Loc::Container(0 | 1))
             && self.m.container.len() == 3
         {
@@ -1246,6 +1259,14 @@ impl Sim<'_> {
                                 return Ok(None);
                             }
                         }
+                    }
+                    WindowKind::Anvil if v == Version::V1_16_5 => {
+                        let ok = match i {
+                            2 => self.insert(&mut st, 3, 39, true)?,
+                            0 | 1 => self.insert(&mut st, 3, 39, false)?,
+                            _ => self.insert(&mut st, 0, 2, false)?,
+                        };
+                        (ok, true)
                     }
                     WindowKind::Anvil if crate::menus::modelled(v, kind) => {
                         let ok = match i {

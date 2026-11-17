@@ -222,6 +222,43 @@ fn compare(inv: &Inventory, v: Version, st: &Value, out: &mut Vec<String>) {
     }
 }
 
+/// 1.16.5 anvil: the rename packets its screen sent, the level and the cost after a step.
+fn check_anvil(inv: &mut Inventory, st: &Value, out: &mut Vec<String>, sent: Vec<Outgoing>) {
+    let Some(want) = st["renames"].as_array() else {
+        return;
+    };
+    let mut got: Vec<String> = sent
+        .into_iter()
+        .chain(inv.take_screen_packets())
+        .filter_map(|o| match o {
+            Outgoing::RenameItem(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    let want: Vec<String> = want
+        .iter()
+        .map(|w| w.as_str().unwrap().to_owned())
+        .collect();
+    if got != want {
+        out.push(format!("renames: ghast {got:?}, vanilla {want:?}"));
+    }
+    got.clear();
+    let level = st["level"].as_i64().unwrap() as i32;
+    if inv.experience_level() != level {
+        out.push(format!(
+            "level: ghast {}, vanilla {level}",
+            inv.experience_level()
+        ));
+    }
+    let cost = st["cost"].as_i64().unwrap() as i32;
+    if inv.result_known() && inv.anvil_cost() != Some(cost) {
+        out.push(format!(
+            "cost: ghast {:?}, vanilla {cost}",
+            inv.anvil_cost()
+        ));
+    }
+}
+
 fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Option<&cb16::Tags>) {
     let name = c["case"].as_str().unwrap().to_owned();
     let sync = c["sync"].as_i64().unwrap() as i32;
@@ -244,6 +281,10 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Op
         }
         Some(k) => inv.on_open_window(sync, Some(k), "{}".into()),
     }
+    if let Some(cr) = c["creative"].as_bool() {
+        inv.set_creative(cr);
+        inv.set_experience_level(c["level"].as_i64().unwrap() as i32);
+    }
     if c["mount"]["known"] == true {
         inv.set_mount_rules(Some(mount_rules_of(v, &c["mount"])));
     }
@@ -260,10 +301,34 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Op
     load(&mut inv, v, sync, c);
     let mut d = Vec::new();
     compare(&inv, v, c, &mut d);
+    check_anvil(&mut inv, c, &mut d, Vec::new());
     assert!(d.is_empty(), "{name}: initial state not loaded: {d:?}");
     s.cases += 1;
     for (n, k) in c["clicks"].as_array().unwrap().iter().enumerate() {
         inv.tick();
+        if let Some(typed) = k["rename"].as_str() {
+            // typing into the anvil's name field
+            let at = format!("{name} step {n} rename {typed:?}");
+            let sent = match inv.anvil_rename(typed) {
+                Ok(o) => o.into_iter().collect(),
+                Err(e) => {
+                    s.diffs.push(format!("{at}: {e:?}"));
+                    Vec::new()
+                }
+            };
+            s.selects += 1;
+            let mut d = Vec::new();
+            compare(&inv, v, k, &mut d);
+            check_anvil(&mut inv, k, &mut d, sent);
+            if !d.is_empty() {
+                for x in d {
+                    s.diffs.push(format!("{at}: {x}"));
+                }
+                load(&mut inv, v, sync, k);
+                let _ = inv.take_screen_packets();
+            }
+            continue;
+        }
         if let Some(b) = k["menu_button"].as_i64() {
             // a menu button the screen pressed (stonecutter recipe, ...)
             let at = format!("{name} step {n} button {b}");
@@ -372,6 +437,7 @@ fn replay_case(v: Version, c: &Value, s: &mut Stats, book: &RecipeBook, tags: Op
                 }
                 let mut d = Vec::new();
                 compare(&inv, v, k, &mut d);
+                check_anvil(&mut inv, k, &mut d, Vec::new());
                 for x in d {
                     s.diffs.push(format!("{at}: {x}"));
                 }
