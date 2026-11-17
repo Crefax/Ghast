@@ -87,3 +87,10 @@ fn lab_soulsand_restart_with_box() {
 fn boats_1_8_9() {
     check("boats.jsonl.gz");
 }
+
+/// Sitting in a minecart the server moves: its interpolation, the rider's own tick, the seat,
+/// the server's dismount (hand cases + the golden minecart fuzz).
+#[test]
+fn minecarts_1_8_9() {
+    check("minecarts.jsonl.gz");
+}

@@ -11,11 +11,13 @@ mod atan_table;
 mod blocks;
 mod boat;
 mod fluid;
+mod minecart;
 mod player;
 mod ray;
 
 pub use blocks::HistoryShapes;
 pub use boat::{BOAT_HEIGHT, BOAT_WIDTH, Boat, JavaTrig, StdTrig, tick_boat, tick_boat_with};
+pub use minecart::{MINECART_HEIGHT, MINECART_WIDTH, Minecart, tick_minecart};
 pub use player::{
     Effects, HEIGHT, MovementInput, Options, PlayerState, STEP_HEIGHT, SentState, WIDTH, box_at,
     is_climbing, is_touching_lava, tick, tick_with,

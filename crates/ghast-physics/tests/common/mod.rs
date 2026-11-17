@@ -490,6 +490,19 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
             v1_8::Boat::spawned(fixed, yaw, 0)
         });
     let mut riding = false;
+    // Riding cases with `setup.ext.boat.minecart`: the vehicle is a minecart.
+    let mut cart = case.header["setup"]
+        .get("ext")
+        .and_then(|x| x.get("boat"))
+        .filter(|bt| bt.get("minecart").and_then(Value::as_bool) == Some(true))
+        .map(|bt| {
+            let fixed = f3(&bt["pos"]).map(|v| (v * 32.0).floor() as i32);
+            let yaw = (f32_of(&bt["yaw"]) * 256.0 / 360.0).floor() as i32 as i8;
+            v1_8::Minecart::spawned(fixed, yaw, 0)
+        });
+    if cart.is_some() {
+        boat = None;
+    }
     let t0 = &case.ticks[0];
     assert_eq!(t0["t"], 0);
     let mut p = player_of(&case.header, t0);
@@ -531,7 +544,22 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
                         fly_speed: f32_of(&e["fly_speed"]),
                         walk_speed: f32_of(&e["walk_speed"]),
                     }),
-                    "ride" => riding = b(&e["on"]) && boat.is_some(),
+                    "ride" => riding = b(&e["on"]) && (boat.is_some() || cart.is_some()),
+                    "boat_teleport" if cart.is_some() => {
+                        cart.as_mut().unwrap().server_teleport(
+                            [i(&e["x"]), i(&e["y"]), i(&e["z"])],
+                            i(&e["yaw"]) as i8,
+                            i(&e["pitch"]) as i8,
+                        );
+                    }
+                    "boat_move" if cart.is_some() => {
+                        cart.as_mut().unwrap().server_update(
+                            [i(&e["dx"]) as i8, i(&e["dy"]) as i8, i(&e["dz"]) as i8],
+                            None,
+                        );
+                    }
+                    // A minecart's client motion does not move it.
+                    "boat_velocity" if cart.is_some() => {}
                     "boat_teleport" => {
                         let bt = boat.as_mut().expect("boat");
                         bt.server_teleport(
@@ -568,21 +596,40 @@ pub fn replay(case: &Case) -> Result<usize, Mismatch> {
         let options = v1_8::Options {
             history_shapes: v1_8::HistoryShapes::Constructor,
         };
-        match boat.as_mut() {
-            Some(bt) if riding => {
-                let trig = JvmTrig::of(rec);
-                if !v1_8::tick_boat_with(&mut p, bt, &ti, &world, &options, &trig, &mut out) {
-                    riding = false;
+        if let (Some(c), true) = (cart.as_mut(), riding) {
+            v1_8::tick_minecart(&mut p, c, &ti, &world, &options, &mut out);
+        } else {
+            match boat.as_mut() {
+                Some(bt) if riding => {
+                    let trig = JvmTrig::of(rec);
+                    if !v1_8::tick_boat_with(&mut p, bt, &ti, &world, &options, &trig, &mut out) {
+                        riding = false;
+                    }
+                    for &[x, y, z] in bt.broken_blocks() {
+                        world.set_raw(x, y, z, 0);
+                    }
                 }
-                for &[x, y, z] in bt.broken_blocks() {
-                    world.set_raw(x, y, z, 0);
-                }
+                _ => v1_8::tick_with(&mut p, &ti, &world, &options, &mut out),
             }
-            _ => v1_8::tick_with(&mut p, &ti, &world, &options, &mut out),
         }
         sent.extend(out.as_slice().iter().map(packet_json));
         if let Some(d) = diff("state", &rec["state"], &state_json(&p, &world, using_item)) {
             return Err(mm(t, d));
+        }
+        if let (Some(want), Some(c), true) = (rec.get("vehicle"), &cart, riding) {
+            let got = json!({
+                "pos": [jf64(c.pos[0]), jf64(c.pos[1]), jf64(c.pos[2])],
+                "yaw": jf32(c.yaw),
+                "pitch": jf32(c.pitch),
+                "lerp_steps": c.interpolation_steps(),
+            });
+            let want = json!({
+                "pos": want["pos"], "yaw": want["yaw"], "pitch": want["pitch"],
+                "lerp_steps": want["lerp_steps"],
+            });
+            if let Some(d) = diff("vehicle", &want, &got) {
+                return Err(mm(t, d));
+            }
         }
         if let (Some(want), Some(bt), true) = (rec.get("vehicle"), &boat, riding) {
             let got = json!({

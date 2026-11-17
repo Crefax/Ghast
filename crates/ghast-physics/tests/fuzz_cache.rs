@@ -1,4 +1,4 @@
-//! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/`, `oracle/cache/1.8.9/fuzz-void/`, `oracle/cache/1.8.9/fuzz-boats/`,
+//! Large-fuzz replay: every `*.jsonl.gz` in `oracle/cache/1.8.9/fuzz/`, `oracle/cache/1.8.9/fuzz-edges/`, `oracle/cache/1.8.9/fuzz-void/`, `oracle/cache/1.8.9/fuzz-boats/`, `oracle/cache/1.8.9/fuzz-minecarts/`,
 //! `oracle/cache/1.16.5/fuzz{,-edges,-extras,-entities,-nether,-riptide,-elytra,-boats,-minecarts}/`, `oracle/cache/1.12.2/fuzz{,-edges,-extras,-entities,-elytra,-boats,-minecarts}/`, the 26.1 and 26.2 directories (or the file / directory in `GHAST_FUZZ`) produced by
 //! `oracle/run.sh fuzz`, compared bit for bit. The version is taken from the path.
 //!
@@ -29,6 +29,7 @@ fn inputs() -> Vec<PathBuf> {
             repo_root().join("oracle/cache/1.8.9/fuzz-extras"),
             repo_root().join("oracle/cache/1.8.9/fuzz-void"),
             repo_root().join("oracle/cache/1.8.9/fuzz-boats"),
+            repo_root().join("oracle/cache/1.8.9/fuzz-minecarts"),
             repo_root().join("oracle/cache/1.16.5/fuzz"),
             repo_root().join("oracle/cache/1.16.5/fuzz-edges"),
             repo_root().join("oracle/cache/1.16.5/fuzz-extras"),

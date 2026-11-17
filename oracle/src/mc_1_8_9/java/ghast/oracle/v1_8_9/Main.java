@@ -52,16 +52,18 @@ public final class Main {
                 boolean edges = Boolean.parseBoolean(a.str("--edges", "false")) || "edges".equals(a.str("--palette", ""));
                 boolean extras = Boolean.parseBoolean(a.str("--extras", "false"));
                 boolean boats = Boolean.parseBoolean(a.str("--boats", "false"));
+                boolean minecarts = Boolean.parseBoolean(a.str("--minecarts", "false"));
                 Path out = a.path("--out", Path.of("cache", VERSION, "fuzz", "fuzz-seed" + seed + "-n" + count + ".jsonl.gz"));
                 // Streamed: cases are generated and written one at a time (millions of ticks fit).
                 write(out, sink -> {
                     for (int i = 0; i < count; i++) {
-                        run(boats ? Boats.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
+                        run(minecarts ? Boats.cartFuzz(seed, i, ticks) : boats ? Boats.fuzz(seed, i, ticks) : edges ? Fuzz.edge(seed, i, ticks)
                                 : extras ? Fuzz.withExtras(seed, i, ticks, useItem) : Fuzz.one(seed, i, ticks, useItem), sink);
                     }
                 });
             }
             case "boats" -> write(a.path("--out", golden.resolve("boats.jsonl.gz")), sink -> runAll(Boats.golden(), sink));
+            case "minecarts" -> write(a.path("--out", golden.resolve("minecarts.jsonl.gz")), sink -> runAll(Boats.cartsGolden(), sink));
             case "boxes" -> {
                 Path out = a.path("--out", golden.resolve("collision_boxes.jsonl.gz"));
                 write(out, sink -> CollisionDump.lines().forEach(sink));
@@ -204,6 +206,7 @@ public final class Main {
         });
         write(dir.resolve("entity_sizes.jsonl.gz"), EntitySizeDump::lines);
         write(dir.resolve("boats.jsonl.gz"), sink -> runAll(Boats.golden(), sink));
+        write(dir.resolve("minecarts.jsonl.gz"), sink -> runAll(Boats.cartsGolden(), sink));
         write(dir.resolve("selection_boxes.jsonl.gz"), sink -> SelectionDump.lines().forEach(sink));
         write(dir.resolve("raytrace.jsonl.gz"), sink -> SelectionDump.rays(GOLDEN_RAY_SEED, GOLDEN_RAY_WORLDS, GOLDEN_RAYS, sink));
         write(dir.resolve("recipes.jsonl.gz"), RecipeDump::lines);
@@ -310,6 +313,7 @@ public final class Main {
             all.add(Fuzz.edge(GOLDEN_FUZZ_SEED, i, GOLDEN_FUZZ_TICKS));
         }
         all.addAll(Boats.golden());
+        all.addAll(Boats.cartsGolden());
         List<List<String>> forward = new ArrayList<>();
         for (Scenario sc : all) {
             forward.add(run(sc));
@@ -330,7 +334,7 @@ public final class Main {
 
         // Round trip: the written files, read back as inputs and replayed, reproduce themselves.
         for (String f : new String[] {"scenarios.jsonl.gz", "fuzz_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz",
-                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "boats.jsonl.gz"}) {
+                "fuzz_edges_seed" + GOLDEN_FUZZ_SEED + ".jsonl.gz", "boats.jsonl.gz", "minecarts.jsonl.gz"}) {
             Path replayed = base.resolve("replayed-" + f);
             write(replayed, sink -> ScenarioReader.read(a.resolve(f), sc -> run(sc, sink)));
             boolean same = sha256(replayed).equals(sha256(a.resolve(f)));

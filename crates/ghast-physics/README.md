@@ -421,7 +421,12 @@ the JVM (58 of 29,340 values in the golden file differ from the correctly rounde
 21 x86-64): `tick_boat` uses the platform's functions, `tick_boat_with` takes a `JavaTrig`, and the
 replay feeds the oracle's recorded values. `boats.jsonl.gz` (18 hand cases + 100 fuzz cases) and
 `fuzz --boats true` seeds 81-85 in `fuzz-boats/` (1,000,000 ticks), 0 diffs. Other entities near
-the boat are not modelled on 1.8.9 (as for walking).
+the boat are not modelled on 1.8.9 (as for walking). Sitting in a minecart (`v1_8::{Minecart,
+tick_minecart}`): the server moves it; the client interpolates its teleports (within 1/32 the
+position is kept) and relative moves on its 1/32 server position (3 + 2 steps), the rider's own
+tick (a minecart has no box for its rider, unlike a 1.8 boat), `look` + `steer_vehicle`, the seat
+0.35 below; no dismount by the client: `minecarts.jsonl.gz` (7 hand cases + 100 fuzz cases) and
+`fuzz --minecarts true` seeds 91-95 in `fuzz-minecarts/` (1,000,000 ticks), 0 diffs.
 
 Last run (2026-11-03): 24,000 cases, **2,160,000 ticks, 0 diffs** (oracle fuzz 1,000,000 ticks,
 oracle fuzz with `--use-item true` 200,000 ticks (seed 21), extra fuzz 960,000 ticks; per 160k extra ticks about 14k in water with flow, 4.5k in lava, 7k in
@@ -533,7 +538,7 @@ vanilla's hash order), depth strider, spectators, entity pushes and collisions (
 
 - 1.8.9: no client-side entity pushes (the 1.8 client leaves them to the server) and boats /
   minecarts are not solid for the player's move.
-- Riding a vehicle other than a boat (1.8.9) or a boat or minecart (1.12.2, 1.16.5); bubble
+- Riding a vehicle other than a boat or a minecart (1.8.9, 1.12.2, 1.16.5); bubble
   columns under a 1.16.5 boat; other entities near a 1.8.9 boat.
 - Sleeping (the pose exists, its movement is not simulated), portals / nausea, living mounts,
   pistons.

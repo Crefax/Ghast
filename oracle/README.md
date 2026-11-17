@@ -77,6 +77,7 @@ tests/golden/1.8.9/
   raytrace.jsonl.gz          crosshair raytrace vectors (50 worlds x 40 viewpoints)
   entity_sizes.jsonl.gz      entity widths / heights / eye heights / boxes per spawn path + metadata variants
   boats.jsonl.gz             riding a boat the client simulates (hand cases + 100 fuzz cases)
+  minecarts.jsonl.gz         sitting in a minecart the server moves (hand cases + 100 fuzz cases)
   entity_tracking.jsonl.gz   (26.1) random entity packets through the real client, entity state per tick
   joins.jsonl.gz             (26.1) joins through the level-load gate (delayed load)
   net_crypto.jsonl.gz        (26.1) login encryption: session hash, hello / key packets, AES/CFB8
@@ -187,6 +188,24 @@ ticks, 0 diffs):
 
 ```sh
 for s in 81 82 83 84 85; do oracle/run.sh fuzz --boats true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.8.9/fuzz-boats/boats_s$s.jsonl.gz"; done
+```
+
+### Minecarts (`minecarts.jsonl.gz`, 1.8.9)
+
+`oracle/run.sh minecarts` (7 hand cases + 100 fuzz cases × 60 ticks of seed 1) and
+`fuzz --minecarts true` (`Boats.cartFuzz`, cases `…_mc`): the boat cases' setup with
+`setup.ext.boat.minecart` (spawn-object type 10, a rideable cart) and the same events, which the
+server sends for the cart: `boat_move` (1/32 deltas), `boat_teleport` (near and far),
+`boat_velocity` (a minecart's client motion does not move it). The 1.8 client only interpolates a
+minecart (3 + 2 steps). Tick records add `vehicle` (the cart: position, rotation, box,
+interpolation steps left). Packets while riding: `look`, `steer_vehicle`; the client never gets off
+by itself. Cases: idle with looks and keys, rolled and stopped, sparse moves with teleports and a
+zero move, under a ceiling against a wall, through water, down a step, the server's dismount.
+What is faked: nothing beyond the boat cases'. Cached run (`oracle/cache/1.8.9/fuzz-minecarts/`,
+1,000,000 ticks, 0 diffs):
+
+```sh
+for s in 91 92 93 94 95; do oracle/run.sh fuzz --minecarts true --seed $s --count 2000 --ticks 100 --out "$PWD/oracle/cache/1.8.9/fuzz-minecarts/minecarts_s$s.jsonl.gz"; done
 ```
 
 ## History-dependent shapes (anvil, chest, trapped chest)
