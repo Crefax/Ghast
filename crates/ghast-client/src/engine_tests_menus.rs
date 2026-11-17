@@ -659,3 +659,55 @@ fn mount_screens_legacy() {
     .unwrap();
     assert_eq!(e.core.inv.slot(1).map(Stack::id), Some(171));
 }
+
+/// The play filters pass what the inventory reads beyond the window packets (villager offers,
+/// 1.16.5 recipes): a filtered packet never reaches `inventory_packet`.
+#[test]
+fn filters_pass_inventory_extras() {
+    use crate::Interests;
+    assert!(
+        V1_8::play_filter(Interests::NONE)
+            .contains(ghast_protocol::v1_8::play::clientbound::id::CUSTOM_PAYLOAD)
+    );
+    assert!(
+        V1_12_2::play_filter(Interests::NONE)
+            .contains(ghast_protocol::v1_12_2::play::clientbound::id::CUSTOM_PAYLOAD)
+    );
+    let f = V1_16_5::play_filter(Interests::NONE);
+    use ghast_protocol::v1_16_5::play::clientbound::id;
+    assert!(f.contains(id::TRADE_LIST));
+    assert!(f.contains(id::DECLARE_RECIPES));
+    assert!(f.contains(id::TAGS));
+}
+
+/// 1.16.5 workstations through the engine: the lectern's take-book button and a loom pattern
+/// button are written as `enchant_item` (the loom's only when it takes the button).
+#[test]
+fn menu_buttons_1_16_5() {
+    let mut e = opened::<V1_16_5>(GameVersion::V1_16_5, &open_1_16(6, 16), 6, vec![None], &[]);
+    let t0 = std::time::Instant::now();
+    e.note_inbound(t0);
+    let mut b = Script(|ctx: &mut TickContext<'_>| {
+        ctx.click_button(3).unwrap();
+    });
+    e.tick(&mut b, t0);
+    let _ = b;
+    let out = std::mem::take(e.outbound());
+    assert!(out.iter().any(|o| matches!(
+        o,
+        Outbound::Inventory(ghast_inventory::Outgoing::ButtonClick {
+            window_id: 6,
+            button: 3
+        })
+    )));
+    let mut e = opened::<V1_16_5>(
+        GameVersion::V1_16_5,
+        &open_1_16(7, 17),
+        7,
+        vec![None; 4],
+        &[],
+    );
+    assert_eq!(e.core.inv.slot_kind(3), Some(SlotKind::MenuResult));
+    assert_eq!(e.inventory_mut().click_button(0), Ok(None));
+    assert!(e.inventory_mut().click_button(5).unwrap().is_some());
+}

@@ -127,6 +127,12 @@ impl ClientVersion for V1_16_5 {
             .with(cb::id::WINDOW_ITEMS)
             .with(cb::id::SET_SLOT)
             .with(cb::id::CRAFT_PROGRESS_BAR)
+            // the inventory: villager offers, the recipes (crafting remainders, furnace,
+            // smithing, stonecutter)
+            .with(cb::id::TRADE_LIST)
+            .with(cb::id::DECLARE_RECIPES)
+            // the item tags (beacon payments, fuels, llama carpets follow the server's)
+            .with(cb::id::TAGS)
             .with(cb::id::ABILITIES)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::COMBAT_EVENT)
@@ -343,6 +349,8 @@ impl ClientVersion for V1_16_5 {
             cb::id::CRAFT_PROGRESS_BAR => P::CraftProgressBar(raw.decode_as()?),
             cb::id::OPEN_HORSE_WINDOW => P::OpenHorseWindow(raw.decode_as()?),
             cb::id::TRADE_LIST => P::TradeList(raw.decode_as()?),
+            cb::id::DECLARE_RECIPES => P::DeclareRecipes(raw.decode_as()?),
+            cb::id::TAGS => P::Tags(raw.decode_as()?),
             _ => return Ok(None),
         };
         Ok(inv.apply_v1_16_5(&p))
@@ -424,6 +432,8 @@ impl ClientVersion for V1_16_5 {
                 Some(sb::ServerboundPlayPacket::Transaction(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::CloseWindow(p)) => enc.write_packet(&p),
                 Some(sb::ServerboundPlayPacket::SelectTrade(p)) => enc.write_packet(&p),
+                // menu buttons (stonecutter, loom, lectern)
+                Some(sb::ServerboundPlayPacket::EnchantItem(p)) => enc.write_packet(&p),
                 _ => Ok(()),
             },
             Outbound::UseEntity {

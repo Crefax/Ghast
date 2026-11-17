@@ -97,6 +97,8 @@ impl ClientVersion for V1_8 {
             .with(cb::id::WINDOW_ITEMS)
             .with(cb::id::SET_SLOT)
             .with(cb::id::CRAFT_PROGRESS_BAR)
+            // the villager offers (`MC|TrList`; the inventory reads them)
+            .with(cb::id::CUSTOM_PAYLOAD)
             .with(cb::id::ABILITIES)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::SET_COMPRESSION)

@@ -2297,6 +2297,21 @@ impl TickContext<'_> {
         self.core.inv.set_mount_rules(rules);
     }
 
+    /// 1.16.5: presses a menu button the way its screen does (stonecutter recipe, loom pattern,
+    /// lectern page / take book; `enchant_item` written now when the menu takes it). The
+    /// stonecutter and the loom update their result like the client.
+    pub fn click_button(&mut self, index: i32) -> Result<(), ClickRefused> {
+        if let Some(o) = self
+            .core
+            .inv
+            .click_button(index)
+            .map_err(ClickRefused::Inventory)?
+        {
+            self.core.out.push(Outbound::Inventory(o));
+        }
+        Ok(())
+    }
+
     /// Selects a trade in the open villager screen (1.8 / 1.12 `MC|TrSel`, 1.16.5 / 26.1
     /// `select_trade`, written now; the output is looked up again for that offer and, from
     /// 1.16.5 on, the payment slots are refilled like the real screen).
