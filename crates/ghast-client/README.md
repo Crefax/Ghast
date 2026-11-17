@@ -365,6 +365,13 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   off (the client dismounts itself); the cart's removal or the server's `set_passengers` takes
   the player off. `TickContext::vehicle` reports it with `controlled: false`. Proven through
   the engine (`minecarts.jsonl.gz` and the 1 M tick cached minecart fuzz, 0 differences).
+- **Minecarts on 1.12.2** (`ghast_physics::v1_12::{Minecart, tick_minecart}`, needs
+  `Interests::ENTITIES`): the same as 1.16.5 at the cart's place in the client world's entity
+  list (the entities before it step first; the ones after it push the passenger), from the
+  cart's client position; the 1.12 client never gets off by itself (sneak only goes to the
+  server). Proven through the engine (`minecarts.jsonl.gz` and the 1 M tick cached minecart
+  fuzz, 0 differences). Not modelled: an interpolation still running when the player boards
+  (the cart starts from where the client has it).
 - **Mount screens on 1.8.9 – 1.16.5** with entity tracking: when a mount's window opens
   (`open_window` `EntityHorse`, 1.16.5 `open_horse_window`), the saddle and armor slot rules
   (`ghast_inventory::MountRules`) are read off the tracked entity like `HorseScreenHandler`

@@ -797,3 +797,45 @@ fn boats_cache_match_the_oracle_1_12_2() {
     eprintln!("1.12.2 boat fuzz cache through the engine: {cases} cases, {ticks} ticks");
     assert!(cases > 0);
 }
+
+/// The 1.12.2 minecart goldens through the engine: boarding by `set_passengers`, the cart's
+/// interpolation of the server's moves, `look` / `steer_vehicle` every tick, the server's dismount.
+#[test]
+fn minecarts_match_the_oracle_1_12_2() {
+    let (cases, ticks) = replay_file(
+        &format!(
+            "{}/../../tests/golden/1.12.2/minecarts.jsonl.gz",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+        false,
+    );
+    assert!(cases >= 107 && ticks > 6000, "{cases} cases, {ticks} ticks");
+}
+
+/// The cached minecart fuzz (`oracle/cache/1.12.2/fuzz-minecarts/`, git-ignored) through the
+/// engine.
+#[test]
+#[ignore = "needs the oracle cache"]
+fn minecarts_cache_match_the_oracle_1_12_2() {
+    let dir = format!(
+        "{}/../../oracle/cache/1.12.2/fuzz-minecarts",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {dir} not found");
+        return;
+    };
+    let mut files: Vec<_> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(".jsonl.gz"))
+        .collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in &files {
+        let (c, t) = replay_file(&f.to_string_lossy(), false);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.12.2 minecart fuzz cache through the engine: {cases} cases, {ticks} ticks");
+    assert!(cases > 0);
+}

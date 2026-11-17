@@ -83,11 +83,18 @@ pub(crate) struct Sim12 {
     reply: Option<Outbound>,
 }
 
-/// The boat the player rides: its entity id and its client-side state.
+/// The vehicle the player rides: its entity id and its client-side state.
 #[derive(Debug)]
 struct Ride12 {
     id: i32,
-    boat: ghast_physics::v1_12::Boat,
+    seat: Seat12,
+}
+
+/// The boat the client moves, or the minecart the server moves.
+#[derive(Debug)]
+enum Seat12 {
+    Boat(ghast_physics::v1_12::Boat),
+    Cart(ghast_physics::v1_12::Minecart),
 }
 
 /// What the 1.12.2 glide reads beyond the physics state, decoded once an elytra was seen in the
@@ -385,6 +392,10 @@ impl Sim12 {
         let Some(r) = self.ride.as_deref_mut() else {
             return;
         };
+        let id = r.id;
+        let Seat12::Boat(boat) = &mut r.seat else {
+            return;
+        };
         let input = ghast_physics::TickInput {
             keys: keys(controls),
             yaw: pose.yaw,
@@ -395,7 +406,7 @@ impl Sim12 {
         let (solids, boat_solids): (&[_], &[_]) =
             match (self.near.as_deref_mut(), self.entities.as_ref()) {
                 (Some(n), Some(t)) => {
-                    if let Some(&k) = n.index.get(&r.id) {
+                    if let Some(&k) = n.index.get(&id) {
                         let seq = n.list[k as usize].seq;
                         n.tick(t, &self.world, &self.player.bb, false, "", 0..seq);
                         for &[x, y, z] in &n.lily_pads {
@@ -406,7 +417,7 @@ impl Sim12 {
                     n.solids(t, &self.world, &self.player);
                     // As far as the boat can move this tick (its velocity grows by at most
                     // the paddle and the flow push before the move).
-                    let b = &r.boat;
+                    let b = &*boat;
                     let reach = |v: f64| v.abs() + 3.0;
                     n.boat_solids(
                         t,
@@ -421,18 +432,18 @@ impl Sim12 {
         let still = ghast_physics::v1_12::tick_boat(
             &mut self.player,
             &mut self.ext,
-            &mut r.boat,
+            boat,
             solids,
             boat_solids,
             &input,
             &self.world,
             &mut self.packets,
         );
-        for &[x, y, z] in r.boat.broken_lily_pads() {
+        for &[x, y, z] in boat.broken_lily_pads() {
             self.world
                 .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
         }
-        let (id, pos, bb) = (r.id, r.boat.pos, r.boat.bb);
+        let (pos, bb) = (boat.pos, boat.bb);
         if let Some(n) = self.near.as_deref_mut()
             && let Some(c) = n.get_mut(id)
         {
@@ -443,6 +454,114 @@ impl Sim12 {
             log::debug!("boat {id} fell out of the world");
             self.leave_boat();
         }
+    }
+
+    /// A tick in the minecart we sit in (`ghast_physics::v1_12::tick_minecart`), at the cart's
+    /// place in the client world's entity list (the entities before it step first).
+    #[cold]
+    #[inline(never)]
+    fn step_cart(&mut self, pose: &Pose, controls: Controls) {
+        let Some(r) = self.ride.as_deref_mut() else {
+            return;
+        };
+        let id = r.id;
+        let Seat12::Cart(cart) = &mut r.seat else {
+            return;
+        };
+        let input = ghast_physics::TickInput {
+            keys: keys(controls),
+            yaw: pose.yaw,
+            pitch: pose.pitch,
+            // The passenger tick has no item slowdown.
+            using_item: false,
+        };
+        let solids: &[_] = match (self.near.as_deref_mut(), self.entities.as_ref()) {
+            (Some(n), Some(t)) => {
+                if let Some(&k) = n.index.get(&id) {
+                    let seq = n.list[k as usize].seq;
+                    n.tick(t, &self.world, &self.player.bb, false, "", 0..seq);
+                    for &[x, y, z] in &n.lily_pads {
+                        self.world
+                            .set_block_state(x, y, z, ghast_data::v1_12::BlockState::AIR);
+                    }
+                }
+                n.solids(t, &self.world, &self.player);
+                &n.solids
+            }
+            _ => &[],
+        };
+        ghast_physics::v1_12::tick_minecart(
+            &mut self.player,
+            &mut self.ext,
+            cart,
+            solids,
+            &input,
+            &self.world,
+            &mut self.packets,
+        );
+        let (pos, bb) = (cart.pos, cart.bb);
+        if let Some(n) = self.near.as_deref_mut()
+            && let Some(c) = n.get_mut(id)
+        {
+            c.follow(pos, bb);
+        }
+    }
+
+    /// The server's moves of the minecart we sit in (`onEntityPosition` / `onEntityUpdate`; the
+    /// entity list follows it, see [`Near12::ridden`]).
+    #[cold]
+    #[inline(never)]
+    fn cart_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_12_2::play::clientbound as cb;
+        let Some(Ride12 {
+            id,
+            seat: Seat12::Cart(c),
+        }) = self.ride.as_deref_mut()
+        else {
+            return Ok(());
+        };
+        let id = *id;
+        match raw.id {
+            cb::id::ENTITY_TELEPORT => {
+                let p: cb::EntityTeleport = raw.decode_as()?;
+                if p.entity_id == id {
+                    c.server_teleport([p.x, p.y, p.z], p.yaw, p.pitch);
+                }
+            }
+            cb::id::REL_ENTITY_MOVE => {
+                let p: cb::RelEntityMove = raw.decode_as()?;
+                if p.entity_id == id {
+                    c.server_update([p.d_x, p.d_y, p.d_z], None);
+                }
+            }
+            cb::id::ENTITY_MOVE_LOOK => {
+                let p: cb::EntityMoveLook = raw.decode_as()?;
+                if p.entity_id == id {
+                    c.server_update([p.d_x, p.d_y, p.d_z], Some((p.yaw, p.pitch)));
+                }
+            }
+            cb::id::ENTITY_LOOK => {
+                let p: cb::EntityLook = raw.decode_as()?;
+                if p.entity_id == id {
+                    c.server_update([0; 3], Some((p.yaw, p.pitch)));
+                }
+            }
+            cb::id::ENTITY => {
+                let p: cb::Entity = raw.decode_as()?;
+                if p.entity_id == id {
+                    c.server_update([0; 3], None);
+                }
+            }
+            cb::id::ENTITY_DESTROY => {
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                if p.entity_ids.contains(&id) {
+                    log::debug!("minecart {id} destroyed");
+                    self.leave_boat();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// The player is off the boat it drove: the boat stays where it is on the client.
@@ -469,14 +588,19 @@ impl Sim12 {
     fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         use ghast_protocol::v1_12_2::play::clientbound as cb;
         if raw.id == cb::id::VEHICLE_MOVE {
-            if let Some(r) = self.ride.as_deref_mut() {
+            if let Some(Ride12 {
+                id: rid,
+                seat: Seat12::Boat(boat),
+            }) = self.ride.as_deref_mut()
+            {
+                let rid = *rid;
                 let p: cb::VehicleMove = raw.decode_as()?;
                 if let ghast_physics::Packet::MoveVehicle {
                     pos,
                     yaw,
                     pitch,
                     on_ground,
-                } = r.boat.server_move([p.x, p.y, p.z], p.yaw, p.pitch)
+                } = boat.server_move([p.x, p.y, p.z], p.yaw, p.pitch)
                 {
                     self.reply = Some(Outbound::VehicleMove {
                         pos: Vec3::new(pos[0], pos[1], pos[2]),
@@ -485,7 +609,7 @@ impl Sim12 {
                         on_ground,
                     });
                 }
-                let (id, pos, bb) = (r.id, r.boat.pos, r.boat.bb);
+                let (id, pos, bb) = (rid, boat.pos, boat.bb);
                 if let Some(n) = self.near.as_deref_mut()
                     && let Some(c) = n.get_mut(id)
                 {
@@ -498,6 +622,33 @@ impl Sim12 {
         let on = p.passengers.contains(&self.own_id());
         let riding_it = self.ride.as_ref().is_some_and(|r| r.id == p.entity_id);
         if on && !riding_it {
+            // A minecart: at its client position (the server's when it is not followed), with
+            // the server's position of it for the relative moves.
+            let cart = self.entities.as_ref().and_then(|t| {
+                let e = t.get(p.entity_id)?;
+                if e.entity_type() != ghast_entity::EntityType::LegacyObject(10) {
+                    return None;
+                }
+                let pos = self
+                    .near
+                    .as_deref()
+                    .and_then(|n| n.index.get(&p.entity_id).map(|&k| n.list[k as usize].pos))
+                    .unwrap_or(e.position());
+                let mut c = ghast_physics::v1_12::Minecart::new(pos, e.yaw(), e.pitch());
+                c.tracked = e.position().map(|v| (v * 4096.0).floor() as i64);
+                Some(c)
+            });
+            if let Some(cart) = cart {
+                log::debug!("in minecart {}", p.entity_id);
+                self.ride = Some(Box::new(Ride12 {
+                    id: p.entity_id,
+                    seat: Seat12::Cart(cart),
+                }));
+                if let Some(n) = self.near.as_deref_mut() {
+                    n.ridden = Some(p.entity_id);
+                }
+                return Ok(());
+            }
             // startRiding a boat the client knows: at its client position, with the rotation the
             // server last sent. Other vehicles are not simulated (the walking tick goes on).
             let boat = self.entities.as_ref().and_then(|t| {
@@ -517,7 +668,7 @@ impl Sim12 {
                     log::debug!("riding boat {}", p.entity_id);
                     self.ride = Some(Box::new(Ride12 {
                         id: p.entity_id,
-                        boat,
+                        seat: Seat12::Boat(boat),
                     }));
                     if let Some(n) = self.near.as_deref_mut() {
                         n.ridden = Some(p.entity_id);
@@ -691,6 +842,23 @@ impl Sim for Sim12 {
         use ghast_protocol::v1_12_2::play::clientbound as cb;
         if matches!(raw.id, cb::id::SET_PASSENGERS | cb::id::VEHICLE_MOVE) {
             return self.vehicle_packet(raw);
+        }
+        if matches!(
+            raw.id,
+            cb::id::ENTITY_TELEPORT
+                | cb::id::REL_ENTITY_MOVE
+                | cb::id::ENTITY_MOVE_LOOK
+                | cb::id::ENTITY_LOOK
+                | cb::id::ENTITY
+                | cb::id::ENTITY_DESTROY
+        ) && matches!(
+            self.ride.as_deref(),
+            Some(Ride12 {
+                seat: Seat12::Cart(_),
+                ..
+            })
+        ) {
+            self.cart_packet(raw)?;
         }
         if raw.id == cb::id::TEAMS {
             if let Some(n) = &mut self.near
@@ -926,7 +1094,19 @@ impl Sim for Sim12 {
 
     fn vehicle(&self) -> Option<crate::common::Vehicle> {
         let r = self.ride.as_deref()?;
-        let b = &r.boat;
+        let b = match &r.seat {
+            Seat12::Boat(b) => b,
+            Seat12::Cart(c) => {
+                return Some(crate::common::Vehicle {
+                    entity_id: r.id,
+                    pos: Vec3::new(c.pos[0], c.pos[1], c.pos[2]),
+                    yaw: c.yaw,
+                    pitch: c.pitch,
+                    on_ground: false,
+                    controlled: false,
+                });
+            }
+        };
         Some(crate::common::Vehicle {
             entity_id: r.id,
             pos: Vec3::new(b.pos[0], b.pos[1], b.pos[2]),
@@ -1140,7 +1320,17 @@ impl Sim for Sim12 {
         }
         let riding = self.ride.is_some();
         if riding {
-            self.step_ride(pose, controls);
+            if matches!(
+                self.ride.as_deref(),
+                Some(Ride12 {
+                    seat: Seat12::Cart(_),
+                    ..
+                })
+            ) {
+                self.step_cart(pose, controls);
+            } else {
+                self.step_ride(pose, controls);
+            }
         } else if self.glide_on {
             self.step_ext(pose, controls, using_item);
         } else if self.near.as_deref().is_some_and(|n| !n.idle()) {
