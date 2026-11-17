@@ -357,6 +357,14 @@ optionally (chat) is then handled too. Read every tick; a change rebuilds the fi
   values (`boats.jsonl.gz` and the 1 M tick cached boat fuzz, 0 differences); with the
   platform's, the packets of 2 of the 10,000 cached cases differ (a 1-ulp seat position sent
   after a dismount). Not modelled: other entities near the boat.
+- **Minecarts on 1.16.5** (`ghast_physics::v1_16_5::{Minecart, tick_minecart}`, needs
+  `Interests::ENTITIES`): `set_passengers` naming the player on a tracked minecart seats it (at
+  the server's position of the cart: the client's interpolation of a cart at rest ends there).
+  The server moves the cart; the client interpolates its teleports, relative moves and looks
+  (3 + 2 steps) and sends `look` + `steer_vehicle` every tick (no `vehicle_move`); sneak gets
+  off (the client dismounts itself); the cart's removal or the server's `set_passengers` takes
+  the player off. `TickContext::vehicle` reports it with `controlled: false`. Proven through
+  the engine (`minecarts.jsonl.gz` and the 1 M tick cached minecart fuzz, 0 differences).
 - **Mount screens on 1.8.9 – 1.16.5** with entity tracking: when a mount's window opens
   (`open_window` `EntityHorse`, 1.16.5 `open_horse_window`), the saddle and armor slot rules
   (`ghast_inventory::MountRules`) are read off the tracked entity like `HorseScreenHandler`

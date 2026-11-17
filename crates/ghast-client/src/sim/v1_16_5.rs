@@ -82,11 +82,49 @@ fn view(
     (t.client_position(id), t.client_box(id))
 }
 
+/// The minecart the player sits in: its entity id and its client-side interpolation.
+#[derive(Debug)]
+struct Cart16 {
+    id: i32,
+    cart: ghast_physics::v1_16_5::Minecart,
+}
+
 /// The boat the player rides: its entity id and its client-side state.
 #[derive(Debug)]
-struct Ride16 {
+struct BoatRide16 {
     id: i32,
     boat: ghast_physics::v1_16_5::Boat,
+}
+
+/// The vehicle the player rides (one box, so the sim's layout does not change with it): the boat
+/// it controls or the minecart the server moves.
+#[derive(Debug)]
+enum Ride16 {
+    Boat(BoatRide16),
+    Cart(Cart16),
+}
+
+impl Ride16 {
+    fn id(&self) -> i32 {
+        match self {
+            Ride16::Boat(r) => r.id,
+            Ride16::Cart(c) => c.id,
+        }
+    }
+}
+
+fn boat_mut(r: &mut Option<Box<Ride16>>) -> Option<&mut BoatRide16> {
+    match r.as_deref_mut() {
+        Some(Ride16::Boat(b)) => Some(b),
+        _ => None,
+    }
+}
+
+fn cart_mut(r: &mut Option<Box<Ride16>>) -> Option<&mut Cart16> {
+    match r.as_deref_mut() {
+        Some(Ride16::Cart(c)) => Some(c),
+        _ => None,
+    }
 }
 
 /// What the 1.16.5 glide reads beyond the physics state: our shared flags and the firework
@@ -456,7 +494,7 @@ impl Sim16 {
     #[cold]
     #[inline(never)]
     fn ride_tick(&mut self, input: &ghast_physics::TickInput) {
-        let Some(r) = self.ride.as_deref_mut() else {
+        let Some(r) = boat_mut(&mut self.ride) else {
             return;
         };
         let mut boat_boxes = self.around.boxes.clone();
@@ -516,9 +554,98 @@ impl Sim16 {
         }
     }
 
+    /// The server's moves of the minecart we sit in (`onEntityPosition` / `onEntityUpdate`), and
+    /// its removal (`ClientWorld.removeEntity` takes its passengers off).
+    #[cold]
+    #[inline(never)]
+    fn cart_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::v1_16_5::play::clientbound as cb;
+        let Some(c) = cart_mut(&mut self.ride) else {
+            return Ok(());
+        };
+        let m = &mut c.cart;
+        match raw.id {
+            cb::id::ENTITY_TELEPORT => {
+                let p: cb::EntityTeleport = raw.decode_as()?;
+                if p.entity_id == c.id {
+                    m.server_teleport([p.x, p.y, p.z], p.yaw, p.pitch);
+                }
+            }
+            cb::id::REL_ENTITY_MOVE => {
+                let p: cb::RelEntityMove = raw.decode_as()?;
+                if p.entity_id == c.id {
+                    m.server_update(Some([p.d_x, p.d_y, p.d_z]), None);
+                }
+            }
+            cb::id::ENTITY_MOVE_LOOK => {
+                let p: cb::EntityMoveLook = raw.decode_as()?;
+                if p.entity_id == c.id {
+                    m.server_update(Some([p.d_x, p.d_y, p.d_z]), Some((p.yaw, p.pitch)));
+                }
+            }
+            cb::id::ENTITY_LOOK => {
+                let p: cb::EntityLook = raw.decode_as()?;
+                if p.entity_id == c.id {
+                    m.server_update(None, Some((p.yaw, p.pitch)));
+                }
+            }
+            cb::id::ENTITY_DESTROY => {
+                let p: cb::EntityDestroy = raw.decode_as()?;
+                if p.entity_ids.contains(&c.id) {
+                    self.ride = None;
+                    self.update_slow();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// A tick in the minecart we sit in (`ghast_physics::v1_16_5::tick_minecart`). On the
+    /// client's own dismount (sneak) the player ticks in the same tick when it comes after the
+    /// cart in the client world's order.
+    #[cold]
+    #[inline(never)]
+    fn cart_tick(&mut self, input: &ghast_physics::TickInput) {
+        let Some(c) = cart_mut(&mut self.ride) else {
+            return;
+        };
+        let around = ghast_physics::v1_16_5::Surroundings::new()
+            .with_entities(&self.around.boxes)
+            .with_others(&self.around.others);
+        let still = ghast_physics::v1_16_5::tick_minecart(
+            &mut self.player,
+            &mut self.ext,
+            &mut c.cart,
+            &around,
+            input,
+            &self.world,
+            &mut self.packets,
+        );
+        if !still {
+            let id = c.id;
+            log::debug!("got off minecart {id} (sneak)");
+            self.ride = None;
+            let after = self
+                .entities
+                .as_ref()
+                .is_some_and(|t| t.ticks_before_self(id));
+            if after {
+                ghast_physics::v1_16_5::tick_ext(
+                    &mut self.player,
+                    &mut self.ext,
+                    &around,
+                    input,
+                    &self.world,
+                    &mut self.packets,
+                );
+            }
+        }
+    }
+
     /// The player left the boat it drove: the boat stays where it is on the client.
     fn park(&mut self) {
-        if let Some(r) = self.ride.take() {
+        if let Some(Ride16::Boat(r)) = self.ride.take().map(|b| *b) {
             let b = r.boat.bb;
             self.parked = Some(Parked16 {
                 id: r.id,
@@ -536,7 +663,7 @@ impl Sim16 {
     fn vehicle_packet(&mut self, raw: &RawPacket) -> Result<(), SimError> {
         use ghast_protocol::v1_16_5::play::clientbound as cb;
         if raw.id == cb::id::VEHICLE_MOVE {
-            if let Some(r) = self.ride.as_deref_mut() {
+            if let Some(r) = boat_mut(&mut self.ride) {
                 let p: cb::VehicleMove = raw.decode_as()?;
                 if let ghast_physics::Packet::MoveVehicle {
                     pos,
@@ -558,7 +685,39 @@ impl Sim16 {
         let p: cb::SetPassengers = raw.decode_as()?;
         let me = self.rt.own_id;
         let on = p.passengers.contains(&me);
-        let riding_it = self.ride.as_ref().is_some_and(|r| r.id == p.entity_id);
+        let riding_it =
+            matches!(self.ride.as_deref(), Some(Ride16::Boat(r)) if r.id == p.entity_id);
+        let in_cart = matches!(self.ride.as_deref(), Some(Ride16::Cart(c)) if c.id == p.entity_id);
+        if on && !riding_it && !in_cart {
+            // A minecart: where the server has it (the client's interpolation of a cart at rest
+            // ends there), the rotation it last sent.
+            let cart = self.entities.as_ref().and_then(|t| {
+                let e = t.get(p.entity_id)?;
+                (ghast_entity::v1_16_5::info(e.entity_type())?.name == "minecart").then(|| {
+                    ghast_physics::v1_16_5::Minecart::new(e.position(), e.yaw(), e.pitch())
+                })
+            });
+            if let Some(cart) = cart {
+                let pl = &mut self.player;
+                pl.pose = ghast_physics::v1_16_5::Pose::Standing;
+                let [x, y, z] = pl.pos;
+                pl.set_position(x, y, z);
+                log::debug!("in minecart {}", p.entity_id);
+                self.parked = None;
+                self.ride = Some(Box::new(Ride16::Cart(Cart16 {
+                    id: p.entity_id,
+                    cart,
+                })));
+                self.update_slow();
+                return Ok(());
+            }
+        }
+        if !on && in_cart {
+            log::debug!("left minecart {}", p.entity_id);
+            self.ride = None;
+            self.update_slow();
+            return Ok(());
+        }
         if on && !riding_it {
             // startRiding a boat the client knows (its client position; the rotation the
             // server last sent). Other vehicles: not simulated (the walking tick goes on).
@@ -579,10 +738,10 @@ impl Sim16 {
                     pl.set_position(x, y, z);
                     log::debug!("riding boat {}", p.entity_id);
                     self.parked = None;
-                    self.ride = Some(Box::new(Ride16 {
+                    self.ride = Some(Box::new(Ride16::Boat(BoatRide16 {
                         id: p.entity_id,
                         boat,
-                    }));
+                    })));
                 }
                 None => log::debug!(
                     "riding {} (not simulated: no entity tracking or not a boat)",
@@ -914,7 +1073,7 @@ impl Sim16 {
     /// are kept for [`Sim::tick_entities`].
     fn entities_around(&mut self) {
         let parked = self.parked;
-        let vehicle = self.ride.as_ref().map(|r| r.id);
+        let vehicle = self.ride.as_ref().map(|r| r.id());
         let a = &mut self.around;
         a.boxes.clear();
         a.after.clear();
@@ -931,8 +1090,13 @@ impl Sim16 {
         // In a boat: around the boat (the server may have moved it away from the seat), as far
         // as it can move.
         let mut at = p.bb;
-        if let Some(r) = &self.ride {
-            let (b, v) = (&r.boat.bb, r.boat.vel);
+        let vehicle_box = match self.ride.as_deref() {
+            Some(Ride16::Boat(r)) => Some((r.boat.bb, r.boat.vel)),
+            Some(Ride16::Cart(c)) => Some((c.cart.bb, [0.0; 3])),
+            None => None,
+        };
+        if let Some((b, v)) = vehicle_box {
+            let b = &b;
             at = ghast_physics::math::Aabb {
                 min_x: at.min_x.min(b.min_x),
                 min_y: at.min_y.min(b.min_y),
@@ -1167,8 +1331,12 @@ impl Sim16 {
             self.order_rockets();
             self.tick_rockets(true, input.yaw, input.pitch);
         }
-        if self.ride.is_some() {
-            self.ride_tick(input);
+        if let Some(r) = self.ride.as_deref() {
+            if matches!(r, Ride16::Boat(_)) {
+                self.ride_tick(input);
+            } else {
+                self.cart_tick(input);
+            }
             self.update_slow();
             return;
         }
@@ -1377,6 +1545,18 @@ impl Sim for Sim16 {
         }
         if matches!(raw.id, cb::id::SET_PASSENGERS | cb::id::VEHICLE_MOVE) {
             return self.vehicle_packet(raw);
+        }
+        if matches!(self.ride.as_deref(), Some(Ride16::Cart(_)))
+            && matches!(
+                raw.id,
+                cb::id::ENTITY_TELEPORT
+                    | cb::id::REL_ENTITY_MOVE
+                    | cb::id::ENTITY_MOVE_LOOK
+                    | cb::id::ENTITY_LOOK
+                    | cb::id::ENTITY_DESTROY
+            )
+        {
+            self.cart_packet(raw)?;
         }
         if matches!(raw.id, cb::id::SPAWN_ENTITY | cb::id::ENTITY_DESTROY) {
             if self.glide.watch {
@@ -1739,7 +1919,20 @@ impl Sim for Sim16 {
     }
 
     fn vehicle(&self) -> Option<crate::common::Vehicle> {
-        let r = self.ride.as_deref()?;
+        if let Some(Ride16::Cart(c)) = self.ride.as_deref() {
+            let m = &c.cart;
+            return Some(crate::common::Vehicle {
+                entity_id: c.id,
+                pos: Vec3::new(m.pos[0], m.pos[1], m.pos[2]),
+                yaw: m.yaw,
+                pitch: m.pitch,
+                on_ground: false,
+                controlled: false,
+            });
+        }
+        let Some(Ride16::Boat(r)) = self.ride.as_deref() else {
+            return None;
+        };
         let b = &r.boat;
         Some(crate::common::Vehicle {
             entity_id: r.id,

@@ -1257,6 +1257,41 @@ fn boats_match_the_oracle_1_16_5() {
     );
 }
 
+/// The minecart goldens through the engine (entity tracking): boarding by `set_passengers`, the
+/// cart's interpolation of the server's moves, `look` / `steer_vehicle` every tick, the client's
+/// own dismount on sneak and the server's.
+#[test]
+fn minecarts_match_the_oracle_1_16_5() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/1.16.5/minecarts.jsonl.gz");
+    let (cases, ticks, skipped) = replay_file_with(&path, false, true);
+    assert!(
+        cases >= 108 && ticks > 6000 && skipped == 0,
+        "{cases} cases, {ticks} ticks, {skipped} skipped"
+    );
+}
+
+/// The cached minecart fuzz (`oracle/cache/1.16.5/fuzz-minecarts/`) through the engine.
+#[test]
+#[ignore = "cache run: cargo test --release -p ghast-client --lib -- --ignored minecarts_cache_1_16_5"]
+fn minecarts_cache_1_16_5() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../oracle/cache/1.16.5/fuzz-minecarts");
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        eprintln!("skipped: {} not found", dir.display());
+        return;
+    };
+    let mut files: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+    files.sort();
+    let (mut cases, mut ticks) = (0, 0);
+    for f in files {
+        let (c, t, _) = replay_file_with(&f, false, true);
+        cases += c;
+        ticks += t;
+    }
+    eprintln!("1.16.5 minecart cache through the engine: {cases} cases, {ticks} ticks");
+}
+
 /// The cached boat fuzz (`oracle/cache/1.16.5/fuzz-boats/`) through the engine.
 #[test]
 #[ignore = "cache run: cargo test --release -p ghast-client --lib -- --ignored boats_cache_1_16_5"]
