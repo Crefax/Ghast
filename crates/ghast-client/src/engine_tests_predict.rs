@@ -1336,3 +1336,193 @@ mod place_golden {
         replay(GameVersion::V26_2, "26.2");
     }
 }
+
+/// Ghost-block checks of 26.x placement predictions (`BlockStatePredictionHandler`,
+/// `ClientLevel.syncBlockState`): whatever the server does with a `use_item_on` (it always acks
+/// it once the client has loaded), the predicted block ends as the server's state.
+mod placement_rollback {
+    use super::*;
+    use crate::common::Face;
+
+    /// The column's test chunk as the server sends it (stone at y = 63, air above).
+    fn chunk(v: GameVersion, x: i32, z: i32) -> RawPacket {
+        match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => crate::sim::test_chunks::v26_2(x, z),
+            _ => crate::sim::test_chunks::v26_1(x, z),
+        }
+    }
+
+    fn stone_stack(v: GameVersion) -> ghast_inventory::Stack {
+        let id = match v {
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => ghast_data::v26_2::Item::from_name("stone").unwrap().id(),
+            _ => ghast_data::v26_1::Item::from_name("stone").unwrap().id(),
+        };
+        ghast_inventory::Stack::new(i32::from(id), 32, 0)
+    }
+
+    /// Places stone on the top of `clicked` in prediction `sequence`; returns the target.
+    fn place(
+        e: &mut Engine<Box<dyn Sim>>,
+        v: GameVersion,
+        clicked: BlockPos,
+        sequence: i32,
+    ) -> BlockPos {
+        let held = stone_stack(v);
+        assert!(e.sim.place_sent(&crate::sim::predict::PlaceSent {
+            pos: clicked,
+            face: Face::Up,
+            held: Some(&held),
+            sneaking: false,
+            any_item: true,
+            game_mode: GameMode::Survival,
+            sequence,
+            player: FEET,
+        }));
+        Face::Up.offset(clicked)
+    }
+
+    /// (a) The server's hand held something else (a dirt block): its block update brings the
+    /// dirt, the ack keeps it. (b) A refused `use_item_on` (out of reach, the hit point too far
+    /// from the block, spawn protection): the ack alone, or the server's updates of the clicked
+    /// block and the target, put the air back.
+    #[test]
+    fn other_item_and_refusals() {
+        for v in modern_versions() {
+            let stone = u32::from(state(v, "stone"));
+            let dirt = state(v, "dirt");
+            let mut e = modern(v);
+            let t = place(&mut e, v, A, 1);
+            assert_eq!(block(&e, t), Some(stone), "{v:?}");
+            e.sim.world_packet(&block_update(v, t, dirt)).unwrap();
+            assert_eq!(block(&e, t), Some(stone), "deferred: {v:?}");
+            e.sim.world_packet(&ack(v, 1)).unwrap();
+            assert_eq!(block(&e, t), Some(u32::from(dirt)), "{v:?}");
+
+            let t = place(&mut e, v, B, 2);
+            e.sim.world_packet(&ack(v, 2)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "ack only: {v:?}");
+
+            let t = place(&mut e, v, C, 3);
+            e.sim
+                .world_packet(&block_update(v, C, stone as u16))
+                .unwrap();
+            e.sim.world_packet(&block_update(v, t, 0)).unwrap();
+            e.sim.world_packet(&ack(v, 3)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "updates + ack: {v:?}");
+            assert_eq!(block(&e, C), Some(stone), "{v:?}");
+        }
+    }
+
+    /// (c, d) A roof row: several placements, the server acks only the last sequence of its
+    /// tick; a placement and a break of the same block keep the first server state and the
+    /// last sequence (`retainKnownServerState`), so an ack between them ends nothing.
+    #[test]
+    fn batched_acks_and_one_block_twice() {
+        for v in modern_versions() {
+            let stone = u32::from(state(v, "stone"));
+            let mut e = modern(v);
+            let row: Vec<BlockPos> = (0..4)
+                .map(|i| place(&mut e, v, BlockPos::new(2 + i, 63, 12), 1 + i))
+                .collect();
+            // Accepted: the server's stone for the first three, the fourth refused.
+            for t in &row[..3] {
+                e.sim
+                    .world_packet(&block_update(v, *t, stone as u16))
+                    .unwrap();
+            }
+            e.sim.world_packet(&ack(v, 4)).unwrap();
+            for t in &row[..3] {
+                assert_eq!(block(&e, *t), Some(stone), "{v:?}");
+            }
+            assert_eq!(block(&e, row[3]), Some(0), "{v:?}");
+
+            let t = place(&mut e, v, A, 5);
+            e.sim.dig_sent(t, DigStatus::Finish, true, 6, FEET);
+            assert_eq!(block(&e, t), Some(0), "{v:?}");
+            e.sim.world_packet(&ack(v, 5)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "the break waits: {v:?}");
+            // Both refused: the first server state (air) comes back.
+            e.sim.world_packet(&ack(v, 6)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "{v:?}");
+            // Accepted place, refused break: the server's stone, sent during the prediction.
+            let t = place(&mut e, v, B, 7);
+            e.sim.dig_sent(t, DigStatus::Finish, true, 8, FEET);
+            e.sim
+                .world_packet(&block_update(v, t, stone as u16))
+                .unwrap();
+            e.sim.world_packet(&ack(v, 8)).unwrap();
+            assert_eq!(block(&e, t), Some(stone), "{v:?}");
+        }
+    }
+
+    /// (e) A section update between the prediction and the ack is remembered for the
+    /// predicted block; a resent chunk replaces the column, and the ack then puts back the
+    /// state remembered before (vanilla: the chunk packet does not touch the records).
+    #[test]
+    fn section_and_chunk_between() {
+        for v in modern_versions() {
+            let stone = u32::from(state(v, "stone"));
+            let glass = state(v, "glass");
+            let mut e = modern(v);
+            let t = place(&mut e, v, A, 1);
+            e.sim
+                .world_packet(&section_update(v, &[(t, glass)]))
+                .unwrap();
+            assert_eq!(block(&e, t), Some(stone), "deferred: {v:?}");
+            e.sim.world_packet(&ack(v, 1)).unwrap();
+            assert_eq!(block(&e, t), Some(u32::from(glass)), "{v:?}");
+
+            // Refused, the column resent before the ack: air from the chunk, air after the ack.
+            let t = place(&mut e, v, B, 2);
+            e.sim.world_packet(&chunk(v, 0, 0)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "{v:?}");
+            e.sim.world_packet(&ack(v, 2)).unwrap();
+            assert_eq!(block(&e, t), Some(0), "{v:?}");
+        }
+    }
+
+    /// Through the engine and the wire: placements on two ticks after some other predicting
+    /// packets carry the numbers the engine predicted with, so the server's ack of the last
+    /// one ends both (refused: air again).
+    fn numbering<V: ClientVersion>(v: GameVersion)
+    where
+        V::Wire: Default,
+    {
+        let (mut e, at) = place_on_floor(v, i32::from(stone_stack(v).id() as u16));
+        // place_on_floor wrote its packet with sequence 1 (a fresh wire numbers from 1).
+        let mut wire = V::Wire::default();
+        let mut finishes = Vec::new();
+        let first = write_tick::<V>(
+            &[Outbound::Place {
+                pos: BlockPos::new(8, 63, 10),
+                face: Face::Up,
+                cursor: Vec3::new(0.5, 1.0, 0.5),
+                held: None,
+                off_hand: false,
+            }],
+            &mut wire,
+            &mut finishes,
+        );
+        assert_eq!(first, Some(1), "{v:?}");
+        assert_eq!(
+            block(&e, at),
+            Some(u32::from(state(v, "stone"))),
+            "predicted: {v:?}"
+        );
+        e.sim.world_packet(&ack(v, 1)).unwrap();
+        assert_eq!(block(&e, at), Some(0), "{v:?}");
+    }
+
+    #[test]
+    fn numbering_26_1() {
+        numbering::<crate::version::V26_1>(GameVersion::V26_1);
+    }
+
+    #[cfg(feature = "v26_2")]
+    #[test]
+    fn numbering_26_2() {
+        numbering::<crate::version::V26_2>(GameVersion::V26_2);
+    }
+}
