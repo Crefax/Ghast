@@ -1210,7 +1210,9 @@ impl Ext {
                 return;
             }
         }
-        log::warn!(
+        // Normal for code that calls `with` / `block_at` in a loop (each call is a round): the
+        // rest simply runs next tick, so this is no warning.
+        log::debug!(
             "[{}] t{} tasks still busy after {MAX_ROUNDS} rounds: continuing next tick",
             self.name,
             ctx.tick()
