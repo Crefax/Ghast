@@ -444,6 +444,11 @@ impl Bot {
 
     /// Attacks entity `id`: turns until the server's crosshair is on it, then attacks
     /// (refused by the client unless it is). Needs [`ghast_client::Interests::ENTITIES`].
+    /// A living entity that already died ([`EntityInfo::alive`] `false`: its body stays for
+    /// the death animation) is not attacked: [`Error::NoSuchEntity`], like one that is gone
+    /// (vanilla would let the hit through, but it does nothing and costs the swing).
+    ///
+    /// [`EntityInfo::alive`]: crate::EntityInfo::alive
     ///
     /// ```no_run
     /// # async fn f(bot: ghast_ext::Bot) -> Result<(), ghast_ext::Error> {
@@ -458,7 +463,10 @@ impl Bot {
             let r = self
                 .with(move |ctx| -> Result<bool, Error> {
                     let es = ctx.entities().ok_or(Error::NoSuchEntity(id))?;
-                    let e = es.get(id).ok_or(Error::NoSuchEntity(id))?;
+                    let e = es
+                        .get(id)
+                        .filter(|e| e.is_alive())
+                        .ok_or(Error::NoSuchEntity(id))?;
                     // Aim at the middle of its box.
                     let [x, y, z] = e.position();
                     let h = e.size().map_or(0.9, |(_, h)| f64::from(h) / 2.0);

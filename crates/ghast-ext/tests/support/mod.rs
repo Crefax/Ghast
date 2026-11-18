@@ -41,6 +41,9 @@ pub struct Setup {
     pub spawn: [f64; 3],
     /// Experience orbs (entity id, position) spawned after the join.
     pub orbs: Vec<(i32, [f64; 3])>,
+    /// A zombie (entity id, position, hits that kill it) spawned after the join: the killing
+    /// hit sends its death event, and the body goes one second later (the death animation).
+    pub zombie: Option<(i32, [f64; 3], u32)>,
 }
 
 impl Setup {
@@ -58,6 +61,7 @@ impl Setup {
             chest: None,
             spawn: [8.5, 64.0, 8.5],
             orbs: Vec::new(),
+            zombie: None,
         }
     }
 
@@ -92,6 +96,8 @@ pub struct Log {
     pub look: (f32, f32),
     /// The final world.
     pub blocks: HashMap<[i32; 3], u16>,
+    /// use_entity attacks: (target, whether the target was already dead).
+    pub attacks: Vec<(i32, bool)>,
 }
 
 fn raw<P: ghast_protocol::Packet>(p: &P) -> RawPacket {
@@ -241,6 +247,23 @@ async fn serve(l: TcpListener, setup: Setup) -> Log {
         }))
         .await;
     }
+    if let Some((id, [x, y, z], _)) = setup.zombie {
+        c.send(&raw(&cb::SpawnEntityLiving {
+            entity_id: id,
+            r#type: 54,
+            x: (x * 32.0) as i32,
+            y: (y * 32.0) as i32,
+            z: (z * 32.0) as i32,
+            yaw: 0,
+            pitch: 0,
+            head_pitch: 0,
+            velocity: ghast_protocol::v1_8::types::Vec3i16 { x: 0, y: 0, z: 0 },
+            metadata: Vec::new(),
+        }))
+        .await;
+    }
+    let mut zombie_hits = 0u32;
+    let mut zombie_died: Option<std::time::Instant> = None;
     let mut held = 0i16;
     let mut keep_alive = 0i32;
     let mut beat = tokio::time::interval(Duration::from_millis(250));
@@ -250,6 +273,12 @@ async fn serve(l: TcpListener, setup: Setup) -> Log {
             _ = beat.tick() => {
                 keep_alive += 1;
                 c.send(&raw(&cb::KeepAlive { keep_alive_id: keep_alive })).await;
+                if let (Some((id, ..)), Some(t)) = (setup.zombie, zombie_died)
+                    && t.elapsed() >= Duration::from_secs(1)
+                {
+                    zombie_died = None;
+                    c.send(&raw(&cb::EntityDestroy { entity_ids: vec![id] })).await;
+                }
                 continue;
             }
         };
@@ -334,6 +363,27 @@ async fn serve(l: TcpListener, setup: Setup) -> Log {
                         r#type: i32::from(r),
                     }))
                     .await;
+                }
+            }
+            Sb::UseEntity(u) if u.mouse == 1 => {
+                let dead = zombie_hits > 0
+                    && setup
+                        .zombie
+                        .is_some_and(|(id, _, n)| id == u.target && zombie_hits >= n);
+                log.attacks.push((u.target, dead));
+                if let Some((id, _, n)) = setup.zombie
+                    && id == u.target
+                    && !dead
+                {
+                    zombie_hits += 1;
+                    if zombie_hits >= n {
+                        c.send(&raw(&cb::EntityStatus {
+                            entity_id: id,
+                            entity_status: 3,
+                        }))
+                        .await;
+                        zombie_died = Some(std::time::Instant::now());
+                    }
                 }
             }
             Sb::HeldItemSlot(h) => {

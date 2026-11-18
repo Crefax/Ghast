@@ -313,6 +313,9 @@ pub struct EntityInfo {
     pub player_name: Option<String>,
     /// An item entity's stack: item id and count.
     pub item: Option<(i32, i32)>,
+    /// `false` once a living entity died: it stays (and is listed) during its death animation,
+    /// about 20 ticks, until the server removes it ([`ghast_client::entity::Entity::is_alive`]).
+    pub alive: bool,
 }
 
 /// The name of an entity type (1.8 and 1.12 share the legacy mob / object id spaces but not
@@ -346,6 +349,7 @@ pub(crate) fn entity_info(ctx: &TickContext<'_>, id: i32) -> Option<EntityInfo> 
         pos: Vec3::new(x, y, z),
         player_name: es.player_name(id).map(str::to_owned),
         item: e.item().map(|i| (i.id, i32::from(i.count))),
+        alive: e.is_alive(),
     })
 }
 

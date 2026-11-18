@@ -434,3 +434,41 @@ async fn planning_over_several_ticks_holds_still() {
         "{moves} movement packets for {end} ticks ({start} before planning)"
     );
 }
+
+/// A fight loop like a bot's (attack every 13 ticks while the target is listed): the killing
+/// hit's death event makes the target not alive, so no hit lands on the body during its death
+/// animation (it stays listed until the server removes it).
+#[tokio::test]
+async fn no_attack_on_a_dying_mob() {
+    let mut ext = Ext::new(|bot| async move {
+        bot.wait_ticks(5).await;
+        let mut last_hit = 0u64;
+        let mut saw_dying = false;
+        while let Some(e) = bot.entity(77).await? {
+            saw_dying |= !e.alive;
+            if bot.tick() - last_hit >= 13 {
+                match bot.attack(77).await {
+                    Ok(()) => last_hit = bot.tick(),
+                    // dying: no hit, the loop waits for the removal
+                    Err(Error::NoSuchEntity(_)) => bot.next_tick().await,
+                    Err(e) => return Err(e),
+                }
+            } else {
+                bot.next_tick().await;
+            }
+        }
+        assert!(saw_dying, "the body stays listed while it dies");
+        Ok(())
+    })
+    .interests(Interests::ENTITIES);
+    let mut setup = Setup::flat();
+    setup.zombie = Some((77, [8.5, 64.0, 10.5], 2));
+    let (_, log) = support::run(setup, &mut ext, 30).await;
+    ok(&ext);
+    assert_eq!(
+        log.attacks,
+        vec![(77, false), (77, false)],
+        "{:?}",
+        log.attacks
+    );
+}
