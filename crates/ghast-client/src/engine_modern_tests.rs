@@ -2111,3 +2111,54 @@ fn entity_push_switch() {
     );
     assert_eq!(run(false, Some(true), true), pushed, "switched back on");
 }
+
+/// 26.x `container_click` has no confirm: the ticket `click` returns carries ghast's own action
+/// number, and it matches the result the inventory reports on a later tick, both when the click
+/// settles (accepted) and when a container packet corrects it (rejected).
+#[test]
+fn click_tickets_match_their_results() {
+    use ghast_inventory::{Click, ClickOutcome, ClickResult, Stack};
+    let log = Stack::new(inv::item_id("oak_log").unwrap(), 16, 0);
+    // (a container packet after the click) -> (ticket, results seen per tick)
+    let run = |correct: bool| {
+        let mut e = engine(GAME);
+        join(&mut e);
+        let mut items = vec![None; 46];
+        items[9] = Some(log.clone());
+        wire_row::inv_on_window_items(e.inventory_mut(), 0, 1, items, None);
+        let t0 = Instant::now();
+        let mut ticket = None;
+        let mut results: Vec<ClickResult> = Vec::new();
+        for tick in 0..12 {
+            if correct && tick == 3 {
+                // the server disagreed: it resends the slot
+                e.inventory_mut()
+                    .on_set_slot_modern(0, 2, 9, Some(log.clone()));
+            }
+            let mut b = Script(|ctx: &mut TickContext<'_>| {
+                results.extend(ctx.events().inventory.clicks.iter().copied());
+                if tick == 0 {
+                    ctx.open_inventory().expect("inventory refused");
+                } else if ticket.is_none() {
+                    ticket = Some(
+                        ctx.click(Click::Swap { slot: 9, hotbar: 0 })
+                            .expect("click refused"),
+                    );
+                }
+            });
+            e.note_inbound(t0);
+            e.tick(&mut b, t0);
+        }
+        (ticket.unwrap(), results)
+    };
+    for (correct, want) in [
+        (false, ClickOutcome::Accepted),
+        (true, ClickOutcome::Rejected),
+    ] {
+        let (ticket, results) = run(correct);
+        assert_eq!(ticket.window_id, 0, "{ticket:?}");
+        assert_eq!(results.len(), 1, "{ticket:?} {results:?}");
+        assert!(ticket.matches(&results[0]), "{ticket:?} vs {results:?}");
+        assert_eq!(results[0].outcome, want);
+    }
+}

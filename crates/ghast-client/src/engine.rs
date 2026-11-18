@@ -186,7 +186,8 @@ impl std::error::Error for ClickRefused {}
 /// (window id and action number, as the server's confirm carries them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClickTicket {
-    /// Window id the click was sent for.
+    /// Window id the click was sent for; -1 when no [`ghast_inventory::ClickResult`] will
+    /// follow (the 26.x creative inventory screen, whose packets the server applies as sent).
     pub window_id: i32,
     /// Its action number.
     pub action: i16,
@@ -2264,6 +2265,13 @@ impl TickContext<'_> {
                 window_id: i32::from(p.window_id),
                 action: p.action,
             },
+            // 26.x: no confirm exists; the inventory reports the click under ghast's own
+            // action number once it settled (or the server corrected it).
+            ghast_inventory::Outgoing::ContainerClick(p) => ClickTicket {
+                window_id: p.window_id,
+                action: p.action,
+            },
+            // the 26.x creative screen's packets: applied at once, no result will follow
             _ => ClickTicket {
                 window_id: -1,
                 action: -1,
@@ -3003,6 +3011,9 @@ mod tests {
             inventory: match version.instance() {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
                 GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,
+                GameVersion::V26_1 => ghast_inventory::Version::V26_1,
+                #[cfg(feature = "v26_2")]
+                GameVersion::V26_2 => ghast_inventory::Version::V26_2,
                 _ => ghast_inventory::Version::V1_16_5,
             },
         }

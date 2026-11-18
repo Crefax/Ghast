@@ -472,6 +472,10 @@ impl Bot {
             }
             self.next_tick().await;
         };
+        if ticket.window_id < 0 {
+            // the 26.x creative screen: its packets are applied as sent, no result follows
+            return Ok(());
+        }
         // The confirm arrives in a later tick's events (the inventory times out after 40).
         loop {
             self.next_tick().await;
