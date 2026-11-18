@@ -839,6 +839,7 @@ impl Tracker {
                     Some(e) => {
                         // LivingEntity.handleEntityEvent(3): setHealth(0), die.
                         if status == 3 && e.living {
+                            e.mark_dead();
                             e.m.set_flag(st::DEAD, true);
                             if keep {
                                 e.meta.set(meta::HEALTH, MetaValue::Float(0.0));

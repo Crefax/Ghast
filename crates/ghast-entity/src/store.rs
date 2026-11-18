@@ -627,7 +627,7 @@ impl Entities {
         let Some(e) = self.map.get_mut(&id) else {
             return;
         };
-        if e.links.is_none() && !e.rides && !self.any_leash {
+        if e.links.is_none() && !e.rides() && !self.any_leash {
             return;
         }
         let vehicle = e.take_vehicle();

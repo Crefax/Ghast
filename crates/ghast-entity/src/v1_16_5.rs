@@ -220,7 +220,7 @@ impl Tracker {
     pub fn tick_client(&mut self, column_loaded: impl Fn(i32, i32) -> bool) {
         let Some(c) = &mut self.client else { return };
         c.tick(&self.store, |e| {
-            !e.rides && (e.is_player() || entity_ticks_at(e, &column_loaded))
+            !e.rides() && (e.is_player() || entity_ticks_at(e, &column_loaded))
         });
     }
 
@@ -228,7 +228,7 @@ impl Tracker {
     /// loaded column (`ClientChunkManager.shouldTickEntity` at its client position).
     #[must_use]
     pub fn client_ticks(&self, e: &Entity, column_loaded: impl Fn(i32, i32) -> bool) -> bool {
-        !e.rides
+        !e.rides()
             && (e.is_player()
                 || match self.client_position(e.id) {
                     Some(p) => column_loaded(chunk(p[0]), chunk(p[2])),
@@ -338,8 +338,11 @@ impl Tracker {
                 let known = match s.map.get_mut(&eid) {
                     Some(e) => {
                         // LivingEntity.handleEntityEvent(3): setHealth(0), die.
-                        if status == 3 && e.living && keep {
-                            e.meta.set(meta::HEALTH, MetaValue::Float(0.0));
+                        if status == 3 && e.living {
+                            e.mark_dead();
+                            if keep {
+                                e.meta.set(meta::HEALTH, MetaValue::Float(0.0));
+                            }
                         }
                         true
                     }

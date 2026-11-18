@@ -354,7 +354,9 @@ pub struct Entity {
     pub(crate) equipment: Option<Box<[Option<Item>; EQUIPMENT_SLOTS]>>,
     /// The vehicle's id (valid with `rides`; an `Option<i32>` would take 8 bytes here).
     pub(crate) vehicle_id: i32,
-    pub(crate) rides: bool,
+    /// [`Entity::RIDES`] (`vehicle_id` is valid), [`Entity::DEAD`] (a living entity's death
+    /// event: `LivingEntity.handleEntityEvent(3)` sets its health to 0).
+    pub(crate) bits: u8,
     /// Passengers, leash and effects (`None` = none of them).
     pub(crate) links: Option<Box<Links>>,
     /// 26.1 client state (codec base, interpolation, size keys), boxed: one pointer for the
@@ -384,9 +386,26 @@ impl Entity {
             equipment: None,
             links: None,
             vehicle_id: 0,
-            rides: false,
+            bits: 0,
             #[cfg(any(feature = "v26_1", feature = "v26_2"))]
             m: crate::modern_state::Ext::default(),
+        }
+    }
+
+    pub(crate) const RIDES: u8 = 1;
+    pub(crate) const DEAD: u8 = 2;
+
+    /// Whether it rides a vehicle.
+    #[inline]
+    pub(crate) fn rides(&self) -> bool {
+        self.bits & Self::RIDES != 0
+    }
+
+    /// A living entity's death event arrived ([`Entity::is_alive`]).
+    #[inline]
+    pub(crate) fn mark_dead(&mut self) {
+        if self.living {
+            self.bits |= Self::DEAD;
         }
     }
 
@@ -399,7 +418,11 @@ impl Entity {
     /// Sets the vehicle (dismounting allocates nothing).
     #[inline]
     pub(crate) fn set_vehicle(&mut self, v: Option<i32>) {
-        self.rides = v.is_some();
+        if v.is_some() {
+            self.bits |= Self::RIDES;
+        } else {
+            self.bits &= !Self::RIDES;
+        }
         self.vehicle_id = v.unwrap_or(0);
     }
 
@@ -519,9 +542,8 @@ impl Entity {
     }
 
     /// Vanilla `isAlive` as far as the packets tell: `false` for a living entity once it died
-    /// (its death event sets the health to 0 like `LivingEntity.handleEntityEvent(3)`, or the
-    /// server's health is not above 0; 1.8.9 – 1.16.5 need [`crate::Config::metadata`], 26.x
-    /// keeps it without) — it stays
+    /// (its death event, which sets the health to 0 like `LivingEntity.handleEntityEvent(3)`, with
+    /// or without [`crate::Config::metadata`]; or the server's health is not above 0) — it stays
     /// tracked during the death animation (about 20 ticks) until the server removes it, and
     /// the vanilla client can still pick and hit it then (the hit does no damage). `true` for
     /// other entities.
@@ -529,6 +551,9 @@ impl Entity {
     pub fn is_alive(&self) -> bool {
         if !self.living {
             return true;
+        }
+        if self.bits & Self::DEAD != 0 {
+            return false;
         }
         let health: Option<f32> = match self.era {
             #[cfg(feature = "v26_1")]
@@ -718,7 +743,7 @@ impl Entity {
     /// Entity this one rides.
     #[must_use]
     pub fn vehicle(&self) -> Option<i32> {
-        self.rides.then_some(self.vehicle_id)
+        self.rides().then_some(self.vehicle_id)
     }
 
     /// Entities riding this one (1.8: at most one).

@@ -532,13 +532,15 @@ fn filters_and_destroy() {
 /// The death event (`entity_status` 3) sets the health to 0 (dead while the body stays).
 #[test]
 fn death_event_ends_alive() {
-    let mut t = tracker(Config::default());
-    spawn_mob(&mut t, 7, 54, [0.0, 64.0, 0.0], [0; 3]);
-    assert!(t.get(7).unwrap().is_alive());
-    t.apply(&W::new().i32(7).i8(2).raw(id::ENTITY_STATUS))
-        .unwrap();
-    assert!(t.get(7).unwrap().is_alive());
-    t.apply(&W::new().i32(7).i8(3).raw(id::ENTITY_STATUS))
-        .unwrap();
-    assert!(!t.get(7).unwrap().is_alive());
+    for config in [Config::default(), Config::default().with_metadata(false)] {
+        let mut t = tracker(config);
+        spawn_mob(&mut t, 7, 54, [0.0, 64.0, 0.0], [0; 3]);
+        assert!(t.get(7).unwrap().is_alive());
+        t.apply(&W::new().i32(7).i8(2).raw(id::ENTITY_STATUS))
+            .unwrap();
+        assert!(t.get(7).unwrap().is_alive());
+        t.apply(&W::new().i32(7).i8(3).raw(id::ENTITY_STATUS))
+            .unwrap();
+        assert!(!t.get(7).unwrap().is_alive());
+    }
 }

@@ -663,13 +663,17 @@ fn names_only_tab_list() {
 /// tracked until the server removes it; other statuses (2 hurt) leave it alive.
 #[test]
 fn death_event_ends_alive() {
-    let mut t = tracker(Config::default());
-    spawn_zombie(&mut t, 7, 0, 0, 0, [0; 3], no_meta());
-    assert!(t.get(7).unwrap().is_alive());
-    let status = |s: i8| W::new().i32(7).i8(s).raw(id::ENTITY_STATUS);
-    t.apply(&status(2)).unwrap();
-    assert!(t.get(7).unwrap().is_alive());
-    t.apply(&status(3)).unwrap();
-    assert!(!t.get(7).unwrap().is_alive());
-    assert_eq!(v1_8::health(t.get(7).unwrap()), Some(0.0));
+    for config in [Config::default(), Config::default().with_metadata(false)] {
+        let mut t = tracker(config);
+        spawn_zombie(&mut t, 7, 0, 0, 0, [0; 3], no_meta());
+        assert!(t.get(7).unwrap().is_alive());
+        let status = |s: i8| W::new().i32(7).i8(s).raw(id::ENTITY_STATUS);
+        t.apply(&status(2)).unwrap();
+        assert!(t.get(7).unwrap().is_alive());
+        t.apply(&status(3)).unwrap();
+        assert!(!t.get(7).unwrap().is_alive());
+        if config.metadata {
+            assert_eq!(v1_8::health(t.get(7).unwrap()), Some(0.0));
+        }
+    }
 }

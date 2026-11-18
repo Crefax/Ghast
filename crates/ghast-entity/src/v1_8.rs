@@ -193,8 +193,11 @@ impl Tracker {
                 let known = match s.map.get_mut(&eid) {
                     Some(e) => {
                         // LivingEntity.handleEntityEvent(3): setHealth(0), die.
-                        if status == 3 && e.living && keep {
-                            e.meta.set(meta::HEALTH, MetaValue::Float(0.0));
+                        if status == 3 && e.living {
+                            e.mark_dead();
+                            if keep {
+                                e.meta.set(meta::HEALTH, MetaValue::Float(0.0));
+                            }
                         }
                         true
                     }
