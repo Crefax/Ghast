@@ -108,7 +108,6 @@ impl Class {
 
     /// Like [`Class::blocks_between`] for a body standing at the cell's centre (or passing
     /// it straight along a [`flag::PANEL`]): a door's side slab does not count.
-    #[allow(dead_code)] // the door moves
     #[inline]
     pub(crate) fn blocks_standing(&self, lo: f32, hi: f32) -> bool {
         !self.has(flag::PANEL) && self.blocks_between(lo, hi)
@@ -333,7 +332,11 @@ fn classify(f: &Facts<'_>) -> Class {
     {
         flags |= DIGGABLE;
     }
-    if f.boxes.is_empty() && !f.fluid_water && !f.fluid_lava && flags & (AVOID | CLIMB) == 0 {
+    if f.boxes.is_empty()
+        && !f.fluid_water
+        && !f.fluid_lava
+        && flags & (AVOID | CLIMB | OPENABLE) == 0
+    {
         flags |= REPLACEABLE;
     }
     if flags & SUPPORT == 0 {

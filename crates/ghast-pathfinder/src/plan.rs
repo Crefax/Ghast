@@ -4,9 +4,10 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use crate::Version;
-use crate::class::flag;
+use crate::class::{Class, flag};
 use crate::control::ControllerConfig;
 use crate::cost::Costs;
+use crate::door;
 use crate::goal::{Goal, Heuristic};
 use crate::jump;
 use crate::moves::{
@@ -1018,6 +1019,22 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
     s: &Spot,
     out: &mut Vec<Edge>,
 ) {
+    moves_from(g, cfg, version, c, p, s, out);
+    if g.saw_doors() {
+        through_doors(g, p, s, out);
+    }
+}
+
+/// [`successors`] before the door checks.
+fn moves_from<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    cfg: &Config,
+    version: Version,
+    c: &Costs,
+    p: [i32; 3],
+    s: &Spot,
+    out: &mut Vec<Edge>,
+) {
     let per_block = 1.0
         / if cfg.sprint {
             c.sprint_speed
@@ -1270,6 +1287,9 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
         {
             dig_through(g, d, per_block, p, f0, (dx, dz), out);
         }
+        if !found && !swimming && !climbing && g.saw_doors() {
+            open_gate(g, per_block, p, f0, (dx, dz), out);
+        }
         // Filling a one-deep hole competes with dropping into it.
         if !swimming
             && !climbing
@@ -1433,6 +1453,156 @@ fn parkour<S: BlockSource + ?Sized>(
             );
         }
     }
+}
+
+/// Extra ticks of a door move: the click, the server's answer.
+const DOOR_TICKS: f64 = 8.0;
+
+/// The door slabs ([`flag::PANEL`]) in column (x, z) between heights `lo` and `hi`
+/// (absolute): `(y, class)`, at most four.
+fn panels_in<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    x: i32,
+    z: i32,
+    lo: f64,
+    hi: f64,
+) -> ([(i32, Class); 4], usize) {
+    let mut out = [(0, Class::UNKNOWN); 4];
+    let mut n = 0;
+    for y in lo.floor() as i32..=(hi - 1e-6).floor() as i32 {
+        let c = g.class(x, y, z);
+        if c.has(flag::PANEL) && n < 4 {
+            out[n] = (y, c);
+            n += 1;
+        }
+    }
+    (out, n)
+}
+
+/// Door slabs: keeps a move only when it crosses none of them, turns a walk through one
+/// closed (or swung-into-the-way) wooden door into a [`MoveKind::Door`] move, and drops every
+/// other move touching a door cell that is not a straight cardinal one.
+fn through_doors<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    p: [i32; 3],
+    s: &Spot,
+    out: &mut Vec<Edge>,
+) {
+    let [x, _, z] = p;
+    let mut i = 0;
+    while i < out.len() {
+        let e = out[i];
+        let (dx, dz) = (e.to[0] - x, e.to[2] - z);
+        if dx == 0 && dz == 0 {
+            // Straight up or down at the centre: a side slab is never in the way.
+            i += 1;
+            continue;
+        }
+        let lo = s.floor.min(e.spot.floor);
+        let hi = s.floor.max(e.spot.floor) + HEIGHT;
+        let (from, nf) = panels_in(g, x, z, lo, hi);
+        let (to, nt) = panels_in(g, e.to[0], e.to[2], lo, hi);
+        if nf == 0 && nt == 0 {
+            i += 1;
+            continue;
+        }
+        let keep = if dx.abs() + dz.abs() != 1 || matches!(e.kind, MoveKind::Parkour { .. }) {
+            false
+        } else {
+            let (out_wall, in_wall) = (door::wall_of(dx, dz), door::wall_of(-dx, -dz));
+            let mut blocker: Option<([i32; 3], bool)> = None;
+            let mut many = false;
+            for (col, list, n, wall) in [
+                ([x, z], &from, nf, out_wall),
+                ([e.to[0], e.to[2]], &to, nt, in_wall),
+            ] {
+                for &(y, c) in &list[..n] {
+                    if c.wall != wall {
+                        continue;
+                    }
+                    let at = [col[0], y, col[1]];
+                    let open = c.has(flag::OPENABLE);
+                    match blocker {
+                        None => blocker = Some((at, open)),
+                        Some((b, o)) => {
+                            // Both halves of one door: click the lower one.
+                            if b[0] == at[0] && b[2] == at[2] {
+                                blocker = Some((if at[1] < b[1] { at } else { b }, o && open));
+                            } else {
+                                many = true;
+                            }
+                        }
+                    }
+                }
+            }
+            match blocker {
+                None => true,
+                Some((at, true))
+                    if !many
+                        && e.kind == MoveKind::Walk
+                        && e.dig[0].is_none()
+                        && e.place.is_none() =>
+                {
+                    out[i].kind = MoveKind::Door { block: at };
+                    out[i].cost += DOOR_TICKS;
+                    true
+                }
+                Some(_) => false,
+            }
+        };
+        if keep {
+            i += 1;
+        } else {
+            out.remove(i);
+        }
+    }
+}
+
+/// Through a closed fence gate in the neighbour (bx, y, bz): open it, walk in.
+fn open_gate<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    per_block: f64,
+    p: [i32; 3],
+    f0: f64,
+    (dx, dz): (i32, i32),
+    out: &mut Vec<Edge>,
+) {
+    let [x, y, z] = p;
+    let (bx, bz) = (x + dx, z + dz);
+    let gate = g.class(bx, y, bz);
+    if !gate.has(flag::OPENABLE) || !gate.has(flag::SOLID) || gate.has(flag::PANEL) {
+        return;
+    }
+    if (f0 - f64::from(y)).abs() > 1e-6 {
+        return;
+    }
+    let fl = g.class(bx, y - 1, bz);
+    if !fl.has(flag::SUPPORT)
+        || fl.has(flag::IRREGULAR | flag::AVOID_FLOOR)
+        || fl.top < 1.0 - 1e-6
+        || fl.top_any > 1.0 + 1e-6
+    {
+        return;
+    }
+    let head = g.class(bx, y + 1, bz);
+    if head.blocks_between(0.0, (HEIGHT - 1.0) as f32) || head.has(flag::AVOID | flag::LAVA) {
+        return;
+    }
+    out.push(Edge {
+        to: [bx, y, bz],
+        spot: Spot {
+            kind: NodeKind::Ground,
+            floor: f0,
+            floor_flags: fl.flags,
+            water: false,
+            submerged: false,
+            climb: false,
+        },
+        kind: MoveKind::Door { block: [bx, y, bz] },
+        cost: per_block + DOOR_TICKS,
+        dig: [None; 3],
+        place: None,
+    });
 }
 
 /// Tunnel: walk into the neighbour at the same level after digging its body blocks.

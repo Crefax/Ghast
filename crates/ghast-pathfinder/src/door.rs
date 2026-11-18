@@ -9,8 +9,6 @@
 //! half the hinge): the planner's grid combines both halves ([`resolve_legacy`]), as vanilla
 //! does for the collision box.
 
-#![allow(dead_code)] // wired up by the door moves
-
 use crate::Version;
 use crate::class::{Class, Table, flag, table};
 use crate::world::BlockSource;

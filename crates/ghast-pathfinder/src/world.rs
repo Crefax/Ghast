@@ -283,8 +283,9 @@ pub(crate) struct Sections {
     secs: Vec<Section>,
     /// The last section looked up (most lookups hit the same section in a row).
     last: (u64, u32),
-    /// A [`flag::PANEL`] class (a door) was looked up: moves need the door checks.
-    panels: bool,
+    /// A door or gate ([`flag::PANEL`] / [`flag::OPENABLE`]) was looked up: moves need the
+    /// door checks.
+    doors: bool,
 }
 
 impl Default for Sections {
@@ -293,7 +294,7 @@ impl Default for Sections {
             index: HashMap::with_capacity_and_hasher(64, BuildKeyHasher),
             secs: Vec::with_capacity(64),
             last: (u64::MAX, u32::MAX),
-            panels: false,
+            doors: false,
         }
     }
 }
@@ -375,14 +376,15 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
             Some(raw) => {
                 let mut v = self.table.index(raw);
                 let f = self.table.classes[v as usize].flags;
-                if f & (flag::DOOR_HALF | flag::PANEL) != 0 {
+                if f & (flag::DOOR_HALF | flag::PANEL | flag::OPENABLE) != 0 {
                     if f & flag::DOOR_HALF != 0
                         && let Some(r) =
                             crate::door::resolve_legacy(self.table, self.src, [x, y, z], raw)
                     {
                         v = r;
                     }
-                    self.sections.panels |= self.table.classes[v as usize].has(flag::PANEL);
+                    self.sections.doors |=
+                        self.table.classes[v as usize].has(flag::PANEL | flag::OPENABLE);
                 }
                 v
             }
@@ -392,11 +394,10 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
         v
     }
 
-    /// Whether a door slab ([`flag::PANEL`]) has been looked up in this search.
-    #[allow(dead_code)] // the door moves
+    /// Whether a door or gate has been looked up in this search.
     #[inline]
-    pub(crate) fn saw_panels(&self) -> bool {
-        self.sections.panels
+    pub(crate) fn saw_doors(&self) -> bool {
+        self.sections.doors
     }
 
     /// The class at a position ([`Class::UNKNOWN`] when unknown).

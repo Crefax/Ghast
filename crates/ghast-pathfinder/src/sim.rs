@@ -6,6 +6,7 @@ use ghast_physics::Keys;
 use crate::Version;
 use crate::class::{flag, table};
 use crate::control::{Controller, ControllerConfig, Progress};
+use crate::door;
 use crate::moves::MoveKind;
 #[cfg(feature = "v1_12_2")]
 use crate::physics::P12;
@@ -387,23 +388,31 @@ impl Run {
                 Progress::Moving | Progress::Working => {}
             }
             // Jobs: a dig or place takes a while, then the block changes.
-            let target = cmd.dig.or(cmd.place.map(|p| p.pos));
+            let target = cmd.dig.or(cmd.place.map(|p| p.pos)).or(cmd.interact);
             match (target, self.job) {
                 (Some(p), Some((q, k))) if p == q => {
-                    let need = match cmd.dig {
-                        Some(d) => {
+                    let need = match (cmd.dig, cmd.interact) {
+                        (Some(d), _) => {
                             5 + (f64::from(class(&view, d[0], d[1], d[2]).hardness.max(0.0)) * 30.0)
                                 as u32
                         }
-                        None => 4,
+                        (None, Some(_)) => 2,
+                        (None, None) => 4,
                     };
                     if k + 1 >= need {
-                        let raw = if cmd.dig.is_some() {
-                            0
+                        if cmd.interact.is_some() && cmd.dig.is_none() && cmd.place.is_none() {
+                            for (q, raw) in door::toggle(self.version, &view, p).unwrap_or_default()
+                            {
+                                view.set(q, raw);
+                            }
                         } else {
-                            stone_raw(self.version)
-                        };
-                        view.set(p, raw);
+                            let raw = if cmd.dig.is_some() {
+                                0
+                            } else {
+                                stone_raw(self.version)
+                            };
+                            view.set(p, raw);
+                        }
                         self.job = None;
                     } else {
                         self.job = Some((q, k + 1));

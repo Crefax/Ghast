@@ -19,6 +19,7 @@ use ghast_physics::Keys;
 
 use crate::Version;
 use crate::class::{Class, Table, flag, table};
+use crate::door;
 use crate::jump::{self, Jumps, Mode};
 use crate::moves::{MoveKind, NodeKind};
 #[cfg(feature = "v1_12_2")]
@@ -155,11 +156,12 @@ pub enum Progress {
     OffPath,
 }
 
-/// A dig / place job before a move.
+/// A dig / place / door job before a move.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Job {
     Dig([i32; 3]),
     Place(Place),
+    Open([i32; 3]),
 }
 
 /// A gap jump in progress (see [`crate::jump`]).
@@ -343,7 +345,31 @@ impl Controller {
         {
             return Some(Job::Place(p));
         }
+        if let MoveKind::Door { block } = t.kind
+            && self.door_in_way(w, self.reached + 1, block)
+        {
+            return Some(Job::Open(block));
+        }
         None
+    }
+
+    /// Whether the door or gate at `b` (as the world has it now) blocks the move to step `k`.
+    fn door_in_way<S: BlockSource + ?Sized>(&self, w: &S, k: usize, b: [i32; 3]) -> bool {
+        let (f, t) = (&self.path.steps[k - 1], &self.path.steps[k]);
+        let c = door::class_at(self.path.version, w, b);
+        if !c.has(flag::SOLID) {
+            return false;
+        }
+        if !c.has(flag::PANEL) {
+            // A closed fence gate.
+            return c.has(flag::OPENABLE);
+        }
+        let (dx, dz) = (t.pos[0] - f.pos[0], t.pos[2] - f.pos[2]);
+        if b[0] == f.pos[0] && b[2] == f.pos[2] {
+            c.wall == door::wall_of(dx, dz)
+        } else {
+            c.wall == door::wall_of(-dx, -dz)
+        }
     }
 
     /// Advances along the path from `obs` and returns the look (yaw, pitch) to aim at this
@@ -381,6 +407,17 @@ impl Controller {
                     f64::from(pl.against[1]) + 1.0,
                     f64::from(pl.against[2]) + 0.5,
                 ],
+                Job::Open(b) => {
+                    // The middle of the door's slab (or of the gate).
+                    let mut q = centre(b);
+                    let c = door::class_at(self.path.version, world, b);
+                    if c.has(flag::PANEL) {
+                        let (sx, sz) = wall_dir(c.wall);
+                        q[0] += f64::from(sx) * (0.5 - DOOR_HALF_THICKNESS);
+                        q[2] += f64::from(sz) * (0.5 - DOOR_HALF_THICKNESS);
+                    }
+                    q
+                }
             };
             let eyes = [obs.pos[0], obs.pos[1] + EYES, obs.pos[2]];
             self.want = look_at(eyes, p);
@@ -420,6 +457,7 @@ impl Controller {
                 match self.job(world) {
                     Some(Job::Dig(d)) => c.dig = Some(d),
                     Some(Job::Place(p)) => c.place = Some(p),
+                    Some(Job::Open(b)) => c.interact = Some(b),
                     None => {}
                 }
                 return c;
@@ -499,6 +537,7 @@ impl Controller {
                     s.dig.iter().any(|&d| self.class(world, d).has(flag::SOLID))
                         || s.place
                             .is_some_and(|p| !self.class(world, p.pos).has(flag::SUPPORT))
+                        || matches!(s.kind, MoveKind::Door { block } if self.door_in_way(world, j, block))
                 });
                 if skipped_job {
                     continue;
@@ -629,7 +668,22 @@ impl Controller {
                 }
             }
         }
-        let point = steps[k].target();
+        let mut point = steps[k].target();
+        if k == self.reached + 1 && (dx == 0) != (dz == 0) {
+            // Along a door's slab: the middle of the free part of the cell, so the box clears
+            // the slab's end.
+            for y in [t.pos[1], t.pos[1] + 1] {
+                let c = door::class_at(self.path.version, world, [t.pos[0], y, t.pos[2]]);
+                if c.has(flag::PANEL) {
+                    let (sx, sz) = wall_dir(c.wall);
+                    if (sx, sz) != (dx, dz) && (sx, sz) != (-dx, -dz) {
+                        point[0] -= f64::from(sx) * DOOR_HALF_THICKNESS;
+                        point[2] -= f64::from(sz) * DOOR_HALF_THICKNESS;
+                        break;
+                    }
+                }
+            }
+        }
         self.aim_dist = hdist(obs.pos, point);
         if self.aim_dist < 0.05 {
             return obs.yaw;
@@ -676,7 +730,7 @@ impl Controller {
         };
         let (dx, dz) = (t.pos[0] - f.pos[0], t.pos[2] - f.pos[2]);
         match t.kind {
-            MoveKind::Start | MoveKind::Walk | MoveKind::Diagonal => {
+            MoveKind::Start | MoveKind::Walk | MoveKind::Diagonal | MoveKind::Door { .. } => {
                 let mut k = Keys {
                     forward: err < 35.0,
                     ..Keys::NONE
@@ -1258,6 +1312,20 @@ fn yaw_to(from: [f64; 3], to: [f64; 3]) -> f32 {
 /// The yaw of a horizontal direction.
 fn dir_yaw(dx: i32, dz: i32) -> f32 {
     (-f64::from(dx)).atan2(f64::from(dz)).to_degrees() as f32
+}
+
+/// Half the thickness of a door's slab (3/16).
+const DOOR_HALF_THICKNESS: f64 = 0.09375;
+
+/// The unit offset toward a side given as a wall code (`Class::wall`).
+fn wall_dir(wall: u8) -> (i32, i32) {
+    match wall {
+        1 => (0, -1),
+        2 => (0, 1),
+        3 => (-1, 0),
+        4 => (1, 0),
+        _ => (0, 0),
+    }
 }
 
 /// The centre of a block.

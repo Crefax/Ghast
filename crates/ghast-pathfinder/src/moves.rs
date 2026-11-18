@@ -62,6 +62,13 @@ pub enum MoveKind {
     /// [`crate::Step::dig`] holds the block). Needs [`crate::Config::dig`]; chains, so goals
     /// below the player are reached by digging straight down.
     DigDown,
+    /// Walk to a cardinal neighbour through a wooden door or fence gate that is in the way,
+    /// after right-clicking `block` (a door half or the gate). Open doors that are not in the
+    /// way need no click: their slab is along the side of the cell, and plain walks pass it.
+    Door {
+        /// The door half or fence gate to click.
+        block: [i32; 3],
+    },
 }
 
 /// A node: feet block and how the player stands there.
@@ -104,6 +111,33 @@ pub(crate) fn clear<S: BlockSource + ?Sized>(
         let l = (lo - fy) as f32;
         let h = (hi - fy) as f32;
         if c.blocks_between(l, h) {
+            return false;
+        }
+    }
+    true
+}
+
+/// [`clear`] for a body standing at the column's centre: door slabs along a side
+/// ([`flag::PANEL`]) do not count (the moves across them are checked separately).
+pub(crate) fn clear_standing<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    x: i32,
+    z: i32,
+    lo: f64,
+    hi: f64,
+) -> bool {
+    if hi <= lo {
+        return true;
+    }
+    let y0 = lo.floor() as i32 - 1;
+    let y1 = (hi - 1e-6).floor() as i32;
+    for y in y0..=y1 {
+        let c = g.class(x, y, z);
+        let fy = f64::from(y);
+        if fy < hi - 1e-6 && fy + 1.0 > lo + 1e-6 && c.has(flag::AVOID | flag::LAVA) {
+            return false;
+        }
+        if c.blocks_standing((lo - fy) as f32, (hi - fy) as f32) {
             return false;
         }
     }
@@ -153,7 +187,7 @@ pub(crate) fn spot<S: BlockSource + ?Sized>(
         return None;
     }
     let mut floor: Option<(f64, Class)> = None;
-    if c0.has(flag::SOLID) && !(c0.has(flag::THIN) && c0.has(flag::CLIMB)) {
+    if c0.has(flag::SOLID) && !(c0.has(flag::THIN) && c0.has(flag::CLIMB)) && !c0.has(flag::PANEL) {
         // A partial block in the feet cell is the floor (slab, soul sand, carpet, ...).
         if c0.has(flag::SUPPORT)
             && !c0.has(flag::IRREGULAR)
@@ -184,7 +218,7 @@ pub(crate) fn spot<S: BlockSource + ?Sized>(
         None if climb => (NodeKind::Climb, f64::from(y), 0),
         None => return None,
     };
-    if !clear(g, x, z, base, base + HEIGHT) {
+    if !clear_standing(g, x, z, base, base + HEIGHT) {
         return None;
     }
     let head = g.class(x, (base + 1.62).floor() as i32, z);

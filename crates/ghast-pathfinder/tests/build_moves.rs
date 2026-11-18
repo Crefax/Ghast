@@ -321,3 +321,88 @@ fn dig_down_is_safe() {
         }
     }
 }
+
+/// A stone wall across the way (x = 3, three high) with a door at z = 0.
+fn door_wall(v: Version, door: &str, facing: &str, open: bool, hinge: &str) -> World {
+    let mut w = World::flat(v);
+    w.fill([3, 64, -64], [3, 66, 79], "stone");
+    w.set(
+        [3, 64, 0],
+        &format!("{door}[facing={facing},half=lower,hinge={hinge},open={open}]"),
+    );
+    w.set(
+        [3, 65, 0],
+        &format!("{door}[facing={facing},half=upper,hinge={hinge},open={open}]"),
+    );
+    w
+}
+
+/// An open door is passed like a gap in the wall, whichever way it opened.
+#[test]
+fn door_open() {
+    for v in VERSIONS {
+        for facing in ["east", "west"] {
+            for hinge in ["left", "right"] {
+                let w = door_wall(v, "oak_door", facing, true, hinge);
+                let (path, _) = check(&w, Config::default(), [0, 64, 0], &Goal::Block([6, 64, 0]));
+                assert!(
+                    path.steps.iter().any(|s| s.pos == [3, 64, 0]),
+                    "{v:?} {facing} {hinge}: not through the door"
+                );
+                assert_eq!(
+                    count(&path, |k| matches!(k, MoveKind::Door { .. })),
+                    0,
+                    "{v:?}: an open door needs no click"
+                );
+                // An open iron door too.
+                let w = door_wall(v, "iron_door", facing, true, hinge);
+                check(&w, Config::default(), [0, 64, 0], &Goal::Block([6, 64, 0]));
+            }
+        }
+    }
+}
+
+/// A closed wooden door is opened with a click; a closed iron door never is.
+#[test]
+fn door_closed() {
+    for v in VERSIONS {
+        for facing in ["east", "west"] {
+            let w = door_wall(v, "oak_door", facing, false, "left");
+            let (path, _) = check(&w, Config::default(), [0, 64, 0], &Goal::Block([6, 64, 0]));
+            assert_eq!(
+                count(&path, |k| matches!(k, MoveKind::Door { .. })),
+                1,
+                "{v:?} {facing}"
+            );
+            let w = door_wall(v, "iron_door", facing, false, "left");
+            let r = w.plan(Config::default(), [0, 64, 0], &Goal::Block([6, 64, 0]));
+            assert!(
+                r.is_err() || r.unwrap().partial,
+                "{v:?}: through an iron door"
+            );
+        }
+        // A door in a wall along x (crossed along z).
+        let mut w = World::flat(v);
+        w.fill([-64, 64, 3], [79, 66, 3], "stone");
+        w.set(
+            [0, 64, 3],
+            "oak_door[facing=north,half=lower,hinge=left,open=false]",
+        );
+        w.set(
+            [0, 65, 3],
+            "oak_door[facing=north,half=upper,hinge=left,open=false]",
+        );
+        check(&w, Config::default(), [0, 64, 0], &Goal::Block([0, 64, 6]));
+        // A closed fence gate in a wall.
+        let mut w = World::flat(v);
+        w.fill([3, 64, -64], [3, 66, 79], "stone");
+        w.set([3, 64, 0], "oak_fence_gate[facing=east,open=false]");
+        w.set([3, 65, 0], "air");
+        let (path, _) = check(&w, Config::default(), [0, 64, 0], &Goal::Block([6, 64, 0]));
+        assert_eq!(
+            count(&path, |k| matches!(k, MoveKind::Door { .. })),
+            1,
+            "{v:?} gate"
+        );
+    }
+}

@@ -1575,6 +1575,49 @@ pub(crate) mod tests {
         assert_eq!(Pathfinder::start_block(io.feet())[1], 64);
     }
 
+    /// Through a closed oak door (the probe's `door_closed`) and an open one, driven by the
+    /// follower in a client that clicks through its crosshair; the approach comes in at an
+    /// angle, so the walk lines up with the door's free side on its own.
+    #[test]
+    fn doors_follower() {
+        for open in [false, true] {
+            for hinge in ["left", "right"] {
+                let mut w = ghast_physics::modern::memory_world_26_2();
+                w.load_chunks(-2, -2, 2, 2);
+                w.fill_raw([-32, 63, -32], [31, 63, 31], id262("stone"));
+                w.fill_raw([3, 64, -32], [3, 66, 31], id262("stone"));
+                for (y, half) in [(64, "lower"), (65, "upper")] {
+                    w.set_raw(
+                        3,
+                        y,
+                        0,
+                        id262(&format!(
+                            "oak_door[facing=east,half={half},hinge={hinge},open={open}]"
+                        )),
+                    );
+                }
+                let mut io = SimIo::<P262, _>::new(&w, [0.5, 64.0, -3.5]);
+                let status = run(&mut io, follower(), Goal::Block([7, 64, 2]), 1500);
+                assert_eq!(
+                    status,
+                    FollowStatus::Arrived,
+                    "open {open} {hinge}: {:?}",
+                    io.feet()
+                );
+                assert_eq!(io.clicks, u32::from(!open), "open {open} {hinge}");
+            }
+        }
+        // 1.8.9: the door's state is split over both halves.
+        let mut w = flat(2);
+        w.fill_raw([3, 64, -32], [3, 66, 31], STONE18);
+        w.set_raw(3, 64, 0, 64 << 4); // lower half: facing east, closed
+        w.set_raw(3, 65, 0, 64 << 4 | 8); // upper half: left hinge
+        let mut io = SimIo::<P18, _>::new(&w, [0.5, 64.0, -3.5]);
+        let status = run(&mut io, follower(), Goal::Block([7, 64, 2]), 1500);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert_eq!(io.clicks, 1);
+    }
+
     /// A 26.2 block's state id.
     pub(crate) fn id262(spec: &str) -> u16 {
         ghast_data::v26_2::BlockState::parse(spec)
