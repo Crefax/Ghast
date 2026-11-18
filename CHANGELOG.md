@@ -6,7 +6,7 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
-## 0.4.7 — unreleased
+## 0.4.7 — 2026-11-18
 
 Fixes found by a survival bot on 26.2, the world time, more of the vanilla client's placement
 prediction, and new pathfinder moves. Everything is additive.
