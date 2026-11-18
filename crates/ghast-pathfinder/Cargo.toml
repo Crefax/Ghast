@@ -42,6 +42,10 @@ harness = false
 required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "v26_2"]
 
 [[test]]
+name = "build_moves"
+required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "v26_2"]
+
+[[test]]
 name = "incremental"
 required-features = ["v1_8", "v1_12_2", "v1_16_5", "v26_1", "v26_2"]
 
