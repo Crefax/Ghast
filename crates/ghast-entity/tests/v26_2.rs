@@ -228,3 +228,21 @@ fn garbage_never_panics() {
     }
     t.tick();
 }
+
+/// The death event (`entity_status` 3) sets the health to 0 (dead while the body stays),
+/// with and without metadata tracking.
+#[test]
+fn death_event_ends_alive() {
+    for config in [Config::default(), Config::default().with_metadata(false)] {
+        let mut t = tracker(config);
+        spawn(&mut t, 10, ty("zombie"), [0.0, 64.0, 0.0]);
+        assert!(t.get(10).unwrap().is_alive());
+        t.apply(&W::new().i32(10).i8(2).raw(id::ENTITY_STATUS))
+            .unwrap();
+        assert!(t.get(10).unwrap().is_alive());
+        t.apply(&W::new().i32(10).i8(3).raw(id::ENTITY_STATUS))
+            .unwrap();
+        assert!(!t.get(10).unwrap().is_alive());
+        assert!(!v26_2::alive(t.get(10).unwrap()));
+    }
+}

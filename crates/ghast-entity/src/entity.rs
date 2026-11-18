@@ -518,6 +518,37 @@ impl Entity {
         self.ty
     }
 
+    /// Vanilla `isAlive` as far as the packets tell: `false` for a living entity once it died
+    /// (its death event sets the health to 0 like `LivingEntity.handleEntityEvent(3)`, or the
+    /// server's health is not above 0; 1.8.9 – 1.16.5 need [`crate::Config::metadata`], 26.x
+    /// keeps it without) — it stays
+    /// tracked during the death animation (about 20 ticks) until the server removes it, and
+    /// the vanilla client can still pick and hit it then (the hit does no damage). `true` for
+    /// other entities.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        if !self.living {
+            return true;
+        }
+        let health: Option<f32> = match self.era {
+            #[cfg(feature = "v26_1")]
+            Era::V26 => return crate::v26_1::alive(self),
+            #[cfg(feature = "v26_2")]
+            Era::V26_2 => return crate::v26_2::alive(self),
+            #[cfg(feature = "v1_8")]
+            Era::V1_8 => crate::v1_8::health(self),
+            #[cfg(feature = "v1_12")]
+            Era::V1_12 => crate::v1_12::health(self),
+            #[cfg(feature = "v1_16_5")]
+            Era::V1_16 => crate::v1_16_5::health(self),
+            // A tracker only stamps eras of versions compiled in.
+            #[allow(unreachable_patterns)]
+            _ => None,
+        };
+        // getHealth() > 0 (NaN is not alive)
+        health.is_none_or(|h| h > 0.0)
+    }
+
     /// Version-independent class.
     #[must_use]
     pub fn class(&self) -> EntityClass {

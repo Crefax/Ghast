@@ -189,7 +189,17 @@ impl Tracker {
             id::ENTITY_STATUS => {
                 let eid = r.read_i32()?;
                 let status = r.read_i8()?;
-                let known = s.map.contains_key(&eid);
+                let keep = s.config.metadata;
+                let known = match s.map.get_mut(&eid) {
+                    Some(e) => {
+                        // LivingEntity.handleEntityEvent(3): setHealth(0), die.
+                        if status == 3 && e.living && keep {
+                            e.meta.set(meta::HEALTH, MetaValue::Float(0.0));
+                        }
+                        true
+                    }
+                    None => false,
+                };
                 if known {
                     s.event(Event::Status { id: eid, status });
                 }
