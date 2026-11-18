@@ -118,8 +118,11 @@ pub struct Command {
     /// Break this block (hold the left button while the crosshair is on it). The player
     /// stands still meanwhile.
     pub dig: Option<[i32; 3]>,
-    /// Place the held block: right-click the top face of [`Place::against`].
+    /// Place the held block: right-click the face [`Place::face`] of [`Place::against`]
+    /// (only sent when the crosshair, from the pose the server has, is on that face).
     pub place: Option<Place>,
+    /// Right-click this block (open a door or fence gate) when the crosshair is on it.
+    pub interact: Option<[i32; 3]>,
 }
 
 impl Command {
@@ -130,6 +133,7 @@ impl Command {
             pitch,
             dig: None,
             place: None,
+            interact: None,
         }
     }
 }
@@ -354,16 +358,24 @@ impl Controller {
             return self.want;
         }
         if let Some(job) = self.job(world) {
+            if self.progress != Progress::Working
+                && self.path.steps[self.reached + 1].kind == MoveKind::DigDown
+                && !self.over_centre(obs)
+            {
+                // Digging the floor away only drops a player whose box is inside the block's
+                // column: get there first (looking down at the block meanwhile).
+                self.progress = Progress::Moving;
+                let eyes = [obs.pos[0], obs.pos[1] + EYES, obs.pos[2]];
+                let d = self.path.steps[self.reached + 1].dig[0];
+                self.want = look_at(eyes, centre(d));
+                return self.want;
+            }
             if self.progress != Progress::Working {
                 self.work = 0;
             }
             self.progress = Progress::Working;
             let p = match job {
-                Job::Dig(d) => [
-                    f64::from(d[0]) + 0.5,
-                    f64::from(d[1]) + 0.5,
-                    f64::from(d[2]) + 0.5,
-                ],
+                Job::Dig(d) => centre(d),
                 Job::Place(pl) => [
                     f64::from(pl.against[0]) + 0.5,
                     f64::from(pl.against[1]) + 1.0,
@@ -432,6 +444,7 @@ impl Controller {
             pitch,
             dig: None,
             place: None,
+            interact: None,
         }
     }
 
@@ -772,6 +785,14 @@ impl Controller {
                 self.steer::<P, S>(&view, obs, look, t, fwd)
             }
             MoveKind::Parkour { gap } => self.leap_keys::<P, S>(&view, obs, look, world, gap),
+            MoveKind::DigDown => {
+                // Over the block's centre before the dig, then fall straight down.
+                if obs.on_ground && (obs.pos[1] - f.feet_y).abs() < 0.02 && !self.over_centre(obs) {
+                    self.centre_tap::<P, S>(&view, obs, look, f)
+                } else {
+                    Keys::NONE
+                }
+            }
             MoveKind::Swim => {
                 let horiz = dx != 0 || dz != 0;
                 let down = t.pos[1] < f.pos[1] && t.node == NodeKind::Swim;
@@ -987,6 +1008,72 @@ impl Controller {
         best.1
     }
 
+    /// Standing still with the whole box inside the current step's column (a dig-down drops
+    /// the player).
+    fn over_centre(&self, obs: &Observation) -> bool {
+        let c = self.path.steps[self.reached].target();
+        obs.on_ground
+            && (obs.pos[0] - c[0]).abs() < 0.15
+            && (obs.pos[2] - c[2]).abs() < 0.15
+            && obs.vel[0].hypot(obs.vel[2]) < 0.01
+    }
+
+    /// The key tap (one tick, then nothing until at rest) whose resting point is nearest the
+    /// centre of step `f`, never leaving its floor; `Keys::NONE` when coasting does as well.
+    fn centre_tap<P: Physics, S: BlockSource + ?Sized>(
+        &self,
+        view: &SourceView<'_, P, S>,
+        obs: &Observation,
+        look: (f32, f32),
+        f: &Step,
+    ) -> Keys {
+        let fc = f.target();
+        let rest = |keys: Keys| -> Option<f64> {
+            let mut s = P::from_observation(obs, &self.live);
+            let mut o = *obs;
+            for i in 0..20 {
+                let k = if i == 0 { keys } else { Keys::NONE };
+                P::tick(&mut s, k, look.0, look.1, view);
+                o = P::observe(&s);
+                if !o.on_ground || (o.pos[1] - f.feet_y).abs() > 1e-6 {
+                    return None;
+                }
+                if i > 0 && o.vel[0].hypot(o.vel[2]) < 0.003 {
+                    break;
+                }
+            }
+            Some((o.pos[0] - fc[0]).abs().max((o.pos[2] - fc[2]).abs()))
+        };
+        let mut best = (rest(Keys::NONE).unwrap_or(f64::INFINITY), Keys::NONE);
+        for sneak in [true, false] {
+            for (fw, bk, lf, rt) in [
+                (true, false, false, false),
+                (false, true, false, false),
+                (false, false, true, false),
+                (false, false, false, true),
+                (true, false, true, false),
+                (true, false, false, true),
+                (false, true, true, false),
+                (false, true, false, true),
+            ] {
+                let k = Keys {
+                    forward: fw,
+                    back: bk,
+                    left: lf,
+                    right: rt,
+                    sneak,
+                    ..Keys::NONE
+                };
+                if let Some(sc) = rest(k)
+                    && sc < best.0 - 1e-9
+                {
+                    best = (sc, k);
+                }
+            }
+        }
+        best.1
+    }
+
     /// Bang-bang landing control: tries "`primary` for n ticks, then nothing" (and, in the
     /// air, the same with the back key) in the physics and returns this tick's keys of the
     /// sequence that lands closest to `t`'s centre. Landing anywhere else is worse than not
@@ -1171,6 +1258,15 @@ fn yaw_to(from: [f64; 3], to: [f64; 3]) -> f32 {
 /// The yaw of a horizontal direction.
 fn dir_yaw(dx: i32, dz: i32) -> f32 {
     (-f64::from(dx)).atan2(f64::from(dz)).to_degrees() as f32
+}
+
+/// The centre of a block.
+fn centre(p: [i32; 3]) -> [f64; 3] {
+    [
+        f64::from(p[0]) + 0.5,
+        f64::from(p[1]) + 0.5,
+        f64::from(p[2]) + 0.5,
+    ]
 }
 
 /// Yaw / pitch that look from `eyes` at `p`.

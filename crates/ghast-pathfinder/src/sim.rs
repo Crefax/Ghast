@@ -139,7 +139,7 @@ pub fn simulate<S: BlockSource + ?Sized>(
 }
 
 /// The raw stone state of a version (what a simulated place puts down).
-fn stone(version: Version) -> u32 {
+pub(crate) fn stone_raw(version: Version) -> u32 {
     match version {
         #[cfg(feature = "v1_8")]
         Version::V1_8 => 1 << 4,
@@ -401,7 +401,7 @@ impl Run {
                         let raw = if cmd.dig.is_some() {
                             0
                         } else {
-                            stone(self.version)
+                            stone_raw(self.version)
                         };
                         view.set(p, raw);
                         self.job = None;

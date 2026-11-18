@@ -43,9 +43,12 @@ pub(crate) trait Io {
     fn set_left_button(&mut self, on: bool);
     /// The crosshair is on this block (as the server judges it).
     fn targets(&self, block: [i32; 3]) -> bool;
-    /// Right-clicks the top face of `against` with the held item if the crosshair is on it;
-    /// `true` when the place was sent.
-    fn place_on_top(&mut self, against: [i32; 3]) -> bool;
+    /// Right-clicks the face of `against` toward `dir` (a unit offset) with the held item if
+    /// the crosshair is on it; `true` when the place was sent.
+    fn place_against(&mut self, against: [i32; 3], dir: [i32; 3]) -> bool;
+    /// Right-clicks `block` (opens a door or gate) if the crosshair is on it; `true` when the
+    /// click was sent.
+    fn activate(&mut self, block: [i32; 3]) -> bool;
     /// 26.1: the live client player (attributes, effects, abilities, level).
     #[cfg(ghast_modern)]
     fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
@@ -167,13 +170,26 @@ impl Io for TickContext<'_> {
         self.target().is_some_and(|t| t.pos == pos)
     }
 
-    fn place_on_top(&mut self, against: [i32; 3]) -> bool {
+    fn place_against(&mut self, against: [i32; 3], dir: [i32; 3]) -> bool {
+        let face = match dir {
+            [0, -1, 0] => Face::Down,
+            [0, 0, -1] => Face::North,
+            [0, 0, 1] => Face::South,
+            [-1, 0, 0] => Face::West,
+            [1, 0, 0] => Face::East,
+            _ => Face::Up,
+        };
         let against = BlockPos::new(against[0], against[1], against[2]);
-        match self
-            .target()
-            .filter(|t| t.pos == against && t.face == Face::Up)
-        {
-            Some(hit) => self.place(against, Face::Up, hit.hit),
+        match self.target().filter(|t| t.pos == against && t.face == face) {
+            Some(hit) => self.place(against, face, hit.hit),
+            None => false,
+        }
+    }
+
+    fn activate(&mut self, block: [i32; 3]) -> bool {
+        let pos = BlockPos::new(block[0], block[1], block[2]);
+        match self.target().filter(|t| t.pos == pos) {
+            Some(hit) => self.place(pos, hit.face, hit.hit),
             None => false,
         }
     }
@@ -771,8 +787,15 @@ impl Follower {
         if let Some(p) = cmd.place {
             if self.place_wait > 0 {
                 self.place_wait -= 1;
-            } else if ctx.place_on_top(p.against) {
+            } else if ctx.place_against(p.against, p.face()) {
                 self.place_wait = 10;
+            }
+        } else if let Some(b) = cmd.interact {
+            // A second click would close the door again: wait for the server's answer.
+            if self.place_wait > 0 {
+                self.place_wait -= 1;
+            } else if ctx.activate(b) {
+                self.place_wait = 20;
             }
         } else {
             self.place_wait = 0;
@@ -791,19 +814,54 @@ pub(crate) mod tests {
     use ghast_physics::Keys;
 
     use super::{FollowConfig, FollowError, FollowStatus, Follower, Io};
-    use crate::physics::{Observation, P12, P16, P18, P26, Physics, SourceView};
+    use crate::physics::{Observation, P12, P16, P18, P26, P262, Physics, SourceView};
     use crate::plan::{Config, Pathfinder, PlanError};
     use crate::sim::Turner;
     use crate::world::BlockSource;
     use crate::{Goal, Version};
 
-    /// A simulated client: the player in `ghast-physics`, turning in whole mouse counts.
+    /// The world as the simulated client sees it: the test's world plus the blocks the player
+    /// dug, placed or clicked (doors).
+    pub(crate) struct Overlay<'w, W> {
+        base: &'w W,
+        set: std::collections::HashMap<[i32; 3], u32>,
+    }
+
+    impl<W: BlockSource> BlockSource for Overlay<'_, W> {
+        fn raw_block(&self, x: i32, y: i32, z: i32) -> Option<u32> {
+            match self.set.get(&[x, y, z]) {
+                Some(&r) => Some(r),
+                None => self.base.raw_block(x, y, z),
+            }
+        }
+
+        fn is_column_loaded(&self, cx: i32, cz: i32) -> bool {
+            self.base.is_column_loaded(cx, cz)
+        }
+
+        fn build_height(&self) -> Option<(i32, i32)> {
+            self.base.build_height()
+        }
+    }
+
+    /// A simulated client: the player in `ghast-physics`, turning in whole mouse counts. Digs,
+    /// places and clicks go through a crosshair ray from the pose of the previous tick (the
+    /// one the server has), within 4.5 blocks, like the real client: a dig breaks the block
+    /// after `5 + 30 × hardness` ticks, a place or a door click takes effect two ticks after it
+    /// was sent (the server's answer).
     pub(crate) struct SimIo<'w, P: Physics, W: BlockSource> {
-        pub(crate) world: &'w W,
+        pub(crate) world: Overlay<'w, W>,
         pub(crate) state: P::State,
         turner: Turner,
         aim: (f32, f32),
         keys: Keys,
+        left: bool,
+        digging: Option<([i32; 3], u32)>,
+        /// Block changes on their way from the server: (ticks left, position, raw).
+        pending: Vec<(u32, [i32; 3], u32)>,
+        /// Places and clicks sent.
+        pub(crate) places: u32,
+        pub(crate) clicks: u32,
     }
 
     impl<'w, P: Physics, W: BlockSource> SimIo<'w, P, W> {
@@ -814,35 +872,142 @@ pub(crate) mod tests {
                 P::tick(&mut state, Keys::NONE, 0.0, 0.0, &view);
             }
             SimIo {
-                world,
+                world: Overlay {
+                    base: world,
+                    set: std::collections::HashMap::new(),
+                },
                 state,
                 turner: Turner::default(),
                 aim: (0.0, 0.0),
                 keys: Keys::NONE,
+                left: false,
+                digging: None,
+                pending: Vec::new(),
+                places: 0,
+                clicks: 0,
             }
         }
 
         /// Runs this tick's movement with what the follower asked for.
         pub(crate) fn advance(&mut self) {
+            // The digging hand first (the server judges it with the pose sent last tick).
+            let target = self.ray().map(|(b, _)| b);
+            match (self.left, target) {
+                (true, Some(b)) => {
+                    let n = match self.digging {
+                        Some((d, n)) if d == b => n + 1,
+                        _ => 1,
+                    };
+                    let hard = self.class(b).hardness.max(0.0);
+                    if n >= 5 + (f64::from(hard) * 30.0) as u32 {
+                        self.world.set.insert(b, 0);
+                        self.digging = None;
+                    } else {
+                        self.digging = Some((b, n));
+                    }
+                }
+                _ => self.digging = None,
+            }
+            for p in &mut self.pending {
+                p.0 -= 1;
+            }
+            let (due, rest): (Vec<_>, Vec<_>) = self.pending.drain(..).partition(|p| p.0 == 0);
+            self.pending = rest;
+            for (_, pos, raw) in due {
+                self.world.set.insert(pos, raw);
+            }
             let o = P::observe(&self.state);
             let look = self.turner.step(o.yaw, o.pitch, self.aim);
-            let view = SourceView::<P, W>::new(self.world);
+            let view = SourceView::<P, Overlay<'w, W>>::new(&self.world);
             P::tick(&mut self.state, self.keys, look.0, look.1, &view);
         }
 
         pub(crate) fn feet(&self) -> [f64; 3] {
             P::observe(&self.state).pos
         }
+
+        pub(crate) fn class(&self, p: [i32; 3]) -> crate::class::Class {
+            let t = crate::class::table(P::VERSION);
+            self.world
+                .raw_block(p[0], p[1], p[2])
+                .map_or(crate::class::Class::UNKNOWN, |r| {
+                    t.classes[t.index(r) as usize]
+                })
+        }
+
+        /// The block the crosshair is on and the face it enters (as a unit offset), from the
+        /// pose the server has; cells with any collision box count as whole cubes.
+        pub(crate) fn ray(&self) -> Option<([i32; 3], [i32; 3])> {
+            let o = P::observe(&self.state);
+            let (yaw, pitch) = (
+                f64::from(o.yaw).to_radians(),
+                f64::from(o.pitch).to_radians(),
+            );
+            let d = [
+                -yaw.sin() * pitch.cos(),
+                -pitch.sin(),
+                yaw.cos() * pitch.cos(),
+            ];
+            let e = [o.pos[0], o.pos[1] + 1.62, o.pos[2]];
+            let mut c = [
+                e[0].floor() as i32,
+                e[1].floor() as i32,
+                e[2].floor() as i32,
+            ];
+            let step = d.map(|v| if v > 0.0 { 1 } else { -1 });
+            let mut tmax = [0.0f64; 3];
+            let mut tdelta = [0.0f64; 3];
+            for i in 0..3 {
+                if d[i].abs() < 1e-12 {
+                    tmax[i] = f64::INFINITY;
+                    tdelta[i] = f64::INFINITY;
+                } else {
+                    let next = if d[i] > 0.0 {
+                        f64::from(c[i]) + 1.0
+                    } else {
+                        f64::from(c[i])
+                    };
+                    tmax[i] = (next - e[i]) / d[i];
+                    tdelta[i] = 1.0 / d[i].abs();
+                }
+            }
+            loop {
+                let i = (0..3).min_by(|&a, &b| tmax[a].total_cmp(&tmax[b])).unwrap();
+                if tmax[i] > 4.5 {
+                    return None;
+                }
+                c[i] += step[i];
+                tmax[i] += tdelta[i];
+                let k = self.class(c);
+                if k.has(crate::class::flag::SOLID) {
+                    let mut face = [0; 3];
+                    face[i] = -step[i];
+                    return Some((c, face));
+                }
+            }
+        }
+
+        /// Whether a block at `p` would overlap the player's box.
+        fn overlaps_player(&self, p: [i32; 3]) -> bool {
+            let o = P::observe(&self.state).pos;
+            let (x, y, z) = (f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
+            o[0] + 0.3 > x
+                && o[0] - 0.3 < x + 1.0
+                && o[1] + 1.8 > y
+                && o[1] < y + 1.0
+                && o[2] + 0.3 > z
+                && o[2] - 0.3 < z + 1.0
+        }
     }
 
-    impl<P: Physics, W: BlockSource> Io for SimIo<'_, P, W> {
+    impl<'w, P: Physics, W: BlockSource> Io for SimIo<'w, P, W> {
         type World<'a>
-            = W
+            = Overlay<'w, W>
         where
             Self: 'a;
 
-        fn world(&self) -> &W {
-            self.world
+        fn world(&self) -> &Overlay<'w, W> {
+            &self.world
         }
 
         fn version(&self) -> Option<Version> {
@@ -878,17 +1043,46 @@ pub(crate) mod tests {
         }
 
         fn left_button(&self) -> bool {
-            false
+            self.left
         }
 
-        fn set_left_button(&mut self, _: bool) {}
-
-        fn targets(&self, _: [i32; 3]) -> bool {
-            false
+        fn set_left_button(&mut self, on: bool) {
+            self.left = on;
         }
 
-        fn place_on_top(&mut self, _: [i32; 3]) -> bool {
-            false
+        fn targets(&self, block: [i32; 3]) -> bool {
+            self.ray().is_some_and(|(b, _)| b == block)
+        }
+
+        fn place_against(&mut self, against: [i32; 3], dir: [i32; 3]) -> bool {
+            if self.ray() != Some((against, dir)) {
+                return false;
+            }
+            let pos = [
+                against[0] + dir[0],
+                against[1] + dir[1],
+                against[2] + dir[2],
+            ];
+            if !self.class(pos).has(crate::class::flag::REPLACEABLE) || self.overlaps_player(pos) {
+                return false;
+            }
+            self.places += 1;
+            self.pending
+                .push((2, pos, crate::sim::stone_raw(P::VERSION)));
+            true
+        }
+
+        fn activate(&mut self, block: [i32; 3]) -> bool {
+            if self.ray().map(|(b, _)| b) != Some(block) {
+                return false;
+            }
+            self.clicks += 1;
+            if let Some(changes) = crate::door::toggle(P::VERSION, &self.world, block) {
+                for (p, raw) in changes {
+                    self.pending.push((2, p, raw));
+                }
+            }
+            true
         }
 
         fn modern_player(&self) -> Option<&ghast_physics::modern::PlayerState> {
@@ -1350,6 +1544,61 @@ pub(crate) mod tests {
         assert!(through_gap, "the step was not avoided");
         // Planned around at plan time (the move set follows the attributes), not by repairs.
         assert_eq!(f.plans(), 1, "replanned");
+    }
+
+    /// Digging straight down through dirt (the probe's `dig_down_6`), driven by the follower
+    /// in a client that digs through its crosshair: six digs, each aimed a tick before it
+    /// starts, and a goal level six blocks down.
+    #[test]
+    fn dig_down_6_follower() {
+        let cfg = Config::default().with_dig(Some(crate::DigCost {
+            base: 8.0,
+            ticks_per_hardness: 30.0,
+            max_hardness: 1.0,
+        }));
+        let mut w = flat(2);
+        w.fill_raw([-3, 64, -3], [3, 69, 3], 3 << 4);
+        let f = Follower::new(Pathfinder::new(cfg.clone()), FollowConfig::default());
+        let mut io = SimIo::<P18, _>::new(&w, [0.5, 70.0, 0.5]);
+        let status = run(&mut io, f, Goal::Block([0, 64, 0]), 2000);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert_eq!(Pathfinder::start_block(io.feet()), [0, 64, 0]);
+        // 26.2 (the version the probe runs).
+        let mut w = ghast_physics::modern::memory_world_26_2();
+        w.load_chunks(-1, -1, 1, 1);
+        w.fill_raw([-8, 63, -8], [8, 63, 8], id262("stone"));
+        w.fill_raw([-3, 64, -3], [3, 69, 3], id262("dirt"));
+        let f = Follower::new(Pathfinder::new(cfg), FollowConfig::default());
+        let mut io = SimIo::<P262, _>::new(&w, [0.5, 70.0, 0.5]);
+        let status = run(&mut io, f, Goal::Y(64), 2000);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert_eq!(Pathfinder::start_block(io.feet())[1], 64);
+    }
+
+    /// A 26.2 block's state id.
+    pub(crate) fn id262(spec: &str) -> u16 {
+        ghast_data::v26_2::BlockState::parse(spec)
+            .unwrap_or_else(|| panic!("{spec}"))
+            .id()
+    }
+
+    /// Drives a follower in `io` to `goal` for at most `max` ticks.
+    pub(crate) fn run<P: Physics, W: BlockSource>(
+        io: &mut SimIo<'_, P, W>,
+        mut f: Follower,
+        goal: Goal,
+        max: u32,
+    ) -> FollowStatus {
+        f.goto(goal);
+        let mut status = FollowStatus::Moving;
+        for _ in 0..max {
+            status = f.step(io);
+            if status != FollowStatus::Moving {
+                break;
+            }
+            io.advance();
+        }
+        status
     }
 
     fn run_corridor<P: Physics, W: BlockSource>(w: &W) {

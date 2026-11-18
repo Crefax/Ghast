@@ -207,14 +207,28 @@ impl Config {
     }
 }
 
-/// A block to place before a step: the new block at `pos`, clicked on the top face of
-/// `against` (the block below it).
+/// A block to place before (or during) a step: the new block at `pos`, clicked on the face of
+/// `against` toward `pos` (`against` is a neighbour of `pos`: the block below it when filling
+/// a hole or towering up, the floor block beside it when bridging).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Place {
     /// Where the new block goes.
     pub pos: [i32; 3],
-    /// The block whose top face is clicked.
+    /// The block whose face is clicked.
     pub against: [i32; 3],
+}
+
+impl Place {
+    /// The clicked face of [`Place::against`] as a unit offset (`pos - against`): `[0, 1, 0]`
+    /// is the top face.
+    #[must_use]
+    pub fn face(&self) -> [i32; 3] {
+        [
+            self.pos[0] - self.against[0],
+            self.pos[1] - self.against[1],
+            self.pos[2] - self.against[2],
+        ]
+    }
 }
 
 /// One step of a path: the feet block to reach and how.
@@ -1073,6 +1087,14 @@ pub(crate) fn successors<S: BlockSource + ?Sized>(
         }
     }
 
+    // Dig out the floor and fall onto the next one below.
+    if s.kind == NodeKind::Ground
+        && !s.water
+        && let Some(d) = &cfg.dig
+    {
+        dig_down(g, cfg, d, c, p, f0, out);
+    }
+
     let swimming = s.kind == NodeKind::Swim;
     let climbing = s.kind == NodeKind::Climb;
     if (swimming && !cfg.swim) || (climbing && !cfg.climb) {
@@ -1473,6 +1495,77 @@ fn dig_through<S: BlockSource + ?Sized>(
         place: None,
     });
     true
+}
+
+/// Dig out the full block under the feet at `p` and fall straight down onto the next full
+/// floor, at most [`Config::max_fall`] below. Never into a liquid, onto a hazard or a fragile /
+/// bouncy floor, or through unknown blocks; the dig itself follows [`dig_cost`] (no liquid next
+/// to the block, nothing falling onto the player).
+fn dig_down<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    cfg: &Config,
+    d: &DigCost,
+    c: &Costs,
+    p: [i32; 3],
+    f0: f64,
+    out: &mut Vec<Edge>,
+) {
+    let [x, y, z] = p;
+    if (f0 - f64::from(y)).abs() > 1e-6 {
+        return;
+    }
+    let below = [x, y - 1, z];
+    let fl = g.class(x, y - 1, z);
+    if !fl.has(flag::SUPPORT) || fl.has(flag::IRREGULAR) || fl.top < 1.0 - 1e-6 {
+        return;
+    }
+    let Some(k) = dig_cost(g, d, below) else {
+        return;
+    };
+    // Fall through the dug cell (feet there first) until a full floor carries the player.
+    let lowest = (y - cfg.max_fall.floor() as i32).max(g.y_range().0 + 1);
+    let mut yt = y - 1;
+    while yt >= lowest {
+        if yt < y - 1 {
+            // The cell the feet fall into (the dug cell itself needs no check).
+            let c0 = g.class(x, yt, z);
+            if c0.has(flag::SOLID | flag::WATER | flag::LAVA | flag::AVOID | flag::CLIMB) {
+                return;
+            }
+        }
+        let cb = g.class(x, yt - 1, z);
+        if cb.has(flag::WATER | flag::LAVA | flag::AVOID | flag::CLIMB) {
+            return;
+        }
+        if cb.has(flag::SOLID) {
+            if !cb.has(flag::SUPPORT)
+                || cb.has(flag::IRREGULAR | flag::AVOID_FLOOR | flag::FRAGILE | flag::BOUNCY)
+                || cb.top < 1.0 - 1e-6
+                || cb.top_any > 1.0 + 1e-6
+            {
+                return;
+            }
+            let drop = f64::from(y - yt);
+            out.push(Edge {
+                to: [x, yt, z],
+                spot: Spot {
+                    kind: NodeKind::Ground,
+                    floor: f64::from(yt),
+                    floor_flags: cb.flags,
+                    water: false,
+                    submerged: false,
+                    climb: false,
+                },
+                kind: MoveKind::DigDown,
+                // Centring over the block, the dig, the fall and landing.
+                cost: k + c.fall_ticks(drop) + 4.0,
+                dig: [Some(below), None, None],
+                place: None,
+            });
+            return;
+        }
+        yt -= 1;
+    }
 }
 
 /// Jump up into the neighbour one block higher after digging what is in the way.

@@ -46,6 +46,16 @@ pub(crate) mod flag {
     pub(crate) const IRREGULAR: u32 = 1 << 14;
     /// Air-like for placing: empty collision, no fluid (a block can be placed into it).
     pub(crate) const REPLACEABLE: u32 = 1 << 15;
+    /// A thin full-height slab along the side [`super::Class::wall`] of the cell (doors, open
+    /// trapdoors): a player at the centre does not touch it; it blocks only moves across that
+    /// side. [`super::Class::blocks_between`] still counts it (standing checks use
+    /// [`super::Class::blocks_standing`]).
+    pub(crate) const PANEL: u32 = 1 << 16;
+    /// Opened and closed by a right click (wooden doors, fence gates).
+    pub(crate) const OPENABLE: u32 = 1 << 17;
+    /// 1.8.9 / 1.12.2 door half: the shape needs the other half (the grid resolves it to a
+    /// [`PANEL`] class, see `crate::door`).
+    pub(crate) const DOOR_HALF: u32 = 1 << 18;
 }
 
 /// The planner's view of one block state.
@@ -95,12 +105,34 @@ impl Class {
         // Collision occupies [bottom, top_any] of the cell.
         self.top_any > lo + 1e-4 && self.bottom < hi - 1e-4
     }
+
+    /// Like [`Class::blocks_between`] for a body standing at the cell's centre (or passing
+    /// it straight along a [`flag::PANEL`]): a door's side slab does not count.
+    #[allow(dead_code)] // the door moves
+    #[inline]
+    pub(crate) fn blocks_standing(&self, lo: f32, hi: f32) -> bool {
+        !self.has(flag::PANEL) && self.blocks_between(lo, hi)
+    }
 }
 
 /// Per-version table: state → class index, plus the distinct classes.
 pub(crate) struct Table {
     pub(crate) classes: Vec<Class>,
     pub(crate) map: Vec<u16>,
+    /// The door-slab classes a legacy door half resolves to ([`crate::door::panel_classes`]);
+    /// unused in the modern tables.
+    pub(crate) panels: [u16; 8],
+}
+
+impl Table {
+    fn new(mut classes: Vec<Class>, map: Vec<u16>) -> Table {
+        let panels = crate::door::panel_classes().map(|c| intern(&mut classes, c));
+        Table {
+            classes,
+            map,
+            panels,
+        }
+    }
 }
 
 impl Table {
@@ -215,6 +247,9 @@ fn classify(f: &Facts<'_>) -> Class {
         // A shape kind added for a newer version: an irregular solid until classified here.
         _ => irregular_solid = true,
     }
+    if f.dependency == ShapeDependency::Neighbours(NeighbourShape::Door) {
+        flags |= DOOR_HALF;
+    }
     if irregular_solid {
         flags |= SOLID | IRREGULAR;
         flags &= !(SUPPORT | THIN);
@@ -272,6 +307,24 @@ fn classify(f: &Facts<'_>) -> Class {
         n if n.ends_with("concrete_powder") => flags |= FALLING,
         _ => {}
     }
+    // A slab hugging one side over the full height (doors, open trapdoors).
+    if flags & (THIN | CLIMB | IRREGULAR) == THIN
+        && wall != 0
+        && bottom <= 1e-6
+        && top_any >= 1.0 - 1e-6
+        && f.boxes.iter().all(|b| match wall {
+            1 => b.max_z <= 0.25,
+            2 => b.min_z >= 0.75,
+            3 => b.max_x <= 0.25,
+            _ => b.min_x >= 0.75,
+        })
+    {
+        flags |= PANEL;
+    }
+    let door = f.name.ends_with("_door") && f.name != "iron_door";
+    if door || f.name.ends_with("fence_gate") {
+        flags |= OPENABLE;
+    }
     if f.diggable
         && !f.fluid_water
         && !f.fluid_lava
@@ -320,7 +373,7 @@ fn build_1_8() -> Table {
         let s = BlockState::from_raw_vanilla(raw as u16);
         *slot = intern(&mut classes, classify_1_8(s));
     }
-    Table { classes, map }
+    Table::new(classes, map)
 }
 
 #[cfg(feature = "v1_8")]
@@ -354,7 +407,7 @@ fn build_1_12() -> Table {
         let s = BlockState::from_raw_vanilla(raw as u16);
         *slot = intern(&mut classes, classify_1_12(s));
     }
-    Table { classes, map }
+    Table::new(classes, map)
 }
 
 #[cfg(feature = "v1_12_2")]
@@ -388,7 +441,7 @@ fn build_1_16_5() -> Table {
         let s = BlockState::from_id(id as u16).unwrap_or(BlockState::AIR);
         *slot = intern(&mut classes, classify_1_16_5(s));
     }
-    Table { classes, map }
+    Table::new(classes, map)
 }
 
 #[cfg(feature = "v1_16_5")]
@@ -429,7 +482,7 @@ macro_rules! modern_classes {
                     let s = BlockState::from_id(id as u16).unwrap_or(BlockState::AIR);
                     *slot = intern(&mut classes, classify_modern(s));
                 }
-                Table { classes, map }
+                Table::new(classes, map)
             }
 
             /// The jar's movement records (the version's `ghast-data` module) in the planner's terms.

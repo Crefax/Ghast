@@ -52,6 +52,7 @@
 mod class;
 mod control;
 mod cost;
+mod door;
 #[cfg(feature = "client")]
 mod follower;
 mod goal;

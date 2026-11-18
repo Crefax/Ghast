@@ -58,6 +58,10 @@ pub enum MoveKind {
     ClimbDown,
     /// Leave a ladder onto a floor above or beside it.
     ClimbExit,
+    /// Dig out the block under the feet and fall onto the next floor below (the step's
+    /// [`crate::Step::dig`] holds the block). Needs [`crate::Config::dig`]; chains, so goals
+    /// below the player are reached by digging straight down.
+    DigDown,
 }
 
 /// A node: feet block and how the player stands there.
