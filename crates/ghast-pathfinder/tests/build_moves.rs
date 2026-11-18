@@ -406,3 +406,60 @@ fn door_closed() {
         );
     }
 }
+
+/// Placing on, gap jumps off (as in the probe).
+fn place() -> Config {
+    Config::default().with_place(Some(20.0)).with_parkour(false)
+}
+
+/// A gap three wide over the void: bridged with three blocks, each placed against the side
+/// of the floor block while sneaking at its edge.
+#[test]
+fn bridge_gap_3() {
+    for v in VERSIONS {
+        let mut w = World::empty(v);
+        w.fill([-8, 63, -8], [1, 63, 8], "stone");
+        w.fill([5, 63, -8], [12, 63, 8], "stone");
+        let (path, _) = check(&w, place(), [0, 64, 0], &Goal::Block([7, 64, 0]));
+        let bridged = path
+            .steps
+            .iter()
+            .filter(|s| s.place.is_some_and(|p| p.face()[1] == 0))
+            .count();
+        assert_eq!(bridged, 3, "{v:?}");
+        // Without placing: no way over.
+        let r = w.plan(
+            Config::default().with_parkour(false),
+            [0, 64, 0],
+            &Goal::Block([7, 64, 0]),
+        );
+        assert!(r.is_err() || r.unwrap().partial, "{v:?}");
+        // Along z and toward negative x as well.
+        let mut w = World::empty(v);
+        w.fill([-8, 63, -8], [8, 63, 1], "stone");
+        w.fill([-8, 63, 4], [8, 63, 8], "stone");
+        check(&w, place(), [0, 64, 0], &Goal::Block([0, 64, 6]));
+        check(&w, place(), [0, 64, 6], &Goal::Block([0, 64, -2]));
+    }
+}
+
+/// The goal on top of a three-high glass pillar beside the start, no other way up: tower up
+/// (jump, place under the feet), then over.
+#[test]
+fn tower_up_3() {
+    for v in VERSIONS {
+        let mut w = World::flat(v);
+        w.fill([3, 64, 0], [3, 66, 0], "glass");
+        let (path, _) = check(&w, place(), [0, 64, 0], &Goal::Block([3, 67, 0]));
+        // Two blocks up, then a jump onto the pillar (or three, then a step).
+        assert!(count(&path, |k| k == MoveKind::Pillar) >= 2, "{v:?}");
+        // Straight up: a goal three above the start.
+        let (path, _) = check(&w, place(), [0, 64, 0], &Goal::Block([0, 67, 0]));
+        assert_eq!(count(&path, |k| k == MoveKind::Pillar), 3, "{v:?}");
+        // Under a low ceiling there is no room to jump: no tower.
+        let mut w = World::flat(v);
+        w.fill([-8, 66, -8], [8, 66, 8], "stone");
+        let r = w.plan(place(), [0, 64, 0], &Goal::Block([0, 65, 0]));
+        assert!(r.is_err() || r.unwrap().partial, "{v:?}");
+    }
+}

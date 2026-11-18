@@ -1618,6 +1618,50 @@ pub(crate) mod tests {
         assert_eq!(io.clicks, 1);
     }
 
+    /// Bridging over a three-wide gap and towering up three blocks (the probe's
+    /// `bridge_gap_3` and `tower_up_3`), driven by the follower in a client that places only
+    /// where its crosshair, from the pose the server has, is on the clicked face and the new
+    /// block clears the player.
+    #[test]
+    fn bridge_and_tower_follower() {
+        let cfg = Config::default().with_place(Some(20.0)).with_parkour(false);
+        let follower = || Follower::new(Pathfinder::new(cfg.clone()), FollowConfig::default());
+        // 26.2
+        let stone = id262("stone");
+        let mut w = ghast_physics::modern::memory_world_26_2();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-8, 63, -8], [1, 63, 8], stone);
+        w.fill_raw([5, 63, -8], [12, 63, 8], stone);
+        let mut io = SimIo::<P262, _>::new(&w, [0.5, 64.0, 0.5]);
+        let status = run(&mut io, follower(), Goal::Block([7, 64, 0]), 2000);
+        assert_eq!(
+            status,
+            FollowStatus::Arrived,
+            "bridge 26.2: {:?}",
+            io.feet()
+        );
+        assert_eq!(io.places, 3, "bridge 26.2");
+        let mut w = ghast_physics::modern::memory_world_26_2();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-8, 63, -8], [8, 63, 8], stone);
+        let mut io = SimIo::<P262, _>::new(&w, [0.5, 64.0, 0.5]);
+        let status = run(&mut io, follower(), Goal::Block([0, 67, 0]), 2000);
+        assert_eq!(status, FollowStatus::Arrived, "tower 26.2: {:?}", io.feet());
+        assert_eq!(io.places, 3, "tower 26.2");
+        // 1.8.9
+        let mut w = ghast_physics::v1_8::memory_world();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-8, 63, -8], [1, 63, 8], STONE18);
+        w.fill_raw([5, 63, -8], [12, 63, 8], STONE18);
+        let mut io = SimIo::<P18, _>::new(&w, [0.5, 64.0, 0.5]);
+        let status = run(&mut io, follower(), Goal::Block([7, 64, 0]), 2000);
+        assert_eq!(status, FollowStatus::Arrived, "bridge 1.8: {:?}", io.feet());
+        let w = flat(2);
+        let mut io = SimIo::<P18, _>::new(&w, [0.5, 64.0, 0.5]);
+        let status = run(&mut io, follower(), Goal::Block([0, 67, 0]), 2000);
+        assert_eq!(status, FollowStatus::Arrived, "tower 1.8: {:?}", io.feet());
+    }
+
     /// A 26.2 block's state id.
     pub(crate) fn id262(spec: &str) -> u16 {
         ghast_data::v26_2::BlockState::parse(spec)

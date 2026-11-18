@@ -69,6 +69,9 @@ pub enum MoveKind {
         /// The door half or fence gate to click.
         block: [i32; 3],
     },
+    /// Tower up one block: jump and place a block under the feet in the air (the step's
+    /// [`crate::Step::place`]). Needs [`crate::Config::place`].
+    Pillar,
 }
 
 /// A node: feet block and how the player stands there.

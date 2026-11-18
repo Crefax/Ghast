@@ -59,8 +59,10 @@ pub struct Config {
     pub climb: bool,
     /// Dig through blocks in the way (default off). The follower digs with the held item.
     pub dig: Option<DigCost>,
-    /// Place a block to fill a one-deep hole, at this cost in ticks (default off). The
-    /// follower places the held item: the caller keeps a block in hand.
+    /// Place blocks, at this cost in ticks per block (default off): fill a one-deep hole,
+    /// bridge over a gap (sneaking to the edge, placing against the side of the floor block),
+    /// tower straight up (jump, place under the feet). The follower places the held item: the
+    /// caller keeps blocks in hand.
     pub place: Option<f64>,
     /// Node budget per plan; when exhausted the best partial path is returned. Default
     /// 250 000: enough to search all the terrain a client loads at view distance 10 on a
@@ -188,7 +190,8 @@ impl Config {
         self.dig = dig;
         self
     }
-    /// Placing blocks into one-deep holes (cost in ticks; None = off).
+    /// Placing blocks: filling holes, bridging, towering up (cost in ticks per block; None =
+    /// off).
     #[must_use]
     pub fn with_place(mut self, cost: Option<f64>) -> Self {
         self.place = cost;
@@ -1111,6 +1114,13 @@ fn moves_from<S: BlockSource + ?Sized>(
     {
         dig_down(g, cfg, d, c, p, f0, out);
     }
+    // Tower up: jump, place a block under the feet.
+    if s.kind == NodeKind::Ground
+        && !s.water
+        && let Some(pc) = cfg.place
+    {
+        pillar(g, pc, c, p, s, out);
+    }
 
     let swimming = s.kind == NodeKind::Swim;
     let climbing = s.kind == NodeKind::Climb;
@@ -1295,8 +1305,9 @@ fn moves_from<S: BlockSource + ?Sized>(
             && !climbing
             && let Some(pc) = cfg.place
             && spot(g, bx, y, bz).is_none()
+            && !fill_hole(g, pc, per_block, p, f0, (dx, dz), out)
         {
-            fill_hole(g, pc, per_block, p, f0, (dx, dz), out);
+            bridge(g, pc, per_block, p, s, (dx, dz), out);
         }
         if cfg.parkour
             && cfg.limits.parkour
@@ -1837,7 +1848,7 @@ fn fill_hole<S: BlockSource + ?Sized>(
     let spot = Spot {
         kind: NodeKind::Ground,
         floor: f0,
-        floor_flags: 0,
+        floor_flags: flag::PLACED,
         water: false,
         submerged: false,
         climb: false,
@@ -1854,6 +1865,109 @@ fn fill_hole<S: BlockSource + ?Sized>(
         }),
     });
     true
+}
+
+/// Extra ticks of a bridging step: turning round, sneaking back to the edge, turning again.
+const BRIDGE_TICKS: f64 = 16.0;
+
+/// Whether the floor of a step at `p` standing as `s` is a full cube whose faces can be
+/// clicked (or one the path places itself).
+fn full_floor<S: BlockSource + ?Sized>(g: &mut Grid<'_, S>, p: [i32; 3], s: &Spot) -> bool {
+    if (s.floor - f64::from(p[1])).abs() > 1e-6 {
+        return false;
+    }
+    if s.floor_flags & flag::PLACED != 0 {
+        return true;
+    }
+    let fl = g.class(p[0], p[1] - 1, p[2]);
+    fl.has(flag::SUPPORT)
+        && !fl.has(flag::IRREGULAR | flag::THIN)
+        && fl.bottom <= 1e-6
+        && fl.top >= 1.0 - 1e-6
+        && fl.top_any <= 1.0 + 1e-6
+}
+
+/// Bridge: walk over a gap to the neighbour at the same level after placing its floor block
+/// against the side of this step's floor block (sneaking at the edge).
+fn bridge<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    cost: f64,
+    per_block: f64,
+    p: [i32; 3],
+    s: &Spot,
+    (dx, dz): (i32, i32),
+    out: &mut Vec<Edge>,
+) -> bool {
+    let [x, y, z] = p;
+    if s.water || !full_floor(g, p, s) {
+        return false;
+    }
+    let (bx, bz) = (x + dx, z + dz);
+    if !g.class(bx, y - 1, bz).has(flag::REPLACEABLE) || g.unknown(bx, y - 1, bz) {
+        return false;
+    }
+    if !clear(g, bx, bz, s.floor, s.floor + HEIGHT) {
+        return false;
+    }
+    out.push(Edge {
+        to: [bx, y, bz],
+        spot: Spot {
+            kind: NodeKind::Ground,
+            floor: s.floor,
+            floor_flags: flag::PLACED,
+            water: false,
+            submerged: false,
+            climb: false,
+        },
+        kind: MoveKind::Walk,
+        cost: per_block + cost + BRIDGE_TICKS,
+        dig: [None; 3],
+        place: Some(Place {
+            pos: [bx, y - 1, bz],
+            against: [x, y - 1, z],
+        }),
+    });
+    true
+}
+
+/// Tower up: jump and place a block into the feet cell, landing on it one block higher.
+fn pillar<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    cost: f64,
+    c: &Costs,
+    p: [i32; 3],
+    s: &Spot,
+    out: &mut Vec<Edge>,
+) {
+    let [x, y, z] = p;
+    if y + 1 >= g.y_range().1 - 1 || !full_floor(g, p, s) {
+        return;
+    }
+    if !g.class(x, y, z).has(flag::REPLACEABLE) {
+        return;
+    }
+    // Room for the body one higher and for the jump's arc above it.
+    if !clear(g, x, z, s.floor + HEIGHT, s.floor + HEIGHT + JUMP_APEX) {
+        return;
+    }
+    out.push(Edge {
+        to: [x, y + 1, z],
+        spot: Spot {
+            kind: NodeKind::Ground,
+            floor: s.floor + 1.0,
+            floor_flags: flag::PLACED,
+            water: false,
+            submerged: false,
+            climb: false,
+        },
+        kind: MoveKind::Pillar,
+        cost: c.jump_up + cost + 4.0,
+        dig: [None; 3],
+        place: Some(Place {
+            pos: [x, y, z],
+            against: [x, y - 1, z],
+        }),
+    });
 }
 
 /// 1.16.5 and 26.1 climb a ladder or vine without a block behind it; the older versions need

@@ -402,11 +402,22 @@ impl Controller {
             self.progress = Progress::Working;
             let p = match job {
                 Job::Dig(d) => centre(d),
-                Job::Place(pl) => [
-                    f64::from(pl.against[0]) + 0.5,
-                    f64::from(pl.against[1]) + 1.0,
-                    f64::from(pl.against[2]) + 0.5,
-                ],
+                Job::Place(_) if self.path.steps[self.reached + 1].kind == MoveKind::Pillar => {
+                    // Straight down at the floor.
+                    self.want = (obs.yaw, 90.0);
+                    return self.want;
+                }
+                Job::Place(pl) if pl.face()[1] == 0 => {
+                    // Facing back over the edge, down at the side face of the floor block.
+                    let [fx, _, fz] = pl.face();
+                    let c = place_point(pl);
+                    let eyes = [obs.pos[0], obs.pos[1] + EYES, obs.pos[2]];
+                    let along = (eyes[0] - c[0]) * f64::from(fx) + (eyes[2] - c[2]) * f64::from(fz);
+                    let pitch = (eyes[1] - c[1]).atan2(along.max(0.05)).to_degrees();
+                    self.want = (dir_yaw(-fx, -fz), pitch as f32);
+                    return self.want;
+                }
+                Job::Place(pl) => place_point(pl),
                 Job::Open(b) => {
                     // The middle of the door's slab (or of the gate).
                     let mut q = centre(b);
@@ -456,6 +467,24 @@ impl Controller {
                 let mut c = Command::idle(yaw, pitch);
                 match self.job(world) {
                     Some(Job::Dig(d)) => c.dig = Some(d),
+                    Some(Job::Place(p)) if self.moving_place(p) => {
+                        let (keys, ready) = match self.path.version {
+                            #[cfg(feature = "v1_8")]
+                            Version::V1_8 => self.place_keys::<P18, S>(obs, look, world, p),
+                            #[cfg(feature = "v1_12_2")]
+                            Version::V1_12 => self.place_keys::<P12, S>(obs, look, world, p),
+                            #[cfg(feature = "v1_16_5")]
+                            Version::V1_16_5 => self.place_keys::<P16, S>(obs, look, world, p),
+                            #[cfg(feature = "v26_1")]
+                            Version::V26_1 => self.place_keys::<P26, S>(obs, look, world, p),
+                            #[cfg(feature = "v26_2")]
+                            Version::V26_2 => self.place_keys::<P262, S>(obs, look, world, p),
+                        };
+                        c.keys = keys;
+                        if ready {
+                            c.place = Some(p);
+                        }
+                    }
                     Some(Job::Place(p)) => c.place = Some(p),
                     Some(Job::Open(b)) => c.interact = Some(b),
                     None => {}
@@ -839,6 +868,8 @@ impl Controller {
                 self.steer::<P, S>(&view, obs, look, t, fwd)
             }
             MoveKind::Parkour { gap } => self.leap_keys::<P, S>(&view, obs, look, world, gap),
+            // Landing on the block placed in the air.
+            MoveKind::Pillar => Keys::NONE,
             MoveKind::DigDown => {
                 // Over the block's centre before the dig, then fall straight down.
                 if obs.on_ground && (obs.pos[1] - f.feet_y).abs() < 0.02 && !self.over_centre(obs) {
@@ -1060,6 +1091,104 @@ impl Controller {
             }
         }
         best.1
+    }
+
+    /// A place that needs the player to move meanwhile: bridging (a side face) or towering.
+    fn moving_place(&self, p: Place) -> bool {
+        p.face()[1] == 0 || self.path.steps[self.reached + 1].kind == MoveKind::Pillar
+    }
+
+    /// The keys of a moving place and whether the place can be sent this tick (from the pose
+    /// the server has: the observation's).
+    ///
+    /// - Bridging: sneaking (vanilla keeps a sneaking player on the floor), back to the edge
+    ///   until the eyes are past the plane of the clicked side face, so the face is in sight.
+    /// - Towering: looking straight down, jump; place once the feet are above the new block
+    ///   (vanilla refuses a block that would overlap the player).
+    fn place_keys<P: Physics, S: BlockSource + ?Sized>(
+        &self,
+        obs: &Observation,
+        look: (f32, f32),
+        world: &S,
+        p: Place,
+    ) -> (Keys, bool) {
+        let f = &self.path.steps[self.reached];
+        let looking =
+            wrap(obs.yaw - self.want.0).abs() < 2.0 && (obs.pitch - self.want.1).abs() < 2.0;
+        if self.path.steps[self.reached + 1].kind == MoveKind::Pillar {
+            if obs.on_ground {
+                let jump = (obs.pos[1] - f.feet_y).abs() < 0.02 && obs.pitch > 85.0;
+                return (Keys { jump, ..Keys::NONE }, false);
+            }
+            let above = obs.pos[1] > f64::from(p.pos[1]) + 1.0 + 1e-4;
+            return (Keys::NONE, above && obs.pitch > 85.0);
+        }
+        let sneak = Keys {
+            sneak: true,
+            ..Keys::NONE
+        };
+        if !obs.on_ground {
+            return (sneak, false);
+        }
+        let [fx, _, fz] = p.face();
+        let c = place_point(p);
+        let eyes = [obs.pos[0], obs.pos[1] + EYES, obs.pos[2]];
+        let past = (eyes[0] - c[0]) * f64::from(fx) + (eyes[2] - c[2]) * f64::from(fz);
+        // Where to stand: the box's back edge 0.05 over the floor block.
+        let stand = [
+            f64::from(p.against[0]) + 0.5 + 0.75 * f64::from(fx),
+            f.feet_y,
+            f64::from(p.against[2]) + 0.5 + 0.75 * f64::from(fz),
+        ];
+        let ready = past > 0.1 && looking;
+        if hdist(obs.pos, stand) < 0.08 && obs.vel[0].hypot(obs.vel[2]) < 0.02 {
+            return (sneak, ready);
+        }
+        let view = SourceView::<P, S>::new(world);
+        let rest = |keys: Keys| -> Option<f64> {
+            let mut s = P::from_observation(obs, &self.live);
+            let mut o = *obs;
+            for i in 0..8 {
+                P::tick(
+                    &mut s,
+                    if i == 0 { keys } else { sneak },
+                    look.0,
+                    look.1,
+                    &view,
+                );
+                o = P::observe(&s);
+                if !o.on_ground || (o.pos[1] - f.feet_y).abs() > 1e-6 {
+                    return None;
+                }
+            }
+            Some(hdist(o.pos, stand))
+        };
+        let mut best = (rest(sneak).unwrap_or(f64::INFINITY), sneak);
+        for (fw, bk, lf, rt) in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+            (true, false, true, false),
+            (true, false, false, true),
+            (false, true, true, false),
+            (false, true, false, true),
+        ] {
+            let k = Keys {
+                forward: fw,
+                back: bk,
+                left: lf,
+                right: rt,
+                sneak: true,
+                ..Keys::NONE
+            };
+            if let Some(sc) = rest(k)
+                && sc < best.0 - 1e-9
+            {
+                best = (sc, k);
+            }
+        }
+        (best.1, ready)
     }
 
     /// Standing still with the whole box inside the current step's column (a dig-down drops
@@ -1312,6 +1441,17 @@ fn yaw_to(from: [f64; 3], to: [f64; 3]) -> f32 {
 /// The yaw of a horizontal direction.
 fn dir_yaw(dx: i32, dz: i32) -> f32 {
     (-f64::from(dx)).atan2(f64::from(dz)).to_degrees() as f32
+}
+
+/// The middle of the face a place clicks.
+fn place_point(p: Place) -> [f64; 3] {
+    let [fx, fy, fz] = p.face();
+    let c = centre(p.against);
+    [
+        c[0] + 0.5 * f64::from(fx),
+        c[1] + 0.5 * f64::from(fy),
+        c[2] + 0.5 * f64::from(fz),
+    ]
 }
 
 /// Half the thickness of a door's slab (3/16).

@@ -3,7 +3,8 @@
 //! - [`Pathfinder`]: A* over feet blocks. Moves: walk (incl. step-ups onto slabs and partial
 //!   blocks), diagonal, jump up, drop down (configurable maximum fall), gap jumps (up to 3
 //!   blocks, also one up or down; each validated in the physics), swimming, ladder / vine
-//!   climbing, and optionally digging and placing. Costs are
+//!   climbing, doors and fence gates (opened with a click), and optionally digging (also
+//!   straight down) and placing (filling holes, bridging gaps, towering up). Costs are
 //!   ticks **measured with `ghast-physics`** (see [`Costs`]). Unknown (unloaded) blocks are
 //!   never treated as air: they are impassable, and a goal beyond them yields a partial path.
 //! - [`Controller`]: turns a path into per-tick keys and aim. It picks the keys by simulating

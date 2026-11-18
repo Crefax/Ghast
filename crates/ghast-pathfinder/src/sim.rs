@@ -1,8 +1,6 @@
 //! Running a path offline: the [`Controller`] drives the vanilla-exact `ghast-physics` player
 //! through the path, turning in whole mouse counts like ghast-client does.
 
-use ghast_physics::Keys;
-
 use crate::Version;
 use crate::class::{flag, table};
 use crate::control::{Controller, ControllerConfig, Progress};
@@ -137,6 +135,34 @@ pub fn simulate<S: BlockSource + ?Sized>(
     let mut sim = Simulation::new(path, cfg);
     while sim.step(world, u32::MAX, None).is_none() {}
     sim.into_report()
+}
+
+/// Whether a client at `obs` can place `p`: the clicked face faces the eyes and is within
+/// 4.5 blocks of them, and the new block does not overlap the player.
+fn place_ok(obs: &Observation, p: crate::plan::Place) -> bool {
+    let [fx, fy, fz] = p.face();
+    let eyes = [obs.pos[0], obs.pos[1] + 1.62, obs.pos[2]];
+    let c = [
+        f64::from(p.against[0]) + 0.5 + 0.5 * f64::from(fx),
+        f64::from(p.against[1]) + 0.5 + 0.5 * f64::from(fy),
+        f64::from(p.against[2]) + 0.5 + 0.5 * f64::from(fz),
+    ];
+    let d = [eyes[0] - c[0], eyes[1] - c[1], eyes[2] - c[2]];
+    let facing = d[0] * f64::from(fx) + d[1] * f64::from(fy) + d[2] * f64::from(fz) > 0.0;
+    let reach = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= 4.5;
+    let (x, y, z) = (
+        f64::from(p.pos[0]),
+        f64::from(p.pos[1]),
+        f64::from(p.pos[2]),
+    );
+    let o = obs.pos;
+    let overlap = o[0] + 0.3 > x
+        && o[0] - 0.3 < x + 1.0
+        && o[1] + 1.8 > y
+        && o[1] < y + 1.0
+        && o[2] + 0.3 > z
+        && o[2] - 0.3 < z + 1.0;
+    facing && reach && !overlap
 }
 
 /// The raw stone state of a version (what a simulated place puts down).
@@ -388,7 +414,10 @@ impl Run {
                 Progress::Moving | Progress::Working => {}
             }
             // Jobs: a dig or place takes a while, then the block changes.
-            let target = cmd.dig.or(cmd.place.map(|p| p.pos)).or(cmd.interact);
+            // A place counts only where a client could make it: the face in sight and reach,
+            // the new block clear of the player.
+            let place = cmd.place.filter(|p| place_ok(&obs, *p));
+            let target = cmd.dig.or(place.map(|p| p.pos)).or(cmd.interact);
             match (target, self.job) {
                 (Some(p), Some((q, k))) if p == q => {
                     let need = match (cmd.dig, cmd.interact) {
@@ -397,10 +426,12 @@ impl Run {
                                 as u32
                         }
                         (None, Some(_)) => 2,
+                        // A place in the air (towering) is answered as fast as the server can.
+                        (None, None) if !obs.on_ground => 2,
                         (None, None) => 4,
                     };
                     if k + 1 >= need {
-                        if cmd.interact.is_some() && cmd.dig.is_none() && cmd.place.is_none() {
+                        if cmd.interact.is_some() && cmd.dig.is_none() && place.is_none() {
                             for (q, raw) in door::toggle(self.version, &view, p).unwrap_or_default()
                             {
                                 view.set(q, raw);
@@ -421,11 +452,7 @@ impl Run {
                 (Some(p), _) => self.job = Some((p, 0)),
                 (None, _) => self.job = None,
             }
-            let keys = if target.is_some() {
-                Keys::NONE
-            } else {
-                cmd.keys
-            };
+            let keys = cmd.keys;
             let kind = ctrl
                 .path()
                 .steps

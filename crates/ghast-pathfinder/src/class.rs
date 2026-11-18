@@ -56,6 +56,9 @@ pub(crate) mod flag {
     /// 1.8.9 / 1.12.2 door half: the shape needs the other half (the grid resolves it to a
     /// [`PANEL`] class, see `crate::door`).
     pub(crate) const DOOR_HALF: u32 = 1 << 18;
+    /// Floor flag of a planned step only: its floor is a block the path places (bridging,
+    /// towering, a filled hole), a full cube the grid does not know yet.
+    pub(crate) const PLACED: u32 = 1 << 31;
 }
 
 /// The planner's view of one block state.
