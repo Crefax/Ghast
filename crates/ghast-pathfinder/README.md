@@ -266,8 +266,12 @@ setbacks; corridor legs 15.1–15.6 s (1.8), 16.1–16.4 s (1.12), 16.2–16.4 s
   flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
 - Digging, placing and door clicks are validated in the simulation and in a simulated client
-  that acts through its crosshair. The client does not predict placed blocks: towering up
-  needs the server's block update before the player falls back (about 7 ticks after the
-  jump), so it suits low-latency connections.
+  that acts through its crosshair. Places are sent only once the new block's cell is clear
+  of the player's box (towering: when the feet, as the server has them, are above it), so
+  ghast-client's placed-block prediction puts the block into the client's world at once
+  (full single-state blocks such as dirt, cobblestone, stone, planks, logs; 26.x rolls a
+  refused place back): the bot lands on its own tower without waiting for the server. With
+  a block the client does not predict, towering needs the server's answer within about 7
+  ticks of the jump.
 
 Licensed under MIT OR Apache-2.0.
