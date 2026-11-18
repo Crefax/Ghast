@@ -471,17 +471,18 @@ impl Bot {
             waker: None,
             dropped: false,
         }));
-        let s2 = slot.clone();
-        let guard = DropWake(slot.clone());
+        let mut guard = DropWake(Some(slot.clone()));
         let req: Request = Box::new(move |ctx| {
             let r = catch_unwind(AssertUnwindSafe(|| f(ctx)));
-            let mut s = lock(&s2);
-            s.result = Some(r);
-            if let Some(w) = s.waker.take() {
-                w.wake();
+            // Ran: the guard gives up its slot handle (it must still be released, or every
+            // request leaks its slot with the result's space).
+            if let Some(slot) = guard.0.take() {
+                let mut s = lock(&slot);
+                s.result = Some(r);
+                if let Some(w) = s.waker.take() {
+                    w.wake();
+                }
             }
-            drop(s);
-            std::mem::forget(guard);
         });
         With {
             bot: self.clone(),
@@ -704,14 +705,16 @@ struct WithSlot<R> {
 }
 
 /// Wakes the waiting future when a request is dropped without running.
-struct DropWake<R>(Arc<Mutex<WithSlot<R>>>);
+struct DropWake<R>(Option<Arc<Mutex<WithSlot<R>>>>);
 
 impl<R> Drop for DropWake<R> {
     fn drop(&mut self) {
-        let mut s = lock(&self.0);
-        s.dropped = true;
-        if let Some(w) = s.waker.take() {
-            w.wake();
+        if let Some(slot) = self.0.take() {
+            let mut s = lock(&slot);
+            s.dropped = true;
+            if let Some(w) = s.waker.take() {
+                w.wake();
+            }
         }
     }
 }
