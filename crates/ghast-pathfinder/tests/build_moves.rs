@@ -3,8 +3,8 @@
 //! carries out the digs, places and door clicks in its own copy of the world).
 
 use ghast_pathfinder::{
-    Config, ControllerConfig, DigCost, Goal, MoveKind, Path, Pathfinder, PlanError, SimOutcome,
-    SimReport, Version, simulate,
+    Budget, Config, ControllerConfig, DigCost, Goal, MoveKind, Path, Pathfinder, PlanError,
+    SimOutcome, SimReport, Version, simulate,
 };
 
 /// The raw state of a block given in the modern notation (`oak_door[facing=east,half=lower]`).
@@ -169,6 +169,27 @@ impl World {
             World::V26(m) => pf.plan(v, m, from, goal),
             World::V262(m) => pf.plan(v, m, from, goal),
         }
+    }
+
+    /// Plans and also returns the nodes the search expanded.
+    fn plan_counted(
+        &self,
+        cfg: Config,
+        from: [i32; 3],
+        goal: &Goal,
+    ) -> (Result<Path, PlanError>, usize) {
+        let pf = Pathfinder::new(cfg);
+        let v = self.version();
+        let mut s = pf.search(v, from, goal.clone(), std::collections::HashSet::new());
+        let r = match self {
+            World::V18(m) => s.step(m, Budget::UNLIMITED),
+            World::V12(m) => s.step(m, Budget::UNLIMITED),
+            World::V16(m) => s.step(m, Budget::UNLIMITED),
+            World::V26(m) => s.step(m, Budget::UNLIMITED),
+            World::V262(m) => s.step(m, Budget::UNLIMITED),
+        }
+        .expect("an unlimited step finishes");
+        (r, s.expanded())
     }
 
     fn simulate(&self, path: &Path) -> SimReport {
@@ -461,5 +482,37 @@ fn tower_up_3() {
         w.fill([-8, 66, -8], [8, 66, 8], "stone");
         let r = w.plan(place(), [0, 64, 0], &Goal::Block([0, 65, 0]));
         assert!(r.is_err() || r.unwrap().partial, "{v:?}");
+    }
+}
+
+/// An unreachable goal (sealed in a stone shell above the floor): with placing and digging
+/// on, the search gives up after about as many nodes as without them, instead of towering,
+/// bridging and digging over the whole loaded area.
+#[test]
+fn unreachable_goals_stay_cheap_with_building_moves() {
+    for v in VERSIONS {
+        let mut w = World::flat(v);
+        // A floating platform (void below its edges) and the shell.
+        w.fill([-64, 63, -64], [79, 63, 79], "air");
+        w.fill([-20, 63, -20], [20, 63, 20], "stone");
+        w.fill([9, 68, -1], [11, 70, 1], "stone");
+        w.set([10, 69, 0], "air");
+        let goal = Goal::Block([10, 69, 0]);
+        let (r, plain) = w.plan_counted(Config::default(), [0, 64, 0], &goal);
+        assert!(r.is_err() || r.unwrap().partial, "{v:?}");
+        let building = Config::default()
+            .with_place(Some(20.0))
+            .with_dig(Some(DigCost {
+                base: 6.0,
+                ticks_per_hardness: 5.0,
+                max_hardness: 1.0,
+            }));
+        let (r, built) = w.plan_counted(building, [0, 64, 0], &goal);
+        assert!(r.is_err() || r.unwrap().partial, "{v:?}");
+        eprintln!("{v:?}: {plain} nodes plain, {built} with building moves");
+        assert!(
+            built <= plain * 2 + 8192,
+            "{v:?}: {built} nodes (plain {plain})"
+        );
     }
 }

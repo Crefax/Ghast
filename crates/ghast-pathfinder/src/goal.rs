@@ -78,6 +78,31 @@ impl Goal {
     }
 }
 
+impl Goal {
+    /// Blocks left to the goal, horizontal (octile) plus vertical: not a cost bound, only a
+    /// measure of progress (a move gets closer when it lowers it).
+    pub(crate) fn blocks_left(&self, p: [i32; 3]) -> f64 {
+        let octile = |dx: i32, dz: i32| {
+            let (a, b) = (f64::from(dx.abs()), f64::from(dz.abs()));
+            let (a, b) = if a > b { (a, b) } else { (b, a) };
+            a - b + b * std::f64::consts::SQRT_2
+        };
+        match self {
+            Goal::Block(b) => octile(b[0] - p[0], b[2] - p[2]) + f64::from((b[1] - p[1]).abs()),
+            Goal::Near { pos, radius } => {
+                let d = octile(pos[0] - p[0], pos[2] - p[2]) + f64::from((pos[1] - p[1]).abs());
+                (d - radius).max(0.0)
+            }
+            Goal::Xz { x, z } => octile(x - p[0], z - p[2]),
+            Goal::Y(y) => f64::from((y - p[1]).abs()),
+            Goal::AnyOf(gs) => gs
+                .iter()
+                .map(|g| g.blocks_left(p))
+                .fold(f64::INFINITY, f64::min),
+        }
+    }
+}
+
 fn dist2(a: [i32; 3], b: [i32; 3]) -> f64 {
     let d = |i: usize| f64::from(a[i] - b[i]);
     d(0) * d(0) + d(1) * d(1) + d(2) * d(2)

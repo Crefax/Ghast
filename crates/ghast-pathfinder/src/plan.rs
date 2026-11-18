@@ -619,6 +619,22 @@ struct SearchState {
     best: u32,
     expanded: usize,
     edges: Vec<Edge>,
+    /// Nodes reached by a building move so far ([`BUILDING_NODES`]).
+    building: usize,
+}
+
+/// Most nodes one search reaches by building moves (towering, bridging, digging down or a
+/// staircase down): far more than any real path places or digs, small next to the node budget.
+const BUILDING_NODES: usize = 4096;
+
+/// A move that builds its own way (see [`BUILDING_NODES`]). Tunnels, jump-ups into dug space
+/// and filled holes are not counted: they stay next to the terrain.
+fn is_building(e: &Edge) -> bool {
+    match e.kind {
+        MoveKind::Pillar | MoveKind::DigDown => true,
+        MoveKind::Descend => e.dig[0].is_some(),
+        _ => e.place.is_some_and(|p| p.face()[1] == 0),
+    }
 }
 
 /// A resumable path search ([`Pathfinder::search`]). Owns its state (`Send`, no borrows),
@@ -730,6 +746,7 @@ impl Search {
                 best: 0,
                 expanded: 0,
                 edges: Vec::with_capacity(32),
+                building: 0,
             };
             st.recs.push(Rec {
                 pos: self.from,
@@ -803,6 +820,14 @@ impl Search {
                 }
                 let ng = gcost + e.cost;
                 let key = pack(e.to);
+                // Building moves (towering, bridging, digging down) only toward the goal, and
+                // a bounded number of them per search: they open the whole sky / void / ground
+                // to the search, which would otherwise expand all of it before giving up on an
+                // unreachable goal.
+                let building = is_building(e);
+                if building && self.goal.blocks_left(e.to) >= self.goal.blocks_left(pos) - 1e-9 {
+                    continue;
+                }
                 let work = |w: &mut Vec<Work>| {
                     if e.dig[0].is_none() && e.place.is_none() {
                         NO_WORK
@@ -831,6 +856,12 @@ impl Search {
                         });
                     }
                     None => {
+                        if building {
+                            if st.building >= BUILDING_NODES {
+                                continue;
+                            }
+                            st.building += 1;
+                        }
                         let h = self.goal.estimate(e.to, &self.heur);
                         let i = st.recs.len() as u32;
                         let wk = work(&mut st.work);
@@ -872,6 +903,7 @@ impl Search {
             best: 0,
             expanded,
             edges: Vec::new(),
+            building: 0,
         });
         self.result = Some(r);
         self.result.clone()
