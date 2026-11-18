@@ -108,6 +108,9 @@ pub struct DimensionType {
     pub has_ceiling: bool,
     /// Environment attribute `minecraft:gameplay/fast_lava` (the nether).
     pub fast_lava: bool,
+    /// `default_clock`: the `minecraft:world_clock` entry that is this dimension's time of
+    /// day (`None`: the dimension has no day, like the nether).
+    pub default_clock: Option<String>,
     /// The entry's data as sent (`None` for a known-pack entry without data).
     pub nbt: Option<AnonNbt>,
 }
@@ -117,11 +120,11 @@ impl DimensionType {
     /// registry entries the server sent without data.
     #[must_use]
     pub fn vanilla(name: &str) -> Option<DimensionType> {
-        let (min_y, height, logical, sky, ceiling, fast_lava) = match name {
-            "minecraft:overworld" => (-64, 384, 384, true, false, false),
-            "minecraft:overworld_caves" => (-64, 384, 384, true, true, false),
-            "minecraft:the_nether" => (0, 256, 128, false, true, true),
-            "minecraft:the_end" => (0, 256, 256, true, false, false),
+        let (min_y, height, logical, sky, ceiling, fast_lava, clock) = match name {
+            "minecraft:overworld" => (-64, 384, 384, true, false, false, Some("overworld")),
+            "minecraft:overworld_caves" => (-64, 384, 384, true, true, false, Some("overworld")),
+            "minecraft:the_nether" => (0, 256, 128, false, true, true, None),
+            "minecraft:the_end" => (0, 256, 256, true, false, false, Some("the_end")),
             _ => return None,
         };
         Some(DimensionType {
@@ -132,6 +135,7 @@ impl DimensionType {
             has_skylight: sky,
             has_ceiling: ceiling,
             fast_lava,
+            default_clock: clock.map(|c| format!("minecraft:{c}")),
             nbt: None,
         })
     }
@@ -175,6 +179,11 @@ impl DimensionType {
             has_skylight: flag("has_skylight"),
             has_ceiling: flag("has_ceiling"),
             fast_lava,
+            default_clock: match c.get("default_clock") {
+                Some(Tag::String(k)) if k.contains(':') => Some(k.to_string()),
+                Some(Tag::String(k)) => Some(format!("minecraft:{k}")),
+                _ => None,
+            },
             nbt: Some(nbt.clone()),
         })
     }
@@ -222,6 +231,9 @@ pub struct Registries {
     /// The climate of each `minecraft:worldgen/biome` entry in registry order (from its data,
     /// or vanilla's for an entry sent without data; `None` when neither is known).
     pub biome_climates: Vec<Option<crate::climate::Climate>>,
+    /// `minecraft:world_clock` entry keys in registry order (a clock's network id is its
+    /// index).
+    pub world_clocks: Vec<String>,
 }
 
 /// The dimension the player is in.
@@ -590,6 +602,20 @@ impl World {
         self.dim.as_ref()
     }
 
+    /// The network id of the current dimension's day clock (its `default_clock` in the
+    /// `minecraft:world_clock` registry); `None` without a dimension, for a dimension without
+    /// a day (the nether) or a clock the registry does not list.
+    #[must_use]
+    pub fn day_clock(&self) -> Option<i32> {
+        let name = self.dim.as_ref()?.kind.default_clock.as_deref()?;
+        let i = self
+            .registries
+            .world_clocks
+            .iter()
+            .position(|k| k == name)?;
+        i32::try_from(i).ok()
+    }
+
     /// Lowest block Y of the current dimension.
     #[must_use]
     pub fn min_y(&self) -> Option<i32> {
@@ -812,6 +838,10 @@ impl World {
                         None => DimensionType::vanilla(k),
                     })
                     .collect();
+                Applied::Changed
+            }
+            "minecraft:world_clock" => {
+                self.registries.world_clocks = entries.map(|(k, _)| k.to_string()).collect();
                 Applied::Changed
             }
             "minecraft:worldgen/biome" => {
@@ -1932,6 +1962,40 @@ mod tests {
         );
         w.enter_dimension("minecraft:overworld", 0, 8);
         w
+    }
+
+    /// The dimension's day clock: its `default_clock` key's index in the world clock registry
+    /// (vanilla entries sent without data, and one with data); the nether has none.
+    #[test]
+    fn day_clock_follows_the_dimension() {
+        let mut w = overworld();
+        assert_eq!(w.day_clock(), None, "no world_clock registry yet");
+        w.apply_registry(
+            "minecraft:world_clock",
+            [("minecraft:overworld", None), ("minecraft:the_end", None)].into_iter(),
+        );
+        assert_eq!(w.day_clock(), Some(0));
+        w.apply_registry(
+            "minecraft:dimension_type",
+            [
+                ("minecraft:overworld", None),
+                ("minecraft:the_nether", None),
+                ("minecraft:the_end", None),
+            ]
+            .into_iter(),
+        );
+        w.enter_dimension("minecraft:the_end", 2, 8);
+        assert_eq!(w.day_clock(), Some(1));
+        w.enter_dimension("minecraft:the_nether", 1, 8);
+        assert_eq!(w.day_clock(), None);
+        // a data pack's dimension type with its own clock
+        let mut c = ghast_protocol::nbt::Compound::default();
+        c.0.push(("min_y".into(), Tag::Int(0)));
+        c.0.push(("height".into(), Tag::Int(256)));
+        c.0.push(("default_clock".into(), Tag::String("the_end".into())));
+        let nbt = AnonNbt::from_tag(&Tag::Compound(c)).unwrap();
+        let t = DimensionType::from_nbt("x:custom", &nbt).unwrap();
+        assert_eq!(t.default_clock.as_deref(), Some("minecraft:the_end"));
     }
 
     /// A chunk body: section 7 (y 48..64) has `top` in its top row (y 63) and `rest` below,

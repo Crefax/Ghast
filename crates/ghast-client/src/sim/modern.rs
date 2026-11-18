@@ -1597,6 +1597,10 @@ impl Sim for ModernSim {
         }
     }
 
+    fn day_clock(&self) -> Option<i32> {
+        self.world.day_clock()
+    }
+
     fn modern_inputs(&self) -> bool {
         true
     }

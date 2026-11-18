@@ -341,6 +341,9 @@ pub(crate) struct Core {
     aimed: bool,
     controls: Controls,
     health: Health,
+    /// The world's clocks (`update_time`) and the network id of the dimension's day clock.
+    clocks: crate::common::Clocks,
+    day_clock: Option<i32>,
     dead: bool,
     abilities: Abilities,
     game_mode: GameMode,
@@ -448,6 +451,8 @@ impl Core {
             aimed: false,
             controls: Controls::default(),
             health: Health::default(),
+            clocks: crate::common::Clocks::default(),
+            day_clock: None,
             dead: false,
             abilities: Abilities::default(),
             game_mode: GameMode::default(),
@@ -993,6 +998,11 @@ impl<S: Sim> Engine<S> {
                     c.pending.chat_dropped += 1;
                 }
             }
+            Inbound::Time(t) => {
+                c.clocks.apply(&t);
+                // the dimension's day clock (26.x: by its world clock registry id)
+                c.day_clock = sim.day_clock();
+            }
             Inbound::Health(h) => {
                 let was_dead = c.dead;
                 c.health = h;
@@ -1217,6 +1227,8 @@ impl<S: Sim> Engine<S> {
     ) {
         let c = &mut self.core;
         c.tick += 1;
+        // `ClientLevel.tickTime`: the game time and the clocks move on between updates.
+        c.clocks.tick();
         // Per-tick packet-order guard and click timeout of the inventory.
         c.inv.tick();
         let was_ready = c.ready;
@@ -1689,6 +1701,13 @@ impl TickView<'_> {
         self.core.health
     }
 
+    /// The world's time: game time and the dimension's time of day (`update_time`, counted on
+    /// between the server's updates); `None` before the first update.
+    #[must_use]
+    pub fn world_time(&self) -> Option<crate::common::WorldTime> {
+        self.core.clocks.world_time(self.core.day_clock)
+    }
+
     /// Game mode.
     #[must_use]
     pub fn game_mode(&self) -> GameMode {
@@ -2024,6 +2043,13 @@ impl TickContext<'_> {
     #[must_use]
     pub fn health(&self) -> Health {
         self.core.health
+    }
+
+    /// The world's time: game time and the dimension's time of day (`update_time`, counted on
+    /// between the server's updates); `None` before the first update.
+    #[must_use]
+    pub fn world_time(&self) -> Option<crate::common::WorldTime> {
+        self.core.clocks.world_time(self.core.day_clock)
     }
 
     /// The player is dead (waiting for [`TickContext::respawn`]).
@@ -2923,6 +2949,11 @@ mod tests_actions;
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 #[path = "engine_tests_mounts.rs"]
 mod tests_mounts;
+
+/// The world's time on the legacy versions (`engine_tests_time.rs`).
+#[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
+#[path = "engine_tests_time.rs"]
+mod tests_time;
 
 /// The legacy special menus through the open-window path (`engine_tests_menus.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]

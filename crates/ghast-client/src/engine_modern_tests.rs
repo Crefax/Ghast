@@ -2162,3 +2162,71 @@ fn click_tickets_match_their_results() {
         assert_eq!(results[0].outcome, want);
     }
 }
+
+/// 26.x `update_time`: the game time and the world clocks (`ClientClockManager`); the day is
+/// the dimension's `default_clock` (the overworld clock here, by its registry id), counted on
+/// at its rate between updates, partial ticks included; a paused clock has rate 0.
+#[test]
+fn world_time_follows_the_day_clock() {
+    use proto::play::clientbound as cb;
+    let mut e = engine(GAME);
+    join(&mut e);
+    {
+        use proto::configuration::clientbound as cc;
+        let reg = cc::RegistryData {
+            id: "minecraft:world_clock".into(),
+            entries: ["minecraft:overworld", "minecraft:the_end"]
+                .iter()
+                .map(|k| cc::RegistryDataEntries {
+                    key: (*k).into(),
+                    value: None,
+                })
+                .collect(),
+        };
+        e.sim.registry_data(&RawPacket::from_packet(&reg).unwrap());
+    }
+    let clock = |id, total_ticks, partial_tick, rate| cb::UpdateTimeClockUpdates {
+        id,
+        total_ticks,
+        partial_tick,
+        rate,
+    };
+    let feed =
+        |e: &mut Engine<Box<dyn Sim>>, age, clocks: Vec<cb::UpdateTimeClockUpdates>, ticks| {
+            let raw = RawPacket::from_packet(&cb::UpdateTime {
+                age,
+                clock_updates: clocks,
+            })
+            .unwrap();
+            let mut wire = Wire::default();
+            let inbound = <Marker as crate::version::ClientVersion>::decode_play(&raw, &mut wire)
+                .unwrap()
+                .expect("update_time decoded");
+            e.handle(inbound);
+            let t0 = Instant::now();
+            for _ in 0..ticks {
+                e.note_inbound(t0);
+                e.tick(&mut Idle, t0);
+            }
+            e.core.clocks.world_time(e.core.day_clock).unwrap()
+        };
+    // the end clock (id 1) is listed first: the day is still the overworld's (id 0)
+    let t = feed(
+        &mut e,
+        24_000,
+        vec![clock(1, 77, 0.0, 1.0), clock(0, 48_000 + 13_000, 0.0, 1.0)],
+        4,
+    );
+    assert_eq!((t.age, t.day_time, t.day_rate), (24_004, Some(61_004), 1.0));
+    assert_eq!((t.time_of_day(), t.day()), (Some(13_004), Some(2)));
+    // a partial update (only the overworld clock) at half rate: whole ticks once the
+    // fraction carries over
+    let t = feed(&mut e, 24_010, vec![clock(0, 100, 0.25, 0.5)], 1);
+    assert_eq!((t.age, t.day_time), (24_011, Some(100)));
+    let t = feed(&mut e, 24_011, vec![], 1);
+    assert_eq!((t.age, t.day_time), (24_012, Some(101)));
+    // paused (`advance_time` off): rate 0
+    let t = feed(&mut e, 24_100, vec![clock(0, 500, 0.0, 0.0)], 10);
+    assert_eq!((t.age, t.day_time), (24_110, Some(500)));
+    assert!(t.day_frozen());
+}

@@ -116,6 +116,7 @@ impl ClientVersion for V1_16_5 {
             .with(cb::id::KEEP_ALIVE)
             .with(cb::id::LOGIN)
             .with(cb::id::UPDATE_HEALTH)
+            .with(cb::id::UPDATE_TIME)
             .with(cb::id::RESPAWN)
             .with(cb::id::POSITION)
             .with(cb::id::HELD_ITEM_SLOT)
@@ -212,6 +213,10 @@ impl ClientVersion for V1_16_5 {
                     relative: u32::from(p.flags as u8),
                     delta: Vec3::default(),
                 })
+            }
+            cb::id::UPDATE_TIME => {
+                let p: cb::UpdateTime = raw.decode_as()?;
+                Inbound::Time(crate::common::TimeUpdate::legacy(p.age, p.time))
             }
             cb::id::HELD_ITEM_SLOT => Inbound::HeldSlot(raw.decode_as::<cb::HeldItemSlot>()?.slot),
             cb::id::GAME_STATE_CHANGE => {

@@ -267,6 +267,205 @@ impl Default for Health {
     }
 }
 
+/// The world's time (`update_time`), counted on between the server's updates like the
+/// vanilla client does (the server sends one a second).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct WorldTime {
+    /// Game time: the ticks the world has run (the packet's `age`).
+    pub age: i64,
+    /// The dimension's day clock in ticks, days included (`time_of_day + 24000 * day`);
+    /// `None` when the dimension has no day (26.x: the nether) or the server sent none.
+    pub day_time: Option<i64>,
+    /// Day clock ticks per game tick: 1 normally, 0 while the day stands still (the
+    /// `doDaylightCycle` / `advance_time` game rule off, or a paused 26.x clock).
+    pub day_rate: f32,
+}
+
+impl WorldTime {
+    /// The time of day, `0..24000` (0 = sunrise, 6000 = noon, 18000 = midnight).
+    #[must_use]
+    pub fn time_of_day(&self) -> Option<i64> {
+        self.day_time.map(|t| t.rem_euclid(24000))
+    }
+
+    /// The day number (`day_time / 24000`).
+    #[must_use]
+    pub fn day(&self) -> Option<i64> {
+        self.day_time.map(|t| t.div_euclid(24000))
+    }
+
+    /// The day stands still (`day_rate` is 0).
+    #[must_use]
+    pub fn day_frozen(&self) -> bool {
+        self.day_rate == 0.0
+    }
+}
+
+/// One clock of a [`TimeUpdate`]: a 26.x world clock (its `minecraft:world_clock` network id)
+/// or, on 1.8 – 1.16.5, the world's single day ([`ClockUpdate::LEGACY_DAY`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct ClockUpdate {
+    /// Clock id.
+    pub id: i32,
+    /// Ticks of the clock.
+    pub total_ticks: i64,
+    /// Fraction of a tick (rates other than whole numbers).
+    pub partial_tick: f32,
+    /// Clock ticks per game tick (0 = stands still).
+    pub rate: f32,
+}
+
+impl ClockUpdate {
+    /// The id of the legacy day.
+    pub const LEGACY_DAY: i32 = -1;
+}
+
+/// `update_time` as the core reads it: the game time and the clocks it sets (at most
+/// [`TimeUpdate::MAX_CLOCKS`]; vanilla has two, further ones are dropped).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct TimeUpdate {
+    /// Game time.
+    pub age: i64,
+    /// The clocks, `clocks[..len]`.
+    pub clocks: [ClockUpdate; TimeUpdate::MAX_CLOCKS],
+    /// Number of clocks.
+    pub len: u8,
+}
+
+impl TimeUpdate {
+    /// Clocks one update carries.
+    pub const MAX_CLOCKS: usize = 3;
+
+    /// 1.8 – 1.16.5: `age` and the day's `time`, negative while the daylight cycle is off
+    /// (vanilla's `WorldClient.setWorldTime`).
+    #[must_use]
+    pub fn legacy(age: i64, time: i64) -> TimeUpdate {
+        let mut u = TimeUpdate {
+            age,
+            ..TimeUpdate::default()
+        };
+        u.push(ClockUpdate {
+            id: ClockUpdate::LEGACY_DAY,
+            total_ticks: time.wrapping_abs(),
+            partial_tick: 0.0,
+            rate: if time < 0 { 0.0 } else { 1.0 },
+        });
+        u
+    }
+
+    /// Adds a clock (dropped when full).
+    pub fn push(&mut self, c: ClockUpdate) {
+        if let Some(slot) = self.clocks.get_mut(usize::from(self.len)) {
+            *slot = c;
+            self.len += 1;
+        }
+    }
+
+    /// 26.x `update_time` body: `age` (long), then a map of world clock (var-int id) to state
+    /// (var-long ticks, float partial tick, float rate). Decoded in place, nothing allocated.
+    ///
+    /// # Errors
+    /// A malformed body.
+    pub fn decode_modern(body: &bytes::Bytes) -> Result<TimeUpdate, ghast_protocol::DecodeError> {
+        let mut r = ghast_protocol::Reader::new(body);
+        let mut u = TimeUpdate {
+            age: r.read_i64()?,
+            ..TimeUpdate::default()
+        };
+        let n = r.read_varint()?;
+        for _ in 0..n.max(0) {
+            let c = ClockUpdate {
+                id: r.read_varint()?,
+                total_ticks: r.read_varlong()?,
+                partial_tick: r.read_f32()?,
+                rate: r.read_f32()?,
+            };
+            u.push(c);
+        }
+        Ok(u)
+    }
+
+    /// The clocks.
+    #[must_use]
+    pub fn clocks(&self) -> &[ClockUpdate] {
+        &self.clocks[..usize::from(self.len)]
+    }
+}
+
+/// The client's clocks (vanilla `ClientClockManager`; the legacy day is one of them).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Clocks {
+    known: bool,
+    age: i64,
+    last: i64,
+    len: u8,
+    c: [ClockUpdate; Clocks::CAP],
+}
+
+impl Clocks {
+    const CAP: usize = 4;
+
+    /// One client tick (`ClientLevel.tickTime`): game time + 1, the clocks follow.
+    #[inline]
+    pub(crate) fn tick(&mut self) {
+        if self.known {
+            self.age = self.age.wrapping_add(1);
+            self.advance();
+        }
+    }
+
+    /// `ClientClockManager.tick`: each clock moves by the game time passed times its rate.
+    fn advance(&mut self) {
+        let d = self.age.wrapping_sub(self.last);
+        self.last = self.age;
+        for c in &mut self.c[..usize::from(self.len)] {
+            let t = f64::from(c.partial_tick) + d as f64 * f64::from(c.rate);
+            // Mth.floor(double) -> int
+            let i = t as i32;
+            let whole = if t < f64::from(i) { i - 1 } else { i };
+            c.partial_tick = (t - f64::from(whole)) as f32;
+            c.total_ticks = c.total_ticks.wrapping_add(i64::from(whole));
+        }
+    }
+
+    /// `handleSetTime`: the game time, the clocks moved up to it, then the sent states.
+    pub(crate) fn apply(&mut self, u: &TimeUpdate) {
+        if !self.known {
+            self.known = true;
+            self.last = u.age;
+        }
+        self.age = u.age;
+        self.advance();
+        for s in u.clocks() {
+            let n = usize::from(self.len);
+            match self.c[..n].iter_mut().find(|c| c.id == s.id) {
+                Some(c) => *c = *s,
+                None if n < Clocks::CAP => {
+                    self.c[n] = *s;
+                    self.len += 1;
+                }
+                None => {}
+            }
+        }
+    }
+
+    /// The time with `day` as the day clock (`None` before the first update).
+    pub(crate) fn world_time(&self, day: Option<i32>) -> Option<WorldTime> {
+        if !self.known {
+            return None;
+        }
+        let c = day.and_then(|id| self.c[..usize::from(self.len)].iter().find(|c| c.id == id));
+        Some(WorldTime {
+            age: self.age,
+            day_time: c.map(|c| c.total_ticks),
+            day_rate: c.map_or(0.0, |c| c.rate),
+        })
+    }
+}
+
 /// Relative-teleport flag bits of the server's position packet.
 pub mod teleport_flags {
     /// X is relative.
@@ -484,6 +683,8 @@ pub enum Inbound {
     Disconnect(ByteString),
     /// Health, food and saturation.
     Health(Health),
+    /// The world's time (`update_time`).
+    Time(TimeUpdate),
     /// Abilities.
     Abilities(Abilities),
     /// The server selects a hotbar slot.

@@ -541,6 +541,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn registry_data(&mut self, raw: &RawPacket) {
         let _ = raw;
     }
+    /// The clock of a [`crate::common::TimeUpdate`] that is the current dimension's day
+    /// (26.x: its world clock registry id; `None` for a dimension without a day).
+    fn day_clock(&self) -> Option<i32> {
+        Some(crate::common::ClockUpdate::LEGACY_DAY)
+    }
 }
 
 /// Options of the per-version sim.
@@ -1304,6 +1309,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn registry_data(&mut self, raw: &RawPacket) {
         (**self).registry_data(raw);
+    }
+    fn day_clock(&self) -> Option<i32> {
+        (**self).day_clock()
     }
 }
 

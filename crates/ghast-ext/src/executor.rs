@@ -38,6 +38,7 @@ pub(crate) struct Snapshot {
     pub(crate) sent: Pose,
     pub(crate) eyes: Vec3,
     pub(crate) health: Health,
+    pub(crate) world_time: Option<ghast_client::WorldTime>,
     pub(crate) dead: bool,
     pub(crate) game_mode: GameMode,
     pub(crate) held_slot: u8,
@@ -55,6 +56,7 @@ impl Snapshot {
             sent: Pose::default(),
             eyes: Vec3::default(),
             health: Health::default(),
+            world_time: None,
             dead: false,
             game_mode: GameMode::Survival,
             held_slot: 0,
@@ -71,6 +73,7 @@ impl Snapshot {
         self.sent = *ctx.sent();
         self.eyes = ctx.eyes(ctx.pose());
         self.health = ctx.health();
+        self.world_time = ctx.world_time();
         self.dead = ctx.is_dead();
         self.game_mode = ctx.game_mode();
         self.held_slot = ctx.held_slot();
@@ -347,6 +350,23 @@ impl Bot {
     #[must_use]
     pub fn health(&self) -> Health {
         self.lock().snap.health
+    }
+
+    /// The world's time at the start of this tick: game time and the dimension's time of day
+    /// (`None` before the server's first `update_time`).
+    ///
+    /// ```no_run
+    /// # fn f(bot: ghast_ext::Bot) {
+    /// let night = bot
+    ///     .world_time()
+    ///     .and_then(|t| t.time_of_day())
+    ///     .is_some_and(|t| (13_000..23_000).contains(&t));
+    /// # let _ = night;
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn world_time(&self) -> Option<ghast_client::WorldTime> {
+        self.lock().snap.world_time
     }
 
     /// The player is dead (see [`Bot::respawn`]).

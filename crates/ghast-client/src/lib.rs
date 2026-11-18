@@ -108,7 +108,7 @@ pub mod version;
 
 pub use client::{Account, Client, TICK};
 pub use common::{
-    ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3, Vehicle,
+    ChatMessage, ClientSettings, Controls, Face, GameMode, Health, Pose, Vec3, Vehicle, WorldTime,
 };
 pub use engine::{
     Behavior, ClickRefused, ClickTicket, Idle, RawInbound, TeleportEvent, TickContext, TickEvents,

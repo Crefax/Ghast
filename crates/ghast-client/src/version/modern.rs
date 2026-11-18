@@ -811,6 +811,7 @@ impl ClientVersion for Marker {
             .with(cb::id::PING)
             .with(cb::id::LOGIN)
             .with(cb::id::UPDATE_HEALTH)
+            .with(cb::id::UPDATE_TIME)
             .with(cb::id::RESPAWN)
             .with(cb::id::POSITION)
             .with(cb::id::PLAYER_ROTATION)
@@ -1003,6 +1004,9 @@ impl ClientVersion for Marker {
                     relative_yaw: p.relative_yaw,
                     relative_pitch: p.relative_pitch,
                 }
+            }
+            cb::id::UPDATE_TIME => {
+                Inbound::Time(crate::common::TimeUpdate::decode_modern(&raw.body)?)
             }
             cb::id::HELD_ITEM_SLOT => {
                 Inbound::HeldSlot(raw.decode_as::<cb::HeldItemSlot>()?.slot as i8)
