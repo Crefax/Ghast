@@ -6,6 +6,71 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.7 — unreleased
+
+Fixes found by a survival bot on 26.2, the world time, more of the vanilla client's placement
+prediction, and new pathfinder moves. Everything is additive.
+
+### Added
+
+- **World time** on every version (`ghast-client`): `TickContext::world_time`,
+  `TickView::world_time` and `ghast_ext::Bot::world_time` give a `WorldTime` (game time, the
+  dimension's day clock in ticks, its rate; `time_of_day()`, `day()`, `day_frozen()`), from
+  `update_time` and counted on between the server's updates like the vanilla client. 1.8.9 –
+  1.16.5: a negative day time means the daylight cycle is off. 26.x: the day is the dimension
+  type's `default_clock` among the world clocks (none in the nether), with partial ticks and a
+  rate of 0 while paused. `ghast-world`: `DimensionType::default_clock`,
+  `Registries::world_clocks`, `World::day_clock`.
+- **Placed-block prediction** (`ghast-client`): a placement predicted on the client now also
+  takes one item off the stack that placed it, like vanilla (not in creative), and blocks
+  whose only property is their axis are predicted too (logs, wood, stems, hyphae, quartz and
+  purpur pillars, basalt, hay, bone blocks: the clicked face's axis; 1.8.9 / 1.12.2 logs keep
+  the item's variant). The 26.x place oracle gained every such block item on each face (348
+  cases per version, all identical to the real client, item count included); the legacy rules
+  come from those versions' classes.
+- **`Entity::is_alive`** (`ghast-entity`, every version): `false` once a living entity died
+  (its death event sets the health to 0 like vanilla), also while its body stays tracked for
+  the death animation. `ghast_ext::EntityInfo::alive`.
+- **`ClickRefused::Dead`**: clicks and opening the inventory are refused while the player is
+  dead.
+- **Pathfinder moves** (`ghast-pathfinder`):
+  - digging straight down with `Config::dig` (`MoveKind::DigDown`): onto the next full floor
+    within `max_fall`, never into or next to a liquid, so goals below the player (`Goal::Y`)
+    and tree tops are left; digging a staircase down (a descent with digs, no fall damage, goes
+    round lava);
+  - doors, fence gates and wooden trapdoors: open ones are passed along their thin slab, closed
+    wooden ones in the way are clicked open (`MoveKind::Door`; the follower waits for the
+    server's answer); iron ones are never clicked;
+  - with `Config::place`: bridging over gaps (placing against the side of the floor block,
+    sneaking back to the edge) and towering up (`MoveKind::Pillar`: jump, place under the
+    feet; it relies on the client's placed-block prediction and places only once the cell is
+    clear of the player's box);
+  - building moves (towering, bridging, digging down) are taken only when they lead at most
+    half a block further from the goal, and a search reaches at most 4096 nodes by placing
+    moves, so a goal that cannot be reached ends with `NoPath` quickly instead of using up the
+    whole node budget. Detours round walls and low ceilings are covered by tests on every
+    version.
+
+### Fixed
+
+- **26.x clicks never completed in `ghast-ext`**: `TickContext::click` returned a ticket that
+  matched no result for 26.x `container_click`, so equip, deposit, withdraw, toss and swap
+  ended in `ClickTimedOut` although the server applied them. The ticket now carries the click's
+  action number. Clicks in the 26.x creative screen, which get no result, return at once.
+- **Memory leak in `ghast-ext` since 0.2.2**: every `Bot::with` call kept its result slot
+  allocated for the rest of the process, and helpers call it every tick. A bot that ran for
+  hours (or looped over failing `goto`s) grew without bound; a three-bot swarm reached
+  several gigabytes. Fixed; a test counts the allocations.
+- **An attack on a mob that already died**: a killed mob stays tracked for its death
+  animation, so a fight loop hit the body once more. `Bot::attack` now answers
+  `Error::NoSuchEntity` for it (`ctx.attack` still allows the hit, like vanilla).
+- **No world or window actions while dead**: `TickContext::place`, `dig` and `attack` return
+  `false`, held buttons do nothing and clicks are refused until the respawn, as the vanilla
+  death screen does. A placement written in that window was dropped by a 26.x server without an
+  answer and its predicted block stayed on the client.
+- `ghast-ext`: "tasks still busy" is logged at debug level (it is normal for loops of `with`
+  calls).
+
 ## 0.4.6 — 2026-11-17
 
 Older-version parity: what the vanilla client does on 1.8.9, 1.12.2 and 1.16.5 that ghast did
