@@ -61,8 +61,9 @@ forward to ghast-data, ghast-physics and, with `client`, ghast-client).
 | `Parkour { gap }` | jump along an axis over 1–3 blocks on the level, onto a block one higher, or one or two lower (4 when two lower); from and onto 1×1 pillars | measured jump |
 | `Swim` | in water, up, down, out onto land | measured swim speeds |
 | `ClimbUp` / `ClimbDown` / `ClimbExit` | ladders and vines, also onto a ladder from above | measured climb speeds |
-| `Door { block }` | through a closed wooden door or fence gate: right-click it, walk through (open doors are passed by plain walks; iron doors are never clicked) | walk + click |
+| `Door { block }` | through a closed wooden door, fence gate or trapdoor: right-click it, walk through (open doors are passed by plain walks; iron doors are never clicked) | walk + click |
 | `DigDown` (opt-in) | dig the block under the feet and fall onto the next floor (chains: goals below the player) | `DigCost` + fall |
+| staircase down (opt-in) | a `Descend` with digs: dig the neighbour column, step one block down | `DigCost` + walk |
 | `Pillar` (opt-in) | tower up: jump, place a block under the feet | jump + place cost |
 | dig / place (opt-in) | tunnel through blocks (`Config::with_dig`); fill one-deep holes and bridge gaps (sneak to the edge, place against the side of the floor block) (`Config::with_place`) | `DigCost`, place cost |
 
@@ -260,8 +261,9 @@ setbacks; corridor legs 15.1–15.6 s (1.8), 16.1–16.4 s (1.12), 16.2–16.4 s
 - Gap jumps go along the four axes only (no diagonal jumps), from and onto full-height
   floors with ordinary friction; sprint jumps need food above 6 (the controller reports
   `Stuck` otherwise and the follower plans around them).
-- Not modelled: opening trapdoors (open ones on a side are passed like doors), entities in
-  the way, flight, boats,
+- Trapdoors are opened only for walks through them (not as hatches over ladders), and only
+  where the opened trapdoor is not across the way. Not modelled: entities in the way,
+  flight, boats,
   1.16 sprint-swimming, speed / slowness effects in the costs.
 - Digging, placing and door clicks are validated in the simulation and in a simulated client
   that acts through its crosshair. The client does not predict placed blocks: towering up

@@ -1682,6 +1682,35 @@ pub(crate) mod tests {
         assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
     }
 
+    /// A closed oak trapdoor at head height in a two-high opening, clicked open through the
+    /// crosshair (26.2 and 1.8.9).
+    #[test]
+    fn trapdoor_follower() {
+        let mut w = ghast_physics::modern::memory_world_26_2();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-32, 63, -32], [31, 63, 31], id262("stone"));
+        w.fill_raw([3, 64, -32], [3, 66, 31], id262("stone"));
+        w.set_raw(3, 64, 0, 0);
+        w.set_raw(
+            3,
+            65,
+            0,
+            id262("oak_trapdoor[facing=north,half=bottom,open=false]"),
+        );
+        let mut io = SimIo::<P262, _>::new(&w, [0.5, 64.0, -2.5]);
+        let status = run(&mut io, follower(), Goal::Block([6, 64, 0]), 1500);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert_eq!(io.clicks, 1);
+        let mut w = flat(2);
+        w.fill_raw([3, 64, -32], [3, 66, 31], STONE18);
+        w.set_raw(3, 64, 0, 0);
+        w.set_raw(3, 65, 0, 96 << 4); // trapdoor, facing north, bottom half, closed
+        let mut io = SimIo::<P18, _>::new(&w, [0.5, 64.0, -2.5]);
+        let status = run(&mut io, follower(), Goal::Block([6, 64, 0]), 1500);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+        assert_eq!(io.clicks, 1);
+    }
+
     /// A 26.2 block's state id.
     pub(crate) fn id262(spec: &str) -> u16 {
         ghast_data::v26_2::BlockState::parse(spec)

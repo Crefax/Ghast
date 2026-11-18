@@ -361,7 +361,7 @@ impl Controller {
             return false;
         }
         if !c.has(flag::PANEL) {
-            // A closed fence gate.
+            // A closed fence gate or trapdoor.
             return c.has(flag::OPENABLE);
         }
         let (dx, dz) = (t.pos[0] - f.pos[0], t.pos[2] - f.pos[2]);
@@ -426,6 +426,9 @@ impl Controller {
                         let (sx, sz) = wall_dir(c.wall);
                         q[0] += f64::from(sx) * (0.5 - DOOR_HALF_THICKNESS);
                         q[2] += f64::from(sz) * (0.5 - DOOR_HALF_THICKNESS);
+                    } else if c.has(flag::SOLID) {
+                        // A gate's bars, a closed trapdoor's flat slab: the middle of its height.
+                        q[1] = f64::from(b[1]) + f64::from(c.bottom + c.top_any) / 2.0;
                     }
                     q
                 }

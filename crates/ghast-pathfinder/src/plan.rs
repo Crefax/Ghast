@@ -1334,7 +1334,7 @@ fn moves_from<S: BlockSource + ?Sized>(
             dig_stair(g, d, c, per_block, p, f0, (dx, dz), out);
         }
         if !found && !swimming && !climbing && g.saw_doors() {
-            open_gate(g, per_block, p, f0, (dx, dz), out);
+            open_block(g, version, per_block, p, f0, (dx, dz), out);
         }
         // Filling a one-deep hole competes with dropping into it.
         if !swimming
@@ -1568,7 +1568,9 @@ fn through_doors<S: BlockSource + ?Sized>(
                         continue;
                     }
                     let at = [col[0], y, col[1]];
-                    let open = c.has(flag::OPENABLE);
+                    // Doors and gates only: a trapdoor's slab across the way lies flat once
+                    // clicked, which this move does not model.
+                    let open = c.has(flag::OPENABLE) && !c.has(flag::HATCH);
                     match blocker {
                         None => blocker = Some((at, open)),
                         Some((b, o)) => {
@@ -1605,9 +1607,12 @@ fn through_doors<S: BlockSource + ?Sized>(
     }
 }
 
-/// Through a closed fence gate in the neighbour (bx, y, bz): open it, walk in.
-fn open_gate<S: BlockSource + ?Sized>(
+/// Through a closed fence gate or a trapdoor in the neighbour (bx, y, bz) at feet or head
+/// height: click it, walk in, where its clicked state lets the body through (a trapdoor swings
+/// to a side; across the way it would still block).
+fn open_block<S: BlockSource + ?Sized>(
     g: &mut Grid<'_, S>,
+    version: Version,
     per_block: f64,
     p: [i32; 3],
     f0: f64,
@@ -1615,14 +1620,32 @@ fn open_gate<S: BlockSource + ?Sized>(
     out: &mut Vec<Edge>,
 ) {
     let [x, y, z] = p;
-    let (bx, bz) = (x + dx, z + dz);
-    let gate = g.class(bx, y, bz);
-    if !gate.has(flag::OPENABLE) || !gate.has(flag::SOLID) || gate.has(flag::PANEL) {
-        return;
-    }
     if (f0 - f64::from(y)).abs() > 1e-6 {
         return;
     }
+    let (bx, bz) = (x + dx, z + dz);
+    let entry = door::wall_of(-dx, -dz);
+    // The body's part of each cell, and whether a class lets it pass.
+    let passes = |c: &Class, hi: f32| {
+        !c.blocks_standing(0.0, hi) && !(c.has(flag::PANEL) && c.wall == entry)
+    };
+    let mut blocker = None;
+    for (yy, hi) in [(y, 1.0f32), (y + 1, (HEIGHT - 1.0) as f32)] {
+        let c = g.class(bx, yy, bz);
+        if c.has(flag::AVOID | flag::LAVA) {
+            return;
+        }
+        if passes(&c, hi) {
+            continue;
+        }
+        if !c.has(flag::OPENABLE) || blocker.is_some() {
+            return;
+        }
+        blocker = Some((yy, hi));
+    }
+    let Some((yy, hi)) = blocker else {
+        return;
+    };
     let fl = g.class(bx, y - 1, bz);
     if !fl.has(flag::SUPPORT)
         || fl.has(flag::IRREGULAR | flag::AVOID_FLOOR)
@@ -1631,9 +1654,9 @@ fn open_gate<S: BlockSource + ?Sized>(
     {
         return;
     }
-    let head = g.class(bx, y + 1, bz);
-    if head.blocks_between(0.0, (HEIGHT - 1.0) as f32) || head.has(flag::AVOID | flag::LAVA) {
-        return;
+    match door::toggled_class(version, g.source(), [bx, yy, bz]) {
+        Some(after) if passes(&after, hi) => {}
+        _ => return,
     }
     out.push(Edge {
         to: [bx, y, bz],
@@ -1645,7 +1668,9 @@ fn open_gate<S: BlockSource + ?Sized>(
             submerged: false,
             climb: false,
         },
-        kind: MoveKind::Door { block: [bx, y, bz] },
+        kind: MoveKind::Door {
+            block: [bx, yy, bz],
+        },
         cost: per_block + DOOR_TICKS,
         dig: [None; 3],
         place: None,

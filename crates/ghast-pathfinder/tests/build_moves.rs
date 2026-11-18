@@ -59,6 +59,8 @@ fn raw_legacy(name: &str, props: &[(&str, &str)]) -> u16 {
         "oak_door" => 64,
         "iron_door" => 71,
         "oak_fence_gate" => 107,
+        "oak_trapdoor" => 96,
+        "iron_trapdoor" => 167,
         _ => panic!("no 1.8 id for {name}"),
     };
     let meta: u16 = match name {
@@ -74,6 +76,16 @@ fn raw_legacy(name: &str, props: &[(&str, &str)]) -> u16 {
                 };
                 f | if prop("open") == Some("true") { 4 } else { 0 }
             }
+        }
+        "oak_trapdoor" | "iron_trapdoor" => {
+            let f = match prop("facing").unwrap_or("north") {
+                "north" => 0,
+                "south" => 1,
+                "west" => 2,
+                _ => 3,
+            };
+            f | if prop("open") == Some("true") { 4 } else { 0 }
+                | if prop("half") == Some("top") { 8 } else { 0 }
         }
         "oak_fence_gate" => {
             let f = match prop("facing").unwrap_or("south") {
@@ -579,5 +591,47 @@ fn down_from_leaves_axe_dig() {
             path.steps.iter().any(|s| s.dig.contains(&[0, 70, 0])),
             "{v:?}: not down the trunk"
         );
+    }
+}
+
+/// A two-high opening in a wall (x = 3) with a trapdoor in it.
+fn trapdoor_wall(v: Version, y: i32, spec: &str) -> World {
+    let mut w = World::flat(v);
+    w.fill([3, 64, -64], [3, 66, 79], "stone");
+    w.fill([3, 64, 0], [3, 65, 0], "air");
+    w.set([3, y, 0], spec);
+    w
+}
+
+/// Closed wooden trapdoors in the way are opened where the opened trapdoor (a slab on a side)
+/// lets the body through; across the way, or iron, they are not.
+#[test]
+fn trapdoors() {
+    let to = Goal::Block([6, 64, 0]);
+    let clicks = |p: &Path| count(p, |k| matches!(k, MoveKind::Door { .. }));
+    for v in VERSIONS {
+        // At head height (bottom half) and at feet height (top half), swinging to a side.
+        for (y, half) in [(65, "bottom"), (64, "top")] {
+            let spec = format!("oak_trapdoor[facing=north,half={half},open=false]");
+            let w = trapdoor_wall(v, y, &spec);
+            let (path, _) = check(&w, Config::default(), [0, 64, 0], &to);
+            assert_eq!(clicks(&path), 1, "{v:?} {half}");
+            // Iron: never.
+            let w = trapdoor_wall(
+                v,
+                y,
+                &format!("iron_trapdoor[facing=north,half={half},open=false]"),
+            );
+            let r = w.plan(Config::default(), [0, 64, 0], &to);
+            assert!(r.is_err() || r.unwrap().partial, "{v:?} iron {half}");
+        }
+        // Opened, it would hang across the way: no path.
+        let w = trapdoor_wall(v, 65, "oak_trapdoor[facing=east,half=bottom,open=false]");
+        let r = w.plan(Config::default(), [0, 64, 0], &to);
+        assert!(r.is_err() || r.unwrap().partial, "{v:?} across");
+        // Already open along the way: walked through without a click.
+        let w = trapdoor_wall(v, 65, "oak_trapdoor[facing=north,half=bottom,open=true]");
+        let (path, _) = check(&w, Config::default(), [0, 64, 0], &to);
+        assert_eq!(clicks(&path), 0, "{v:?} open");
     }
 }

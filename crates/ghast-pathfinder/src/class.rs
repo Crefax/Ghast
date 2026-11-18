@@ -51,11 +51,13 @@ pub(crate) mod flag {
     /// side. [`super::Class::blocks_between`] still counts it (standing checks use
     /// [`super::Class::blocks_standing`]).
     pub(crate) const PANEL: u32 = 1 << 16;
-    /// Opened and closed by a right click (wooden doors, fence gates).
+    /// Opened and closed by a right click (wooden doors, fence gates, wooden trapdoors).
     pub(crate) const OPENABLE: u32 = 1 << 17;
     /// 1.8.9 / 1.12.2 door half: the shape needs the other half (the grid resolves it to a
     /// [`PANEL`] class, see `crate::door`).
     pub(crate) const DOOR_HALF: u32 = 1 << 18;
+    /// A trapdoor (opened like a door, but its slab lies flat when closed).
+    pub(crate) const HATCH: u32 = 1 << 19;
     /// Floor flag of a planned step only: its floor is a block the path places (bridging,
     /// towering, a filled hole), a full cube the grid does not know yet.
     pub(crate) const PLACED: u32 = 1 << 31;
@@ -324,7 +326,11 @@ fn classify(f: &Facts<'_>) -> Class {
         flags |= PANEL;
     }
     let door = f.name.ends_with("_door") && f.name != "iron_door";
-    if door || f.name.ends_with("fence_gate") {
+    let hatch = f.name.ends_with("trapdoor");
+    if hatch {
+        flags |= HATCH;
+    }
+    if door || f.name.ends_with("fence_gate") || (hatch && f.name != "iron_trapdoor") {
         flags |= OPENABLE;
     }
     if f.diggable

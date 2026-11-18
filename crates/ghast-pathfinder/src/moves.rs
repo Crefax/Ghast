@@ -62,8 +62,8 @@ pub enum MoveKind {
     /// [`crate::Step::dig`] holds the block). Needs [`crate::Config::dig`]; chains, so goals
     /// below the player are reached by digging straight down.
     DigDown,
-    /// Walk to a cardinal neighbour through a wooden door or fence gate that is in the way,
-    /// after right-clicking `block` (a door half or the gate). Open doors that are not in the
+    /// Walk to a cardinal neighbour through a wooden door, fence gate or wooden trapdoor that
+    /// is in the way, after right-clicking `block` (a door half, the gate or the trapdoor). Open doors that are not in the
     /// way need no click: their slab is along the side of the cell, and plain walks pass it.
     Door {
         /// The door half or fence gate to click.

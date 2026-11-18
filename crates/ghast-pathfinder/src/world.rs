@@ -326,6 +326,11 @@ impl<'w, S: BlockSource + ?Sized> Grid<'w, S> {
         }
     }
 
+    /// The block source.
+    pub(crate) fn source(&self) -> &'w S {
+        self.src
+    }
+
     /// The cache, for the next slice.
     pub(crate) fn into_cache(self) -> Sections {
         self.sections

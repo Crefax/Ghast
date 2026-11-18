@@ -56,11 +56,11 @@ fn legacy_door(id: u32) -> bool {
     matches!(id, 64 | 71 | 193..=197)
 }
 
-/// Legacy fence gate ids.
+/// Legacy fence gate and wooden trapdoor ids (the open bit is 4 in both).
 #[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 #[inline]
 fn legacy_gate(id: u32) -> bool {
-    matches!(id, 107 | 183..=187)
+    matches!(id, 96 | 107 | 183..=187)
 }
 
 /// Door direction from the lower half's metadata bits 0-1: east, south, west, north.
@@ -138,7 +138,10 @@ macro_rules! toggle_modern {
         let p = $p;
         let s = $state::from_id(u16::try_from($raw).ok()?)?;
         let mut out = vec![(p, flip($raw)?)];
-        if let Some(h) = s.get($prop::Half) {
+        if let Some(h) = s
+            .get($prop::Half)
+            .filter(|h| *h == "upper" || *h == "lower")
+        {
             let q = [p[0], if h == "upper" { p[1] - 1 } else { p[1] + 1 }, p[2]];
             if let Some(o) = $src.raw_block(q[0], q[1], q[2])
                 && $state::from_id(u16::try_from(o).ok()?).is_some_and(|t| t.block() == s.block())
@@ -149,6 +152,20 @@ macro_rules! toggle_modern {
         }
         Some(out)
     }};
+}
+
+/// The class the block at `p` has once clicked (`None`: nothing a hand opens).
+pub(crate) fn toggled_class<S: BlockSource + ?Sized>(
+    version: Version,
+    src: &S,
+    p: [i32; 3],
+) -> Option<Class> {
+    let raw = toggle(version, src, p)?
+        .into_iter()
+        .find(|(q, _)| *q == p)?
+        .1;
+    let t = table(version);
+    Some(t.classes[t.index(raw) as usize])
 }
 
 /// The block changes a right click on the door or fence gate at `p` makes (the server's
