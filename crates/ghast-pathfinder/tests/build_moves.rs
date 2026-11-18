@@ -49,6 +49,7 @@ fn raw_legacy(name: &str, props: &[(&str, &str)]) -> u16 {
     let id: u16 = match name {
         "air" => 0,
         "stone" => 1,
+        "bedrock" => 7,
         "dirt" => 3,
         "cobblestone" => 4,
         "water" => 9,
@@ -633,5 +634,53 @@ fn trapdoors() {
         let w = trapdoor_wall(v, 65, "oak_trapdoor[facing=north,half=bottom,open=true]");
         let (path, _) = check(&w, Config::default(), [0, 64, 0], &to);
         assert_eq!(clicks(&path), 0, "{v:?} open");
+    }
+}
+
+/// Detours whose building step does not bring the player closer to the goal: the progress
+/// rule for building moves must still let them through.
+///
+/// 1. A one-wide pier ends at a three-wide gap over the void, and a wall stands over the gap
+///    on the pier's line: the bridge must first go one cell sideways.
+/// 2. A goal on top of a four-high cliff; a low roof over the approach leaves one tower spot,
+///    two cells to the side of the line to the goal.
+/// 3. A goal on the floor beside a tall block whose half toward the goal (with the column
+///    under the player) is bedrock: the descent starts after stepping away from the goal.
+#[test]
+fn building_detours() {
+    for v in VERSIONS {
+        // 1.
+        let mut w = World::empty(v);
+        w.fill([-8, 63, 0], [1, 63, 0], "stone");
+        w.fill([5, 63, -8], [12, 63, 8], "stone");
+        w.fill([2, 64, 0], [4, 67, 0], "bedrock");
+        let (path, _) = check(&w, place(), [0, 64, 0], &Goal::Block([7, 64, 0]));
+        assert!(
+            path.steps
+                .iter()
+                .any(|s| s.place.is_some_and(|p| p.pos[2] != 0)),
+            "{v:?}: no sideways bridge"
+        );
+        // 2.
+        let mut w = World::flat(v);
+        w.fill([4, 64, -64], [12, 67, 79], "stone");
+        w.fill([-8, 66, -8], [3, 66, 8], "glass");
+        w.set([3, 66, 2], "air");
+        let (path, _) = check(&w, place(), [0, 64, 0], &Goal::Block([6, 68, 0]));
+        assert!(
+            path.steps
+                .iter()
+                .any(|s| s.kind == MoveKind::Pillar && s.pos[2] != 0),
+            "{v:?}: no tower beside the line"
+        );
+        // 3.
+        let mut w = World::flat(v);
+        w.fill([-8, 64, -8], [8, 74, 8], "dirt");
+        w.fill([-8, 64, -8], [8, 74, 0], "bedrock");
+        let (path, _) = check(&w, soft_dig(), [0, 75, 0], &Goal::Block([0, 64, -12]));
+        assert!(
+            path.steps.iter().any(|s| !s.dig.is_empty() && s.pos[2] > 0),
+            "{v:?}: no descent away from the goal"
+        );
     }
 }

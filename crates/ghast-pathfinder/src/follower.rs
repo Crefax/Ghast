@@ -861,6 +861,9 @@ pub(crate) mod tests {
         pending: Vec<(u32, [i32; 3], u32)>,
         /// Places and clicks sent.
         pub(crate) places: u32,
+        /// Places asked for while the new block's cell overlapped the player's box (a
+        /// client's placed-block prediction would not apply; vanilla refuses them).
+        pub(crate) overlapping: u32,
         pub(crate) clicks: u32,
     }
 
@@ -884,6 +887,7 @@ pub(crate) mod tests {
                 digging: None,
                 pending: Vec::new(),
                 places: 0,
+                overlapping: 0,
                 clicks: 0,
             }
         }
@@ -1063,7 +1067,11 @@ pub(crate) mod tests {
                 against[1] + dir[1],
                 against[2] + dir[2],
             ];
-            if !self.class(pos).has(crate::class::flag::REPLACEABLE) || self.overlaps_player(pos) {
+            if self.overlaps_player(pos) {
+                self.overlapping += 1;
+                return false;
+            }
+            if !self.class(pos).has(crate::class::flag::REPLACEABLE) {
                 return false;
             }
             self.places += 1;
@@ -1641,6 +1649,10 @@ pub(crate) mod tests {
             io.feet()
         );
         assert_eq!(io.places, 3, "bridge 26.2");
+        assert_eq!(
+            io.overlapping, 0,
+            "bridge 26.2: a place overlapped the player"
+        );
         let mut w = ghast_physics::modern::memory_world_26_2();
         w.load_chunks(-2, -2, 2, 2);
         w.fill_raw([-8, 63, -8], [8, 63, 8], stone);
@@ -1648,6 +1660,10 @@ pub(crate) mod tests {
         let status = run(&mut io, follower(), Goal::Block([0, 67, 0]), 2000);
         assert_eq!(status, FollowStatus::Arrived, "tower 26.2: {:?}", io.feet());
         assert_eq!(io.places, 3, "tower 26.2");
+        assert_eq!(
+            io.overlapping, 0,
+            "tower 26.2: a place overlapped the player"
+        );
         // 1.8.9
         let mut w = ghast_physics::v1_8::memory_world();
         w.load_chunks(-2, -2, 2, 2);
@@ -1660,6 +1676,10 @@ pub(crate) mod tests {
         let mut io = SimIo::<P18, _>::new(&w, [0.5, 64.0, 0.5]);
         let status = run(&mut io, follower(), Goal::Block([0, 67, 0]), 2000);
         assert_eq!(status, FollowStatus::Arrived, "tower 1.8: {:?}", io.feet());
+        assert_eq!(
+            io.overlapping, 0,
+            "tower 1.8: a place overlapped the player"
+        );
     }
 
     /// A staircase down through dirt to a goal ten lower and ten away, on 26.2, driven by the

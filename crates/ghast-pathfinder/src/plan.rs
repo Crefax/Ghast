@@ -630,6 +630,10 @@ struct SearchState {
 /// descent through solid ground has to try many columns (the dig costs dwarf the heuristic).
 const BUILDING_NODES: usize = 4096;
 
+/// How much further from the goal (in [`Goal::blocks_left`] terms) a building move may lead:
+/// a sideways bridge step adds at most `sqrt(2) - 1`, a step straight away a whole block.
+const BUILD_SLACK: f64 = 0.5;
+
 /// A move that builds its own way (see [`BUILDING_NODES`]). Tunnels, jump-ups into dug space
 /// and filled holes are not counted: they stay next to the terrain.
 fn is_building(e: &Edge) -> bool {
@@ -823,12 +827,16 @@ impl Search {
                 }
                 let ng = gcost + e.cost;
                 let key = pack(e.to);
-                // Building moves (towering, bridging, digging down) only toward the goal, and
-                // a bounded number of them per search: they open the whole sky / void / ground
-                // to the search, which would otherwise expand all of it before giving up on an
-                // unreachable goal.
+                // Building moves (towering, bridging, digging down) never away from the goal,
+                // and a bounded number of placing ones per search: they open the whole sky /
+                // void / ground to the search, which would otherwise expand all of it before
+                // giving up on an unreachable goal. "Away" is more than [`BUILD_SLACK`] blocks
+                // further: a bridge one cell sideways round an obstacle, or a staircase step
+                // that trades one block across for one down, still counts as on the way.
                 let building = is_building(e);
-                if building && self.goal.blocks_left(e.to) >= self.goal.blocks_left(pos) - 1e-9 {
+                if building
+                    && self.goal.blocks_left(e.to) > self.goal.blocks_left(pos) + BUILD_SLACK
+                {
                     continue;
                 }
                 let work = |w: &mut Vec<Work>| {

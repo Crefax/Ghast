@@ -1119,6 +1119,12 @@ impl Controller {
         let looking =
             wrap(obs.yaw - self.want.0).abs() < 2.0 && (obs.pitch - self.want.1).abs() < 2.0;
         if self.path.steps[self.reached + 1].kind == MoveKind::Pillar {
+            if obs.on_ground && (obs.pos[1] - f.feet_y).abs() < 0.02 && !self.over_centre(obs) {
+                // The whole box over the column first: a ceiling over a neighbouring column
+                // must not cut the jump short.
+                let view = SourceView::<P, S>::new(world);
+                return (self.centre_tap::<P, S>(&view, obs, look, f), false);
+            }
             if obs.on_ground {
                 let jump = (obs.pos[1] - f.feet_y).abs() < 0.02 && obs.pitch > 85.0;
                 return (Keys { jump, ..Keys::NONE }, false);
