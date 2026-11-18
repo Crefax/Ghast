@@ -1217,11 +1217,23 @@ fn plain_placement_rule(
         return None;
     }
     let block = Item::from_id(u16::try_from(stack.id()).ok()?)?.block()?;
-    let state = block.default_state();
-    if block.layout().state_count != 1
-        || !state.phys().has(sf::FULL_CUBE)
-        || not_plain_placement(block.name())
-    {
+    let state = if block.layout().state_count == 1 {
+        block.default_state()
+    } else if is_pillar(block) {
+        // RotatedPillarBlock.getStateForPlacement: the axis of the clicked face.
+        use crate::common::Face;
+        let axis = match p.face {
+            Face::Down | Face::Up => "y",
+            Face::North | Face::South => "z",
+            Face::West | Face::East => "x",
+        };
+        block
+            .default_state()
+            .with(super::data::Property::Axis, axis)?
+    } else {
+        return None;
+    };
+    if !state.phys().has(sf::FULL_CUBE) || not_plain_placement(block.name()) {
         return None;
     }
     // useItemOn: the clicked position inside the world border.
@@ -1248,6 +1260,16 @@ fn plain_placement_rule(
         return None;
     }
     Some(state)
+}
+
+/// A block whose only property is `axis` (x, y, z): logs, wood, stems, pillars, basalt, hay
+/// (vanilla `RotatedPillarBlock`, placed along the clicked face's axis).
+fn is_pillar(block: super::data::Block) -> bool {
+    let mut props = block.properties();
+    props.len() == 1
+        && props
+            .next()
+            .is_some_and(|d| d.property == super::data::Property::Axis && d.values.len() == 3)
 }
 
 /// Single-state full-cube blocks whose item places them with logic of its own

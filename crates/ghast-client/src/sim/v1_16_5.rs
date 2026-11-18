@@ -2177,9 +2177,23 @@ impl Sim16 {
         }
         let item = Item::from_id(u16::try_from(stack.id()).ok()?)?;
         let block = Block::from_name(item.info().name)?;
-        let state = block.default_state();
-        if block.layout().state_count != 1
-            || !state.full_cube()
+        let state = if block.layout().state_count == 1 {
+            block.default_state()
+        } else if is_pillar_16(block) {
+            // PillarBlock.getPlacementState: the axis of the clicked face.
+            use crate::common::Face;
+            let axis = match p.face {
+                Face::Down | Face::Up => "y",
+                Face::North | Face::South => "z",
+                Face::West | Face::East => "x",
+            };
+            block
+                .default_state()
+                .with(ghast_data::v1_16_5::Property::Axis, axis)?
+        } else {
+            return None;
+        };
+        if !state.full_cube()
             // ConcretePowderBlock.getPlacementState: concrete next to water.
             || block.info().name.ends_with("_concrete_powder")
         {
@@ -2293,4 +2307,14 @@ mod tests {
             );
         }
     }
+}
+
+/// A block whose only property is `axis` (x, y, z): logs, wood, stems, hyphae, pillars, basalt,
+/// hay, bone blocks (1.16.5 `PillarBlock`, placed along the clicked face's axis).
+fn is_pillar_16(block: ghast_data::v1_16_5::Block) -> bool {
+    let mut props = block.properties();
+    props.len() == 1
+        && props.next().is_some_and(|d| {
+            d.property == ghast_data::v1_16_5::Property::Axis && d.values.len() == 3
+        })
 }

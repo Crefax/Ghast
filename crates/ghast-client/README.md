@@ -457,16 +457,20 @@ continues the next time the behaviour aims (`ctx.held_turns()` counts them).
 - Placed blocks are predicted (every version) when the result is known exactly: a block
   whose only state is a full collision cube (stone, cobblestone, planks on 1.13+, ores,
   wool on 1.13+, glass, …; 1.8.9 / 1.12.2: the blocks without block-state properties, so
-  not stone / planks / wool there) from a stack without block data, placed on a full-cube
+  not stone / planks / wool there), or a block whose only property is its axis (logs, wood,
+  stems, pillars, basalt, hay, bone blocks: the clicked face's axis; 1.8.9 / 1.12.2 logs,
+  hay, purpur pillars, bone blocks with the item's variant) from a stack without block data,
+  placed on a full-cube
   block the click does not activate (or while sneaking with an item), into air, water or
   lava, inside the build height and the world border, not into the player's box, in
-  survival or creative. 26.x keeps the server's state until its `block_changed_ack` like
+  survival or creative. The placing stack loses one item at once like vanilla (not in
+  creative). 26.x keeps the server's state until its `block_changed_ack` like
   vanilla (oracle-proven: `tests/golden/26.x/place.jsonl.gz`); older versions take the
   server's block updates for the clicked block and its neighbour. Not predicted (the
-  server's updates bring them): placement rules of the block (facing, axis, half, slabs,
+  server's updates bring them): other placement rules of the block (facing, half, slabs,
   waterlogging, concrete powder), replaceable clicked blocks (grass, snow), multi-block
   items (doors, beds), neighbour shape updates (fences, panes, stairs, note block
-  instruments), other entities in the way, item counts (the server's slot update).
+  instruments), other entities in the way.
 - `ctx.drop_held(whole_stack)` / `ctx.swap_hands()`: the drop and swap-hands keys outside a
   screen (`MinecraftClient.handleInputEvents`), a `block_dig` drop item (4) / drop stack (3) /
   swap (6, 1.9+) at the origin facing down, written now in call order. 1.16.5 and 26.x

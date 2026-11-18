@@ -1669,7 +1669,8 @@ Replayed by `crates/ghast-data/src/v26_1/tests.rs` (`dig_matches_the_client`); a
 ## `place.jsonl.gz` (26.1, 26.2): right clicks on blocks and the server's answer
 
 `PlaceDump` (`place [--seed --count]`, part of `golden`: 6000 random cases, seed 1, then every
-full-cube state clicked once on its top and once on a side with a stone item). The real client's
+full-cube state clicked once on its top and once on a side with a stone item, then every block
+item whose block has only an `axis` property placed on each face of stone). The real client's
 `MultiPlayerGameMode.useItemOn` (main hand) on a flat stone pad with the player at
 `(0.5, 64, 0.5)`. Per case: `clicked` / `face` / `hit`, `clicked_state` and `target_state` (the
 block next to the clicked face; air, water, lava or any non-air state), `held` item and `count`

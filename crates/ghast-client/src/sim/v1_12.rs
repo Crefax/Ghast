@@ -1216,6 +1216,8 @@ impl Sim for Sim12 {
         let Some((at, raw)) = crate::sim::predict::legacy_plain_placement(
             p,
             PLAIN,
+            // logs (4 variants), acacia / dark oak logs (2), hay, purpur pillar, bone block
+            &[(17, 4), (162, 2), (170, 1), (202, 1), (216, 1)],
             ACTIVATED,
             |q| w.block_state(q.x, q.y, q.z).map(BlockState::raw),
             |raw| {

@@ -737,7 +737,7 @@ fn placed_block_is_predicted_and_settled_by_the_ack() {
         };
         let (e, at) = place_on_floor(v, stick);
         assert_eq!(block(&e, at), Some(0), "{v:?}");
-        // Oak logs place with their axis: left to the server.
+        // Oak logs place along the clicked face's axis (the top: y).
         let log = match v {
             #[cfg(feature = "v26_2")]
             GameVersion::V26_2 => {
@@ -746,7 +746,7 @@ fn placed_block_is_predicted_and_settled_by_the_ack() {
             _ => i32::from(ghast_data::v26_1::Item::from_name("oak_log").unwrap().id()),
         };
         let (e, at) = place_on_floor(v, log);
-        assert_eq!(block(&e, at), Some(0), "{v:?}");
+        assert_eq!(block(&e, at), Some(u32::from(state(v, "oak_log"))), "{v:?}");
     }
 }
 
@@ -774,14 +774,32 @@ fn legacy_set(e: &mut Engine<Box<dyn Sim>>, v: GameVersion, pos: BlockPos, s: u3
 }
 
 /// 1.8.9 – 1.16.5: the placed block shows at once; the server's block change for it settles
-/// it (refused: back to air; accepted: the same block, no flicker). Logs (axis) and wool
-/// (variants) are not predicted.
+/// it (refused: back to air; accepted: the same block, no flicker). Logs place along the
+/// clicked face's axis (the top: y); wool (variants) is not predicted.
 #[test]
 fn placed_block_is_predicted_on_legacy_versions() {
-    let cases: [(GameVersion, i32, u32, &[i32]); 3] = [
-        // cobblestone item 4 → raw 4 << 4; oak log 17, wool 35: not predicted.
-        (GameVersion::V1_8_9, 4, 4 << 4, &[17, 35, 280]),
-        (GameVersion::V1_12_2, 4, 4 << 4, &[17, 35, 280]),
+    let cases: [(GameVersion, i32, u32, &[i32]); 6] = [
+        // cobblestone item 4 → raw 4 << 4; wool 35, stick 280: not predicted.
+        (GameVersion::V1_8_9, 4, 4 << 4, &[35, 280]),
+        (GameVersion::V1_12_2, 4, 4 << 4, &[35, 280]),
+        // logs 17: axis y = meta 0
+        (GameVersion::V1_8_9, 17, 17 << 4, &[]),
+        (GameVersion::V1_12_2, 17, 17 << 4, &[]),
+        (
+            GameVersion::V1_16_5,
+            i32::from(
+                ghast_data::v1_16_5::Item::from_name("oak_log")
+                    .unwrap()
+                    .id(),
+            ),
+            u32::from(
+                ghast_data::v1_16_5::Block::from_name("oak_log")
+                    .unwrap()
+                    .default_state()
+                    .id(),
+            ),
+            &[],
+        ),
         (
             GameVersion::V1_16_5,
             i32::from(
@@ -797,7 +815,7 @@ fn placed_block_is_predicted_on_legacy_versions() {
             ),
             &[
                 i32::from(
-                    ghast_data::v1_16_5::Item::from_name("oak_log")
+                    ghast_data::v1_16_5::Item::from_name("grass_block")
                         .unwrap()
                         .id(),
                 ),
@@ -829,7 +847,7 @@ fn predicted_placement_uses_the_item() {
         match v {
             GameVersion::V1_8_9 | GameVersion::V1_12_2 => match name {
                 "cobblestone" => 4,
-                _ => 17,
+                _ => 2,
             },
             GameVersion::V1_16_5 => {
                 i32::from(ghast_data::v1_16_5::Item::from_name(name).unwrap().id())
@@ -850,8 +868,8 @@ fn predicted_placement_uses_the_item() {
         let (e, at) = place_on_floor(v, item(v, "cobblestone"));
         assert_ne!(block(&e, at), Some(0), "predicted: {v:?}");
         assert_eq!(held(&e), Some(15), "{v:?}");
-        // a log (axis): not predicted, the count waits for the server
-        let (e, at) = place_on_floor(v, item(v, "oak_log"));
+        // a grass block: not predicted, the count waits for the server
+        let (e, at) = place_on_floor(v, item(v, "grass_block"));
         assert_eq!(block(&e, at), Some(0), "{v:?}");
         assert_eq!(held(&e), Some(16), "{v:?}");
         // creative: placed, the stack stays
@@ -859,6 +877,49 @@ fn predicted_placement_uses_the_item() {
         assert_eq!(e.core.game_mode, GameMode::Creative, "{v:?}");
         assert_ne!(block(&e, at), Some(0), "creative predicted: {v:?}");
         assert_eq!(held(&e), Some(16), "creative: {v:?}");
+    }
+}
+
+/// 1.8.9 / 1.12.2 logs: the item's variant (`damage & 3`) with the clicked face's axis in the
+/// meta (`BlockLog.onBlockPlaced`); a variant the block does not have is left to the server.
+#[test]
+fn legacy_logs_take_the_face_axis_and_variant() {
+    use crate::common::Face;
+    for v in [GameVersion::V1_8_9, GameVersion::V1_12_2] {
+        let mut e = engine(v);
+        join(&mut e);
+        let clicked = BlockPos::new(8, 65, 12);
+        // (item, damage, face) -> raw placed
+        let cases: [(i32, i16, Face, Option<u32>); 6] = [
+            (17, 2, Face::East, Some(17 << 4 | 2 | 4)),
+            (17, 6, Face::North, Some(17 << 4 | 2 | 8)),
+            (17, 1, Face::Down, Some(17 << 4 | 1)),
+            (162, 1, Face::West, Some(162 << 4 | 1 | 4)),
+            (162, 2, Face::East, None),
+            (170, 3, Face::South, Some(170 << 4 | 8)),
+        ];
+        for (item, damage, face, want) in cases {
+            let at = face.offset(clicked);
+            legacy_set(&mut e, v, clicked, 1 << 4);
+            legacy_set(&mut e, v, at, 0);
+            let held = ghast_inventory::Stack::new(item, 8, damage);
+            let placed = e.sim.place_sent(&crate::sim::predict::PlaceSent {
+                pos: clicked,
+                face,
+                held: Some(&held),
+                sneaking: false,
+                any_item: true,
+                game_mode: GameMode::Survival,
+                sequence: 0,
+                player: e.core.pose.pos,
+            });
+            assert_eq!(placed, want.is_some(), "{v:?} {item}:{damage} {face:?}");
+            assert_eq!(
+                block(&e, at),
+                Some(want.unwrap_or(0)),
+                "{v:?} {item}:{damage} {face:?}"
+            );
+        }
     }
 }
 

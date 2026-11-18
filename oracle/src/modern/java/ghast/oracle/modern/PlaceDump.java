@@ -133,6 +133,20 @@ final class PlaceDump {
                         net.minecraft.world.item.Items.STONE, 32, false, GameType.SURVIVAL, 0.5, 64.0, 0.5, sink);
             }
         }
+        // Every block item whose block has only an axis (logs, stems, pillars, hay) placed on
+        // each face of stone: the placed axis.
+        for (Item it : blockItems) {
+            Block b = ((BlockItem) it).getBlock();
+            var props = b.getStateDefinition().getProperties();
+            if (props.size() != 1 || props.iterator().next() != net.minecraft.world.level.block.state.properties.BlockStateProperties.AXIS) {
+                continue;
+            }
+            for (Direction face : faces) {
+                Vec3 hit = facePoint(clicked, face, 0.5, 0.5);
+                oneCase(run, handler, rng, states, k++, clicked, face, hit, stone, Blocks.AIR.defaultBlockState(),
+                        it, 8, false, GameType.SURVIVAL, 0.5, 64.0, 0.5, sink);
+            }
+        }
         Harness.client.gameMode.setLocalMode(GameType.SURVIVAL, null);
         run.player.setShiftKeyDown(false);
         CollisionDump.sneak(run, false);

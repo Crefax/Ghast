@@ -75,6 +75,7 @@ pub(crate) fn border_contains(b: &ghast_physics::WorldBorder, pos: BlockPos) -> 
 pub(crate) fn legacy_plain_placement(
     p: &PlaceSent<'_>,
     plain: &[u16],
+    pillars: &[(u16, u8)],
     activated: &[u16],
     raw_at: impl Fn(BlockPos) -> Option<u16>,
     full_cube: impl Fn(u16) -> bool,
@@ -87,11 +88,35 @@ pub(crate) fn legacy_plain_placement(
         return None;
     }
     let stack = p.held?;
-    // A plain BlockItem places its block's state for data 0 (getMeta), whatever the damage.
     let id = u16::try_from(stack.id()).ok()?;
-    if stack.count() <= 0 || !plain.contains(&id) {
+    if stack.count() <= 0 {
         return None;
     }
+    let placed = if plain.contains(&id) {
+        // A plain BlockItem places its block's state for data 0 (getMeta), whatever the damage.
+        id << 4
+    } else if let Some(&(_, variants)) = pillars.iter().find(|x| x.0 == id) {
+        // BlockLog / BlockRotatedPillar.onBlockPlaced: the item's data (logs: the variant,
+        // `damage & 3`; a plain block item: 0) with the axis of the clicked face (meta bits
+        // 0 y, 4 x, 8 z).
+        let variant = if variants > 1 {
+            (stack.damage() & 3) as u16
+        } else {
+            0
+        };
+        if variant >= u16::from(variants) {
+            return None;
+        }
+        use crate::common::Face;
+        let axis = match p.face {
+            Face::Down | Face::Up => 0,
+            Face::West | Face::East => 4,
+            Face::North | Face::South => 8,
+        };
+        id << 4 | variant | axis
+    } else {
+        return None;
+    };
     if !border_contains(border, p.pos) {
         return None;
     }
@@ -123,7 +148,7 @@ pub(crate) fn legacy_plain_placement(
     {
         return None;
     }
-    Some((at, id << 4))
+    Some((at, placed))
 }
 
 /// 1.8.9 / 1.12.2 `BlockItem.canPlaceItemBlock`, which the client's right click checks before it
