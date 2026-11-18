@@ -50,12 +50,14 @@ pub(crate) fn panel_classes() -> [Class; 8] {
 }
 
 /// Legacy door ids: wooden doors and the iron door.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 #[inline]
 fn legacy_door(id: u32) -> bool {
     matches!(id, 64 | 71 | 193..=197)
 }
 
 /// Legacy fence gate ids.
+#[cfg(any(feature = "v1_8", feature = "v1_12_2"))]
 #[inline]
 fn legacy_gate(id: u32) -> bool {
     matches!(id, 107 | 183..=187)
@@ -124,6 +126,7 @@ pub(crate) fn class_at<S: BlockSource + ?Sized>(version: Version, src: &S, p: [i
 }
 
 /// [`toggle`] for a modern version's state types.
+#[cfg(any(feature = "v1_16_5", feature = "v26_1", feature = "v26_2"))]
 macro_rules! toggle_modern {
     ($state:ident, $prop:ident, $src:expr, $p:expr, $raw:expr) => {{
         let flip = |r: u32| -> Option<u32> {
