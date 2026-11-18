@@ -1662,6 +1662,26 @@ pub(crate) mod tests {
         assert_eq!(status, FollowStatus::Arrived, "tower 1.8: {:?}", io.feet());
     }
 
+    /// A staircase down through dirt to a goal ten lower and ten away, on 26.2, driven by the
+    /// follower in a client that digs through its crosshair.
+    #[test]
+    fn staircase_follower() {
+        let cfg = Config::default().with_dig(Some(crate::DigCost {
+            base: 8.0,
+            ticks_per_hardness: 30.0,
+            max_hardness: 1.0,
+        }));
+        let mut w = ghast_physics::modern::memory_world_26_2();
+        w.load_chunks(-2, -2, 2, 2);
+        w.fill_raw([-32, 63, -32], [31, 63, 31], id262("stone"));
+        w.fill_raw([-32, 64, -32], [31, 80, 31], id262("dirt"));
+        w.fill_raw([0, 74, 0], [0, 75, 0], 0);
+        let f = Follower::new(Pathfinder::new(cfg), FollowConfig::default());
+        let mut io = SimIo::<P262, _>::new(&w, [0.5, 74.0, 0.5]);
+        let status = run(&mut io, f, Goal::Block([10, 64, 0]), 6000);
+        assert_eq!(status, FollowStatus::Arrived, "{:?}", io.feet());
+    }
+
     /// A 26.2 block's state id.
     pub(crate) fn id262(spec: &str) -> u16 {
         ghast_data::v26_2::BlockState::parse(spec)

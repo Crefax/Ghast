@@ -516,3 +516,68 @@ fn unreachable_goals_stay_cheap_with_building_moves() {
         );
     }
 }
+
+/// Digging with an axe-like cost: blocks up to hardness 2 (logs, not stone).
+fn axe_dig() -> Config {
+    Config::default().with_dig(Some(DigCost {
+        base: 6.0,
+        ticks_per_hardness: 7.5,
+        max_hardness: 2.0,
+    }))
+}
+
+/// Staircase moves: steps down with digs.
+fn stairs(path: &Path) -> usize {
+    path.steps
+        .iter()
+        .filter(|s| s.kind == MoveKind::Descend && !s.dig.is_empty())
+        .count()
+}
+
+/// Buried in dirt, a goal 20 blocks lower and 20 away: a staircase (cheaper than a tunnel and
+/// a shaft); 20 blocks straight down to a `Goal::Y`; and with a lava pocket under the start
+/// column, round it. Never any fall damage.
+#[test]
+fn dig_staircase_down() {
+    for v in VERSIONS {
+        let mut w = World::flat(v);
+        w.fill([-40, 64, -40], [40, 100, 40], "dirt");
+        w.fill([0, 84, 0], [0, 85, 0], "air");
+        let (path, _) = check(&w, soft_dig(), [0, 84, 0], &Goal::Block([20, 64, 0]));
+        let kinds: Vec<_> = path
+            .steps
+            .iter()
+            .map(|s| (s.pos, s.kind, s.dig.len()))
+            .collect();
+        assert!(
+            stairs(&path) >= 10,
+            "{v:?}: {} stair steps {kinds:?}",
+            stairs(&path)
+        );
+        let (path, _) = check(&w, soft_dig(), [0, 84, 0], &Goal::Y(64));
+        assert!(path.steps.len() >= 21, "{v:?}");
+        // Lava under the start column: straight down stops above it.
+        w.set([0, 75, 0], "lava");
+        let (path, _) = check(&w, soft_dig(), [0, 84, 0], &Goal::Y(64));
+        assert!(
+            path.steps.iter().all(|s| !s.dig.contains(&[0, 76, 0])),
+            "{v:?}: dug above the lava"
+        );
+    }
+}
+
+/// The probe's tree: one leaf canopy eight up over a trunk. With an axe-level dig the bot
+/// digs the leaf over the trunk, then down the trunk, all without a fall.
+#[test]
+fn down_from_leaves_axe_dig() {
+    for v in VERSIONS {
+        let mut w = World::flat(v);
+        w.fill([-2, 71, -2], [2, 71, 2], "oak_leaves");
+        w.fill([0, 64, 0], [0, 70, 0], "oak_log");
+        let (path, _) = check(&w, axe_dig(), [1, 72, 0], &Goal::Block([5, 64, 0]));
+        assert!(
+            path.steps.iter().any(|s| s.dig.contains(&[0, 70, 0])),
+            "{v:?}: not down the trunk"
+        );
+    }
+}

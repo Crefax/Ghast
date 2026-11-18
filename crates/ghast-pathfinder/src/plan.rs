@@ -57,7 +57,9 @@ pub struct Config {
     pub swim: bool,
     /// Climb ladders and vines. Default on.
     pub climb: bool,
-    /// Dig through blocks in the way (default off). The follower digs with the held item.
+    /// Dig through blocks in the way (default off): tunnels, jump-ups into dug space,
+    /// straight down ([`MoveKind::DigDown`]) and staircases down (a [`MoveKind::Descend`]
+    /// with digs). The follower digs with the held item.
     pub dig: Option<DigCost>,
     /// Place blocks, at this cost in ticks per block (default off): fill a one-deep hole,
     /// bridge over a gap (sneaking to the edge, placing against the side of the floor block),
@@ -619,12 +621,13 @@ struct SearchState {
     best: u32,
     expanded: usize,
     edges: Vec<Edge>,
-    /// Nodes reached by a building move so far ([`BUILDING_NODES`]).
+    /// Nodes reached by a placing building move so far ([`BUILDING_NODES`]).
     building: usize,
 }
 
-/// Most nodes one search reaches by building moves (towering, bridging, digging down or a
-/// staircase down): far more than any real path places or digs, small next to the node budget.
+/// Most nodes one search reaches by placing moves (towering, bridging): far more than any real
+/// path places, small next to the node budget. Digging moves are only held to progress: a deep
+/// descent through solid ground has to try many columns (the dig costs dwarf the heuristic).
 const BUILDING_NODES: usize = 4096;
 
 /// A move that builds its own way (see [`BUILDING_NODES`]). Tunnels, jump-ups into dug space
@@ -856,7 +859,7 @@ impl Search {
                         });
                     }
                     None => {
-                        if building {
+                        if building && e.place.is_some() {
                             if st.building >= BUILDING_NODES {
                                 continue;
                             }
@@ -1328,6 +1331,7 @@ fn moves_from<S: BlockSource + ?Sized>(
             && let Some(d) = &cfg.dig
         {
             dig_through(g, d, per_block, p, f0, (dx, dz), out);
+            dig_stair(g, d, c, per_block, p, f0, (dx, dz), out);
         }
         if !found && !swimming && !climbing && g.saw_doors() {
             open_gate(g, per_block, p, f0, (dx, dz), out);
@@ -1779,6 +1783,74 @@ fn dig_down<S: BlockSource + ?Sized>(
         }
         yt -= 1;
     }
+}
+
+/// Staircase down: dig what is in the way in the neighbour column (the cell the head passes,
+/// then the body's two cells one lower) and step down one block onto its floor. No fall
+/// damage at any depth; every dig follows [`dig_cost`]. A [`MoveKind::Descend`] with digs.
+#[allow(clippy::too_many_arguments)]
+fn dig_stair<S: BlockSource + ?Sized>(
+    g: &mut Grid<'_, S>,
+    d: &DigCost,
+    c: &Costs,
+    per_block: f64,
+    p: [i32; 3],
+    f0: f64,
+    (dx, dz): (i32, i32),
+    out: &mut Vec<Edge>,
+) -> bool {
+    let [x, y, z] = p;
+    if (f0 - f64::from(y)).abs() > 1e-6 || y - 1 <= g.y_range().0 {
+        return false;
+    }
+    let (bx, bz) = (x + dx, z + dz);
+    let fl = g.class(bx, y - 2, bz);
+    if !fl.has(flag::SUPPORT)
+        || fl.has(flag::IRREGULAR | flag::AVOID_FLOOR | flag::FRAGILE | flag::BOUNCY | flag::WATER)
+        || fl.top < 1.0 - 1e-6
+        || fl.top_any > 1.0 + 1e-6
+    {
+        return false;
+    }
+    let mut cost = per_block + c.fall_ticks(1.0) + 2.0;
+    let mut dig = [None; 3];
+    let mut n = 0;
+    for yy in [y + 1, y, y - 1] {
+        let q = [bx, yy, bz];
+        let cl = g.class(q[0], q[1], q[2]);
+        if g.unknown(q[0], q[1], q[2]) || cl.has(flag::AVOID | flag::LAVA | flag::WATER) {
+            return false;
+        }
+        if cl.has(flag::SOLID) {
+            match dig_cost(g, d, q) {
+                Some(k) => {
+                    cost += k;
+                    dig[n] = Some(q);
+                    n += 1;
+                }
+                None => return false,
+            }
+        }
+    }
+    if n == 0 {
+        return false;
+    }
+    out.push(Edge {
+        to: [bx, y - 1, bz],
+        spot: Spot {
+            kind: NodeKind::Ground,
+            floor: f0 - 1.0,
+            floor_flags: fl.flags,
+            water: false,
+            submerged: false,
+            climb: false,
+        },
+        kind: MoveKind::Descend,
+        cost,
+        dig,
+        place: None,
+    });
+    true
 }
 
 /// Jump up into the neighbour one block higher after digging what is in the way.
