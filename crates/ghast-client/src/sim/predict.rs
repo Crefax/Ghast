@@ -51,6 +51,13 @@ pub(crate) struct PlaceSent<'a> {
     pub player: crate::common::Vec3,
 }
 
+/// Whether a block placed on the client uses up one item of the stack there too
+/// (`BlockItem.place`, 1.8 `ItemBlock.onItemUse`): not in creative (`hasInfiniteMaterials`;
+/// 1.8 – 1.16.5 restore the count after the use).
+pub(crate) fn placing_uses_item(mode: crate::common::GameMode) -> bool {
+    mode != crate::common::GameMode::Creative
+}
+
 /// `WorldBorder.isWithinBounds(BlockPos)` (1.16.5 `contains`) of a static border.
 pub(crate) fn border_contains(b: &ghast_physics::WorldBorder, pos: BlockPos) -> bool {
     let h = b.size / 2.0;

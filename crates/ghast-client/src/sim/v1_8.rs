@@ -752,7 +752,7 @@ impl Sim for Sim18 {
             .set_block_state(x, y, z, ghast_data::v1_8::BlockState::AIR);
     }
 
-    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) -> bool {
         // 1.8.9: single-state full-cube blocks with a plain block item (from the 1.8.9 classes:
         // no block-state properties, no own placement rules); the redstone ores light up when
         // clicked and the listed blocks open a screen or react to the click.
@@ -786,12 +786,14 @@ impl Sim for Sim18 {
             &self.player.bb,
             &ghast_physics::BlockView::world_border(&self.world),
         ) else {
-            return;
+            return false;
         };
-        if let Some(s) = BlockState::from_raw(raw) {
-            log::debug!("predicted {} at {at:?}", s.block().name());
-            self.world.set_block_state(at.x, at.y, at.z, s);
-        }
+        let Some(s) = BlockState::from_raw(raw) else {
+            return false;
+        };
+        log::debug!("predicted {} at {at:?}", s.block().name());
+        self.world.set_block_state(at.x, at.y, at.z, s);
+        true
     }
 
     fn place_suppressed(&self, pos: BlockPos, face: crate::common::Face, held: u16) -> bool {

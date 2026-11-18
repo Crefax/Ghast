@@ -1817,6 +1817,8 @@ fn sent_predictions<S: Sim>(c: &mut Core, sim: &mut S) {
     let mut broken = 0;
     let mut placing = c.hands.placing.iter().copied().peekable();
     let any_item = c.inv.held().is_some() || c.inv.offhand().is_some();
+    // items used by predicted placements: main hand, off hand
+    let mut used = [0u8; 2];
     for (i, o) in c.out.iter().enumerate() {
         match *o {
             Outbound::Dig { status, pos, .. } => {
@@ -1836,12 +1838,13 @@ fn sent_predictions<S: Sim>(c: &mut Core, sim: &mut S) {
                 pos,
                 face,
                 ref held,
+                off_hand,
                 ..
             } => {
                 sequence = sequence.wrapping_add(1);
                 while placing.next_if(|&p| (p as usize) < i).is_some() {}
-                if placing.next_if_eq(&(i as u32)).is_some() {
-                    sim.place_sent(&crate::sim::predict::PlaceSent {
+                if placing.next_if_eq(&(i as u32)).is_some()
+                    && sim.place_sent(&crate::sim::predict::PlaceSent {
                         pos,
                         face,
                         held: held.as_ref(),
@@ -1850,7 +1853,10 @@ fn sent_predictions<S: Sim>(c: &mut Core, sim: &mut S) {
                         game_mode: c.game_mode,
                         sequence,
                         player,
-                    });
+                    })
+                    && crate::sim::predict::placing_uses_item(c.game_mode)
+                {
+                    used[usize::from(off_hand)] = used[usize::from(off_hand)].saturating_add(1);
                 }
             }
             Outbound::UseItem { .. } => {
@@ -1868,6 +1874,12 @@ fn sent_predictions<S: Sim>(c: &mut Core, sim: &mut S) {
         sim.predict_air(p.x, p.y, p.z);
     }
     c.broken_now.clear();
+    if used[0] > 0 {
+        c.inv.consume_held(used[0]);
+    }
+    if used[1] > 0 {
+        c.inv.consume_offhand(used[1]);
+    }
 }
 
 /// 1.8 `SeedItem.use` / `CropItem.use` on the client: planting on the top of

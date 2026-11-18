@@ -652,8 +652,23 @@ mod v1_16_5 {
 /// Holds 16 of `item` in hotbar slot 0, right-clicks the top of the floor block two blocks in
 /// front with [`TickContext::place`] and returns the engine with the placement written.
 fn place_on_floor(v: GameVersion, item_id: i32) -> (Engine<Box<dyn Sim>>, BlockPos) {
+    place_on_floor_in(v, item_id, false)
+}
+
+/// [`place_on_floor`], in creative mode with `creative`.
+fn place_on_floor_in(
+    v: GameVersion,
+    item_id: i32,
+    creative: bool,
+) -> (Engine<Box<dyn Sim>>, BlockPos) {
     let mut e = engine(v);
     join(&mut e);
+    if creative {
+        e.handle(Inbound::GameState {
+            reason: 3,
+            value: 1.0,
+        });
+    }
     let support = BlockPos::new(8, 63, 10);
     if v == GameVersion::V1_16_5 {
         // The 1.16.5 test chunks are empty: a floor under the player and the support.
@@ -802,6 +817,48 @@ fn placed_block_is_predicted_on_legacy_versions() {
             let (e, at) = place_on_floor(v, o);
             assert_eq!(block(&e, at), Some(0), "{v:?} item {o}");
         }
+    }
+}
+
+/// A placement predicted on the client also uses one item of the held stack there (vanilla
+/// `BlockItem.place` / `ItemBlock.onItemUse`), on every version; one left to the server keeps
+/// the count until the server's `set_slot`, and creative keeps the stack.
+#[test]
+fn predicted_placement_uses_the_item() {
+    let item = |v: GameVersion, name: &str| -> i32 {
+        match v {
+            GameVersion::V1_8_9 | GameVersion::V1_12_2 => match name {
+                "cobblestone" => 4,
+                _ => 17,
+            },
+            GameVersion::V1_16_5 => {
+                i32::from(ghast_data::v1_16_5::Item::from_name(name).unwrap().id())
+            }
+            #[cfg(feature = "v26_2")]
+            GameVersion::V26_2 => i32::from(ghast_data::v26_2::Item::from_name(name).unwrap().id()),
+            _ => i32::from(ghast_data::v26_1::Item::from_name(name).unwrap().id()),
+        }
+    };
+    let held = |e: &Engine<Box<dyn Sim>>| e.core.inv.held().map(ghast_inventory::Stack::count);
+    let mut versions = vec![
+        GameVersion::V1_8_9,
+        GameVersion::V1_12_2,
+        GameVersion::V1_16_5,
+    ];
+    versions.extend(modern_versions());
+    for v in versions {
+        let (e, at) = place_on_floor(v, item(v, "cobblestone"));
+        assert_ne!(block(&e, at), Some(0), "predicted: {v:?}");
+        assert_eq!(held(&e), Some(15), "{v:?}");
+        // a log (axis): not predicted, the count waits for the server
+        let (e, at) = place_on_floor(v, item(v, "oak_log"));
+        assert_eq!(block(&e, at), Some(0), "{v:?}");
+        assert_eq!(held(&e), Some(16), "{v:?}");
+        // creative: placed, the stack stays
+        let (e, at) = place_on_floor_in(v, item(v, "cobblestone"), true);
+        assert_eq!(e.core.game_mode, GameMode::Creative, "{v:?}");
+        assert_ne!(block(&e, at), Some(0), "creative predicted: {v:?}");
+        assert_eq!(held(&e), Some(16), "creative: {v:?}");
     }
 }
 
@@ -1110,6 +1167,15 @@ mod place_golden {
             let we_predicted = ours != u32::from(ts);
             if we_predicted {
                 predicted += 1;
+                // the client uses the item as vanilla does (the engine consumes it)
+                let count = c["count"].as_i64().unwrap();
+                let ours_after =
+                    count - i64::from(crate::sim::predict::placing_uses_item(game_mode));
+                assert_eq!(
+                    ours_after,
+                    c["count_after"].as_i64().unwrap(),
+                    "case {k} count after: {c}"
+                );
                 if vanilla_target != Some(ours) || c["result"] != "Success" {
                     bad.push(format!(
                         "case {k}: predicted {} at {target:?} clicking {}, vanilla {:?} ({}): {c}",

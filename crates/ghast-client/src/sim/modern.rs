@@ -2186,19 +2186,21 @@ impl Sim for ModernSim {
         }
     }
 
-    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) -> bool {
         let Some((at, state)) = self.plain_placement(p) else {
-            return;
+            return false;
         };
         // BlockItem.place: ClientLevel.setBlock while predicting keeps the server's state.
         let Some(old) = self.world.block_state(at.x, at.y, at.z) else {
-            return;
+            return false;
         };
-        if self.world.set_block_state(at.x, at.y, at.z, state) {
-            log::debug!("predicted {state} at {at:?} (sequence {})", p.sequence);
-            self.predictions
-                .retain(at, old, p.sequence, [p.player.x, p.player.y, p.player.z]);
+        if !self.world.set_block_state(at.x, at.y, at.z, state) {
+            return false;
         }
+        log::debug!("predicted {state} at {at:?} (sequence {})", p.sequence);
+        self.predictions
+            .retain(at, old, p.sequence, [p.player.x, p.player.y, p.player.z]);
+        true
     }
 
     #[cfg(test)]

@@ -2019,13 +2019,15 @@ impl Sim for Sim16 {
         }
     }
 
-    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) {
+    fn place_sent(&mut self, p: &crate::sim::predict::PlaceSent<'_>) -> bool {
         // interactBlock → BlockItem.place on the client world; the server's block updates for
         // the clicked block and its neighbour settle it (no records).
-        if let Some((at, state)) = self.plain_placement(p) {
-            log::debug!("predicted {} at {at:?}", state.block().name());
-            self.world.set_block_state(at.x, at.y, at.z, state);
-        }
+        let Some((at, state)) = self.plain_placement(p) else {
+            return false;
+        };
+        log::debug!("predicted {} at {at:?}", state.block().name());
+        self.world.set_block_state(at.x, at.y, at.z, state);
+        true
     }
 
     #[cfg(test)]

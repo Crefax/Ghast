@@ -431,9 +431,11 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// digs ([`Sim::dig_sent`]): the version places the block on the client when it knows the
     /// result exactly (see [`predict::PlaceSent`]); 26.x keeps the server's state until the ack,
     /// older versions take the server's block updates for the clicked block and its neighbour.
+    /// Returns whether the block was placed on the client (the item is then used up there too).
     #[inline]
-    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
+    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) -> bool {
         let _ = p;
+        false
     }
     /// 1.8.9 / 1.12.2: the vanilla client writes no `block_place` for a right click with block
     /// item `held` on `face` of `pos` (`BlockItem.canPlaceItemBlock` fails; see
@@ -1168,8 +1170,8 @@ impl Sim for Box<dyn Sim> {
     fn records_digs(&self) -> bool {
         (**self).records_digs()
     }
-    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) {
-        (**self).place_sent(p);
+    fn place_sent(&mut self, p: &predict::PlaceSent<'_>) -> bool {
+        (**self).place_sent(p)
     }
     fn place_suppressed(&self, pos: BlockPos, face: crate::common::Face, held: u16) -> bool {
         (**self).place_suppressed(pos, face, held)
