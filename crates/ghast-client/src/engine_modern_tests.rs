@@ -2230,3 +2230,114 @@ fn world_time_follows_the_day_clock() {
     assert_eq!((t.age, t.day_time), (24_110, Some(500)));
     assert!(t.day_frozen());
 }
+
+/// Dead (the death screen): no place, dig, attack, button or click is written, so nothing is
+/// predicted that the server — which drops `use_item_on` without an ack from its respawn
+/// until `player_loaded` — would never answer. After the respawn the first placement follows
+/// the new `player_loaded`.
+#[test]
+fn no_actions_while_dead_or_before_player_loaded() {
+    use ghast_inventory::{Click, Stack};
+    let mut e = engine(GAME);
+    join(&mut e);
+    let support = ghast_protocol::BlockPos::new(8, 63, 10);
+    let target = ghast_protocol::BlockPos::new(8, 64, 10);
+    let stone = inv::item_id("stone").unwrap();
+    e.inventory_mut()
+        .on_set_slot(0, 36, Some(Stack::new(stone, 16, 0)));
+    let t0 = Instant::now();
+    let hit = Vec3::new(8.5, 64.0, 10.5);
+    // Aim at the support first.
+    for _ in 0..20 {
+        e.note_inbound(t0);
+        e.tick(
+            &mut Script(|ctx: &mut TickContext<'_>| ctx.set_aim(0.0, 39.0)),
+            t0,
+        );
+        e.outbound().clear();
+    }
+    e.handle(Inbound::Health(crate::common::Health {
+        health: 0.0,
+        food: 20,
+        saturation: 0.0,
+    }));
+    let mut refused = Vec::new();
+    for _ in 0..5 {
+        e.note_inbound(t0);
+        e.tick(
+            &mut Script(|ctx: &mut TickContext<'_>| {
+                ctx.set_buttons(crate::hands::Buttons {
+                    left: true,
+                    right: true,
+                });
+                refused.push((
+                    ctx.place(support, crate::common::Face::Up, hit),
+                    ctx.dig(support, crate::common::Face::Up),
+                    ctx.click(Click::Pickup {
+                        slot: 36,
+                        right: false,
+                    }),
+                ));
+            }),
+            t0,
+        );
+        let out = std::mem::take(e.outbound());
+        assert!(
+            !out.iter().any(|o| matches!(
+                o,
+                Outbound::Place { .. } | Outbound::Dig { .. } | Outbound::Inventory(_)
+            )),
+            "{out:?}"
+        );
+    }
+    assert!(
+        refused
+            .iter()
+            .all(|r| *r == (false, false, Err(ClickRefused::Dead))),
+        "{refused:?}"
+    );
+    assert_eq!(e.sim.raw_block(target.x, target.y, target.z), Some(0));
+    // Respawn in the same dimension: actions wait for the level gate, then place again.
+    e.handle(Inbound::Respawn {
+        dimension: "0".into(),
+        game_mode: GameMode::Survival,
+        keep: 0,
+    });
+    e.handle(Inbound::Teleport(Teleport {
+        x: 8.5,
+        y: 64.0,
+        z: 8.5,
+        teleport_id: Some(2),
+        ..Default::default()
+    }));
+    e.handle(Inbound::GameState {
+        reason: 13,
+        value: 0.0,
+    });
+    e.handle(Inbound::Health(crate::common::Health {
+        health: 20.0,
+        food: 20,
+        saturation: 5.0,
+    }));
+    let mut sent = Vec::new();
+    for _ in 0..40 {
+        e.note_inbound(t0);
+        e.tick(
+            &mut Script(|ctx: &mut TickContext<'_>| {
+                ctx.set_aim(0.0, 39.0);
+                let _ = ctx.place(support, crate::common::Face::Up, hit);
+            }),
+            t0,
+        );
+        sent.extend(std::mem::take(e.outbound()));
+    }
+    let loaded = sent
+        .iter()
+        .position(|o| *o == Outbound::PlayerLoaded)
+        .expect("player_loaded");
+    let first_place = sent
+        .iter()
+        .position(|o| matches!(o, Outbound::Place { .. }))
+        .expect("a placement after the respawn");
+    assert!(loaded < first_place, "{sent:?}");
+}

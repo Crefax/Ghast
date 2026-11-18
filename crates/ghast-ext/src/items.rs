@@ -465,6 +465,7 @@ impl Bot {
                     | ClickError::Unpredictable
                     | ClickError::WindowOpen),
                 )) => return Err(Error::Click(e)),
+                Err(ClickRefused::Dead) => return Err(Error::Died),
                 Err(_) => {}
             }
             if self.tick().saturating_sub(start) > CLICK_WAIT {

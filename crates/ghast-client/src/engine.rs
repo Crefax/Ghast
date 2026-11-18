@@ -169,6 +169,8 @@ pub enum ClickRefused {
     Turning,
     /// The inventory refused it.
     Inventory(ghast_inventory::ClickError),
+    /// The player is dead (vanilla's death screen takes the input until the respawn).
+    Dead,
 }
 
 impl std::fmt::Display for ClickRefused {
@@ -176,6 +178,7 @@ impl std::fmt::Display for ClickRefused {
         match self {
             ClickRefused::Turning => f.write_str("the player is turning"),
             ClickRefused::Inventory(e) => write!(f, "{e}"),
+            ClickRefused::Dead => f.write_str("the player is dead"),
         }
     }
 }
@@ -1421,7 +1424,11 @@ impl<S: Sim> Engine<S> {
             };
             let look = hands::look_vector(c.pose.yaw, c.pose.pitch);
             let held_id = c.inv.held().and_then(|s| u16::try_from(s.id()).ok());
-            let (left, right) = (c.buttons.left && !gui, c.buttons.right && !gui);
+            // The death screen takes the input too, until the respawn.
+            let (left, right) = (
+                c.buttons.left && !gui && !c.dead,
+                c.buttons.right && !gui && !c.dead,
+            );
             // GameRenderer.updateTargetedEntity before the key handling: one oracle-proven
             // pick for the block and the entity. With both buttons up the hands never read it
             // (no click, and the dig is reset whatever the target), so it is only computed
@@ -2281,11 +2288,14 @@ impl TickContext<'_> {
     }
 
     /// Clicks in the open screen (`window_click`, written now). Refused (nothing sent) while
-    /// the player is turning (the look changed in the last movement step or an aim is set for
+    /// the player is dead ([`ClickRefused::Dead`]), while the player is turning (the look changed in the last movement step or an aim is set for
     /// this tick: clicks only while still) or when the inventory refuses it (one click in
     /// flight, same-tick packet order, unpredictable result, …). The result arrives in
     /// [`TickEvents::inventory`] on a later tick.
     pub fn click(&mut self, click: ghast_inventory::Click) -> Result<ClickTicket, ClickRefused> {
+        if self.core.dead {
+            return Err(ClickRefused::Dead);
+        }
         if self.core.turned || self.core.aimed {
             return Err(ClickRefused::Turning);
         }
@@ -2387,8 +2397,11 @@ impl TickContext<'_> {
     }
 
     /// Opens the player inventory GUI (1.8: the "open inventory" client command; 1.16: nothing
-    /// is sent). Window 0 clicks need it open.
+    /// is sent). Window 0 clicks need it open. Refused while the player is dead.
     pub fn open_inventory(&mut self) -> Result<(), ClickRefused> {
+        if self.core.dead {
+            return Err(ClickRefused::Dead);
+        }
         if let Some(o) = self
             .core
             .inv
@@ -2572,10 +2585,10 @@ impl TickContext<'_> {
     }
 
     /// Attacks `entity` (`use_entity` attack and the arm swing in the version's order; 1.16
-    /// resets the attack cooldown). Refused (`false`, nothing sent) unless the sent crosshair is
-    /// on that entity.
+    /// resets the attack cooldown). Refused (`false`, nothing sent) while dead and unless the
+    /// sent crosshair is on that entity.
     pub fn attack(&mut self, entity: i32) -> bool {
-        if self.target_entity().is_none_or(|e| e.id != entity) {
+        if self.core.dead || self.target_entity().is_none_or(|e| e.id != entity) {
             return false;
         }
         let world = self.world;
@@ -2762,11 +2775,12 @@ impl TickContext<'_> {
 
     /// Starts digging `pos` on `face` (`block_dig` start, then an arm swing), breaking it at
     /// once when it is instant for the held item. Refused (nothing sent, `false`) unless the
-    /// crosshair from the sent pose is on exactly that block face.
+    /// crosshair from the sent pose is on exactly that block face, and while the player is dead.
     pub fn dig(&mut self, pos: ghast_protocol::BlockPos, face: crate::common::Face) -> bool {
-        if !self
-            .target()
-            .is_some_and(|t| t.pos == pos && t.face == face)
+        if self.core.dead
+            || !self
+                .target()
+                .is_some_and(|t| t.pos == pos && t.face == face)
         {
             return false;
         }
@@ -2809,7 +2823,9 @@ impl TickContext<'_> {
 
     /// Right-clicks `support`'s `face` at the absolute point `hit` (`block_place`, then an arm
     /// swing): places the held block or activates the block. Refused (nothing sent, `false`)
-    /// unless the crosshair from the sent pose is on exactly that block face, and on 1.8.9 /
+    /// while the player is dead (until the respawn the server would drop it without an answer,
+    /// and vanilla's death screen takes the input), unless the crosshair from the sent pose is
+    /// on exactly that block face, and on 1.8.9 /
     /// 1.12.2 when the vanilla client would write no packet because the held block cannot go
     /// there (the spot next to the face is not replaceable, or the block would overlap the
     /// player).
@@ -2819,6 +2835,9 @@ impl TickContext<'_> {
         face: crate::common::Face,
         hit: Vec3,
     ) -> bool {
+        if self.core.dead {
+            return false;
+        }
         let Some(t) = self.target().filter(|t| t.pos == support && t.face == face) else {
             return false;
         };
