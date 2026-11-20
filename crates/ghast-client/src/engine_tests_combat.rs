@@ -237,6 +237,7 @@ fn setup(v: GameVersion) -> Engine<Box<dyn Sim>> {
         health: 20.0,
         food: 20,
         saturation: 5.0,
+        ..Health::default()
     }));
     e
 }
@@ -551,6 +552,7 @@ fn dead_player_does_not_walk() {
             health: 0.0,
             food: 20,
             saturation: 0.0,
+            ..Health::default()
         }));
         let x0 = e.core.pose.pos.x;
         for _ in 0..20 {

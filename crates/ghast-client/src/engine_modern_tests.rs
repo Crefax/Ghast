@@ -1970,6 +1970,7 @@ fn joins_match_the_oracle() {
             health,
             food: 20,
             saturation: 5.0,
+            ..Health::default()
         }));
         e.outbound().clear();
         let mut compiled = false;
@@ -2260,6 +2261,7 @@ fn no_actions_while_dead_or_before_player_loaded() {
         health: 0.0,
         food: 20,
         saturation: 0.0,
+        ..crate::common::Health::default()
     }));
     let mut refused = Vec::new();
     for _ in 0..5 {
@@ -2318,6 +2320,7 @@ fn no_actions_while_dead_or_before_player_loaded() {
         health: 20.0,
         food: 20,
         saturation: 5.0,
+        ..crate::common::Health::default()
     }));
     let mut sent = Vec::new();
     for _ in 0..40 {

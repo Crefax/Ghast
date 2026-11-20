@@ -35,6 +35,27 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   `Interests::ENTITY_EVENTS`: the tracker's events as `TickEvents::entities` (spawns, removals,
   moves, statuses, hurts with our own entity included, velocity, metadata, riding, pickups; at
   most 4096 per behaviour tick, the rest counted in `entities_dropped`).
+- **Own status effects, absorption, spawn point, hurts and deaths** (`ghast-client`, every
+  version, without entity tracking): `TickContext::effects` / `TickView::effects` give
+  `ActiveEffect`s (id in the classic numbering, amplifier, duration, flags, the tick it arrived;
+  `remaining(now)` counts down like the client, `None` for an infinite effect) and
+  `TickEvents::effects` every `entity_effect` / `remove_entity_effect` for us as an
+  `EffectEvent` (a re-application with the same values included, `Cleared` with a new player
+  entity). `Health::absorption` from our entity data (1.8 index 17, 1.12 11, 1.16 14, 26.x 17,
+  checked against each jar). `TickContext::spawn_position` (`SpawnPoint`: position; 26.x with
+  yaw, pitch and dimension). `TickEvents::hurt` (`Hurt`: 1.8 – 1.16.5 the hurt statuses for us,
+  26.x `damage_event` with source type, attacker and direct entity) and
+  `TickContext::last_hurt_tick`. `TickEvents::deaths` (`Death`: the dead player, the killer on
+  1.8 – 1.16.5, the message; 1.8 now decodes `combat_event` too). New `Inbound::EffectApplied`,
+  `SpawnPoint`, `Death`, `Damage`; the decoders emit `EffectApplied` / `Death` where they emitted
+  `Effect` / `Died` (both still accepted by the engine).
+- **Scoreboard teams on every version** (`ghast-client`, `Interests::TEAMS`):
+  `TickContext::teams` / `TickView::teams` give `teams::Teams` (`team_of(name)`, `team`,
+  `same_team`, `iter`) with each `Team`'s display name, prefix and suffix as plain text, colour
+  index, friendly fire, seeing invisible mates, name tag visibility, collision rule and
+  members, from 1.8 `scoreboard_team`, 1.9 – 1.16.5 `teams` and 26.x `set_player_team` (each
+  version's field order); a join starts an empty scoreboard. `Inbound::Teams` carries the raw
+  body, parsed only with the interest.
 - **Own movement state for behaviours** (`ghast-client`, every version):
   `TickContext::velocity` (the velocity this tick's step starts from, with knockback /
   explosion pushes received since the last step), `horizontal_collision` /

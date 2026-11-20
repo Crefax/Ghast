@@ -255,6 +255,10 @@ pub struct Health {
     pub food: i32,
     /// Food saturation.
     pub saturation: f32,
+    /// Absorption hearts (the player entity data's absorption amount; not part of
+    /// `update_health`, kept from our own `entity_metadata` on every version without entity
+    /// tracking, refreshed once per behaviour tick).
+    pub absorption: f32,
 }
 
 impl Default for Health {
@@ -263,6 +267,7 @@ impl Default for Health {
             health: 20.0,
             food: 20,
             saturation: 5.0,
+            absorption: 0.0,
         }
     }
 }
@@ -748,6 +753,19 @@ pub enum Inbound {
         /// Amplifier (level − 1).
         amplifier: i8,
     },
+    /// A status effect was applied, with its duration and flags (replaces [`Inbound::Effect`]
+    /// in the decoders since 0.4.8; the engine still accepts both).
+    EffectApplied(StatusEffect),
+    /// The world's spawn point.
+    SpawnPoint(SpawnPoint),
+    /// A player death with its killer and message (replaces [`Inbound::Died`] in the decoders
+    /// since 0.4.8; the engine still accepts both).
+    Death(Death),
+    /// 26.x `damage_event`: an entity was hurt (with the damage source).
+    Damage(Hurt),
+    /// A scoreboard team packet (decoded with [`crate::Interests::TEAMS`]; parsed by the engine
+    /// into [`crate::teams::Teams`]).
+    Teams(crate::teams::TeamsPacket),
     /// A status effect ended.
     EffectRemoved {
         /// The entity.
@@ -1288,4 +1306,149 @@ pub enum Outbound {
     DialogCommand(String),
     /// A packet the behaviour built itself ([`crate::TickContext::send_raw`]), written as given.
     Raw(ghast_protocol::RawPacket),
+}
+
+/// A status effect on the player as the server applied it (`entity_effect`; a re-application
+/// with the same values is a new one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ActiveEffect {
+    /// Effect id in the classic 1-based numbering (1 speed, 5 strength, 10 regeneration, 11
+    /// resistance, 22 absorption …; 26.x: the registry id + 1, the same numbers).
+    pub id: i8,
+    /// Amplifier (level − 1).
+    pub amplifier: i8,
+    /// Duration in ticks when the packet arrived (−1: infinite, 1.19.4+).
+    pub duration: i32,
+    /// The flags as sent: 1.8 bit 0 = hide particles; 1.9+ bit 0 ambient, bit 1 show
+    /// particles, bit 2 show icon (1.14+).
+    pub flags: u8,
+    /// The tick ([`crate::TickContext::tick`]) in which the behaviour first saw it.
+    pub received_tick: u64,
+}
+
+impl ActiveEffect {
+    /// Ticks left at tick `now` as the vanilla client counts them down (one per client tick
+    /// from the packet on; at least 0), `None` for an infinite effect.
+    #[must_use]
+    pub fn remaining(&self, now: u64) -> Option<i32> {
+        if self.is_infinite() {
+            return None;
+        }
+        let gone = i64::try_from(now.saturating_sub(self.received_tick)).unwrap_or(i64::MAX);
+        Some((i64::from(self.duration) - gone).max(0) as i32)
+    }
+
+    /// An effect without an end (duration −1).
+    #[must_use]
+    pub fn is_infinite(&self) -> bool {
+        self.duration == -1
+    }
+}
+
+/// A change of the player's status effects ([`crate::TickEvents::effects`]), one per packet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EffectEvent {
+    /// An effect was applied (new, upgraded, refreshed or re-sent).
+    Applied(ActiveEffect),
+    /// The server removed the effect with this id.
+    Removed(i8),
+    /// Every effect ended with the player entity (respawn, dimension change, join).
+    Cleared,
+}
+
+/// `entity_effect` with its duration and flags (see [`ActiveEffect`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StatusEffect {
+    /// The entity.
+    pub entity_id: i32,
+    /// Effect id (classic 1-based numbering).
+    pub id: i8,
+    /// Amplifier (level − 1).
+    pub amplifier: i8,
+    /// Duration in ticks (−1: infinite).
+    pub duration: i32,
+    /// Flags as sent.
+    pub flags: u8,
+}
+
+/// The world's spawn point as the server sent it (`spawn_position`): where the compass points
+/// and where a player without a bed respawns.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct SpawnPoint {
+    /// Block position.
+    pub pos: ghast_protocol::BlockPos,
+    /// Spawn yaw (1.17+; 0 before).
+    pub yaw: f32,
+    /// Spawn pitch (26.x; 0 before).
+    pub pitch: f32,
+    /// The dimension (26.x; `None` before: the current one).
+    pub dimension: Option<String>,
+}
+
+/// A player death the server announced (1.8 – 1.16.5 `combat_event` "entity dead", 1.17+
+/// `player_combat_kill`). The server sends it only to the player who died.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Death {
+    /// The dead player's entity id (ours).
+    pub entity_id: i32,
+    /// The killer's entity id (1.8 – 1.19.4; `None` when the server sent −1 and on 1.20+,
+    /// whose packet has no killer).
+    pub killer_id: Option<i32>,
+    /// The death message.
+    pub message: ChatMessage,
+}
+
+/// A hurt of the player ([`crate::TickEvents::hurt`]): 1.8 – 1.16.5 a hurt entity status, 26.x
+/// a `damage_event` with its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Hurt {
+    /// The hurt entity (ours in [`crate::TickEvents::hurt`]).
+    pub entity_id: i32,
+    /// 1.8 – 1.16.5: the entity status (2 hurt; 1.9+ 33 thorns, 36 drowning, 37 burning; 1.14+
+    /// 44 sweet berry bush). `None` on 26.x.
+    pub status: Option<i8>,
+    /// 26.x: the damage type's registry id (`minecraft:damage_type`). `None` before.
+    pub source_type: Option<i32>,
+    /// 26.x: the entity that caused the damage (the shooter for a projectile), if any.
+    pub attacker: Option<i32>,
+    /// 26.x: the entity that dealt it directly (the projectile, or the attacker), if any.
+    pub direct: Option<i32>,
+}
+
+impl Hurt {
+    /// A legacy hurt status.
+    #[must_use]
+    pub fn from_status(entity_id: i32, status: i8) -> Self {
+        Hurt {
+            entity_id,
+            status: Some(status),
+            source_type: None,
+            attacker: None,
+            direct: None,
+        }
+    }
+
+    /// A 26.x damage event (`cause` / `direct`: the wire's optional entity ids, already
+    /// decoded: `None` for none).
+    #[must_use]
+    pub fn from_damage(
+        entity_id: i32,
+        source_type: i32,
+        cause: Option<i32>,
+        direct: Option<i32>,
+    ) -> Self {
+        Hurt {
+            entity_id,
+            status: None,
+            source_type: Some(source_type),
+            attacker: cause,
+            direct,
+        }
+    }
 }

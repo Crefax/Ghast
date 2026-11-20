@@ -830,6 +830,8 @@ impl ClientVersion for Marker {
             .with(cb::id::ABILITIES)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::DEATH_COMBAT_EVENT)
+            .with(cb::id::SPAWN_POSITION)
+            .with(cb::id::DAMAGE_EVENT)
             .with(cb::id::ENTITY_STATUS)
             .with(cb::id::ENTITY_UPDATE_ATTRIBUTES)
             .with(cb::id::ENTITY_EFFECT)
@@ -852,6 +854,9 @@ impl ClientVersion for Marker {
         // slots, abilities for creative clicks, experience for the anvil and enchanting).
         for &id in super::inventory_packet_ids() {
             f.insert(id);
+        }
+        if interests.contains(Interests::TEAMS) {
+            f.insert(cb::id::TEAMS);
         }
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::SYSTEM_CHAT);
@@ -982,6 +987,7 @@ impl ClientVersion for Marker {
                     health: p.health,
                     food: p.food,
                     saturation: p.food_saturation,
+                    ..Health::default()
                 })
             }
             cb::id::POSITION => {
@@ -1080,11 +1086,13 @@ impl ClientVersion for Marker {
             cb::id::ENTITY_EFFECT => {
                 let p: cb::EntityEffect = raw.decode_as()?;
                 // Registry ids are 0-based; the core uses the classic 1-based effect numbers.
-                Inbound::Effect {
+                Inbound::EffectApplied(crate::common::StatusEffect {
                     entity_id: p.entity_id,
                     id: i8::try_from(p.effect_id + 1).unwrap_or(i8::MAX),
                     amplifier: p.amplifier.clamp(0, 127) as i8,
-                }
+                    duration: p.duration,
+                    flags: p.flags,
+                })
             }
             cb::id::REMOVE_ENTITY_EFFECT => {
                 let p: cb::RemoveEntityEffect = raw.decode_as()?;
@@ -1103,9 +1111,36 @@ impl ClientVersion for Marker {
                     status: p.entity_status,
                 }
             }
-            cb::id::DEATH_COMBAT_EVENT => Inbound::Died {
-                entity_id: raw.decode_as::<cb::DeathCombatEvent>()?.player_id,
-            },
+            cb::id::DEATH_COMBAT_EVENT => {
+                let p: cb::DeathCombatEvent = raw.decode_as()?;
+                Inbound::Death(crate::common::Death {
+                    entity_id: p.player_id,
+                    // 1.20+: the packet has no killer.
+                    killer_id: None,
+                    message: ChatMessage::from_text(plain(&p.message), ChatPosition::System, None),
+                })
+            }
+            cb::id::SPAWN_POSITION => {
+                let p: cb::SpawnPosition = raw.decode_as()?;
+                Inbound::SpawnPoint(crate::common::SpawnPoint {
+                    pos: p.global_pos.location,
+                    yaw: p.yaw,
+                    pitch: p.pitch,
+                    dimension: Some(p.global_pos.dimension_name.to_string()),
+                })
+            }
+            cb::id::DAMAGE_EVENT => {
+                let p: cb::DamageEvent = raw.decode_as()?;
+                // The cause and direct ids are written + 1 (0: none); the generated reader
+                // keeps the wire value.
+                let opt = |v: i32| (v > 0).then(|| v - 1);
+                Inbound::Damage(crate::common::Hurt::from_damage(
+                    p.entity_id,
+                    p.source_type_id,
+                    opt(p.source_cause_id),
+                    opt(p.source_direct_id),
+                ))
+            }
             cb::id::CHUNK_BATCH_START => Inbound::ChunkBatchStart,
             cb::id::CHUNK_BATCH_FINISHED => {
                 Inbound::ChunkBatchFinished(raw.decode_as::<cb::ChunkBatchFinished>()?.batch_size)
@@ -1150,6 +1185,10 @@ impl ClientVersion for Marker {
                 wire.commands = None;
                 return Ok(None);
             }
+            cb::id::TEAMS => Inbound::Teams(crate::teams::TeamsPacket::new(
+                raw.body.clone(),
+                super::TEAMS_LAYOUT,
+            )),
             _ => return Ok(None),
         }))
     }

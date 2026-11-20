@@ -17,6 +17,8 @@ pub(crate) use ghast_world::v26_1 as world;
 
 /// The run-time tag of this version.
 pub(crate) const GAME: GameVersion = GameVersion::V26_1;
+/// The field order of this version's team packet.
+pub(crate) const TEAMS_LAYOUT: crate::teams::Layout = crate::teams::Layout::V26_1;
 /// The inventory version.
 pub(crate) const INVENTORY: ghast_inventory::Version = ghast_inventory::Version::V26_1;
 /// Every play packet the inventory reads.

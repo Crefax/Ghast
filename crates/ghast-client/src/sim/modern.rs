@@ -87,6 +87,8 @@ pub(crate) struct ModernSim {
     snapped: bool,
     /// The shared flags byte (entity data index 0) the server last sent for our entity.
     server_flags: Option<u8>,
+    /// The absorption the server last sent for our entity (player entity data; 0 before any).
+    absorption: f32,
 }
 
 /// A vehicle the player rides.
@@ -507,6 +509,8 @@ impl ModernSim {
                             self.ext.apply_shared_flags(&mut self.player, *b as u8);
                             self.ext_active |= self.ext.fall_flying;
                         }
+                        // Player.DATA_PLAYER_ABSORPTION_ID (after Avatar's two entries).
+                        (V::Float(a), 17) if id == self.own.id => self.absorption = *a,
                         (V::Byte(b), DATA_LIVING_FLAGS) if id == self.own.id => {
                             self.ext.apply_living_flags(*b as u8);
                             self.ext_active |= self.ext.spin_attack;
@@ -996,6 +1000,7 @@ impl ModernSim {
             predictions: Default::default(),
             snapped: false,
             server_flags: None,
+            absorption: 0.0,
         }
     }
 
@@ -1778,6 +1783,7 @@ impl Sim for ModernSim {
         // handleLogin / handleRespawn: wait for the level again.
         self.gate = modern::LoadGate::waiting();
         self.server_flags = None;
+        self.absorption = 0.0;
         self.sync_level();
     }
 
@@ -1788,7 +1794,7 @@ impl Sim for ModernSim {
         let old_mining = self.mining;
         let old_ranges = self.ranges;
         let old_moves = (self.ext.attributes, self.movement_attributes);
-        let old_flags = self.server_flags;
+        let old_flags = (self.server_flags, self.absorption);
         self.reset_player();
         if keep & 1 != 0 {
             self.player.attributes = old.attributes;
@@ -1800,7 +1806,7 @@ impl Sim for ModernSim {
         if keep & 2 != 0 {
             self.player.sent.input = old.sent.input;
             self.player.sent.sprinting = old.sent.sprinting;
-            self.server_flags = old_flags;
+            (self.server_flags, self.absorption) = old_flags;
         }
     }
 
@@ -2018,6 +2024,10 @@ impl Sim for ModernSim {
 
     fn server_flags(&self) -> Option<u8> {
         self.server_flags
+    }
+
+    fn absorption(&self) -> f32 {
+        self.absorption
     }
 
     fn velocity_now(&self) -> Vec3 {

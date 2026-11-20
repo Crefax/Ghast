@@ -56,6 +56,8 @@ pub(crate) struct Sim16 {
     parked: Option<Parked16>,
     /// The flags byte (entity data index 0) the server last sent for our entity.
     server_flags: Option<u8>,
+    /// The absorption the server last sent for our entity (player entity data; 0 before any).
+    absorption: f32,
 }
 
 /// A boat the player drove and left: the client moved it, the server sends no move for it, so
@@ -424,6 +426,7 @@ impl Sim16 {
             reply: None,
             parked: None,
             server_flags: None,
+            absorption: 0.0,
         }
     }
 
@@ -1239,6 +1242,8 @@ impl Sim16 {
         for e in &p.metadata {
             match (e.key, &e.value) {
                 (7, V::Byte(b)) => self.ext.apply_living_flags(*b as u8),
+                // PlayerEntity.ABSORPTION_AMOUNT (its first entry: 14).
+                (14, V::Float(a)) => self.absorption = *a,
                 // The shared flags (sprinting, swimming, fall flying; sneaking is the input's:
                 // `ClientPlayerEntity.isSneaking`).
                 (0, V::Byte(b)) => {
@@ -1665,6 +1670,7 @@ impl Sim for Sim16 {
         self.rt.using = None;
         self.rt.held.hands.set([(0, false, -1); 2]);
         self.server_flags = None;
+        self.absorption = 0.0;
         self.update_slow();
     }
 
@@ -1817,6 +1823,10 @@ impl Sim for Sim16 {
 
     fn server_flags(&self) -> Option<u8> {
         self.server_flags
+    }
+
+    fn absorption(&self) -> f32 {
+        self.absorption
     }
 
     fn velocity_now(&self) -> Vec3 {

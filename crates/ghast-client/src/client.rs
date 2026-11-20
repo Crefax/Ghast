@@ -1195,6 +1195,8 @@ where
         self.engine
             .sim
             .collect_block_updates(interests.contains(Interests::BLOCK_UPDATES));
+        self.engine
+            .track_teams(interests.contains(Interests::TEAMS));
         // Entity tracking follows the interests at run time (a tracker started late begins
         // empty: entities spawned before are not known until the server sends them again).
         self.engine

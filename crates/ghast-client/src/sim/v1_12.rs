@@ -83,6 +83,8 @@ pub(crate) struct Sim12 {
     reply: Option<Outbound>,
     /// The flags byte (entity data index 0) the server last sent for our entity.
     server_flags: Option<u8>,
+    /// The absorption the server last sent for our entity (player entity data; 0 before any).
+    absorption: f32,
 }
 
 /// The vehicle the player rides: its entity id and its client-side state.
@@ -212,6 +214,7 @@ impl Sim12 {
             ride: None,
             reply: None,
             server_flags: None,
+            absorption: 0.0,
         }
     }
 
@@ -343,6 +346,8 @@ impl Sim12 {
                                 r.note("own entity flags not representable");
                             }
                         }
+                        // PlayerEntity's absorption amount (its first entry: 11).
+                        (11, V::Float(a)) if own => self.absorption = *a,
                         // A rocket's shooter (an entity id, 0 for none).
                         (7, V::VarInt(v)) if !own => {
                             if let Some(k) = pending {
@@ -950,6 +955,7 @@ impl Sim for Sim12 {
         self.glide.pending.clear();
         self.update_glide();
         self.server_flags = None;
+        self.absorption = 0.0;
     }
 
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
@@ -1115,6 +1121,10 @@ impl Sim for Sim12 {
 
     fn server_flags(&self) -> Option<u8> {
         self.server_flags
+    }
+
+    fn absorption(&self) -> f32 {
+        self.absorption
     }
 
     fn velocity_now(&self) -> Vec3 {

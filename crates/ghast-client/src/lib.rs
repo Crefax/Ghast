@@ -102,6 +102,7 @@ mod record;
 pub mod rotation;
 mod sim;
 pub mod swarm;
+pub mod teams;
 #[cfg(all(test, feature = "v1_8"))]
 mod trace_replay;
 pub mod version;

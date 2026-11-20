@@ -488,6 +488,7 @@ fn item_use_ends_with_its_stack() {
                 health: 20.0,
                 food: 10,
                 saturation: 0.0,
+                ..Health::default()
             }));
             set_slot(e, 36, Some(Stack::new(bread, 3, 0)));
             tick_with(e, t, |ctx| {

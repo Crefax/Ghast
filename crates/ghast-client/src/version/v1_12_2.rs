@@ -9,8 +9,8 @@ use ghast_protocol::{DecodeError, EncodeError, FrameEncoder, McWrite, PacketFilt
 
 use super::{ClientVersion, GameVersion, V1_12_2, teleport_target, truncate_utf16};
 use crate::common::{
-    Abilities, ChatMessage, ChatPosition, EntityAction, GameMode, Health, Inbound, JoinGame,
-    LoginInbound, MovePacket, Outbound, Pose, Teleport, Vec3,
+    Abilities, ChatMessage, ChatPosition, Death, EntityAction, GameMode, Health, Inbound, JoinGame,
+    LoginInbound, MovePacket, Outbound, Pose, SpawnPoint, StatusEffect, Teleport, Vec3,
 };
 use crate::interest::Interests;
 
@@ -134,6 +134,7 @@ impl ClientVersion for V1_12_2 {
             .with(cb::id::EXPERIENCE)
             .with(cb::id::KICK_DISCONNECT)
             .with(cb::id::COMBAT_EVENT)
+            .with(cb::id::SPAWN_POSITION)
             .with(cb::id::ENTITY_STATUS)
             // Our speed attribute and status effects (physics, dig speed).
             .with(cb::id::ENTITY_UPDATE_ATTRIBUTES)
@@ -148,6 +149,9 @@ impl ClientVersion for V1_12_2 {
         }
         // Server resource packs are answered (servers that need one kick a silent client).
         f.insert(cb::id::RESOURCE_PACK_SEND);
+        if interests.contains(Interests::TEAMS) {
+            f.insert(cb::id::TEAMS);
+        }
         if interests.contains(Interests::CHAT) {
             f.insert(cb::id::CHAT);
         }
@@ -189,6 +193,7 @@ impl ClientVersion for V1_12_2 {
                     health: p.health,
                     food: p.food,
                     saturation: p.food_saturation,
+                    ..Health::default()
                 })
             }
             cb::id::RESPAWN => {
@@ -297,11 +302,13 @@ impl ClientVersion for V1_12_2 {
             }
             cb::id::ENTITY_EFFECT => {
                 let p: cb::EntityEffect = raw.decode_as()?;
-                Inbound::Effect {
+                Inbound::EffectApplied(StatusEffect {
                     entity_id: p.entity_id,
                     id: p.effect_id,
                     amplifier: p.amplifier,
-                }
+                    duration: p.duration,
+                    flags: p.hide_particles as u8,
+                })
             }
             cb::id::REMOVE_ENTITY_EFFECT => {
                 let p: cb::RemoveEntityEffect = raw.decode_as()?;
@@ -317,13 +324,31 @@ impl ClientVersion for V1_12_2 {
                     status: p.entity_status,
                 }
             }
+            cb::id::SPAWN_POSITION => Inbound::SpawnPoint(SpawnPoint {
+                pos: raw.decode_as::<cb::SpawnPosition>()?.location,
+                yaw: 0.0,
+                pitch: 0.0,
+                dimension: None,
+            }),
             cb::id::COMBAT_EVENT => {
                 let p: cb::CombatEvent = raw.decode_as()?;
                 match (p.event, p.player_id) {
-                    (COMBAT_ENTITY_DEAD, Some(entity_id)) => Inbound::Died { entity_id },
+                    (COMBAT_ENTITY_DEAD, Some(entity_id)) => Inbound::Death(Death {
+                        entity_id,
+                        killer_id: p.entity_id.filter(|&k| k >= 0),
+                        message: ChatMessage::from_json(
+                            p.message.unwrap_or_default(),
+                            ChatPosition::System,
+                            None,
+                        ),
+                    }),
                     _ => return Ok(None),
                 }
             }
+            cb::id::TEAMS => Inbound::Teams(crate::teams::TeamsPacket::new(
+                raw.body.clone(),
+                crate::teams::Layout::V1_12,
+            )),
             _ => return Ok(None),
         }))
     }

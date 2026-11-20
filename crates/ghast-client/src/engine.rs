@@ -276,6 +276,16 @@ pub struct TickEvents {
     pub health_changed: bool,
     /// The game mode changed.
     pub game_mode_changed: bool,
+    /// Our status effects: every `entity_effect` / `remove_entity_effect` for us in arrival
+    /// order (a re-application with the same values is an `Applied` too), and `Cleared` when a
+    /// new player entity drops them (join, respawn). See [`TickContext::effects`].
+    pub effects: Vec<crate::common::EffectEvent>,
+    /// We were hurt (1.8 – 1.16.5 the hurt entity statuses for our entity, 26.x its
+    /// `damage_event`), in arrival order.
+    pub hurt: Vec<crate::common::Hurt>,
+    /// Player deaths the server announced (ours: it sends them only to the dead player), with
+    /// the killer where the version sends one.
+    pub deaths: Vec<crate::common::Death>,
     /// Inventory / window changes and click results (ghast-inventory).
     pub inventory: ghast_inventory::Events,
     /// Block changes in arrival order (only with [`Interests::BLOCK_UPDATES`]): position and
@@ -310,6 +320,9 @@ impl TickEvents {
         self.died = false;
         self.health_changed = false;
         self.game_mode_changed = false;
+        self.effects.clear();
+        self.hurt.clear();
+        self.deaths.clear();
         self.inventory = ghast_inventory::Events::default();
         self.block_updates.clear();
         self.block_updates_dropped = 0;
@@ -386,6 +399,14 @@ pub(crate) struct Core {
     turned: bool,
     /// Our active status effects: id → amplifier.
     effects: std::collections::BTreeMap<i8, i8>,
+    /// Our active status effects with durations ([`TickContext::effects`]).
+    active_effects: Vec<crate::common::ActiveEffect>,
+    /// The world's spawn point (`spawn_position`).
+    spawn_point: Option<crate::common::SpawnPoint>,
+    /// The tick of our last hurt (status or damage event; [`TickContext::last_hurt_tick`]).
+    last_hurt: Option<u64>,
+    /// The scoreboard teams (with [`Interests::TEAMS`]).
+    teams: Option<Box<crate::teams::Teams>>,
     /// Aqua affinity on the helmet (dig speed under water).
     aqua_affinity: bool,
     /// Blocks broken on the client this tick (predicted air until the server answers).
@@ -506,6 +527,10 @@ impl Core {
             inv,
             turned: false,
             effects: std::collections::BTreeMap::new(),
+            active_effects: Vec::new(),
+            spawn_point: None,
+            last_hurt: None,
+            teams: None,
             attack_speed: 4.0,
             collisions: (false, false),
             aqua_affinity: false,
@@ -548,6 +573,13 @@ impl Core {
         self.hands.reset();
         self.buttons = Buttons::default();
         self.effects.clear();
+        if !self.active_effects.is_empty() {
+            self.active_effects.clear();
+            self.pending
+                .effects
+                .push(crate::common::EffectEvent::Cleared);
+        }
+        self.last_hurt = None;
         // A new level waits for its chunks again (1.21.4+ LevelLoadTracker).
         self.level_load_started = false;
         self.client_loaded = false;
@@ -911,6 +943,13 @@ impl<S: Sim> Engine<S> {
         self.core.last_inbound
     }
 
+    /// Keeps the scoreboard teams from now on ([`Interests::TEAMS`]; off frees them).
+    pub(crate) fn track_teams(&mut self, on: bool) {
+        if on != self.core.teams.is_some() {
+            self.core.teams = on.then(Box::default);
+        }
+    }
+
     /// The wire layer's prediction sequence after writing packets.
     pub(crate) fn note_sequence(&mut self, sequence: Option<i32>) {
         self.core.sequence = sequence;
@@ -1011,6 +1050,10 @@ impl<S: Sim> Engine<S> {
                 // the world packet routing).
                 c.dimension = j.dimension;
                 c.joined = true;
+                // A new client level has an empty scoreboard.
+                if let Some(t) = &mut c.teams {
+                    **t = crate::teams::Teams::default();
+                }
                 c.pending.joined = true;
                 // The level's loading screen replaces any dialog.
                 c.dialog = None;
@@ -1123,7 +1166,11 @@ impl<S: Sim> Engine<S> {
             }
             Inbound::Health(h) => {
                 let was_dead = c.dead;
-                c.health = h;
+                // The absorption comes from our entity data, not from update_health.
+                c.health = Health {
+                    absorption: c.health.absorption,
+                    ..h
+                };
                 sim.food(h.food);
                 // isAlive(): a dead player does not wait for its section (26.1 load gate).
                 sim.player_alive(h.health > 0.0);
@@ -1138,6 +1185,47 @@ impl<S: Sim> Engine<S> {
                 if entity_id == c.entity_id && !c.respawn_screen {
                     // 1.16 immediate respawn: the client respawns without a death screen.
                     c.out.push(Outbound::Respawn);
+                }
+            }
+            Inbound::Death(d) => {
+                if d.entity_id == c.entity_id && !c.respawn_screen {
+                    // 1.16 immediate respawn: the client respawns without a death screen.
+                    c.out.push(Outbound::Respawn);
+                }
+                c.pending.deaths.push(d);
+            }
+            Inbound::SpawnPoint(p) => c.spawn_point = Some(p),
+            Inbound::Teams(p) => {
+                if let Some(t) = &mut c.teams
+                    && !t.apply(&p)
+                {
+                    log::debug!("[{}] t{} team packet not applied", c.opts.name, c.tick);
+                }
+            }
+            Inbound::Damage(h) => {
+                if h.entity_id == c.entity_id {
+                    c.last_hurt = Some(c.tick + 1);
+                    c.pending.hurt.push(h);
+                }
+            }
+            Inbound::EffectApplied(e) => {
+                if e.entity_id == c.entity_id {
+                    c.effects.insert(e.id, e.amplifier);
+                    sim.status_effects(&c.effects);
+                    let a = crate::common::ActiveEffect {
+                        id: e.id,
+                        amplifier: e.amplifier,
+                        duration: e.duration,
+                        flags: e.flags,
+                        received_tick: c.tick + 1,
+                    };
+                    match c.active_effects.iter_mut().find(|x| x.id == e.id) {
+                        Some(x) => *x = a,
+                        None => c.active_effects.push(a),
+                    }
+                    c.pending
+                        .effects
+                        .push(crate::common::EffectEvent::Applied(a));
                 }
             }
             Inbound::Abilities(a) => {
@@ -1230,12 +1318,24 @@ impl<S: Sim> Engine<S> {
                 if entity_id == c.entity_id {
                     c.effects.remove(&id);
                     sim.status_effects(&c.effects);
+                    c.active_effects.retain(|x| x.id != id);
+                    c.pending
+                        .effects
+                        .push(crate::common::EffectEvent::Removed(id));
                 }
             }
             Inbound::EntityStatus { entity_id, status } => {
                 // 9: the server finished our item use (eating, drinking).
                 if entity_id == c.entity_id && status == 9 {
                     c.hands.stop_using();
+                }
+                // LivingEntity.handleStatus: 2 hurt, 33 thorns, 36 drowning, 37 burning (1.9+),
+                // 44 sweet berry bush (1.14+); 26.x sends damage events instead.
+                if entity_id == c.entity_id && matches!(status, 2 | 33 | 36 | 37 | 44) {
+                    c.last_hurt = Some(c.tick + 1);
+                    c.pending
+                        .hurt
+                        .push(crate::common::Hurt::from_status(entity_id, status));
                 }
             }
             Inbound::Attributes {
@@ -1461,6 +1561,11 @@ impl<S: Sim> Engine<S> {
         } else if !self.state.failed && !self.state.done {
             std::mem::swap(&mut c.pending, &mut c.current);
             c.pending.clear();
+            let absorption = self.sim.absorption();
+            if absorption.to_bits() != c.health.absorption.to_bits() {
+                c.health.absorption = absorption;
+                c.current.health_changed = true;
+            }
             if !c.dialogs.is_empty() || !c.dialogs_pending.is_empty() {
                 c.dialogs.clear();
                 std::mem::swap(&mut c.dialogs, &mut c.dialogs_pending);
@@ -1861,10 +1966,38 @@ impl TickView<'_> {
         self.core.entity_id
     }
 
-    /// Health, food and saturation.
+    /// Health, food, saturation and absorption.
     #[must_use]
     pub fn health(&self) -> Health {
         self.core.health
+    }
+
+    /// Our active status effects (from `entity_effect` / `remove_entity_effect`, without
+    /// entity tracking), with their durations and the tick each arrived; a new player entity
+    /// (join, respawn) has none. [`crate::common::ActiveEffect::remaining`] counts down like
+    /// the vanilla client. Changes: [`TickEvents::effects`].
+    #[must_use]
+    pub fn effects(&self) -> &[crate::common::ActiveEffect] {
+        &self.core.active_effects
+    }
+
+    /// The world's spawn point from the server's last `spawn_position` (`None` before one).
+    #[must_use]
+    pub fn spawn_position(&self) -> Option<&crate::common::SpawnPoint> {
+        self.core.spawn_point.as_ref()
+    }
+
+    /// The scoreboard teams (only with [`Interests::TEAMS`]; `None` without it).
+    #[must_use]
+    pub fn teams(&self) -> Option<&crate::teams::Teams> {
+        self.core.teams.as_deref()
+    }
+
+    /// The tick (as [`TickContext::tick`]) in which the behaviour first saw our last hurt
+    /// ([`TickEvents::hurt`]); `None` before one and for a new player entity.
+    #[must_use]
+    pub fn last_hurt_tick(&self) -> Option<u64> {
+        self.core.last_hurt
     }
 
     /// The world's time: game time and the dimension's time of day (`update_time`, counted on
@@ -2289,10 +2422,38 @@ impl TickContext<'_> {
         self.core.swings + count_swings(&self.core.out)
     }
 
-    /// Health, food and saturation.
+    /// Health, food, saturation and absorption.
     #[must_use]
     pub fn health(&self) -> Health {
         self.core.health
+    }
+
+    /// Our active status effects (from `entity_effect` / `remove_entity_effect`, without
+    /// entity tracking), with their durations and the tick each arrived; a new player entity
+    /// (join, respawn) has none. [`crate::common::ActiveEffect::remaining`] counts down like
+    /// the vanilla client. Changes: [`TickEvents::effects`].
+    #[must_use]
+    pub fn effects(&self) -> &[crate::common::ActiveEffect] {
+        &self.core.active_effects
+    }
+
+    /// The world's spawn point from the server's last `spawn_position` (`None` before one).
+    #[must_use]
+    pub fn spawn_position(&self) -> Option<&crate::common::SpawnPoint> {
+        self.core.spawn_point.as_ref()
+    }
+
+    /// The scoreboard teams (only with [`Interests::TEAMS`]; `None` without it).
+    #[must_use]
+    pub fn teams(&self) -> Option<&crate::teams::Teams> {
+        self.core.teams.as_deref()
+    }
+
+    /// The tick (as [`TickContext::tick`]) in which the behaviour first saw our last hurt
+    /// ([`TickEvents::hurt`]); `None` before one and for a new player entity.
+    #[must_use]
+    pub fn last_hurt_tick(&self) -> Option<u64> {
+        self.core.last_hurt
     }
 
     /// The world's time: game time and the dimension's time of day (`update_time`, counted on
@@ -3249,6 +3410,18 @@ mod tests_combat;
 #[path = "engine_tests_entities.rs"]
 mod tests_entities;
 
+/// The player's own effects, absorption, spawn point, hurts and death (`engine_tests_self.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
+#[path = "engine_tests_self.rs"]
+mod tests_self;
+
 /// Mount screen rules read off the tracked entity (`engine_tests_mounts.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
 #[path = "engine_tests_mounts.rs"]
@@ -3836,6 +4009,7 @@ mod tests {
                     health: 0.0,
                     food: 20,
                     saturation: 5.0,
+                    ..crate::common::Health::default()
                 }));
                 let t0 = Instant::now();
                 e.note_inbound(t0);

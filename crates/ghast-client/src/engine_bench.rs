@@ -287,6 +287,7 @@ fn run<S: Sim>(
                 health: 20.0,
                 food: 20,
                 saturation: 5.0,
+                ..Health::default()
             }));
         }
         if i % 200 == 199 {

@@ -49,6 +49,8 @@ pub(crate) struct Sim18 {
     own_id: Option<i32>,
     /// The flags byte (entity data index 0) the server last sent for our entity.
     server_flags: Option<u8>,
+    /// The absorption the server last sent for our entity (player entity data; 0 before any).
+    absorption: f32,
     /// Test hook: the JVM's `Math.sin` / `Math.cos` of the next boat tick (argument bits, sine,
     /// cosine), from an oracle record.
     #[cfg(test)]
@@ -151,6 +153,7 @@ impl Sim18 {
             ride: None,
             own_id: None,
             server_flags: None,
+            absorption: 0.0,
             #[cfg(test)]
             trig: Vec::new(),
         }
@@ -196,6 +199,10 @@ impl Sim18 {
         }
         let p: cb::EntityMetadata = raw.decode_as()?;
         for e in &p.metadata {
+            // PlayerEntity.setAbsorption: index 17.
+            if let (17, V::Float(a)) = (e.key, &e.value) {
+                self.absorption = *a;
+            }
             if let (0, V::Byte(b)) = (e.key, &e.value) {
                 let flags = *b as u8;
                 self.server_flags = Some(flags);
@@ -584,6 +591,7 @@ impl Sim for Sim18 {
         self.player.food_level = food;
         self.ride = None;
         self.server_flags = None;
+        self.absorption = 0.0;
     }
 
     fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
@@ -795,6 +803,10 @@ impl Sim for Sim18 {
 
     fn server_flags(&self) -> Option<u8> {
         self.server_flags
+    }
+
+    fn absorption(&self) -> f32 {
+        self.absorption
     }
 
     fn velocity_now(&self) -> Vec3 {

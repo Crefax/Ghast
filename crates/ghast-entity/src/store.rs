@@ -401,14 +401,16 @@ impl Entities {
         self.map.values().filter(move |e| Some(e.id) != me)
     }
 
-    /// The bot's own entity id (from `login`). Its entry carries metadata, effects, equipment
-    /// and riding state, but **no position**: the client owns its own position.
+    /// The bot's own entity id (from `login`). Its entry carries metadata, equipment, riding
+    /// state and effects as far as the [`Config`] keeps them, but **no position**: the client
+    /// owns its own position. The ghast client tracks entities with [`Config::effects`] and
+    /// [`Config::equipment`] off: use `TickContext::effects` for the bot's own effects.
     #[must_use]
     pub fn self_id(&self) -> Option<i32> {
         self.self_id
     }
 
-    /// The bot's own entry.
+    /// The bot's own entry (see [`Entities::self_id`] for what it carries).
     #[must_use]
     pub fn me(&self) -> Option<&Entity> {
         self.map.get(&self.self_id?)

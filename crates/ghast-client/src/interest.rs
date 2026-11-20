@@ -58,6 +58,9 @@ impl Interests {
     /// hurts, velocity, metadata, riding, pickups) on top of [`Interests::ENTITIES`] or
     /// [`Interests::ENTITY_TRACKING`]. Switching it restarts the tracker empty.
     pub const ENTITY_EVENTS: Interests = Interests(1 << 8);
+    /// The scoreboard teams ([`crate::TickContext::teams`]: members, prefix / suffix, colour,
+    /// friendly fire) on every version. Off by default: busy servers send many team packets.
+    pub const TEAMS: Interests = Interests(1 << 9);
 
     /// Whether every group in `other` is in `self`.
     #[must_use]
