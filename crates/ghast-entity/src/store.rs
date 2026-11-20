@@ -40,9 +40,22 @@ pub struct Config {
     /// 26.x, refusing a player spawn whose profile is not in the tab list. Ignored when
     /// [`Config::player_list`] is on (the full list answers the same questions). Default `false`.
     pub player_names: bool,
+    /// The client view of the other entities: what the vanilla client draws and picks
+    /// ([`Entity::drawn_position`], [`Entity::drawn_bounding_box`]) and the per-entity clocks
+    /// ([`Entity::position_tick`], [`Entity::spawn_tick`], [`Entity::last_hurt_tick`],
+    /// [`Entity::estimated_velocity`]); the same switch as each tracker's
+    /// `track_client_motion`. One small heap block per living entity. Default `false`.
+    pub client_motion: bool,
 }
 
 impl Config {
+    /// Sets [`Config::client_motion`].
+    #[must_use]
+    pub const fn with_client_motion(mut self, on: bool) -> Self {
+        self.client_motion = on;
+        self
+    }
+
     /// Sets [`Config::metadata`].
     #[must_use]
     pub const fn with_metadata(mut self, on: bool) -> Self {
@@ -110,6 +123,7 @@ impl Default for Config {
             events: false,
             skins: false,
             player_names: false,
+            client_motion: false,
         }
     }
 }
@@ -140,6 +154,16 @@ pub enum Event {
     },
     /// Metadata changed.
     Metadata(i32),
+    /// An entity was hurt: 1.8 – 1.16.5 the hurt statuses (2; 1.12+ also 33 thorns, 36
+    /// drowning, 37 burning; 1.16 44 sweet berry bush, each also queued as [`Event::Status`]),
+    /// 26.x a living entity's `damage_event`. The bot's own entity included.
+    Hurt {
+        /// Id.
+        id: i32,
+        /// 26.x: the entity that caused the damage (the shooter for projectiles), if any;
+        /// always `None` before 26.x (the status carries no source).
+        attacker: Option<i32>,
+    },
     /// Equipment changed.
     Equipment(i32),
     /// Effects changed.
@@ -336,12 +360,18 @@ pub struct Entities {
     pub(crate) era: crate::entity::Era,
     /// Last tab list object generation handed out.
     pub(crate) generations: u32,
+    /// The client's tick clock ([`Entities::set_tick`]).
+    pub(crate) now: u64,
+    /// The client view is on (`track_client_motion`): living entities carry their drawn state
+    /// and clocks.
+    pub(crate) client_motion: bool,
 }
 
 impl Entities {
     pub(crate) fn new(config: Config) -> Self {
         Entities {
             config,
+            client_motion: config.client_motion,
             ..Default::default()
         }
     }
@@ -594,12 +624,85 @@ impl Entities {
         };
     }
 
+    /// Sets the clock that stamps [`Entity::position_tick`], [`Entity::spawn_tick`] and
+    /// [`Entity::last_hurt_tick`] (the ghast client sets it to the tick in which the behaviour
+    /// first sees the packets that follow).
+    pub fn set_tick(&mut self, now: u64) {
+        self.now = now;
+    }
+
+    /// The clock set with [`Entities::set_tick`].
+    #[must_use]
+    pub fn tick(&self) -> u64 {
+        self.now
+    }
+
+    /// Attaches the client view's state to a spawning entity (living entities, with the view on).
+    #[inline]
+    fn attach_client(&self, e: &mut Entity) {
+        use crate::drawn::{Client, Lerp, legacy_lerp};
+        use crate::entity::Era;
+        let lerp = match e.era {
+            Era::V1_8 | Era::V1_12 => legacy_lerp(e),
+            _ if e.living => Some(Lerp::External),
+            // 1.16.5 boats interpolate in the client view (registry id 6).
+            Era::V1_16 if e.ty == EntityType::Registry(6) => Some(Lerp::External),
+            _ => None,
+        };
+        if let Some(l) = lerp {
+            e.client = Some(Box::new(Client::new(e, l, self.now)));
+        }
+    }
+
+    /// Turns the client view on or off for every tracked entity (on: drawn where the server has
+    /// them now).
+    pub(crate) fn set_client_motion(&mut self, on: bool) {
+        if on == self.client_motion {
+            return;
+        }
+        self.client_motion = on;
+        let mut map = std::mem::take(&mut self.map);
+        for e in map.values_mut() {
+            if on && Some(e.id) != self.self_id {
+                self.attach_client(e);
+            } else {
+                e.client = None;
+            }
+        }
+        self.map = map;
+    }
+
+    /// One client tick of the legacy (1.8 / 1.12) drawn positions.
+    pub(crate) fn step_drawn(&mut self) {
+        if !self.client_motion {
+            return;
+        }
+        for e in self.map.values_mut() {
+            if let Some(c) = e.client.as_deref_mut() {
+                c.step();
+            }
+        }
+    }
+
+    /// A hurt (status or damage event) of entity `id`: stamps it and queues [`Event::Hurt`].
+    #[inline]
+    pub(crate) fn hurt(&mut self, id: i32, attacker: Option<i32>) {
+        let now = self.now;
+        if let Some(c) = self.map.get_mut(&id).and_then(|e| e.client.as_deref_mut()) {
+            c.hurt = Some(now);
+        }
+        self.event(Event::Hurt { id, attacker });
+    }
+
     /// Adds an entity, replacing (and unlinking) any entity with the same id, as vanilla does.
     pub(crate) fn spawn(&mut self, mut e: Entity) {
         let id = e.id;
         self.resolve(&mut e);
         if Some(id) == self.self_id {
             return;
+        }
+        if self.client_motion {
+            self.attach_client(&mut e);
         }
         if self.map.contains_key(&id) {
             self.unlink(id);
@@ -772,8 +875,9 @@ mod tests {
         eprintln!("size_of::<Entity>() = {n}");
         // 0.3.0 – 0.4.3: 232 bytes. Riding, leash and effects sit behind one pointer, the
         // metadata is an exact-size block (pointer + length); the 26.x state is boxed.
+        // 0.4.8: + 8 bytes, the pointer to the client view's drawn state and clocks.
         let modern = cfg!(any(feature = "v26_1", feature = "v26_2"));
-        assert!(n <= if modern { 168 } else { 160 }, "{n}");
+        assert!(n <= if modern { 176 } else { 168 }, "{n}");
         #[cfg(any(feature = "v26_1", feature = "v26_2"))]
         {
             let b = std::mem::size_of::<crate::modern_state::State>();

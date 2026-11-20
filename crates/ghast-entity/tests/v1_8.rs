@@ -677,3 +677,91 @@ fn death_event_ends_alive() {
         }
     }
 }
+
+/// The client view: a living entity's drawn position follows the server position over
+/// vanilla's 3 interpolation steps (`LivingEntity.tickMovement`), every move packet restarts
+/// them, a teleport near the drawn position freezes it, and the clocks stamp each update.
+#[test]
+fn client_view_interpolates_living_entities() {
+    let mut t = tracker(events().with_client_motion(true));
+    t.store_mut().set_tick(10);
+    spawn_zombie(&mut t, 7, 0, 64 * 32, 0, [0; 3], no_meta());
+    let e = t.get(7).unwrap();
+    assert_eq!(e.drawn_position(), [0.0, 64.0, 0.0]);
+    assert_eq!((e.spawn_tick(), e.position_tick()), (Some(10), Some(10)));
+    let b = e.drawn_bounding_box().unwrap();
+    assert_eq!(b, e.bounding_box().unwrap());
+
+    // +3 blocks on x (96 / 32): the server position moves, the drawn one does not yet.
+    t.store_mut().set_tick(12);
+    let w = W::new().varint(7).i8(96).i8(0).i8(0).bool(true);
+    t.apply(&w.raw(id::REL_ENTITY_MOVE)).unwrap();
+    let e = t.get(7).unwrap();
+    assert_eq!(e.position(), [3.0, 64.0, 0.0]);
+    assert_eq!(e.drawn_position(), [0.0, 64.0, 0.0]);
+    assert_eq!(e.interpolation(), Some(([3.0, 64.0, 0.0], 3)));
+    assert_eq!(e.estimated_velocity(), Some([1.5, 0.0, 0.0]));
+    assert_eq!(e.position_tick(), Some(12));
+    t.tick_client();
+    assert_eq!(t.get(7).unwrap().drawn_position(), [1.0, 64.0, 0.0]);
+    let db = t.get(7).unwrap().drawn_bounding_box().unwrap();
+    assert_eq!(db[0], 1.0 - f64::from(0.6f32 / 2.0));
+
+    // A look-only packet restarts the 3 steps to the same target.
+    let w = W::new().varint(7).i8(0).i8(0).bool(true);
+    t.apply(&w.raw(id::ENTITY_LOOK)).unwrap();
+    t.tick_client();
+    assert_eq!(t.get(7).unwrap().drawn_position()[0], 1.0 + 2.0 / 3.0);
+    t.tick_client();
+    t.tick_client();
+    assert_eq!(t.get(7).unwrap().drawn_position()[0], 3.0);
+    assert_eq!(t.get(7).unwrap().interpolation(), None);
+
+    // A teleport within 1/32 of the drawn position keeps it there (3 steps to the same spot).
+    let w = W::new()
+        .varint(7)
+        .i32(3 * 32)
+        .i32(64 * 32)
+        .i32(0)
+        .i8(0)
+        .i8(0)
+        .bool(true);
+    t.apply(&w.raw(id::ENTITY_TELEPORT)).unwrap();
+    let e = t.get(7).unwrap();
+    assert_eq!(e.interpolation(), Some(([3.0, 64.0, 0.0], 3)));
+    // Status 2: the hurt clock and a Hurt event after the Status event.
+    t.store_mut().set_tick(20);
+    t.store_mut().drain_events().for_each(drop);
+    let w = W::new().i32(7).i8(2);
+    t.apply(&w.raw(id::ENTITY_STATUS)).unwrap();
+    assert_eq!(t.get(7).unwrap().last_hurt_tick(), Some(20));
+    let ev: Vec<Event> = t.store_mut().drain_events().collect();
+    assert_eq!(
+        ev,
+        [
+            Event::Status { id: 7, status: 2 },
+            Event::Hurt {
+                id: 7,
+                attacker: None
+            }
+        ]
+    );
+}
+
+/// Without the client view nothing is boxed and the drawn position is the server position.
+#[test]
+fn client_view_off_draws_server_position() {
+    let mut t = tracker(events());
+    spawn_zombie(&mut t, 7, 0, 64 * 32, 0, [0; 3], no_meta());
+    let w = W::new().varint(7).i8(96).i8(0).i8(0).bool(true);
+    t.apply(&w.raw(id::REL_ENTITY_MOVE)).unwrap();
+    t.tick_client();
+    let e = t.get(7).unwrap();
+    assert_eq!(e.drawn_position(), [3.0, 64.0, 0.0]);
+    assert_eq!((e.spawn_tick(), e.estimated_velocity()), (None, None));
+    // Turning it on starts at the server position.
+    t.track_client_motion(true);
+    let e = t.get(7).unwrap();
+    assert_eq!(e.drawn_position(), [3.0, 64.0, 0.0]);
+    assert!(t.tracks_client_motion());
+}

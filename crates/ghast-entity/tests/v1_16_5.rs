@@ -558,3 +558,30 @@ fn death_event_ends_alive() {
         assert!(!t.get(7).unwrap().is_alive());
     }
 }
+
+/// The 1.16.5 client view: the drawn position and box are the client view's (3-step
+/// interpolation of living entities), the clocks stamp the server's moves and the hurt
+/// statuses (44: sweet berry bush).
+#[test]
+fn client_view_drawn_position() {
+    let mut t = tracker(Config::default().with_client_motion(true));
+    assert!(t.tracks_client_motion());
+    t.store_mut().set_tick(3);
+    spawn_living(&mut t, 7, 102, [0.5, 64.0, 0.5], [0; 3]);
+    t.store_mut().set_tick(4);
+    t.apply(&rel(7, [4096 * 3, 0, 0])).unwrap();
+    let e = t.get(7).unwrap();
+    assert_eq!(e.position()[0], 3.5);
+    assert_eq!(e.drawn_position()[0], 0.5);
+    assert_eq!(e.estimated_velocity(), Some([3.0, 0.0, 0.0]));
+    t.tick_client(|_, _| true);
+    let e = t.get(7).unwrap();
+    assert_eq!(e.drawn_position()[0], 1.5);
+    assert_eq!(Some(e.drawn_position()), t.client_position(7));
+    assert_eq!(e.drawn_bounding_box(), t.client_box(7));
+    assert_ne!(e.drawn_bounding_box(), e.bounding_box());
+    t.store_mut().set_tick(9);
+    let w = W::new().i32(7).i8(44);
+    t.apply(&w.raw(id::ENTITY_STATUS)).unwrap();
+    assert_eq!(t.get(7).unwrap().last_hurt_tick(), Some(9));
+}

@@ -71,6 +71,7 @@ pub const CORE_IDS: &[i32] = &[
     id::ENTITY_TELEPORT,
     id::ENTITY_HEAD_ROTATION,
     id::ENTITY_STATUS,
+    id::DAMAGE_EVENT,
     id::ATTACH_ENTITY,
     id::SET_PASSENGERS,
     id::COLLECT,
@@ -487,6 +488,20 @@ impl Tracker {
         }
     }
 
+    /// Keeps the client view's clocks of living entities from now on (off by default):
+    /// [`Entity::position_tick`], [`Entity::spawn_tick`], [`Entity::last_hurt_tick`] and
+    /// [`Entity::estimated_velocity`] (set the clock with [`Entities::set_tick`]). The drawn
+    /// position needs nothing: on 26.x it is [`Entity::position`].
+    pub fn track_client_motion(&mut self, on: bool) {
+        self.store.set_client_motion(on);
+    }
+
+    /// `true` while [`Tracker::track_client_motion`] is on.
+    #[must_use]
+    pub fn tracks_client_motion(&self) -> bool {
+        self.store.client_motion
+    }
+
     /// The shared store, mutable for [`Entities::drain_events`].
     pub fn store_mut(&mut self) -> &mut Entities {
         &mut self.store
@@ -795,6 +810,17 @@ impl Tracker {
         let ticking = (&self.chunks, &self.ghosts);
         let s = &mut self.store;
         let changed = match packet_id {
+            id::DAMAGE_EVENT => {
+                // LivingEntity.handleDamageEvent: the hurt animation (other entities: nothing).
+                let eid = r.read_varint()?;
+                let _source_type = r.read_varint()?;
+                let cause = r.read_varint()? - 1;
+                let known = s.map.get(&eid).is_some_and(|e| e.living);
+                if known {
+                    s.hurt(eid, (cause >= 0).then_some(cause));
+                }
+                known
+            }
             id::REL_ENTITY_MOVE => relative(s, r, true, false)?,
             id::ENTITY_MOVE_LOOK => relative(s, r, true, true)?,
             id::ENTITY_LOOK => relative(s, r, false, true)?,
@@ -1387,6 +1413,7 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
     if Some(eid) == me {
         return Ok(false);
     }
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -1405,6 +1432,7 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         move_or_interpolate(e, None, Some(y), Some(x));
     }
     e.on_ground = on_ground;
+    stamp_move(e, now);
     s.event(Event::Moved(eid));
     Ok(true)
 }
@@ -1436,6 +1464,7 @@ fn sync(
     if Some(eid) == me {
         return Ok(false);
     }
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -1452,6 +1481,7 @@ fn sync(
             snap_to(e, p, y, x);
         }
         e.on_ground = on_ground;
+        stamp_move(e, now);
     }
     s.event(Event::Moved(eid));
     Ok(true)
@@ -1465,6 +1495,7 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     if Some(eid) == s.self_id {
         return Ok(false);
     }
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -1501,8 +1532,20 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     }
     e.velocity = v;
     e.on_ground = on_ground;
+    stamp_move(e, now);
     s.event(Event::Moved(eid));
     Ok(true)
+}
+
+/// The clocks of the client view ([`Entity::position_tick`], [`Entity::estimated_velocity`])
+/// after a position packet: the position the packet moves to is the interpolation target (or
+/// the position itself).
+#[inline]
+fn stamp_move(e: &mut Entity, now: u64) {
+    let p = if e.m.steps > 0 { e.m.target } else { e.pos };
+    if let Some(c) = e.client.as_deref_mut() {
+        c.server_moved(p, now);
+    }
 }
 
 /// The value of one metadata entry: stored (owned) when wanted, else skipped. Size keys are
@@ -2236,9 +2279,10 @@ mod tests {
             z.heap_bytes()
         );
         // 0.4.3: slot 240 B, metadata block 448 B (four-entry capacity), state 120 B: 808 B.
-        assert!(slot <= 176, "{slot}");
-        assert!(pb <= 520, "player {pb}");
-        assert!(zb <= 408, "zombie {zb}");
+        // 0.4.8: + 8 B (the client view's pointer).
+        assert!(slot <= 184, "{slot}");
+        assert!(pb <= 528, "player {pb}");
+        assert!(zb <= 416, "zombie {zb}");
         // Without the metadata store (`Config::metadata` off): slot and state only.
         let mut t = Tracker::new(
             Config::default()
@@ -2250,7 +2294,7 @@ mod tests {
         assert!(p.metadata().is_empty());
         let lean = slot + p.heap_bytes();
         eprintln!("without the metadata store: player {lean} B");
-        assert!(lean <= 296, "player {lean}");
+        assert!(lean <= 304, "player {lean}");
     }
 
     fn destroy(t: &mut Tracker, ids: &[i32]) {

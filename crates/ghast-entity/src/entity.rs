@@ -359,6 +359,9 @@ pub struct Entity {
     pub(crate) bits: u8,
     /// Passengers, leash and effects (`None` = none of them).
     pub(crate) links: Option<Box<Links>>,
+    /// The client view's drawn state and clocks (`None` without `track_client_motion`, and for
+    /// entities it does not keep).
+    pub(crate) client: Option<Box<crate::drawn::Client>>,
     /// 26.1 client state (codec base, interpolation, size keys), boxed: one pointer for the
     /// other versions.
     #[cfg(any(feature = "v26_1", feature = "v26_2"))]
@@ -385,6 +388,7 @@ impl Entity {
             meta: Metadata::default(),
             equipment: None,
             links: None,
+            client: None,
             vehicle_id: 0,
             bits: 0,
             #[cfg(any(feature = "v26_1", feature = "v26_2"))]
@@ -519,6 +523,9 @@ impl Entity {
         #[cfg(any(feature = "v26_1", feature = "v26_2"))]
         if self.m.0.is_some() {
             n += std::mem::size_of::<crate::modern_state::State>();
+        }
+        if self.client.is_some() {
+            n += std::mem::size_of::<crate::drawn::Client>();
         }
         n
     }
@@ -690,6 +697,102 @@ impl Entity {
     #[must_use]
     pub fn position(&self) -> [f64; 3] {
         self.pos
+    }
+
+    /// The position the vanilla client draws this entity at and its crosshair pick reads: the
+    /// server position ([`Entity::position`]) followed over the client's interpolation steps.
+    ///
+    /// - **1.8.9 / 1.12.2** players, mobs and armor stands: a position packet sets a target that
+    ///   the entity reaches over 3 client ticks (1/3, 1/2, then the rest of the remaining way;
+    ///   every move, look or bare `entity` packet restarts the 3 steps), as
+    ///   `LivingEntity.tickMovement` / `OtherClientPlayerEntity.tickMovement` move it.
+    /// - **1.16.5** living entities, boats and shulkers: the 1.16 client view's position.
+    /// - **26.x**: [`Entity::position`] (the 26.x tracker already holds the client's position).
+    ///
+    /// Needs the tracker's `track_client_motion` (the ghast client turns it on with entity
+    /// tracking) and its `tick_client` once per client tick; otherwise, and for the entities the
+    /// view does not interpolate, this is [`Entity::position`].
+    #[must_use]
+    pub fn drawn_position(&self) -> [f64; 3] {
+        match &self.client {
+            Some(c) if c.lerp != crate::drawn::Lerp::External || c.bb.is_some() => c.pos,
+            _ => self.pos,
+        }
+    }
+
+    /// The bounding box at [`Entity::drawn_position`] (1.16.5: the client view's box, which
+    /// keeps its minimum corner after a growing resize until the next move), `[min_x, min_y,
+    /// min_z, max_x, max_y, max_z]`. This is the box vanilla's crosshair pick tests.
+    #[must_use]
+    pub fn drawn_bounding_box(&self) -> Option<[f64; 6]> {
+        if let Some(b) = self.client.as_ref().and_then(|c| c.bb) {
+            return Some(b);
+        }
+        let [x, y, z] = self.drawn_position();
+        let b = self.dimensions()?.bounding_box(x, y, z);
+        Some([b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z])
+    }
+
+    /// The drawn `(yaw, pitch)` (1.8.9 / 1.12.2 interpolated like [`Entity::drawn_position`];
+    /// otherwise [`Entity::yaw`] / [`Entity::pitch`]).
+    #[must_use]
+    pub fn drawn_rotation(&self) -> (f32, f32) {
+        match &self.client {
+            Some(c)
+                if matches!(
+                    c.lerp,
+                    crate::drawn::Lerp::Player | crate::drawn::Lerp::Living
+                ) =>
+            {
+                (c.rot[0], c.rot[1])
+            }
+            _ => (self.yaw, self.pitch),
+        }
+    }
+
+    /// 1.8.9 / 1.12.2: the interpolation target and the client ticks left to reach it (`None`
+    /// when the drawn position is not interpolating or the view is off).
+    #[must_use]
+    pub fn interpolation(&self) -> Option<([f64; 3], u8)> {
+        let c = self.client.as_ref()?;
+        (c.steps > 0
+            && matches!(
+                c.lerp,
+                crate::drawn::Lerp::Player | crate::drawn::Lerp::Living
+            ))
+        .then_some((c.target, c.steps))
+    }
+
+    /// Estimated velocity in blocks per tick: the change between the last two server positions
+    /// divided by the ticks between them (players are often updated every 2 ticks). It is not
+    /// reset when the updates stop (compare [`Entity::position_tick`] with the current tick).
+    /// `None` without the client view (living entities only).
+    #[must_use]
+    pub fn estimated_velocity(&self) -> Option<[f64; 3]> {
+        self.client.as_ref().map(|c| c.velocity())
+    }
+
+    /// The tick (the clock the client sets with `Entities::set_tick`; the ghast client uses
+    /// `TickContext::tick`) of the last server position change (the spawn tick before the
+    /// first one). `None` without the client view (living entities only).
+    #[must_use]
+    pub fn position_tick(&self) -> Option<u64> {
+        self.client.as_ref().map(|c| c.moved)
+    }
+
+    /// The tick this entity spawned (a re-spawn with the same id is a new entity with a new
+    /// spawn tick). `None` without the client view (living entities only).
+    #[must_use]
+    pub fn spawn_tick(&self) -> Option<u64> {
+        self.client.as_ref().map(|c| c.spawned)
+    }
+
+    /// The tick of the last hurt (1.8: entity status 2; 1.12 / 1.16 also the thorns, drowning,
+    /// burning and berry-bush statuses; 26.x the damage event). `None` before the first one and
+    /// without the client view (living entities only).
+    #[must_use]
+    pub fn last_hurt_tick(&self) -> Option<u64> {
+        self.client.as_ref()?.hurt
     }
 
     /// 1.8 only: the raw server position in 1/32 blocks (`[0; 3]` in 1.12 and 1.16).

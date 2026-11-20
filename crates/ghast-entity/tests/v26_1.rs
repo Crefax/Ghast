@@ -463,3 +463,40 @@ fn death_event_ends_alive() {
         assert!(!v26_1::alive(t.get(10).unwrap()));
     }
 }
+
+/// 26.x client view clocks: the drawn position is the entity's position; the clocks stamp the
+/// interpolation target of each move and the damage event (with its attacker).
+#[test]
+fn client_view_clocks_and_damage_event() {
+    let mut t = tracker(Config::default().with_client_motion(true).with_events(true));
+    t.store_mut().set_tick(1);
+    spawn(&mut t, 10, ZOMBIE, [0.0, 64.0, 0.0], [0; 3]);
+    t.store_mut().set_tick(3);
+    let mv = W::new().varint(10).i16(4096).i16(0).i16(0).bool(true);
+    t.apply(&mv.raw(id::REL_ENTITY_MOVE)).unwrap();
+    let z = t.get(10).unwrap();
+    assert_eq!(z.drawn_position(), z.position());
+    assert_eq!(z.drawn_bounding_box(), z.bounding_box());
+    assert_eq!(z.spawn_tick(), Some(1));
+    assert_eq!(z.position_tick(), Some(3));
+    assert_eq!(z.estimated_velocity(), Some([0.5, 0.0, 0.0]));
+    t.store_mut().drain_events().for_each(drop);
+    // damage_event: entity, source type, cause id + 1, direct id + 1, no source position.
+    t.store_mut().set_tick(4);
+    let w = W::new()
+        .varint(10)
+        .varint(3)
+        .varint(43)
+        .varint(43)
+        .bool(false);
+    assert_eq!(t.apply(&w.raw(id::DAMAGE_EVENT)), Ok(Applied::Changed));
+    assert_eq!(t.get(10).unwrap().last_hurt_tick(), Some(4));
+    let ev: Vec<ghast_entity::Event> = t.store_mut().drain_events().collect();
+    assert_eq!(
+        ev,
+        [ghast_entity::Event::Hurt {
+            id: 10,
+            attacker: Some(42)
+        }]
+    );
+}

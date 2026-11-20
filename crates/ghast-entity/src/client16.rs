@@ -455,36 +455,55 @@ impl Client16 {
 
     /// One client tick of every entity that ticks (`ticks(entity)`): one interpolation step;
     /// a shulker sits on its attached block.
-    pub(crate) fn tick(&mut self, store: &Entities, ticks: impl Fn(&Entity) -> bool) {
+    /// The drawn state ([`Entity::drawn_position`]) of every ticked entity follows.
+    pub(crate) fn tick(&mut self, store: &mut Entities, ticks: impl Fn(&Entity) -> bool) {
         for (id, m) in &mut self.motion {
-            let Some(e) = store.map.get(id) else { continue };
+            let Some(e) = store.map.get_mut(id) else {
+                continue;
+            };
             if !ticks(e) {
                 continue;
             }
-            if let Some(b) = m.attached {
-                // ShulkerEntity.tick: resetPosition (no box) and the closed shell's box.
-                let (x, y, z) = (f64::from(b[0]), f64::from(b[1]), f64::from(b[2]));
-                m.pos = [x + 0.5, y, z + 0.5];
-                m.bb = [
-                    m.pos[0] - 0.5,
-                    y,
-                    m.pos[2] - 0.5,
-                    m.pos[0] + 0.5,
-                    y + 1.0,
-                    m.pos[2] + 0.5,
-                ];
-                continue;
+            m.tick_one();
+            if let Some(c) = e.client.as_deref_mut() {
+                c.pos = m.pos;
+                c.bb = Some(m.bb);
             }
-            if m.steps > 0 && m.lerp != Lerp::Still {
-                let n = f64::from(m.steps);
-                let p = [
-                    m.pos[0] + (m.target[0] - m.pos[0]) / n,
-                    m.pos[1] + (m.target[1] - m.pos[1]) / n,
-                    m.pos[2] + (m.target[2] - m.pos[2]) / n,
-                ];
-                m.steps -= 1;
-                m.set_position(p);
-            }
+        }
+    }
+
+    /// The drawn position and box of entity `id`.
+    pub(crate) fn drawn(&self, id: i32) -> Option<([f64; 3], [f64; 6])> {
+        self.motion.get(&id).map(|m| (m.pos, m.bb))
+    }
+}
+
+impl Motion {
+    /// One client tick: one interpolation step; a shulker sits on its attached block.
+    fn tick_one(&mut self) {
+        if let Some(b) = self.attached {
+            // ShulkerEntity.tick: resetPosition (no box) and the closed shell's box.
+            let (x, y, z) = (f64::from(b[0]), f64::from(b[1]), f64::from(b[2]));
+            self.pos = [x + 0.5, y, z + 0.5];
+            self.bb = [
+                self.pos[0] - 0.5,
+                y,
+                self.pos[2] - 0.5,
+                self.pos[0] + 0.5,
+                y + 1.0,
+                self.pos[2] + 0.5,
+            ];
+            return;
+        }
+        if self.steps > 0 && self.lerp != Lerp::Still {
+            let n = f64::from(self.steps);
+            let p = [
+                self.pos[0] + (self.target[0] - self.pos[0]) / n,
+                self.pos[1] + (self.target[1] - self.pos[1]) / n,
+                self.pos[2] + (self.target[2] - self.pos[2]) / n,
+            ];
+            self.steps -= 1;
+            self.set_position(p);
         }
     }
 }

@@ -151,6 +151,30 @@ impl Tracker {
         }
     }
 
+    /// Keeps what the vanilla client draws of the other entities from now on (off by default):
+    /// [`Entity::drawn_position`] / [`Entity::drawn_bounding_box`] (the 3-step interpolation of
+    /// players, mobs and armor stands; shulkers on their block) and the clocks
+    /// [`Entity::position_tick`], [`Entity::spawn_tick`], [`Entity::last_hurt_tick`] and
+    /// [`Entity::estimated_velocity`]. Call [`Tracker::tick_client`] once per client tick and
+    /// [`Entities::set_tick`] for the clock. Turning it on draws every entity at its server
+    /// position.
+    pub fn track_client_motion(&mut self, on: bool) {
+        self.store.set_client_motion(on);
+    }
+
+    /// `true` while [`Tracker::track_client_motion`] is on.
+    #[must_use]
+    pub fn tracks_client_motion(&self) -> bool {
+        self.store.client_motion
+    }
+
+    /// One client tick of the drawn positions (`World.tickEntities`: every entity's
+    /// interpolation step). Call it after the tick's crosshair pick, where vanilla ticks the
+    /// world's entities.
+    pub fn tick_client(&mut self) {
+        self.store.step_drawn();
+    }
+
     /// The shared store, mutable for [`Entities::drain_events`].
     pub fn store_mut(&mut self) -> &mut Entities {
         &mut self.store
@@ -239,6 +263,10 @@ impl Tracker {
                 };
                 if known {
                     s.event(Event::Status { id: eid, status });
+                    // LivingEntity.handleStatus: 2 hurt, 33 thorns, 36 drowning, 37 burning.
+                    if matches!(status, 2 | 33 | 36 | 37) {
+                        s.hurt(eid, None);
+                    }
                 }
                 known
             }
@@ -502,6 +530,7 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         return Ok(false);
     };
     let ctl = controlled(s, e);
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -517,6 +546,7 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
+    crate::drawn::relative(e, rot.is_some(), now);
     s.event(Event::Moved(eid));
     Ok(true)
 }
@@ -533,6 +563,7 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
         return Ok(false);
     };
     let ctl = controlled(s, e);
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -545,6 +576,7 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     e.yaw = angle(y);
     e.pitch = angle(pi);
     e.on_ground = on_ground;
+    crate::drawn::teleport(e, now);
     s.event(Event::Moved(eid));
     Ok(true)
 }

@@ -51,6 +51,7 @@
 #[cfg(feature = "v1_16_5")]
 mod client16;
 mod common;
+mod drawn;
 mod entity;
 #[cfg(any(feature = "v26_1", feature = "v26_2"))]
 mod modern_state;

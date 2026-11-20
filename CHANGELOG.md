@@ -6,6 +6,26 @@ Versioning: until 1.0, a **patch** release (0.y.Z) adds features and fixes witho
 public API; a **minor** release (0.Y.0) may break it and says how to migrate. 1.0 comes only when
 the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are met.
 
+## 0.4.8 — unreleased
+
+### Added
+
+- **Client view of other entities on every version** (`ghast-entity`, opt-in
+  `Config::client_motion` / each tracker's `track_client_motion`): `Entity::drawn_position`,
+  `drawn_bounding_box`, `drawn_rotation` and `interpolation` give what the vanilla client draws
+  and its crosshair pick tests. 1.8.9 / 1.12.2: players, mobs and armor stands follow the
+  server position over vanilla's 3 interpolation steps (`LivingEntity.tickMovement` /
+  `OtherClientPlayerEntity.tickMovement`; every move, look or bare `entity` packet restarts
+  them, a teleport within 1/32 of the drawn position keeps it there; 1.12 shulkers sit on their
+  block), stepped by the new `Tracker::tick_client`; 1.16.5 copies its client view (living
+  entities, boats, shulkers); 26.x already held the drawn position. Per-entity clocks stamped
+  with the new `Entities::set_tick`: `Entity::position_tick`, `spawn_tick` (a re-spawn with
+  the same id is a new spawn tick), `last_hurt_tick` (1.8 status 2; 1.12 / 1.16 also thorns,
+  drowning, burning, berry bush; 26.x `damage_event`) and `estimated_velocity` (the last two
+  server positions over the ticks between them). `Event::Hurt { id, attacker }` (26.x with the
+  attacking entity). One small heap block per living entity with the view on; `Entity` grew by
+  8 bytes (the pointer).
+
 ## 0.4.7 — 2026-11-18
 
 Fixes found by a survival bot on 26.2, the world time, more of the vanilla client's placement

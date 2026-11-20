@@ -544,3 +544,53 @@ fn death_event_ends_alive() {
         assert!(!t.get(7).unwrap().is_alive());
     }
 }
+
+/// The 1.12 client view: 3-step interpolation of living entities in 1/4096 moves; a teleport
+/// within 1/32 of the drawn position keeps it with 0 steps (no further movement); hurt statuses
+/// 2 / 33 / 36 / 37 stamp the hurt clock, others do not.
+#[test]
+fn client_view_interpolates_living_entities() {
+    let mut t = tracker(Config::default().with_client_motion(true));
+    t.store_mut().set_tick(5);
+    assert_eq!(
+        spawn_mob(&mut t, 7, 54, [0.5, 64.0, 0.5], [0; 3]),
+        Applied::Changed
+    );
+    // +1.5 blocks on z (6144 / 4096).
+    let w = W::new().varint(7).i16(0).i16(0).i16(6144).bool(true);
+    t.store_mut().set_tick(6);
+    t.apply(&w.raw(id::REL_ENTITY_MOVE)).unwrap();
+    let e = t.get(7).unwrap();
+    assert_eq!(e.position()[2], 2.0);
+    assert_eq!(e.drawn_position()[2], 0.5);
+    assert_eq!(e.estimated_velocity(), Some([0.0, 0.0, 1.5]));
+    t.tick_client();
+    assert_eq!(t.get(7).unwrap().drawn_position()[2], 1.0);
+    let tp = |x: f64, y: f64, z: f64| {
+        W::new()
+            .varint(7)
+            .f64(x)
+            .f64(y)
+            .f64(z)
+            .i8(0)
+            .i8(0)
+            .bool(true)
+            .raw(id::ENTITY_TELEPORT)
+    };
+    // Near the drawn position (1.0): kept, 0 steps.
+    t.apply(&tp(0.5, 64.0, 1.02)).unwrap();
+    assert_eq!(t.get(7).unwrap().interpolation(), None);
+    t.tick_client();
+    assert_eq!(t.get(7).unwrap().drawn_position(), [0.5, 64.0, 1.0]);
+    // Far: 3 steps.
+    t.apply(&tp(0.5, 64.0, 4.0)).unwrap();
+    assert_eq!(
+        t.get(7).unwrap().interpolation(),
+        Some(([0.5, 64.0, 4.0], 3))
+    );
+    for (status, hurt) in [(9, None), (33, Some(6))] {
+        let w = W::new().i32(7).i8(status);
+        t.apply(&w.raw(id::ENTITY_STATUS)).unwrap();
+        assert_eq!(t.get(7).unwrap().last_hurt_tick(), hurt, "status {status}");
+    }
+}

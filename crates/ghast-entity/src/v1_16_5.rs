@@ -125,7 +125,7 @@ impl Tracker {
         if config.reads_tab_list() {
             wanted.add(PLAYER_LIST_IDS);
         }
-        Tracker {
+        let mut t = Tracker {
             store: Entities {
                 era: crate::entity::Era::V1_16,
                 ..Entities::new(config)
@@ -133,7 +133,11 @@ impl Tracker {
             world_name: String::new(),
             wanted,
             client: None,
+        };
+        if config.client_motion {
+            t.track_client_motion(true);
         }
+        t
     }
 
     /// Keeps the vanilla client's own view of the entities from now on (off by default): the
@@ -156,6 +160,13 @@ impl Tracker {
             }
             c
         });
+        self.store.set_client_motion(on);
+        if let Some(c) = &self.client {
+            let ids: Vec<i32> = self.store.map.keys().copied().collect();
+            for id in ids {
+                mirror(&mut self.store, c, id);
+            }
+        }
     }
 
     /// `true` while [`Tracker::track_client_motion`] is on.
@@ -219,7 +230,7 @@ impl Tracker {
     /// left alone. Call it once per client tick, where the bot's world ticks its entities.
     pub fn tick_client(&mut self, column_loaded: impl Fn(i32, i32) -> bool) {
         let Some(c) = &mut self.client else { return };
-        c.tick(&self.store, |e| {
+        c.tick(&mut self.store, |e| {
             !e.rides() && (e.is_player() || entity_ticks_at(e, &column_loaded))
         });
     }
@@ -350,6 +361,11 @@ impl Tracker {
                 };
                 if known {
                     s.event(Event::Status { id: eid, status });
+                    // LivingEntity.handleStatus: 2 hurt, 33 thorns, 36 drowning, 37 burning,
+                    // 44 sweet berry bush.
+                    if matches!(status, 2 | 33 | 36 | 37 | 44) {
+                        s.hurt(eid, None);
+                    }
                 }
                 known
             }
@@ -508,6 +524,7 @@ impl Tracker {
                     && let Some(e) = s.map.get(&eid)
                 {
                     c.data(e, &scratch);
+                    mirror(s, c, eid);
                 }
                 if res.is_ok()
                     && wanted
@@ -707,7 +724,7 @@ fn controlled(s: &Entities, e: &Entity) -> bool {
 
 /// The client view's side of a spawn: `addEntityPrivate` and the spawn position.
 fn client_spawned(
-    s: &Entities,
+    s: &mut Entities,
     client: Option<&mut crate::client16::Client16>,
     id: i32,
     name: Option<Box<str>>,
@@ -719,6 +736,19 @@ fn client_spawned(
     let Some(e) = s.map.get(&id) else { return };
     c.add(id);
     c.spawned(e, name);
+    mirror(s, c, id);
+}
+
+/// Copies the client view's position and box of `id` into its drawn state
+/// ([`Entity::drawn_position`]).
+fn mirror(s: &mut Entities, c: &crate::client16::Client16, id: i32) {
+    let Some(cl) = s.map.get_mut(&id).and_then(|e| e.client.as_deref_mut()) else {
+        return;
+    };
+    if let Some((p, b)) = c.drawn(id) {
+        cl.pos = p;
+        cl.bb = Some(b);
+    }
 }
 
 #[inline]
@@ -750,6 +780,7 @@ fn relative(
     if controlled(s, e) {
         return Ok(false);
     }
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
@@ -765,6 +796,7 @@ fn relative(
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
+    crate::drawn::relative(e, look, now);
     if let Some(c) = client {
         if pos {
             c.moved(eid, e.pos);
@@ -792,12 +824,14 @@ fn teleport(
         return Ok(false);
     };
     let ctl = controlled(s, e);
+    let now = s.now;
     let Some(e) = s.map.get_mut(&eid) else {
         return Ok(false);
     };
     // Packet coordinates are set even for a vehicle the bot controls.
     e.pos = p;
     if !ctl {
+        crate::drawn::teleport(e, now);
         e.yaw = angle(y);
         e.pitch = angle(pi);
         e.on_ground = on_ground;
