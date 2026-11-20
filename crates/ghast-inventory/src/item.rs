@@ -86,6 +86,152 @@ pub struct Enchantment {
     pub level: i32,
 }
 
+/// A broad item kind, version-independent ([`Stack::kind`]): what combat and tool logic asks
+/// (`#[non_exhaustive]`: kinds may be added).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ItemKind {
+    /// A sword.
+    Sword,
+    /// An axe.
+    Axe,
+    /// A pickaxe.
+    Pickaxe,
+    /// A shovel.
+    Shovel,
+    /// A hoe.
+    Hoe,
+    /// A bow.
+    Bow,
+    /// A crossbow (1.14+).
+    Crossbow,
+    /// A trident (1.13+).
+    Trident,
+    /// A mace (1.21+).
+    Mace,
+    /// A shield (1.9+).
+    Shield,
+    /// A fishing rod.
+    FishingRod,
+    /// A helmet (turtle shell included).
+    Helmet,
+    /// A chestplate.
+    Chestplate,
+    /// Leggings.
+    Leggings,
+    /// Boots.
+    Boots,
+    /// Anything else.
+    Other,
+}
+
+impl ItemKind {
+    /// The kind of an item by its registry name (without `minecraft:`), the same rule on every
+    /// version (`diamond_sword`, `golden_axe`, `turtle_helmet` …).
+    #[must_use]
+    pub fn of_name(name: &str) -> ItemKind {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let exact = match name {
+            "bow" => Some(ItemKind::Bow),
+            "crossbow" => Some(ItemKind::Crossbow),
+            "trident" => Some(ItemKind::Trident),
+            "mace" => Some(ItemKind::Mace),
+            "shield" => Some(ItemKind::Shield),
+            "fishing_rod" => Some(ItemKind::FishingRod),
+            "turtle_helmet" => Some(ItemKind::Helmet),
+            _ => None,
+        };
+        if let Some(k) = exact {
+            return k;
+        }
+        // `_pickaxe` before `_axe`.
+        for (suffix, k) in [
+            ("_sword", ItemKind::Sword),
+            ("_pickaxe", ItemKind::Pickaxe),
+            ("_axe", ItemKind::Axe),
+            ("_shovel", ItemKind::Shovel),
+            ("_hoe", ItemKind::Hoe),
+            ("_helmet", ItemKind::Helmet),
+            ("_chestplate", ItemKind::Chestplate),
+            ("_leggings", ItemKind::Leggings),
+            ("_boots", ItemKind::Boots),
+        ] {
+            if name.ends_with(suffix) {
+                return k;
+            }
+        }
+        ItemKind::Other
+    }
+}
+
+/// 1.8 / 1.12 enchantment registry ids by name (`Enchantment.REGISTRY`, from the jars: 9, 10,
+/// 22, 70 and 71 exist since 1.9 – 1.11).
+pub(crate) const LEGACY_ENCHANTMENTS: &[(i16, &str)] = &[
+    (0, "protection"),
+    (1, "fire_protection"),
+    (2, "feather_falling"),
+    (3, "blast_protection"),
+    (4, "projectile_protection"),
+    (5, "respiration"),
+    (6, "aqua_affinity"),
+    (7, "thorns"),
+    (8, "depth_strider"),
+    (9, "frost_walker"),
+    (10, "binding_curse"),
+    (16, "sharpness"),
+    (17, "smite"),
+    (18, "bane_of_arthropods"),
+    (19, "knockback"),
+    (20, "fire_aspect"),
+    (21, "looting"),
+    (22, "sweeping"),
+    (32, "efficiency"),
+    (33, "silk_touch"),
+    (34, "unbreaking"),
+    (35, "fortune"),
+    (48, "power"),
+    (49, "punch"),
+    (50, "flame"),
+    (51, "infinity"),
+    (61, "luck_of_the_sea"),
+    (62, "lure"),
+    (70, "mending"),
+    (71, "vanishing_curse"),
+];
+
+impl EnchantmentId {
+    /// The name without `minecraft:` on every version: 1.8 / 1.12 numeric ids through the
+    /// vanilla registry, 26.x registry ids through `registry` (the server's enchantment
+    /// registry names, [`crate::Inventory::enchantment_name_modern`]'s list).
+    #[must_use]
+    pub fn plain_name<'a>(&'a self, registry: &'a [String]) -> Option<&'a str> {
+        let n = match self {
+            EnchantmentId::Legacy(id) => {
+                return LEGACY_ENCHANTMENTS
+                    .iter()
+                    .find(|(i, _)| i == id)
+                    .map(|(_, n)| *n);
+            }
+            other => other.name(registry)?,
+        };
+        Some(n.strip_prefix("minecraft:").unwrap_or(n))
+    }
+}
+
+impl Stack {
+    /// The broad kind of the item ([`ItemKind::of_name`] of [`Stack::item_name`]).
+    #[must_use]
+    pub fn kind(&self, v: Version) -> ItemKind {
+        self.item_name(v).map_or(ItemKind::Other, ItemKind::of_name)
+    }
+
+    /// `true` for a sword.
+    #[must_use]
+    pub fn is_sword(&self, v: Version) -> bool {
+        self.kind(v) == ItemKind::Sword
+    }
+}
+
 fn root(s: &Stack) -> Option<Compound> {
     match s.nbt()?.parse().ok()??.tag {
         Tag::Compound(c) => Some(c),

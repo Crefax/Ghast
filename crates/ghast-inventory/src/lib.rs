@@ -95,7 +95,7 @@ pub use inventory::{
     DEFAULT_CLICK_SETTLE_TICKS, DEFAULT_CLICK_TIMEOUT_TICKS, DragKind, DragStage, Events,
     Inventory, Outgoing, Window,
 };
-pub use item::{Enchantment, EnchantmentId, ItemText};
+pub use item::{Enchantment, EnchantmentId, ItemKind, ItemText};
 pub use merchant::TradeOffer;
 pub use mount::{MountArmor, MountRules};
 #[cfg(feature = "v26_1")]

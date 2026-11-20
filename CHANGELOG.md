@@ -56,6 +56,13 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   members, from 1.8 `scoreboard_team`, 1.9 – 1.16.5 `teams` and 26.x `set_player_team` (each
   version's field order); a join starts an empty scoreboard. `Inbound::Teams` carries the raw
   body, parsed only with the interest.
+- **Item kinds and enchantment levels on every version** (`ghast-inventory`): `ItemKind`
+  (sword, axe, pickaxe, shovel, hoe, bow, crossbow, trident, mace, shield, fishing rod, the
+  four armour pieces, other) from the registry name, `Stack::kind` / `is_sword`;
+  `Inventory::enchantment_level(stack, "sharpness")` reads 1.8 / 1.12 numeric ids (the
+  vanilla registry, checked against both jars), 1.16.5 names and 26.x registry ids through the
+  server's registry; `EnchantmentId::plain_name`. For the held item:
+  `ctx.inventory().held().map(|s| s.kind(ctx.inventory().version()))`.
 - **Own movement state for behaviours** (`ghast-client`, every version):
   `TickContext::velocity` (the velocity this tick's step starts from, with knockback /
   explosion pushes received since the last step), `horizontal_collision` /

@@ -652,6 +652,23 @@ impl Inventory {
         self.version
     }
 
+    /// The level of enchantment `name` (`sharpness` or `minecraft:sharpness`) on `stack`, on
+    /// every version (1.8 / 1.12 numeric ids, 1.16.5 names, 26.x the server's enchantment
+    /// registry from [`Inventory::set_registries_modern`]); 0 when it has none.
+    #[must_use]
+    pub fn enchantment_level(&self, stack: &crate::Stack, name: &str) -> i32 {
+        let want = name.strip_prefix("minecraft:").unwrap_or(name);
+        #[cfg(modern)]
+        let registry: &[String] = self.reg26.enchantments();
+        #[cfg(not(modern))]
+        let registry: &[String] = &[];
+        stack
+            .enchantments(self.version)
+            .iter()
+            .find(|e| e.id.plain_name(registry) == Some(want))
+            .map_or(0, |e| e.level)
+    }
+
     /// The modern table set of this inventory's version (a placeholder for a legacy one: only
     /// modern code paths read it).
     #[cfg(modern)]

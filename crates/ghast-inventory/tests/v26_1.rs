@@ -880,3 +880,24 @@ fn trident_spin_attack_strength() {
         assert_eq!(s(inv, &[(120, 1)]), None);
     }
 }
+
+/// `Inventory::enchantment_level` by name through the server's enchantment registry.
+#[test]
+fn enchantment_level_by_name() {
+    let mut inv = Inventory::new(Version::V26_1).unwrap();
+    let mut reg = HashRegistries::default();
+    reg.add(
+        "minecraft:enchantment",
+        [
+            "minecraft:aqua_affinity",
+            "minecraft:loyalty",
+            "minecraft:riptide",
+        ],
+    );
+    inv.set_registries_26_1(reg);
+    let t = enchanted_trident(&[(1, 3), (2, 1)]);
+    assert_eq!(inv.enchantment_level(&t, "loyalty"), 3);
+    assert_eq!(inv.enchantment_level(&t, "minecraft:riptide"), 1);
+    assert_eq!(inv.enchantment_level(&t, "aqua_affinity"), 0);
+    assert_eq!(t.kind(Version::V26_1), ghast_inventory::ItemKind::Trident);
+}
