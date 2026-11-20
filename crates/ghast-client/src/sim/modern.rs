@@ -2167,6 +2167,10 @@ impl Sim for ModernSim {
         self.player.age += 1;
     }
 
+    fn entities_mut(&mut self) -> Option<&mut ghast_entity::Entities> {
+        self.entities.as_mut().map(|t| t.store_mut())
+    }
+
     fn set_entity_push(&mut self, on: bool) {
         self.entity_push = on;
     }

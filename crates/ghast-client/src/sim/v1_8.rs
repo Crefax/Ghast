@@ -828,6 +828,19 @@ impl Sim for Sim18 {
         });
     }
 
+    /// `World.tickEntities`: the other entities' interpolation steps (what the next tick's
+    /// pick sees).
+    fn tick_entities(&mut self, pose: &mut Pose) {
+        let _ = pose;
+        if let Some(t) = &mut self.entities {
+            t.tick_client();
+        }
+    }
+
+    fn entities_mut(&mut self) -> Option<&mut ghast_entity::Entities> {
+        self.entities.as_mut().map(|t| t.store_mut())
+    }
+
     fn entity_packet_ids(&self) -> Vec<i32> {
         self.entities
             .as_ref()

@@ -493,6 +493,10 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn tick_entities(&mut self, pose: &mut Pose) {
         let _ = pose;
     }
+    /// The entity store, mutable (its clock and event queue); `None` without a tracker.
+    fn entities_mut(&mut self) -> Option<&mut ghast_entity::Entities> {
+        None
+    }
     /// Whether entities push the player (`LivingEntity.pushEntities` and the boat's push on
     /// the client player; default on, as in vanilla). Versions whose client never pushes the
     /// player ignore it.
@@ -1323,6 +1327,9 @@ impl Sim for Box<dyn Sim> {
     }
     fn tick_entities(&mut self, pose: &mut Pose) {
         (**self).tick_entities(pose);
+    }
+    fn entities_mut(&mut self) -> Option<&mut ghast_entity::Entities> {
+        (**self).entities_mut()
     }
     fn set_entity_push(&mut self, on: bool) {
         (**self).set_entity_push(on);

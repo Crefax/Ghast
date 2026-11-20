@@ -25,6 +25,16 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   server positions over the ticks between them). `Event::Hurt { id, attacker }` (26.x with the
   attacking entity). One small heap block per living entity with the view on; `Entity` grew by
   8 bytes (the pointer).
+- **The client picks entities at their drawn position** (`ghast-client`, A8 of the PvP findings):
+  entity tracking (`Interests::ENTITIES` / `ENTITY_TRACKING`) turns the client view on, the
+  engine steps it where vanilla ticks the world's entities and stamps its clock with the tick
+  in which the behaviour sees a packet, and `target_entity()`, `attack()` and the buttons'
+  pick test `Entity::drawn_bounding_box` like vanilla's `updateTargetedEntity` (1.8.9 / 1.12.2
+  / 1.16.5 used the newest server position before, so a fast target could count as hit where
+  the vanilla client, and an anticheat modelling it, saw a miss).
+  `Interests::ENTITY_EVENTS`: the tracker's events as `TickEvents::entities` (spawns, removals,
+  moves, statuses, hurts with our own entity included, velocity, metadata, riding, pickups; at
+  most 4096 per behaviour tick, the rest counted in `entities_dropped`).
 - **Own movement state for behaviours** (`ghast-client`, every version):
   `TickContext::velocity` (the velocity this tick's step starts from, with knockback /
   explosion pushes received since the last step), `horizontal_collision` /

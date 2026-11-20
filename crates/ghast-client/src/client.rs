@@ -322,10 +322,10 @@ impl Client {
     }
 
     /// Keep the look still on a tick that dug or placed when this tick's turn would take the
-    /// crosshair off the clicked block (on by default). Grim's
-    /// RotationPlace re-checks a dig / place with the look of the movement packet that follows
-    /// it; holding the mouse for one tick is what a player does anyway. The held turn
-    /// continues on the next tick the behaviour aims.
+    /// crosshair off the clicked block, or that used an item without a block when the new look
+    /// would pick one (on by default). Grim's RotationPlace re-checks a dig / place / item use
+    /// with the look of the movement packet that follows it; holding the mouse for one tick is
+    /// what a player does anyway. The held turn continues on the next tick the behaviour aims.
     #[must_use]
     pub fn hold_turn_on_action(mut self, on: bool) -> Self {
         self.hold_turn_on_action = on;
@@ -1058,8 +1058,11 @@ pub(crate) fn entity_config(
             // profile name, spectators do not push, and vanilla skips a player spawn whose
             // profile is not in the tab list. Older versions decode no player_info then.
             .with_player_names(!list && caps.client_entity_push)
-            .with_events(false)
+            .with_events(interests.contains(Interests::ENTITY_EVENTS))
             .with_skins(interests.contains(Interests::PLAYER_SKINS))
+            // What the vanilla client draws and picks (interpolated positions) and the
+            // per-entity clocks.
+            .with_client_motion(true)
     })
 }
 

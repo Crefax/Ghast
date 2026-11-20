@@ -1235,6 +1235,14 @@ impl Sim for Sim12 {
         if self.glide_on && !self.glide.rockets.is_empty() {
             self.tick_rockets(pose);
         }
+        // The other entities' interpolation steps (what the next tick's pick sees).
+        if let Some(t) = &mut self.entities {
+            t.tick_client();
+        }
+    }
+
+    fn entities_mut(&mut self) -> Option<&mut ghast_entity::Entities> {
+        self.entities.as_mut().map(|t| t.store_mut())
     }
 
     fn set_entity_push(&mut self, on: bool) {

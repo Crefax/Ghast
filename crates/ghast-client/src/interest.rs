@@ -54,6 +54,10 @@ impl Interests {
     /// are refused ([`ghast_inventory::ClickError::Unpredictable`]). Other versions: no
     /// effect (1.8 / 1.12 clients have them built in; 26.x reads its own).
     pub const RECIPES: Interests = Interests(1 << 7);
+    /// Entity change events ([`crate::TickEvents::entities`]: spawns, removals, statuses and
+    /// hurts, velocity, metadata, riding, pickups) on top of [`Interests::ENTITIES`] or
+    /// [`Interests::ENTITY_TRACKING`]. Switching it restarts the tracker empty.
+    pub const ENTITY_EVENTS: Interests = Interests(1 << 8);
 
     /// Whether every group in `other` is in `self`.
     #[must_use]

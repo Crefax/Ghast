@@ -249,6 +249,8 @@ const MAX_PENDING_TELEPORTS: usize = 64;
 
 /// Most raw packets kept between two behaviour ticks.
 const MAX_PENDING_RAW: usize = 4096;
+/// Most entity events kept between two behaviour ticks.
+const MAX_PENDING_ENTITY_EVENTS: usize = 4096;
 /// Most dialog events kept between two behaviour ticks (the open dialog is always current).
 const MAX_PENDING_DIALOGS: usize = 64;
 
@@ -287,6 +289,14 @@ pub struct TickEvents {
     pub raw: Vec<RawInbound>,
     /// Raw packets dropped because more than 4096 piled up between two behaviour ticks.
     pub raw_dropped: usize,
+    /// Entity changes in arrival order (only with [`Interests::ENTITY_EVENTS`] and entity
+    /// tracking): spawns (a re-spawn with the same id is a `Removed` then a `Spawned`),
+    /// removals, moves, velocity, statuses, [`ghast_entity::Event::Hurt`] (the bot's own
+    /// entity included), metadata, riding, pickups. Kept while the behaviour is on hold, at
+    /// most 4096.
+    pub entities: Vec<ghast_entity::Event>,
+    /// Entity events dropped because more than 4096 piled up between two behaviour ticks.
+    pub entities_dropped: usize,
 }
 
 impl TickEvents {
@@ -305,6 +315,8 @@ impl TickEvents {
         self.block_updates_dropped = 0;
         self.raw.clear();
         self.raw_dropped = 0;
+        self.entities.clear();
+        self.entities_dropped = 0;
     }
 }
 
@@ -443,6 +455,15 @@ pub(crate) struct Engine<S> {
 }
 
 impl Core {
+    /// Stamps the entity store's clock for the packets that arrive before the next tick (the
+    /// tick in which the behaviour sees them).
+    #[inline]
+    fn stamp_entities(&self, sim: &mut (impl Sim + ?Sized)) {
+        if let Some(s) = sim.entities_mut() {
+            s.set_tick(self.tick + 1);
+        }
+    }
+
     fn new(opts: CoreOptions) -> Self {
         let rotation =
             Rotation::new(opts.sensitivity).with_turn_rate(opts.turn_rate.0, opts.turn_rate.1);
@@ -665,14 +686,18 @@ impl PickList {
         };
         let riding = ents.me().and_then(Entity::vehicle);
         let my_root = me.map(root);
-        for e in ents.within([eyes.x, eyes.y, eyes.z], 16.0) {
-            if Some(e.id()) == me {
+        for e in ents.iter() {
+            // The drawn position and box: what vanilla's pick tests (interpolated with the
+            // tracker's client view, else the server position).
+            let p = e.drawn_position();
+            let d = [p[0] - eyes.x, p[1] - eyes.y, p[2] - eyes.z];
+            if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 16.0 * 16.0 {
                 continue;
             }
             let Some(pick_radius) = w.pick_margin(e) else {
                 continue;
             };
-            let Some(b) = e.bounding_box() else {
+            let Some(b) = e.drawn_bounding_box() else {
                 continue;
             };
             // 1.8: the vehicle we sit on; 1.9+: anything with our root vehicle.
@@ -686,7 +711,6 @@ impl PickList {
                 pick_radius,
                 same_root_vehicle,
             });
-            let p = e.position();
             self.ids.push((e.id(), Vec3::new(p[0], p[1], p[2])));
         }
     }
@@ -1406,6 +1430,7 @@ impl<S: Sim> Engine<S> {
                 self.sim.tick_unloaded();
             }
             self.sim.tick_entities(&mut c.pose);
+            c.stamp_entities(&mut self.sim);
             return;
         }
 
@@ -1441,6 +1466,13 @@ impl<S: Sim> Engine<S> {
                 std::mem::swap(&mut c.dialogs, &mut c.dialogs_pending);
             }
             c.current.inventory = c.inv.drain_events();
+            if let Some(s) = self.sim.entities_mut() {
+                let ev = s.drain_events();
+                let n = ev.len();
+                let skip = n.saturating_sub(MAX_PENDING_ENTITY_EVENTS);
+                c.current.entities.extend(ev.skip(skip));
+                c.current.entities_dropped = skip;
+            }
             c.current.block_updates_dropped =
                 self.sim.drain_block_updates(&mut c.current.block_updates);
             if c.current.inventory.player_changed {
@@ -1678,6 +1710,7 @@ impl<S: Sim> Engine<S> {
         // player (the first entity in the client's tick list): the other entities' ticks see
         // the moved player and push it (1.12.2, 26.1+).
         self.sim.tick_entities(&mut c.pose);
+        c.stamp_entities(&mut self.sim);
         c.hands.count_use_tick();
         for o in &c.out[first..] {
             let Outbound::Move(m) = o else { continue };
@@ -2358,7 +2391,10 @@ impl TickContext<'_> {
         }
     }
 
-    /// Swings the arm (`arm_animation`).
+    /// Swings the arm (`arm_animation`) and nothing else. Vanilla's left click on air also
+    /// starts the 10-tick miss delay outside creative (no click until it ran out or the button
+    /// is released; 1.9+ resets the attack cooldown too): the left button of
+    /// [`TickContext::set_buttons`] models that, this swing does not.
     pub fn swing(&mut self) {
         self.core.out.push(Outbound::Swing);
     }
@@ -2623,6 +2659,9 @@ impl TickContext<'_> {
     /// Mouse buttons from now on (kept until changed; released by a join, a respawn or an
     /// open window). Left held mines what the crosshair is on, right held uses / places
     /// (vanilla's key processing, after the behaviour and before the movement packet).
+    /// A left press on air (or on nothing in reach) starts vanilla's 10-tick miss delay
+    /// outside creative: no attack or dig until it ran out, and releasing the button ends it.
+    /// A new right press needs a released tick before it; held, right re-uses every 4 ticks.
     ///
     /// **Entities are invisible without entity tracking** ([`Interests::ENTITIES`] or
     /// [`Interests::ENTITY_TRACKING`]): the crosshair then sees blocks only (a player or mob in
@@ -2785,6 +2824,14 @@ impl TickContext<'_> {
     /// Attacks `entity` (`use_entity` attack and the arm swing in the version's order; 1.16
     /// resets the attack cooldown). Refused (`false`, nothing sent) while dead and unless the
     /// sent crosshair is on that entity.
+    ///
+    /// Like vanilla's `PlayerEntity.attack` (the left button's attacks too), a hit the client
+    /// counts as landed — another player, a boat, a minecart, an end crystal (never a mob) —
+    /// with knockback slows the bot before this tick's movement: velocity x / z × 0.6 and the
+    /// sprint ends (it starts again in the same step while the sprint key is held, without a
+    /// packet). Knockback is the held item's Knockback level (1.8 – 1.16.5; the 26.x client
+    /// has none) plus one for a sprint attack, which 1.9+ grants only at an attack strength
+    /// above 0.9. Grim predicts the same slow-down.
     pub fn attack(&mut self, entity: i32) -> bool {
         if self.core.dead || self.target_entity().is_none_or(|e| e.id != entity) {
             return false;
@@ -3188,6 +3235,19 @@ mod tests_actions;
 ))]
 #[path = "engine_tests_combat.rs"]
 mod tests_combat;
+
+/// The client view of other entities: drawn-box picks, entity events, clocks
+/// (`engine_tests_entities.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
+#[path = "engine_tests_entities.rs"]
+mod tests_entities;
 
 /// Mount screen rules read off the tracked entity (`engine_tests_mounts.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
