@@ -505,8 +505,6 @@ pub(crate) struct Core {
     forced_look: Option<(f32, f32)>,
     /// 1.9+: our `attack_speed` attribute as the server synced it (the attack strength).
     attack_speed: f64,
-    /// The last movement step's (horizontal, vertical) collision.
-    collisions: (bool, bool),
 }
 
 /// Behaviour bookkeeping of the engine.
@@ -583,7 +581,6 @@ impl Core {
             last_hurt: None,
             teams: None,
             attack_speed: 4.0,
-            collisions: (false, false),
             aqua_affinity: false,
             broken_now: Vec::new(),
             pick: PickList::default(),
@@ -1888,7 +1885,6 @@ impl<S: Sim> Engine<S> {
         let using = c.hands.using_item();
         self.sim
             .step(&mut c.pose, controls, using, c.entity_id, &mut c.out);
-        c.collisions = self.sim.collisions();
         // ClientLevel.tickEntities: after this tick's pick and key handling, and after the
         // player (the first entity in the client's tick list): the other entities' ticks see
         // the moved player and push it (1.12.2, 26.1+).
@@ -2004,14 +2000,14 @@ impl TickView<'_> {
     /// This tick's movement step hit a wall (see [`TickContext::horizontal_collision`]).
     #[must_use]
     pub fn horizontal_collision(&self) -> bool {
-        self.core.collisions.0
+        self.world.collisions().0
     }
 
     /// This tick's movement step was cut vertically (see
     /// [`TickContext::vertical_collision`]).
     #[must_use]
     pub fn vertical_collision(&self) -> bool {
-        self.core.collisions.1
+        self.world.collisions().1
     }
 
     /// The world.
@@ -2301,6 +2297,22 @@ fn predict_planting(c: &mut Core, world: &dyn WorldView, first: usize) {
 /// full cube, from the sent and the current feet, standing or sneaking eyes, with the old or the
 /// new yaw) — the post-look check that keeps Grim's RotationPlace check satisfied.
 fn post_look_ok(c: &Core, world: &(impl Sim + ?Sized), yaw: f32, pitch: f32) -> bool {
+    // Most ticks have no action: nothing to hold for.
+    let (mut action, mut use_item) = (false, false);
+    for o in &c.out {
+        match o {
+            Outbound::Dig {
+                status: crate::common::DigStatus::Start | crate::common::DigStatus::Finish,
+                ..
+            }
+            | Outbound::Place { .. } => action = true,
+            Outbound::UseItem { .. } => use_item = true,
+            _ => {}
+        }
+    }
+    if !action && !use_item {
+        return true;
+    }
     let looks = [
         hands::look_vector(c.pose.yaw, pitch),
         hands::look_vector(yaw, pitch),
@@ -2308,9 +2320,7 @@ fn post_look_ok(c: &Core, world: &(impl Sim + ?Sized), yaw: f32, pitch: f32) -> 
     let heights = [c.opts.caps.eye_height, c.opts.caps.sneak_eye_height];
     // A plain item use (no block) must not pick a block with the new look either: Grim
     // re-checks it like a place.
-    if (yaw, pitch) != (c.pose.yaw, c.pose.pitch)
-        && c.out.iter().any(|o| matches!(o, Outbound::UseItem { .. }))
-    {
+    if use_item && (yaw, pitch) != (c.pose.yaw, c.pose.pitch) {
         let rotations = [(c.pose.yaw, pitch), (yaw, pitch)];
         let picks = [c.sent.pos, c.pose.pos].iter().any(|o| {
             heights.iter().any(|h| {
@@ -2424,13 +2434,13 @@ impl TickContext<'_> {
     /// collisions keep it).
     #[must_use]
     pub fn horizontal_collision(&self) -> bool {
-        self.core.collisions.0
+        self.world.collisions().0
     }
 
     /// The last movement step was cut vertically (`verticalCollision`: floor or ceiling).
     #[must_use]
     pub fn vertical_collision(&self) -> bool {
-        self.core.collisions.1
+        self.world.collisions().1
     }
 
     /// The flags byte (entity data index 0) the server last sent for our entity: 0x01 on

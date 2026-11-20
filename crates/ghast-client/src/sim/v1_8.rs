@@ -430,6 +430,13 @@ impl Sim18 {
 }
 
 impl WorldView for Sim18 {
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
+    }
+
     fn column(&self, chunk_x: i32, chunk_z: i32) -> Option<&ghast_world::Column> {
         self.world.column(chunk_x, chunk_z)
     }
@@ -818,13 +825,6 @@ impl Sim for Sim18 {
     fn velocity_now(&self) -> Vec3 {
         let v = self.player.vel;
         Vec3::new(v[0], v[1], v[2])
-    }
-
-    fn collisions(&self) -> (bool, bool) {
-        (
-            self.player.horizontal_collision,
-            self.player.vertical_collision,
-        )
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {

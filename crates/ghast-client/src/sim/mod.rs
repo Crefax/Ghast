@@ -133,6 +133,12 @@ pub trait WorldView {
         None
     }
 
+    /// The player's last movement step: `(horizontalCollision, verticalCollision)` (`false`
+    /// for a view without a player).
+    fn collisions(&self) -> (bool, bool) {
+        (false, false)
+    }
+
     /// The block the crosshair is on from `eyes` with the look `(yaw, pitch)` (`look` is its
     /// unit vector, [`crate::hands::look_vector`]) within `reach`, by the version's ray rules.
     /// `None` when nothing is hit.
@@ -580,10 +586,6 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     /// applied since the last step.
     fn velocity_now(&self) -> Vec3 {
         Vec3::default()
-    }
-    /// The last movement step's `(horizontalCollision, verticalCollision)`.
-    fn collisions(&self) -> (bool, bool) {
-        (false, false)
     }
 }
 
@@ -1136,6 +1138,9 @@ impl WorldView for Box<dyn Sim> {
     fn loaded_columns(&self) -> usize {
         (**self).loaded_columns()
     }
+    fn collisions(&self) -> (bool, bool) {
+        (**self).collisions()
+    }
 
     fn block_query(&self, x: i32, y: i32, z: i32) -> Option<BlockQuery> {
         (**self).block_query(x, y, z)
@@ -1384,9 +1389,6 @@ impl Sim for Box<dyn Sim> {
     }
     fn velocity_now(&self) -> Vec3 {
         (**self).velocity_now()
-    }
-    fn collisions(&self) -> (bool, bool) {
-        (**self).collisions()
     }
 }
 

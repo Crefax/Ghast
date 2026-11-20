@@ -1385,6 +1385,13 @@ fn outline_box(s: BlockState) -> Option<[f64; 6]> {
 }
 
 impl WorldView for ModernSim {
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
+    }
+
     fn is_column_loaded(&self, chunk_x: i32, chunk_z: i32) -> bool {
         self.world.is_column_loaded(chunk_x, chunk_z)
     }
@@ -2042,13 +2049,6 @@ impl Sim for ModernSim {
     fn velocity_now(&self) -> Vec3 {
         let v = self.player.vel;
         Vec3::new(v[0], v[1], v[2])
-    }
-
-    fn collisions(&self) -> (bool, bool) {
-        (
-            self.player.horizontal_collision,
-            self.player.vertical_collision,
-        )
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
