@@ -58,6 +58,8 @@ pub(crate) struct Sim16 {
     server_flags: Option<u8>,
     /// The absorption the server last sent for our entity (player entity data; 0 before any).
     absorption: f32,
+    /// `absorption` changed since the engine last took it.
+    absorption_dirty: bool,
 }
 
 /// A boat the player drove and left: the client moved it, the server sends no move for it, so
@@ -427,6 +429,7 @@ impl Sim16 {
             parked: None,
             server_flags: None,
             absorption: 0.0,
+            absorption_dirty: false,
         }
     }
 
@@ -1243,7 +1246,10 @@ impl Sim16 {
             match (e.key, &e.value) {
                 (7, V::Byte(b)) => self.ext.apply_living_flags(*b as u8),
                 // PlayerEntity.ABSORPTION_AMOUNT (its first entry: 14).
-                (14, V::Float(a)) => self.absorption = *a,
+                (14, V::Float(a)) => {
+                    self.absorption = *a;
+                    self.absorption_dirty = true;
+                }
                 // The shared flags (sprinting, swimming, fall flying; sneaking is the input's:
                 // `ClientPlayerEntity.isSneaking`).
                 (0, V::Byte(b)) => {
@@ -1670,6 +1676,7 @@ impl Sim for Sim16 {
         self.rt.using = None;
         self.rt.held.hands.set([(0, false, -1); 2]);
         self.server_flags = None;
+        self.absorption_dirty |= self.absorption != 0.0;
         self.absorption = 0.0;
         self.update_slow();
     }
@@ -1825,8 +1832,9 @@ impl Sim for Sim16 {
         self.server_flags
     }
 
-    fn absorption(&self) -> f32 {
-        self.absorption
+    #[inline]
+    fn take_absorption(&mut self) -> Option<f32> {
+        std::mem::take(&mut self.absorption_dirty).then_some(self.absorption)
     }
 
     fn velocity_now(&self) -> Vec3 {

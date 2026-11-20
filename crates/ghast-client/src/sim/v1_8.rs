@@ -51,6 +51,8 @@ pub(crate) struct Sim18 {
     server_flags: Option<u8>,
     /// The absorption the server last sent for our entity (player entity data; 0 before any).
     absorption: f32,
+    /// `absorption` changed since the engine last took it.
+    absorption_dirty: bool,
     /// Test hook: the JVM's `Math.sin` / `Math.cos` of the next boat tick (argument bits, sine,
     /// cosine), from an oracle record.
     #[cfg(test)]
@@ -154,6 +156,7 @@ impl Sim18 {
             own_id: None,
             server_flags: None,
             absorption: 0.0,
+            absorption_dirty: false,
             #[cfg(test)]
             trig: Vec::new(),
         }
@@ -202,6 +205,7 @@ impl Sim18 {
             // PlayerEntity.setAbsorption: index 17.
             if let (17, V::Float(a)) = (e.key, &e.value) {
                 self.absorption = *a;
+                self.absorption_dirty = true;
             }
             if let (0, V::Byte(b)) = (e.key, &e.value) {
                 let flags = *b as u8;
@@ -591,6 +595,7 @@ impl Sim for Sim18 {
         self.player.food_level = food;
         self.ride = None;
         self.server_flags = None;
+        self.absorption_dirty |= self.absorption != 0.0;
         self.absorption = 0.0;
     }
 
@@ -805,8 +810,9 @@ impl Sim for Sim18 {
         self.server_flags
     }
 
-    fn absorption(&self) -> f32 {
-        self.absorption
+    #[inline]
+    fn take_absorption(&mut self) -> Option<f32> {
+        std::mem::take(&mut self.absorption_dirty).then_some(self.absorption)
     }
 
     fn velocity_now(&self) -> Vec3 {

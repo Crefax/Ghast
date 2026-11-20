@@ -121,7 +121,7 @@ fn pick_follows_the_drawn_position() {
         let mut tick = |e: &mut Engine<Box<dyn Sim>>, picks: &mut Vec<bool>| {
             let mut b = Script(|ctx: &mut TickContext<'_>| {
                 picks.push(ctx.target_entity().is_some_and(|h| h.id == 50));
-                events.extend(ctx.events().entities.iter().copied());
+                events.extend(ctx.events().entities().iter().copied());
                 if let Some(z) = ctx.entities().and_then(|t| t.get(50)) {
                     ticks.push((ctx.tick(), z.spawn_tick(), z.position_tick()));
                 }
@@ -176,7 +176,7 @@ fn entity_events_need_the_interest() {
         .world_packet(&zombie(v, 50, [6.5, 64.0, 8.5]))
         .unwrap();
     let mut n = usize::MAX;
-    let mut b = Script(|ctx: &mut TickContext<'_>| n = ctx.events().entities.len());
+    let mut b = Script(|ctx: &mut TickContext<'_>| n = ctx.events().entities().len());
     e.tick(&mut b, t0);
     assert_eq!(n, 0);
 }

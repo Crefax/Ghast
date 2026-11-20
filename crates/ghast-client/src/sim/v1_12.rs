@@ -85,6 +85,8 @@ pub(crate) struct Sim12 {
     server_flags: Option<u8>,
     /// The absorption the server last sent for our entity (player entity data; 0 before any).
     absorption: f32,
+    /// `absorption` changed since the engine last took it.
+    absorption_dirty: bool,
 }
 
 /// The vehicle the player rides: its entity id and its client-side state.
@@ -215,6 +217,7 @@ impl Sim12 {
             reply: None,
             server_flags: None,
             absorption: 0.0,
+            absorption_dirty: false,
         }
     }
 
@@ -347,7 +350,10 @@ impl Sim12 {
                             }
                         }
                         // PlayerEntity's absorption amount (its first entry: 11).
-                        (11, V::Float(a)) if own => self.absorption = *a,
+                        (11, V::Float(a)) if own => {
+                            self.absorption = *a;
+                            self.absorption_dirty = true;
+                        }
                         // A rocket's shooter (an entity id, 0 for none).
                         (7, V::VarInt(v)) if !own => {
                             if let Some(k) = pending {
@@ -955,6 +961,7 @@ impl Sim for Sim12 {
         self.glide.pending.clear();
         self.update_glide();
         self.server_flags = None;
+        self.absorption_dirty |= self.absorption != 0.0;
         self.absorption = 0.0;
     }
 
@@ -1123,8 +1130,9 @@ impl Sim for Sim12 {
         self.server_flags
     }
 
-    fn absorption(&self) -> f32 {
-        self.absorption
+    #[inline]
+    fn take_absorption(&mut self) -> Option<f32> {
+        std::mem::take(&mut self.absorption_dirty).then_some(self.absorption)
     }
 
     fn velocity_now(&self) -> Vec3 {

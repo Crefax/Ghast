@@ -153,7 +153,7 @@ fn own_effects_with_durations_and_events() {
             seen = (
                 ctx.tick(),
                 ctx.effects().to_vec(),
-                ctx.events().effects.clone(),
+                ctx.events().effects().to_vec(),
             )
         });
         let (t, effects, events) = seen.clone();
@@ -171,7 +171,7 @@ fn own_effects_with_durations_and_events() {
             seen = (
                 ctx.tick(),
                 ctx.effects().to_vec(),
-                ctx.events().effects.clone(),
+                ctx.events().effects().to_vec(),
             )
         });
         assert_eq!(seen.1.len(), 1, "{v:?}");
@@ -179,7 +179,7 @@ fn own_effects_with_durations_and_events() {
         assert!(matches!(seen.2[..], [EffectEvent::Applied(_)]), "{v:?}");
         feed(&mut e, &remove_effect(v));
         tick_with(&mut e, |ctx| {
-            seen = (0, ctx.effects().to_vec(), ctx.events().effects.clone())
+            seen = (0, ctx.effects().to_vec(), ctx.events().effects().to_vec())
         });
         assert!(seen.1.is_empty(), "{v:?}");
         assert_eq!(seen.2, [EffectEvent::Removed(1)], "{v:?}");
@@ -193,9 +193,9 @@ fn own_effects_with_durations_and_events() {
         });
         assert!(e.core.active_effects.is_empty(), "{v:?}");
         assert!(
-            matches!(e.core.pending.effects[..], [EffectEvent::Applied(a), EffectEvent::Cleared] if a.remaining(1 << 40).is_none()),
+            matches!(e.core.pending.effects()[..], [EffectEvent::Applied(a), EffectEvent::Cleared] if a.remaining(1 << 40).is_none()),
             "{v:?} {:?}",
-            e.core.pending.effects
+            e.core.pending.effects()
         );
     }
 }
@@ -311,9 +311,9 @@ fn spawn_point_hurt_and_death() {
             seen = Some((
                 ctx.tick(),
                 ctx.spawn_position().cloned(),
-                ctx.events().hurt.clone(),
+                ctx.events().hurt().to_vec(),
                 ctx.last_hurt_tick(),
-                ctx.events().deaths.clone(),
+                ctx.events().deaths().to_vec(),
             ))
         });
         let (t, spawn, hurt, last_hurt, deaths) = seen.unwrap();

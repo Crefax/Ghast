@@ -572,9 +572,9 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
         None
     }
     /// The absorption amount the server last sent for our entity (player entity data; 0
-    /// before any).
-    fn absorption(&self) -> f32 {
-        0.0
+    /// before any), once after each change (`None` while unchanged).
+    fn take_absorption(&mut self) -> Option<f32> {
+        None
     }
     /// The player's velocity now (blocks per tick), with server velocity / explosion pushes
     /// applied since the last step.
@@ -1375,8 +1375,8 @@ impl Sim for Box<dyn Sim> {
     fn server_flags(&self) -> Option<u8> {
         (**self).server_flags()
     }
-    fn absorption(&self) -> f32 {
-        (**self).absorption()
+    fn take_absorption(&mut self) -> Option<f32> {
+        (**self).take_absorption()
     }
     fn velocity_now(&self) -> Vec3 {
         (**self).velocity_now()

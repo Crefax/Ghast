@@ -276,16 +276,6 @@ pub struct TickEvents {
     pub health_changed: bool,
     /// The game mode changed.
     pub game_mode_changed: bool,
-    /// Our status effects: every `entity_effect` / `remove_entity_effect` for us in arrival
-    /// order (a re-application with the same values is an `Applied` too), and `Cleared` when a
-    /// new player entity drops them (join, respawn). See [`TickContext::effects`].
-    pub effects: Vec<crate::common::EffectEvent>,
-    /// We were hurt (1.8 – 1.16.5 the hurt entity statuses for our entity, 26.x its
-    /// `damage_event`), in arrival order.
-    pub hurt: Vec<crate::common::Hurt>,
-    /// Player deaths the server announced (ours: it sends them only to the dead player), with
-    /// the killer where the version sends one.
-    pub deaths: Vec<crate::common::Death>,
     /// Inventory / window changes and click results (ghast-inventory).
     pub inventory: ghast_inventory::Events,
     /// Block changes in arrival order (only with [`Interests::BLOCK_UPDATES`]): position and
@@ -299,14 +289,9 @@ pub struct TickEvents {
     pub raw: Vec<RawInbound>,
     /// Raw packets dropped because more than 4096 piled up between two behaviour ticks.
     pub raw_dropped: usize,
-    /// Entity changes in arrival order (only with [`Interests::ENTITY_EVENTS`] and entity
-    /// tracking): spawns (a re-spawn with the same id is a `Removed` then a `Spawned`),
-    /// removals, moves, velocity, statuses, [`ghast_entity::Event::Hurt`] (the bot's own
-    /// entity included), metadata, riding, pickups. Kept while the behaviour is on hold, at
-    /// most 4096.
-    pub entities: Vec<ghast_entity::Event>,
-    /// Entity events dropped because more than 4096 piled up between two behaviour ticks.
-    pub entities_dropped: usize,
+    /// The rarely filled lists (effects, hurts, deaths, entity events), behind one pointer: a
+    /// tick moves and clears them only when something arrived.
+    more: Box<MoreEvents>,
 }
 
 impl TickEvents {
@@ -320,17 +305,72 @@ impl TickEvents {
         self.died = false;
         self.health_changed = false;
         self.game_mode_changed = false;
-        self.effects.clear();
-        self.hurt.clear();
-        self.deaths.clear();
+        if self.more.any {
+            *self.more = MoreEvents::default();
+        }
         self.inventory = ghast_inventory::Events::default();
         self.block_updates.clear();
         self.block_updates_dropped = 0;
         self.raw.clear();
         self.raw_dropped = 0;
-        self.entities.clear();
-        self.entities_dropped = 0;
     }
+
+    /// The extra lists for writing (marks them non-empty).
+    #[inline]
+    fn more(&mut self) -> &mut MoreEvents {
+        self.more.any = true;
+        &mut self.more
+    }
+
+    /// Our status effects: every `entity_effect` / `remove_entity_effect` for us in arrival
+    /// order (a re-application with the same values is an `Applied` too), and `Cleared` when a
+    /// new player entity drops them (join, respawn). See [`TickContext::effects`].
+    #[must_use]
+    pub fn effects(&self) -> &[crate::common::EffectEvent] {
+        &self.more.effects
+    }
+
+    /// We were hurt (1.8 – 1.16.5 the hurt entity statuses for our entity, 26.x its
+    /// `damage_event`), in arrival order.
+    #[must_use]
+    pub fn hurt(&self) -> &[crate::common::Hurt] {
+        &self.more.hurt
+    }
+
+    /// Player deaths the server announced (ours: it sends them only to the dead player), with
+    /// the killer where the version sends one.
+    #[must_use]
+    pub fn deaths(&self) -> &[crate::common::Death] {
+        &self.more.deaths
+    }
+
+    /// Entity changes in arrival order (only with [`Interests::ENTITY_EVENTS`] and entity
+    /// tracking): spawns (a re-spawn with the same id is a `Removed` then a `Spawned`),
+    /// removals, moves, velocity, statuses, [`ghast_entity::Event::Hurt`] (the bot's own
+    /// entity included), metadata, riding, pickups. Kept while the behaviour is on hold, at
+    /// most 4096.
+    #[must_use]
+    pub fn entities(&self) -> &[ghast_entity::Event] {
+        &self.more.entities
+    }
+
+    /// Entity events dropped because more than 4096 piled up between two behaviour ticks.
+    #[must_use]
+    pub fn entities_dropped(&self) -> usize {
+        self.more.entities_dropped
+    }
+}
+
+/// The rarely filled event lists of [`TickEvents`].
+#[derive(Debug, Clone, Default, PartialEq)]
+struct MoreEvents {
+    /// Something was written since the last clear.
+    any: bool,
+    effects: Vec<crate::common::EffectEvent>,
+    hurt: Vec<crate::common::Hurt>,
+    deaths: Vec<crate::common::Death>,
+    entities: Vec<ghast_entity::Event>,
+    entities_dropped: usize,
 }
 
 /// Tunables of the core.
@@ -576,6 +616,7 @@ impl Core {
         if !self.active_effects.is_empty() {
             self.active_effects.clear();
             self.pending
+                .more()
                 .effects
                 .push(crate::common::EffectEvent::Cleared);
         }
@@ -1192,7 +1233,7 @@ impl<S: Sim> Engine<S> {
                     // 1.16 immediate respawn: the client respawns without a death screen.
                     c.out.push(Outbound::Respawn);
                 }
-                c.pending.deaths.push(d);
+                c.pending.more().deaths.push(d);
             }
             Inbound::SpawnPoint(p) => c.spawn_point = Some(p),
             Inbound::Teams(p) => {
@@ -1205,7 +1246,7 @@ impl<S: Sim> Engine<S> {
             Inbound::Damage(h) => {
                 if h.entity_id == c.entity_id {
                     c.last_hurt = Some(c.tick + 1);
-                    c.pending.hurt.push(h);
+                    c.pending.more().hurt.push(h);
                 }
             }
             Inbound::EffectApplied(e) => {
@@ -1224,6 +1265,7 @@ impl<S: Sim> Engine<S> {
                         None => c.active_effects.push(a),
                     }
                     c.pending
+                        .more()
                         .effects
                         .push(crate::common::EffectEvent::Applied(a));
                 }
@@ -1320,6 +1362,7 @@ impl<S: Sim> Engine<S> {
                     sim.status_effects(&c.effects);
                     c.active_effects.retain(|x| x.id != id);
                     c.pending
+                        .more()
                         .effects
                         .push(crate::common::EffectEvent::Removed(id));
                 }
@@ -1334,6 +1377,7 @@ impl<S: Sim> Engine<S> {
                 if entity_id == c.entity_id && matches!(status, 2 | 33 | 36 | 37 | 44) {
                     c.last_hurt = Some(c.tick + 1);
                     c.pending
+                        .more()
                         .hurt
                         .push(crate::common::Hurt::from_status(entity_id, status));
                 }
@@ -1561,10 +1605,9 @@ impl<S: Sim> Engine<S> {
         } else if !self.state.failed && !self.state.done {
             std::mem::swap(&mut c.pending, &mut c.current);
             c.pending.clear();
-            let absorption = self.sim.absorption();
-            if absorption.to_bits() != c.health.absorption.to_bits() {
-                c.health.absorption = absorption;
-                c.current.health_changed = true;
+            if let Some(a) = self.sim.take_absorption() {
+                c.current.health_changed |= a.to_bits() != c.health.absorption.to_bits();
+                c.health.absorption = a;
             }
             if !c.dialogs.is_empty() || !c.dialogs_pending.is_empty() {
                 c.dialogs.clear();
@@ -1574,9 +1617,12 @@ impl<S: Sim> Engine<S> {
             if let Some(s) = self.sim.entities_mut() {
                 let ev = s.drain_events();
                 let n = ev.len();
-                let skip = n.saturating_sub(MAX_PENDING_ENTITY_EVENTS);
-                c.current.entities.extend(ev.skip(skip));
-                c.current.entities_dropped = skip;
+                if n > 0 {
+                    let skip = n.saturating_sub(MAX_PENDING_ENTITY_EVENTS);
+                    let m = c.current.more();
+                    m.entities.extend(ev.skip(skip));
+                    m.entities_dropped = skip;
+                }
             }
             c.current.block_updates_dropped =
                 self.sim.drain_block_updates(&mut c.current.block_updates);

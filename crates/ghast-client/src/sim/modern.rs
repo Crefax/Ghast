@@ -89,6 +89,8 @@ pub(crate) struct ModernSim {
     server_flags: Option<u8>,
     /// The absorption the server last sent for our entity (player entity data; 0 before any).
     absorption: f32,
+    /// `absorption` changed since the engine last took it.
+    absorption_dirty: bool,
 }
 
 /// A vehicle the player rides.
@@ -510,7 +512,10 @@ impl ModernSim {
                             self.ext_active |= self.ext.fall_flying;
                         }
                         // Player.DATA_PLAYER_ABSORPTION_ID (after Avatar's two entries).
-                        (V::Float(a), 17) if id == self.own.id => self.absorption = *a,
+                        (V::Float(a), 17) if id == self.own.id => {
+                            self.absorption = *a;
+                            self.absorption_dirty = true;
+                        }
                         (V::Byte(b), DATA_LIVING_FLAGS) if id == self.own.id => {
                             self.ext.apply_living_flags(*b as u8);
                             self.ext_active |= self.ext.spin_attack;
@@ -1001,6 +1006,7 @@ impl ModernSim {
             snapped: false,
             server_flags: None,
             absorption: 0.0,
+            absorption_dirty: false,
         }
     }
 
@@ -1783,6 +1789,7 @@ impl Sim for ModernSim {
         // handleLogin / handleRespawn: wait for the level again.
         self.gate = modern::LoadGate::waiting();
         self.server_flags = None;
+        self.absorption_dirty |= self.absorption != 0.0;
         self.absorption = 0.0;
         self.sync_level();
     }
@@ -1807,6 +1814,7 @@ impl Sim for ModernSim {
             self.player.sent.input = old.sent.input;
             self.player.sent.sprinting = old.sent.sprinting;
             (self.server_flags, self.absorption) = old_flags;
+            self.absorption_dirty = true;
         }
     }
 
@@ -2026,8 +2034,9 @@ impl Sim for ModernSim {
         self.server_flags
     }
 
-    fn absorption(&self) -> f32 {
-        self.absorption
+    #[inline]
+    fn take_absorption(&mut self) -> Option<f32> {
+        std::mem::take(&mut self.absorption_dirty).then_some(self.absorption)
     }
 
     fn velocity_now(&self) -> Vec3 {

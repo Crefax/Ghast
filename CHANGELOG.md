@@ -38,7 +38,10 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   the vanilla client, and an anticheat modelling it, saw a miss).
   `Interests::ENTITY_EVENTS`: the tracker's events as `TickEvents::entities` (spawns, removals,
   moves, statuses, hurts with our own entity included, velocity, metadata, riding, pickups; at
-  most 4096 per behaviour tick, the rest counted in `entities_dropped`).
+  most 4096 per behaviour tick, the rest counted in `entities_dropped`). These and the other
+  new event lists (`effects`, `hurt`, `deaths`) are methods of `TickEvents` over one boxed
+  block that a tick touches only when something arrived: a bot without entity tracking runs
+  the engine bench at the 0.4.7 instruction count.
 - **Own status effects, absorption, spawn point, hurts and deaths** (`ghast-client`, every
   version, without entity tracking): `TickContext::effects` / `TickView::effects` give
   `ActiveEffect`s (id in the classic numbering, amplifier, duration, flags, the tick it arrived;
