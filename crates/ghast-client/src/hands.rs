@@ -1408,6 +1408,57 @@ mod tests {
             .collect()
     }
 
+    /// The miss delay: a left press on air outside creative (`hasLimitedAttackSpeed`) holds
+    /// the button off the block for 10 ticks (the counter counts down at the start of the
+    /// tick); creative digs at once. 1.8 and 1.9+ alike; releasing the button clears it.
+    #[test]
+    fn air_swing_miss_delay_outside_creative() {
+        let hit = Some(BlockHit {
+            pos: BlockPos::new(0, 0, 0),
+            face: Face::Up,
+            hit: Vec3::new(0.5, 1.0, 0.5),
+            distance: 1.6,
+        });
+        for modern in [false, true] {
+            for creative in [false, true] {
+                let mut h = Hands::default();
+                let mut first_dig = None;
+                for t in 0..20u32 {
+                    let (mut out, mut broken, mut placed) = (Vec::new(), Vec::new(), false);
+                    let mut io = HandsIo {
+                        blocks: &io_blocks,
+                        target: if t == 0 { None } else { hit },
+                        held: None,
+                        held_stack: None,
+                        food: 20,
+                        modern,
+                        off_held: None,
+                        off_stack: None,
+                        entity: None,
+                        factors: DigFactors::default(),
+                        sneaking: false,
+                        out: &mut out,
+                        broken: &mut broken,
+                        placed: &mut placed,
+                        spectator: false,
+                        spectator_swings: true,
+                        creative,
+                        place_blocked: &|_, _, _| false,
+                    };
+                    h.tick(true, false, &mut io);
+                    if t == 0 {
+                        assert_eq!(kinds(&out), ["swing"], "{modern} {creative}");
+                    }
+                    if first_dig.is_none() && kinds(&out).contains(&"dig") {
+                        first_dig = Some(t);
+                    }
+                }
+                let want = if creative { 1 } else { 10 };
+                assert_eq!(first_dig, Some(want), "modern {modern} creative {creative}");
+            }
+        }
+    }
+
     /// 1.16 right click: empty hands try both hands on the block; a block item places with
     /// the main hand and swings.
     #[test]
