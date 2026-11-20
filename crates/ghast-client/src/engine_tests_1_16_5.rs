@@ -1467,12 +1467,12 @@ fn riptide_rain_and_spin_flag_1_16_5() {
             "biome {biome}, overworld {overworld}, rain {rain}"
         );
     }
-    // A riptide trident in a hand: our entity data joins the packet filter; the spin flag
-    // arrives with it.
+    // A riptide trident in a hand: the spin flag arrives with our entity data (always in the
+    // packet filter: the shared flags).
     let mut sim = Sim16::new();
     sim.world_packet(&login_packet("minecraft:overworld", false))
         .unwrap();
-    assert!(!sim.world_packet_ids().contains(&cb::id::ENTITY_METADATA));
+    assert!(sim.world_packet_ids().contains(&cb::id::ENTITY_METADATA));
     let _ = usable(&sim);
     assert!(sim.take_filter_dirty());
     assert!(!sim.take_filter_dirty());

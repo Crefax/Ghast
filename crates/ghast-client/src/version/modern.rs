@@ -403,6 +403,8 @@ const MOVEMENT_ATTRIBUTES: &[&str] = &[
     "mining_efficiency",
     "movement_efficiency",
     "movement_speed",
+    // The attack strength (1.9+ cooldown) of the client's attack.
+    "attack_speed",
     "safe_fall_distance",
     "scale",
     "sneaking_speed",

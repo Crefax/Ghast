@@ -729,6 +729,16 @@ pub enum Inbound {
         /// Modifiers `(uuid, amount, operation)` in packet order.
         modifiers: Vec<(Uuid, f64, i8)>,
     },
+    /// The attributes of an entity the core reads (1.9 – 1.16 entity properties packet):
+    /// base and modifiers `(uuid, amount, operation)` in packet order, when the packet has them.
+    LegacyAttributes {
+        /// The entity.
+        entity_id: i32,
+        /// `generic.movement_speed`.
+        movement_speed: Option<LegacyAttribute>,
+        /// `generic.attack_speed`.
+        attack_speed: Option<LegacyAttribute>,
+    },
     /// A status effect was applied to an entity.
     Effect {
         /// The entity.
@@ -814,6 +824,10 @@ pub enum Inbound {
     /// The server closes the open dialog (`clear_dialog`).
     ClearDialog,
 }
+
+/// One attribute of a 1.9 – 1.16 entity properties packet: base and modifiers
+/// `(uuid, amount, operation)` in packet order.
+pub type LegacyAttribute = (f64, Vec<(Uuid, f64, i8)>);
 
 /// One entry of a 1.20.5+ attributes packet.
 #[derive(Debug, Clone, PartialEq)]

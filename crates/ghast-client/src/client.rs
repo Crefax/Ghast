@@ -110,6 +110,8 @@ pub struct Client {
     force_step_position: crate::sim::ForceStepPosition,
     hold_turn_on_action: bool,
     entity_push: bool,
+    turn_rate: (f64, f64),
+    gui_releases_keys: bool,
     world_config: Option<ghast_world::WorldConfig>,
     shared_chunks: Option<ghast_world::SharedChunks>,
     accept_required_packs: bool,
@@ -142,6 +144,11 @@ impl Client {
             force_step_position: crate::sim::ForceStepPosition::Off,
             hold_turn_on_action: true,
             entity_push: true,
+            turn_rate: (
+                crate::rotation::Rotation::MAX_YAW_PER_TICK,
+                crate::rotation::Rotation::MAX_PITCH_PER_TICK,
+            ),
+            gui_releases_keys: true,
             world_config: None,
             shared_chunks: None,
             accept_required_packs: true,
@@ -210,6 +217,34 @@ impl Client {
     #[must_use]
     pub fn sensitivity(mut self, sensitivity: f32) -> Self {
         self.sensitivity = sensitivity;
+        self
+    }
+
+    /// The aim's turn rate cap: at most `yaw` / `pitch` degrees per tick (defaults
+    /// [`Rotation::MAX_YAW_PER_TICK`](crate::rotation::Rotation::MAX_YAW_PER_TICK) 14° /
+    /// [`Rotation::MAX_PITCH_PER_TICK`](crate::rotation::Rotation::MAX_PITCH_PER_TICK) 10.5°).
+    /// Every turn stays a whole number of mouse counts of the [`Client::sensitivity`]. The cap
+    /// is a behaviour choice, not vanilla (a mouse has none; players turn 30–60° in a tick in
+    /// fights); values that are not finite and positive keep the default.
+    #[must_use]
+    pub fn turn_rate(mut self, yaw: f64, pitch: f64) -> Self {
+        self.turn_rate = (yaw, pitch);
+        self
+    }
+
+    /// A screen (an open window, the player inventory) releases the movement keys, like
+    /// vanilla (default on): every version's `setScreen` calls `KeyBinding.unpressAll`, and
+    /// the screen takes the keyboard, so while it is open the player walks, jumps, sneaks and
+    /// sprints as if no key were held (a sprint ends on the next movement step, a sneak too).
+    /// The held [`Controls`](crate::Controls) apply again once it closes (1.12+ re-read the
+    /// held keys then; on 1.8 it is the same as pressing them again). Off: the controls apply
+    /// through screens (not vanilla; Grim checks clicking and closing while moving).
+    ///
+    /// 1.16.5's own inventory screen passes newly pressed keys through (`passEvents`); keys
+    /// held while it is open stay released here, which is a vanilla-possible input.
+    #[must_use]
+    pub fn gui_releases_keys(mut self, on: bool) -> Self {
+        self.gui_releases_keys = on;
         self
     }
 
@@ -568,6 +603,8 @@ where
         hold_turn_on_action: client.hold_turn_on_action,
         accept_required_packs: client.accept_required_packs,
         entity_push: client.entity_push,
+        turn_rate: client.turn_rate,
+        gui_releases_keys: client.gui_releases_keys,
     };
     let mut play = Play::<V, _, _> {
         rd,

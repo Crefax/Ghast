@@ -25,6 +25,37 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   server positions over the ticks between them). `Event::Hurt { id, attacker }` (26.x with the
   attacking entity). One small heap block per living entity with the view on; `Entity` grew by
   8 bytes (the pointer).
+- **Own movement state for behaviours** (`ghast-client`, every version):
+  `TickContext::velocity` (the velocity this tick's step starts from, with knockback /
+  explosion pushes received since the last step), `horizontal_collision` /
+  `vertical_collision` of the last step (also on `TickView`), `server_flags` /
+  `server_sprinting` (the flags byte the server last sent for our entity, without entity
+  tracking).
+- `Client::turn_rate(yaw, pitch)`: the aim's per-tick turn cap (defaults stay 14° / 10.5°;
+  still whole mouse counts), `Rotation::with_turn_rate` / `turn_rate`.
+- `Client::gui_releases_keys` (default on, see Fixed), `Capabilities::attack_knockback_enchantment`,
+  `Inbound::LegacyAttributes` (1.12 / 1.16 movement and attack speed).
+
+### Fixed
+
+- **Attack slow-down** (`ghast-client`, every version): `PlayerEntity.attack` runs on the
+  client after every attack (`TickContext::attack` and left clicks): a hit the client counts as
+  landed (other players, boats, minecarts, end crystals, … — mobs never) with knockback (the
+  held item's knockback level on 1.8 – 1.16.5, plus one for a sprint attack, on 1.9+ only at
+  full attack strength from the server's attack speed) multiplies the velocity by 0.6 on x / z
+  and unsprints before the movement step. Grim predicts it; sprint hits flagged Simulation
+  before.
+- **Our flags byte** from the server's entity data now sets the sprint flag on 1.8.9 (and on
+  1.12.2 / 1.16.5 without an elytra seen), like vanilla's data watcher (the flag, not the sprint
+  speed).
+- A dead player's movement keys do nothing (`isMovementBlocked`; Simulation flags at every
+  death before), and an open screen (window, player inventory, dialog) releases them like
+  vanilla's `setScreen` (sprint and sneak end; `Client::gui_releases_keys(false)` keeps the old
+  behaviour).
+- `hold_turn_on_action` also holds the turn on a tick with a plain item use when the new look
+  would pick a block (Grim RotationPlace post-flying).
+- The miss delay after an air swing (10 ticks) no longer applies in creative, and on 1.8 a
+  block hit on air counts as a miss, like vanilla.
 
 ## 0.4.7 — 2026-11-18
 

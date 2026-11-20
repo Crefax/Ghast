@@ -54,6 +54,8 @@ pub(crate) struct Sim16 {
     reply: Option<Outbound>,
     /// The boat the player left (see [`Parked16`]).
     parked: Option<Parked16>,
+    /// The flags byte (entity data index 0) the server last sent for our entity.
+    server_flags: Option<u8>,
 }
 
 /// A boat the player drove and left: the client moved it, the server sends no move for it, so
@@ -421,6 +423,7 @@ impl Sim16 {
             ride: None,
             reply: None,
             parked: None,
+            server_flags: None,
         }
     }
 
@@ -1236,10 +1239,14 @@ impl Sim16 {
         for e in &p.metadata {
             match (e.key, &e.value) {
                 (7, V::Byte(b)) => self.ext.apply_living_flags(*b as u8),
-                // The shared flags (sprinting, swimming, fall flying), read while gliding can
-                // happen.
-                (0, V::Byte(b)) if self.glide.watch => {
+                // The shared flags (sprinting, swimming, fall flying; sneaking is the input's:
+                // `ClientPlayerEntity.isSneaking`).
+                (0, V::Byte(b)) => {
+                    self.server_flags = Some(*b as u8);
                     self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                    if let Some(r) = &mut self.rec {
+                        r.note("own entity flags not representable");
+                    }
                 }
                 _ => {}
             }
@@ -1657,6 +1664,7 @@ impl Sim for Sim16 {
         self.ride = None;
         self.rt.using = None;
         self.rt.held.hands.set([(0, false, -1); 2]);
+        self.server_flags = None;
         self.update_slow();
     }
 
@@ -1773,15 +1781,63 @@ impl Sim for Sim16 {
         std::mem::take(&mut self.updates.dropped)
     }
 
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        self.rt.own_id = id;
+    }
+
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        // 1.16.5 `damage` on the client: `OtherClientPlayerEntity` always, boats and minecarts
+        // (`world.isClient` → true), the end crystal, the ghast fireball (an attacker given),
+        // the shulker bullet. LivingEntity is false on the client; paintings / item frames
+        // are skipped by `handleAttack`; small / dragon fireballs and wither skulls are never
+        // damaged.
+        if e.is_player() {
+            return true;
+        }
+        ghast_entity::v1_16_5::info(e.entity_type()).is_some_and(|i| {
+            matches!(
+                i.name,
+                "boat" | "end_crystal" | "fireball" | "shulker_bullet"
+            ) || i.name.ends_with("minecart")
+        })
+    }
+
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        let p = &mut self.player;
+        if super::attack_knockback_applies(knockback, p.sprinting, sprint_bonus) {
+            p.vel[0] *= 0.6;
+            p.vel[2] *= 0.6;
+            p.set_sprinting(false);
+            if let Some(r) = &mut self.rec {
+                r.note("attack slow-down not representable");
+            }
+        }
+    }
+
+    fn server_flags(&self) -> Option<u8> {
+        self.server_flags
+    }
+
+    fn velocity_now(&self) -> Vec3 {
+        let v = self.player.vel;
+        Vec3::new(v[0], v[1], v[2])
+    }
+
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
+    }
+
     fn world_packet_ids(&self) -> Vec<i32> {
         use ghast_protocol::v1_16_5::play::clientbound as cb;
         let mut ids: Vec<i32> = self.world.packet_ids().collect();
         // The server's answers to the dig actions.
         ids.push(cb::id::ACKNOWLEDGE_PLAYER_DIGGING);
-        // Our own entity data (the riptide spin flag), once a riptide trident was held.
-        if self.rt.held.watch.get() || self.glide.watch {
-            ids.push(cb::id::ENTITY_METADATA);
-        }
+        // Our own entity data: the shared flags, the riptide spin flag.
+        ids.push(cb::id::ENTITY_METADATA);
         // Riding: boarding and the server's boat corrections.
         ids.extend([cb::id::SET_PASSENGERS, cb::id::VEHICLE_MOVE]);
         // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.

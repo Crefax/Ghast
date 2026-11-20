@@ -145,6 +145,7 @@ mod tests {
     fn attribute_ids_by_name() {
         use super::proto::play::clientbound::EntityUpdateAttributesPropertiesKey as K;
         let old = [
+            (4, "attack_speed"),
             (5, "block_break_speed"),
             (6, "block_interaction_range"),
             (10, "entity_interaction_range"),

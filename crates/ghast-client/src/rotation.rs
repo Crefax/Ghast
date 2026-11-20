@@ -6,8 +6,9 @@
 //! the multiplier is computed in `f32` like `GameRenderer.render`, the
 //! angles are added in `f64` and stored as `f32` like `Entity.increaseTransforms`.
 //!
-//! The speed model (at most 14° yaw / 10.5° pitch per tick with a carried budget) is the one
-//! the reference behaviours were tuned with; it is a behaviour choice, not vanilla.
+//! The speed model (by default at most 14° yaw / 10.5° pitch per tick with a carried budget,
+//! see [`Rotation::with_turn_rate`]) is the one the reference behaviours were tuned with; it is
+//! a behaviour choice, not vanilla (a player's mouse has no such cap).
 
 /// `GameRenderer`: `f = sensitivity * 0.6 + 0.2; f * f * f * 8`, all `f32`.
 #[must_use]
@@ -73,12 +74,14 @@ pub struct Rotation {
     pitch_step: MouseStep,
     target_yaw: f32,
     target_pitch: f32,
+    max_yaw: f64,
+    max_pitch: f64,
 }
 
 impl Rotation {
-    /// Maximum yaw change per tick (degrees).
+    /// Default maximum yaw change per tick (degrees).
     pub const MAX_YAW_PER_TICK: f64 = 14.0;
-    /// Maximum pitch change per tick (degrees).
+    /// Default maximum pitch change per tick (degrees).
     pub const MAX_PITCH_PER_TICK: f64 = 10.5;
 
     /// A controller for an options.txt mouse sensitivity (0 … 1; vanilla default 0.5).
@@ -90,7 +93,30 @@ impl Rotation {
             pitch_step: MouseStep::default(),
             target_yaw: 0.0,
             target_pitch: 0.0,
+            max_yaw: Self::MAX_YAW_PER_TICK,
+            max_pitch: Self::MAX_PITCH_PER_TICK,
         }
+    }
+
+    /// The same controller turning at most `yaw` / `pitch` degrees per tick (defaults
+    /// [`Rotation::MAX_YAW_PER_TICK`] / [`Rotation::MAX_PITCH_PER_TICK`]); the steps stay whole
+    /// mouse counts. Values that are not finite and positive keep the default.
+    #[must_use]
+    pub fn with_turn_rate(mut self, yaw: f64, pitch: f64) -> Self {
+        let ok = |v: f64| v.is_finite() && v > 0.0;
+        self.max_yaw = if ok(yaw) { yaw } else { Self::MAX_YAW_PER_TICK };
+        self.max_pitch = if ok(pitch) {
+            pitch
+        } else {
+            Self::MAX_PITCH_PER_TICK
+        };
+        self
+    }
+
+    /// The turn rate cap per tick: (yaw, pitch) degrees.
+    #[must_use]
+    pub fn turn_rate(&self) -> (f64, f64) {
+        (self.max_yaw, self.max_pitch)
     }
 
     /// The sensitivity.
@@ -125,14 +151,12 @@ impl Rotation {
     /// `pitch = (float)(pitch - dy * 0.15)`, pitch clamped to ±90.
     pub fn step(&mut self, yaw: f32, pitch: f32) -> (f32, f32) {
         let m = mouse_multiplier(self.sensitivity);
-        let dx = self.yaw_step.counts(
-            wrap_degrees(self.target_yaw - yaw),
-            m,
-            Self::MAX_YAW_PER_TICK,
-        );
+        let dx = self
+            .yaw_step
+            .counts(wrap_degrees(self.target_yaw - yaw), m, self.max_yaw);
         let dy = self
             .pitch_step
-            .counts(self.target_pitch - pitch, m, Self::MAX_PITCH_PER_TICK);
+            .counts(self.target_pitch - pitch, m, self.max_pitch);
         // Mouse counts are small integers; the float conversion is exact.
         let fx = dx as f32 * m;
         let fy = -(dy as f32) * m;
@@ -182,6 +206,33 @@ mod tests {
         }
         assert!(r.yaw_error(yaw) < gcd as f32);
         assert!(r.pitch_error(pitch) < gcd as f32);
+    }
+
+    /// A raised turn rate turns farther per tick, still in whole mouse counts.
+    #[test]
+    fn turn_rate_cap() {
+        let sens = 0.5_f32;
+        let gcd = f64::from(mouse_gcd(sens));
+        let mut r = Rotation::new(sens).with_turn_rate(45.0, 30.0);
+        assert_eq!(r.turn_rate(), (45.0, 30.0));
+        r.set_target(120.0, 80.0);
+        let (y, p) = r.step(0.0, 0.0);
+        assert!(
+            f64::from(y) > 40.0 && f64::from(y) <= 45.0 + gcd + 1e-3,
+            "{y}"
+        );
+        assert!(
+            f64::from(p) > 26.0 && f64::from(p) <= 30.0 + gcd + 1e-3,
+            "{p}"
+        );
+        let k = f64::from(y) / gcd;
+        assert!((k - k.round()).abs() < 1e-2);
+        // Bad values keep the defaults.
+        let d = Rotation::new(sens).with_turn_rate(f64::NAN, -1.0);
+        assert_eq!(
+            d.turn_rate(),
+            (Rotation::MAX_YAW_PER_TICK, Rotation::MAX_PITCH_PER_TICK)
+        );
     }
 
     #[test]

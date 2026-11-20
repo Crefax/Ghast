@@ -1125,6 +1125,11 @@ fn opts(sensitivity: f32) -> CoreOptions {
         hold_turn_on_action: true,
         accept_required_packs: true,
         entity_push: true,
+        turn_rate: (
+            crate::rotation::Rotation::MAX_YAW_PER_TICK,
+            crate::rotation::Rotation::MAX_PITCH_PER_TICK,
+        ),
+        gui_releases_keys: true,
     }
 }
 

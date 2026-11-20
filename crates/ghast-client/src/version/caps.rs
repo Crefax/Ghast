@@ -122,6 +122,12 @@ pub struct Capabilities {
     /// `ServerPlayer.setGameMode(SPECTATOR)` calls `stopUsingItem` and the client's use ends
     /// with the living flags; 1.8 – 1.16.5 stop nothing (the use runs until release or finish).
     pub spectator_switch_stops_use: bool,
+    /// The client's attack reads the held item's knockback enchantment level
+    /// (`EnchantmentHelper.getKnockback`, 1.8 – 1.16.5): with knockback the attacker slows down
+    /// on the client too. 26.1 / 26.2 `LivingEntity.getKnockback` runs the data-driven
+    /// enchantment effects only on a `ServerLevel`: the client's knockback is the attribute
+    /// alone (a sprint attack at full strength still slows).
+    pub attack_knockback_enchantment: bool,
 }
 
 const fn f(v: f32) -> f64 {
@@ -179,6 +185,7 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     drop_prediction: false,
     spectator_block_click_swings: true,
     spectator_switch_stops_use: false,
+    attack_knockback_enchantment: true,
 };
 
 /// 1.12.2 (protocol 340).
@@ -228,6 +235,7 @@ pub(crate) const V26_1: Capabilities = Capabilities {
     client_entity_push: true,
     spectator_block_click_swings: false,
     spectator_switch_stops_use: true,
+    attack_knockback_enchantment: false,
     ..V1_16_5
 };
 

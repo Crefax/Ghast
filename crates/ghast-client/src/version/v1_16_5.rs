@@ -275,20 +275,27 @@ impl ClientVersion for V1_16_5 {
             }
             cb::id::ENTITY_UPDATE_ATTRIBUTES => {
                 let p: cb::EntityUpdateAttributes = raw.decode_as()?;
-                let Some(speed) = p.properties.iter().find(|a| {
-                    a.key.ends_with("generic.movementSpeed")
-                        || a.key.ends_with("generic.movement_speed")
-                }) else {
-                    return Ok(None);
-                };
-                Inbound::MovementSpeed {
-                    entity_id: p.entity_id,
-                    base: speed.value,
-                    modifiers: speed
-                        .modifiers
+                let find = |names: [&str; 2]| {
+                    p.properties
                         .iter()
-                        .map(|m| (m.uuid, m.amount, m.operation))
-                        .collect(),
+                        .find(|a| names.iter().any(|n| a.key.ends_with(n)))
+                        .map(|a| {
+                            let mods = a.modifiers.iter();
+                            (
+                                a.value,
+                                mods.map(|m| (m.uuid, m.amount, m.operation)).collect(),
+                            )
+                        })
+                };
+                let movement_speed = find(["generic.movementSpeed", "generic.movement_speed"]);
+                let attack_speed = find(["generic.attackSpeed", "generic.attack_speed"]);
+                if movement_speed.is_none() && attack_speed.is_none() {
+                    return Ok(None);
+                }
+                Inbound::LegacyAttributes {
+                    entity_id: p.entity_id,
+                    movement_speed,
+                    attack_speed,
                 }
             }
             cb::id::ENTITY_EFFECT => {

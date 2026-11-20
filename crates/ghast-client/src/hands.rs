@@ -95,6 +95,13 @@ pub(crate) struct ModernDig {
     pub(crate) conduit_power: Option<i32>,
 }
 
+/// 1.9+ `getAttackCooldownProgress(0.5F)` after `ticks` ticks since the last swing:
+/// `clamp((ticks + 0.5) / (float)(1 / attack_speed * 20), 0, 1)`.
+pub(crate) fn attack_strength_at(ticks: u32, attack_speed: f64) -> f32 {
+    let period = (1.0 / attack_speed * 20.0) as f32;
+    ((ticks as f32 + 0.5) / period).clamp(0.0, 1.0)
+}
+
 /// The held stack as far as digging and using need it.
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
@@ -755,6 +762,9 @@ pub(crate) struct HandsIo<'a> {
     /// 26.x answers CONSUME, whose swing source is none
     /// ([`crate::version::Capabilities::spectator_block_click_swings`]).
     pub spectator_swings: bool,
+    /// Creative mode: a missed attack sets no miss delay (`hasLimitedAttackSpeed` /
+    /// `hasMissTime` is false).
+    pub creative: bool,
     /// 1.8.9 / 1.12.2: the client writes no `block_place` for this click with this block item
     /// ([`crate::sim::Sim::place_suppressed`]).
     pub place_blocked: &'a dyn Fn(BlockPos, Face, u16) -> bool,
@@ -792,6 +802,9 @@ pub struct Hands {
     released: Option<(bool, u16, u32)>,
     left_was: bool,
     right_was: bool,
+    /// This tick's attacks (entity id, the attack-strength ticks before the attack reset
+    /// them); the engine applies their effect on the player before the movement step.
+    pub(crate) attacks: Vec<(i32, u32)>,
     /// Blocks broken (finish sent).
     pub broken: u64,
     /// A dig start / abort / finish was written since the engine last looked (it then tells the
@@ -875,11 +888,12 @@ impl Hands {
     /// (vanilla `getCooledAttackStrength(0.5F)`; attack speed 4.0 with an empty hand).
     #[must_use]
     pub fn attack_strength(&self, attack_speed: f64) -> f32 {
-        let period = (1.0 / attack_speed * 20.0) as f32;
-        ((self.ticks_since_swing as f32 + 0.5) / period).clamp(0.0, 1.0)
+        attack_strength_at(self.ticks_since_swing, attack_speed)
     }
 
-    /// `PlayerController.attackEntity`: the attack packet (1.16: then the cooldown resets).
+    /// `PlayerController.attackEntity`: the attack packet, then `PlayerEntity.attack` (its
+    /// effect on the player is the engine's, see [`Hands::attacks`]; 1.9+: then the cooldown
+    /// resets).
     pub(crate) fn attack(&mut self, id: i32, io: &mut HandsIo<'_>) {
         io.out.push(Outbound::UseEntity {
             target: id,
@@ -887,6 +901,9 @@ impl Hands {
             off_hand: false,
             sneaking: io.sneaking,
         });
+        if !io.spectator {
+            self.attacks.push((id, self.ticks_since_swing));
+        }
         self.ticks_since_swing = 0;
     }
 
@@ -986,8 +1003,10 @@ impl Hands {
                     self.click_block(hit.pos, hit.face, io);
                 }
                 _ => {
-                    self.left_click_counter = 10;
-                    // resetCooldown on a miss.
+                    // The miss delay (outside creative); resetCooldown on a miss.
+                    if !io.creative {
+                        self.left_click_counter = 10;
+                    }
                     self.ticks_since_swing = 0;
                 }
             }
@@ -995,13 +1014,12 @@ impl Hands {
             return;
         }
         io.out.push(Outbound::Swing);
+        // 1.8 clickMouse: a block hit on air falls through to the miss (the miss delay outside
+        // creative).
         match t {
-            Some(hit) => {
-                if io.solid(hit.pos).is_some() {
-                    self.click_block(hit.pos, hit.face, io);
-                }
-            }
-            None => self.left_click_counter = 10,
+            Some(hit) if io.solid(hit.pos).is_some() => self.click_block(hit.pos, hit.face, io),
+            _ if !io.creative => self.left_click_counter = 10,
+            _ => {}
         }
     }
 
@@ -1420,6 +1438,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                creative: false,
                 place_blocked: &|_, _, _| false,
             };
             h.tick(false, true, &mut io);
@@ -1480,6 +1499,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                creative: false,
                 place_blocked: &check,
             };
             h.tick(false, true, &mut io);
@@ -1530,6 +1550,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: true,
                 spectator_swings: swings,
+                creative: false,
                 place_blocked: &|_, _, _| true,
             };
             h.tick(false, true, &mut io);
@@ -1598,6 +1619,7 @@ mod tests {
                     placed: &mut placed,
                     spectator: false,
                     spectator_swings: true,
+                    creative: false,
                     place_blocked: &|_, _, _| false,
                 };
                 h.tick(true, false, &mut io);
@@ -1652,6 +1674,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                creative: false,
                 place_blocked: &|_, _, _| false,
             };
             h.click_mouse(hit, &mut io);
@@ -1707,6 +1730,7 @@ mod tests {
                 placed: &mut placed,
                 spectator: false,
                 spectator_swings: true,
+                creative: false,
                 place_blocked: &|_, _, _| false,
             };
             h.tick(true, false, &mut io);

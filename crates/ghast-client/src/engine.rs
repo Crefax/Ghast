@@ -327,6 +327,10 @@ pub(crate) struct CoreOptions {
     /// Entities push the player (vanilla: on; off is the non-vanilla opt-in of
     /// [`crate::Client::entity_push`]).
     pub entity_push: bool,
+    /// The rotation's cap per tick (yaw, pitch degrees; [`crate::Client::turn_rate`]).
+    pub turn_rate: (f64, f64),
+    /// A screen releases the movement keys (vanilla; [`crate::Client::gui_releases_keys`]).
+    pub gui_releases_keys: bool,
 }
 
 /// Client state shared by the connection and the behaviour context.
@@ -415,6 +419,10 @@ pub(crate) struct Core {
     /// Test hook: this tick's look, set instead of a rotation step.
     #[cfg(test)]
     forced_look: Option<(f32, f32)>,
+    /// 1.9+: our `attack_speed` attribute as the server synced it (the attack strength).
+    attack_speed: f64,
+    /// The last movement step's (horizontal, vertical) collision.
+    collisions: (bool, bool),
 }
 
 /// Behaviour bookkeeping of the engine.
@@ -436,7 +444,8 @@ pub(crate) struct Engine<S> {
 
 impl Core {
     fn new(opts: CoreOptions) -> Self {
-        let rotation = Rotation::new(opts.sensitivity);
+        let rotation =
+            Rotation::new(opts.sensitivity).with_turn_rate(opts.turn_rate.0, opts.turn_rate.1);
         // a version module exists only with its feature, which enables its inventory
         let inv = ghast_inventory::Inventory::new(opts.inventory)
             .expect("the version's feature enables its ghast-inventory feature");
@@ -476,6 +485,8 @@ impl Core {
             inv,
             turned: false,
             effects: std::collections::BTreeMap::new(),
+            attack_speed: 4.0,
+            collisions: (false, false),
             aqua_affinity: false,
             broken_now: Vec::new(),
             pick: PickList::default(),
@@ -726,6 +737,86 @@ fn off_held_item<W: Sim + ?Sized>(
     let id = u16::try_from(s.id()).ok()?;
     let count = u8::try_from(s.count().clamp(0, 255)).unwrap_or(0);
     Some(sim.item_use_facts(s, true, sim.held_item(id, count, 0)))
+}
+
+/// The movement keys of this tick's step: [`Controls::NONE`] while dead (`isMovementBlocked`
+/// at health 0; the death screen released the keys) and, unless switched off
+/// ([`crate::Client::gui_releases_keys`]), while a screen is open (a window, the player
+/// inventory, a dialog: `setScreen` releases every key and the screen takes the keyboard).
+#[inline]
+fn movement_controls(c: &Core) -> Controls {
+    if c.dead || (c.opts.gui_releases_keys && (c.inv.gui_open() || c.dialog.is_some())) {
+        Controls::NONE
+    } else {
+        c.controls
+    }
+}
+
+/// `PlayerEntity.attack` on the client for this tick's attacks, in order: a hit the client
+/// counts as landed ([`Sim::attack_hurts`]) with knockback slows the player
+/// ([`Sim::attack_slow`]). The knockback is the held item's enchantment level (up to 1.16.5;
+/// the client's is 0 on 26.x, see [`Capabilities::attack_knockback_enchantment`]) plus one
+/// for a sprint attack, which 1.9+ grants only at full strength (cooldown above 0.9).
+#[cold]
+#[inline(never)]
+fn attack_effects(c: &mut Core, sim: &mut (impl Sim + ?Sized)) {
+    let caps = c.opts.caps;
+    let knockback = if caps.attack_knockback_enchantment {
+        c.inv.held().map_or(0, |s| i32::from(knockback(s)))
+    } else {
+        0
+    };
+    for (id, ticks) in c.hands.attacks.drain(..) {
+        let hurts = sim
+            .entities()
+            .and_then(|t| t.get(id))
+            .is_some_and(|e| sim.attack_hurts(e));
+        if !hurts {
+            continue;
+        }
+        let sprint_bonus =
+            !caps.combat_1_9 || hands::attack_strength_at(ticks, c.attack_speed) > 0.9;
+        sim.attack_slow(knockback, sprint_bonus);
+    }
+}
+
+/// Our movement speed attribute from the server (the sim replaces its modifiers with it).
+fn movement_speed(
+    c: &Core,
+    sim: &mut (impl Sim + ?Sized),
+    base: f64,
+    modifiers: &[(uuid::Uuid, f64, i8)],
+) {
+    log::debug!(
+        "[{}] t{} movement speed base {base:?} modifiers {modifiers:?}",
+        c.opts.name,
+        c.tick
+    );
+    let mods: Vec<(u128, f64, u8)> = modifiers
+        .iter()
+        .map(|&(id, amount, op)| (id.as_u128(), amount, op as u8))
+        .collect();
+    sim.movement_speed(base, &mods);
+}
+
+/// A 1.20.5+ attribute's value (`AttributeInstance.calculateValue`: additions, then
+/// multiplied-base, then multiplied-total modifiers; clamped to the attack speed range).
+fn modern_attribute_value(a: &crate::common::AttributeUpdate) -> f64 {
+    let ops = |op: i8| a.modifiers.iter().filter(move |m| m.2 == op).map(|m| m.1);
+    let d = a.base + ops(0).sum::<f64>();
+    let mut e = d;
+    for v in ops(1) {
+        e += d * v;
+    }
+    for v in ops(2) {
+        e *= 1.0 + v;
+    }
+    e.clamp(0.0, 1024.0)
+}
+
+/// Knockback enchantment level of a stack (see [`enchant_level`]).
+fn knockback(s: &ghast_inventory::Stack) -> u8 {
+    enchant_level(s, 19, "minecraft:knockback")
 }
 
 /// Efficiency level of a stack (see [`enchant_level`]).
@@ -1080,16 +1171,25 @@ impl<S: Sim> Engine<S> {
                 modifiers,
             } => {
                 if entity_id == c.entity_id {
-                    log::debug!(
-                        "[{}] t{} movement speed base {base:?} modifiers {modifiers:?}",
-                        c.opts.name,
-                        c.tick
-                    );
-                    let mods: Vec<(u128, f64, u8)> = modifiers
-                        .iter()
-                        .map(|&(id, amount, op)| (id.as_u128(), amount, op as u8))
-                        .collect();
-                    sim.movement_speed(base, &mods);
+                    movement_speed(c, sim, base, &modifiers);
+                }
+            }
+            Inbound::LegacyAttributes {
+                entity_id,
+                movement_speed: speed,
+                attack_speed,
+            } => {
+                if entity_id == c.entity_id {
+                    if let Some((base, modifiers)) = speed {
+                        movement_speed(c, sim, base, &modifiers);
+                    }
+                    if let Some((base, modifiers)) = attack_speed {
+                        let mut m = ghast_physics::attribute::Modifiers::NONE;
+                        for &(id, amount, op) in &modifiers {
+                            m.insert(id.as_u128(), amount, op as u8);
+                        }
+                        c.attack_speed = m.value(base);
+                    }
                 }
             }
             Inbound::Effect {
@@ -1119,6 +1219,9 @@ impl<S: Sim> Engine<S> {
                 attributes,
             } => {
                 if entity_id == c.entity_id {
+                    if let Some(a) = attributes.iter().find(|a| a.name == "attack_speed") {
+                        c.attack_speed = modern_attribute_value(a);
+                    }
                     sim.attributes(&attributes);
                 }
             }
@@ -1481,12 +1584,18 @@ impl<S: Sim> Engine<S> {
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
                 spectator_swings: c.opts.caps.spectator_block_click_swings,
+                creative: c.game_mode == GameMode::Creative,
                 place_blocked: &blocked,
             };
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
             let _ = placed;
             predict_planting(c, sim, first);
+        }
+        // This tick's attacks (behaviour and button): `PlayerEntity.attack` runs on the client
+        // right after each attack packet, before the player's movement.
+        if !c.hands.attacks.is_empty() {
+            attack_effects(c, &mut self.sim);
         }
         // The tick's dig packets (behaviour actions and buttons): broken blocks turn to air
         // and the version keeps its records of them for the server's answers.
@@ -1526,7 +1635,7 @@ impl<S: Sim> Engine<S> {
         let gate_tick = std::mem::take(&mut c.gate_tick);
         if c.aimed && !gate_tick {
             let (yaw, pitch) = c.rotation.step(c.pose.yaw, c.pose.pitch);
-            if c.opts.hold_turn_on_action && !post_look_ok(c, yaw, pitch) {
+            if c.opts.hold_turn_on_action && !post_look_ok(c, &self.sim, yaw, pitch) {
                 // Grim RotationPlace re-checks a dig / place with the look of the movement
                 // packet that follows it: keep the mouse still on the clicked block this tick.
                 c.held_turns += 1;
@@ -1542,16 +1651,19 @@ impl<S: Sim> Engine<S> {
         // nothing here).
         // 26.1 per-tick inputs, only when something can need them: a use, a release, a jump
         // press, attached rockets.
+        // The keys the movement reads: none while dead (`isMovementBlocked`, the death screen
+        // releases them) or while a screen is open (`setScreen` releases them).
+        let controls = movement_controls(c);
         if self.sim.modern_inputs()
             && (c.hands.using_item()
                 || c.hands.released_use().is_some()
-                || c.controls.jump
+                || controls.jump
                 || self.sim.pre_tick_wanted())
         {
             let pre = crate::sim::PreTick {
                 using: c.hands.use_item(),
                 released: c.hands.released_use(),
-                controls: c.controls,
+                controls,
                 look: (c.pose.yaw, c.pose.pitch),
             };
             if !self.sim.pre_tick(&c.inv, &pre) {
@@ -1560,7 +1672,8 @@ impl<S: Sim> Engine<S> {
         }
         let using = c.hands.using_item();
         self.sim
-            .step(&mut c.pose, c.controls, using, c.entity_id, &mut c.out);
+            .step(&mut c.pose, controls, using, c.entity_id, &mut c.out);
+        c.collisions = self.sim.collisions();
         // ClientLevel.tickEntities: after this tick's pick and key handling, and after the
         // player (the first entity in the client's tick list): the other entities' ticks see
         // the moved player and push it (1.12.2, 26.1+).
@@ -1670,6 +1783,19 @@ impl TickView<'_> {
     #[must_use]
     pub fn sent(&self) -> &Pose {
         &self.core.sent
+    }
+
+    /// This tick's movement step hit a wall (see [`TickContext::horizontal_collision`]).
+    #[must_use]
+    pub fn horizontal_collision(&self) -> bool {
+        self.core.collisions.0
+    }
+
+    /// This tick's movement step was cut vertically (see
+    /// [`TickContext::vertical_collision`]).
+    #[must_use]
+    pub fn vertical_collision(&self) -> bool {
+        self.core.collisions.1
     }
 
     /// The world.
@@ -1930,12 +2056,40 @@ fn predict_planting(c: &mut Core, world: &dyn WorldView, first: usize) {
 /// Whether the look `yaw`/`pitch` still points at every block dug or placed this tick (its
 /// full cube, from the sent and the current feet, standing or sneaking eyes, with the old or the
 /// new yaw) — the post-look check that keeps Grim's RotationPlace check satisfied.
-fn post_look_ok(c: &Core, yaw: f32, pitch: f32) -> bool {
+fn post_look_ok(c: &Core, world: &(impl Sim + ?Sized), yaw: f32, pitch: f32) -> bool {
     let looks = [
         hands::look_vector(c.pose.yaw, pitch),
         hands::look_vector(yaw, pitch),
     ];
     let heights = [c.opts.caps.eye_height, c.opts.caps.sneak_eye_height];
+    // A plain item use (no block) must not pick a block with the new look either: Grim
+    // re-checks it like a place.
+    if (yaw, pitch) != (c.pose.yaw, c.pose.pitch)
+        && c.out.iter().any(|o| matches!(o, Outbound::UseItem { .. }))
+    {
+        let rotations = [(c.pose.yaw, pitch), (yaw, pitch)];
+        let picks = [c.sent.pos, c.pose.pos].iter().any(|o| {
+            heights.iter().any(|h| {
+                let eyes = Vec3::new(o.x, o.y + *h, o.z);
+                rotations.iter().zip(&looks).any(|(r, l)| {
+                    let t = world.crosshair_target(&PickQuery {
+                        eyes,
+                        rotation: *r,
+                        look: *l,
+                        held: None,
+                        now: false,
+                        creative: c.game_mode == GameMode::Creative,
+                        player_bb: pick_box(*o),
+                        entities: &[],
+                    });
+                    matches!(t, Crosshair::Block(Some(_)))
+                })
+            })
+        });
+        if picks {
+            return false;
+        }
+    }
     c.out
         .iter()
         .filter_map(|o| match o {
@@ -2009,6 +2163,50 @@ impl TickContext<'_> {
     #[must_use]
     pub fn sent(&self) -> &Pose {
         &self.core.sent
+    }
+
+    /// The player's velocity now (blocks per tick): [`Pose::motion`] after the last movement
+    /// step plus what arrived since — the server's velocity for our entity (knockback, a
+    /// setback's velocity) and explosion pushes. This tick's movement step starts from it,
+    /// after the slow-down of this tick's attacks (applied once the behaviour and the buttons
+    /// are done, see [`TickContext::attack`]).
+    #[must_use]
+    pub fn velocity(&self) -> Vec3 {
+        self.world.velocity_now()
+    }
+
+    /// The last movement step hit a wall (`horizontalCollision`: the move was cut on x or z).
+    /// Vanilla stops a sprint on it (1.8 – 1.16.5; 26.x only on a head-on hit, the minor
+    /// collisions keep it).
+    #[must_use]
+    pub fn horizontal_collision(&self) -> bool {
+        self.core.collisions.0
+    }
+
+    /// The last movement step was cut vertically (`verticalCollision`: floor or ceiling).
+    #[must_use]
+    pub fn vertical_collision(&self) -> bool {
+        self.core.collisions.1
+    }
+
+    /// The flags byte (entity data index 0) the server last sent for our entity: 0x01 on
+    /// fire, 0x02 sneaking, 0x08 sprinting, 0x10 using an item on 1.8 / swimming on 1.13+,
+    /// 0x20 invisible, 0x80 gliding (1.9+). `None` before the server sent one (after a respawn
+    /// too, unless the 26.x respawn keeps the entity data). Read without entity tracking.
+    ///
+    /// The client applies its sprint bit (and 1.9+ gliding, 1.13+ swimming) like vanilla's
+    /// entity data: it sets the flag `isSprinting()` reads, not the sprint speed. Sneaking stays
+    /// the input's.
+    #[must_use]
+    pub fn server_flags(&self) -> Option<u8> {
+        self.world.server_flags()
+    }
+
+    /// The server's last flags byte for us has the sprint bit ([`TickContext::server_flags`];
+    /// `false` before any).
+    #[must_use]
+    pub fn server_sprinting(&self) -> bool {
+        self.server_flags().is_some_and(|f| f & 0x08 != 0)
     }
 
     /// Eye position of `pose` (standing or sneaking eye height of this version).
@@ -2616,6 +2814,7 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: c.opts.caps.spectator_block_click_swings,
+            creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
         };
         if !modern {
@@ -2814,6 +3013,7 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: c.opts.caps.spectator_block_click_swings,
+            creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
         };
         c.hands.click_block(pos, face, &mut io);
@@ -2869,6 +3069,7 @@ impl TickContext<'_> {
             placed: &mut placed,
             spectator: c.game_mode == GameMode::Spectator,
             spectator_swings: c.opts.caps.spectator_block_click_swings,
+            creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
         };
         c.hands
@@ -2908,7 +3109,7 @@ impl TickContext<'_> {
         }
         let mut r = c.rotation;
         let (yaw, pitch) = r.step(c.pose.yaw, c.pose.pitch);
-        if c.opts.hold_turn_on_action && !post_look_ok(c, yaw, pitch) {
+        if c.opts.hold_turn_on_action && !post_look_ok(c, self.world, yaw, pitch) {
             now
         } else {
             (yaw, pitch)
@@ -2975,6 +3176,18 @@ mod tests_26_2;
 ))]
 #[path = "engine_tests_actions.rs"]
 mod tests_actions;
+
+/// Attacks' effect on the player, our flags byte, released keys (`engine_tests_combat.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
+#[path = "engine_tests_combat.rs"]
+mod tests_combat;
 
 /// Mount screen rules read off the tracked entity (`engine_tests_mounts.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]
@@ -3070,6 +3283,11 @@ mod tests {
             hold_turn_on_action: true,
             accept_required_packs: true,
             entity_push: true,
+            turn_rate: (
+                crate::rotation::Rotation::MAX_YAW_PER_TICK,
+                crate::rotation::Rotation::MAX_PITCH_PER_TICK,
+            ),
+            gui_releases_keys: true,
             inventory: match version.instance() {
                 GameVersion::V1_8_9 => ghast_inventory::Version::V1_8,
                 GameVersion::V1_12_2 => ghast_inventory::Version::V1_12,

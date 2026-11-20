@@ -45,6 +45,10 @@ pub(crate) struct Sim18 {
     block_entities: bool,
     /// The boat we ride (the 1.8 client simulates it; with entity tracking).
     ride: Option<Box<Ride18>>,
+    /// Our entity id (join game).
+    own_id: Option<i32>,
+    /// The flags byte (entity data index 0) the server last sent for our entity.
+    server_flags: Option<u8>,
     /// Test hook: the JVM's `Math.sin` / `Math.cos` of the next boat tick (argument bits, sine,
     /// cosine), from an oracle record.
     #[cfg(test)]
@@ -145,6 +149,8 @@ impl Sim18 {
             session: SessionPackets::default(),
             block_entities: false,
             ride: None,
+            own_id: None,
+            server_flags: None,
             #[cfg(test)]
             trig: Vec::new(),
         }
@@ -173,6 +179,35 @@ impl Sim18 {
 }
 
 impl Sim18 {
+    /// `entity_metadata`: only our own entity's flags byte (index 0) is read. Vanilla's data
+    /// watcher writes it into the local player too (`NetHandlerPlayClient.handleEntityMetadata`):
+    /// the sprint bit sets the flag `isSprinting()` reads (`Entity.setFlag(3)`, not
+    /// `setSprinting`: the speed modifier stays until the client's own movement update changes
+    /// it). Sneaking is the input's on the 1.8 client (`isSneaking()`), the other bits are not
+    /// read by movement.
+    fn own_metadata(&mut self, raw: &RawPacket) -> Result<(), SimError> {
+        use ghast_protocol::defs::p47::types::EntityMetadataValue as V;
+        use ghast_protocol::v1_8::play::clientbound as cb;
+        let Some(own) = self.own_id else {
+            return Ok(());
+        };
+        if ghast_protocol::Reader::new(&raw.body).read_varint()? != own {
+            return Ok(());
+        }
+        let p: cb::EntityMetadata = raw.decode_as()?;
+        for e in &p.metadata {
+            if let (0, V::Byte(b)) = (e.key, &e.value) {
+                let flags = *b as u8;
+                self.server_flags = Some(flags);
+                self.player.sprinting = flags & 0x08 != 0;
+                if let Some(r) = &mut self.rec {
+                    r.note("own entity flags not representable");
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The boat packets (with entity tracking): `attach_entity` naming us (boarding a tracked
     /// boat, or leaving it with vehicle -1), and while riding the server's teleport, relative
     /// moves, looks and velocity of that boat and its destruction (vanilla's
@@ -492,8 +527,11 @@ impl Sim for Sim18 {
         match raw.id {
             cb::id::LOGIN => {
                 self.ride = None;
-                w.apply_login(&raw.decode_as()?);
+                let p: cb::Login = raw.decode_as()?;
+                self.own_id = Some(p.entity_id);
+                w.apply_login(&p);
             }
+            cb::id::ENTITY_METADATA => return self.own_metadata(raw),
             cb::id::RESPAWN => {
                 self.ride = None;
                 w.apply_respawn(&raw.decode_as()?);
@@ -545,6 +583,7 @@ impl Sim for Sim18 {
         self.player.abilities = abilities;
         self.player.food_level = food;
         self.ride = None;
+        self.server_flags = None;
     }
 
     fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
@@ -718,7 +757,56 @@ impl Sim for Sim18 {
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {
-        self.world.packet_ids().collect()
+        let mut ids: Vec<i32> = self.world.packet_ids().collect();
+        // Our own entity data (the flags byte), decoded only when it is ours.
+        ids.push(ghast_protocol::v1_8::play::clientbound::id::ENTITY_METADATA);
+        ids
+    }
+
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        self.own_id = Some(id);
+    }
+
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        use ghast_entity::EntityType as T;
+        // 1.8.9 `damage` on the client: `OtherClientPlayerEntity` always, boats and minecarts
+        // (`world.isClient` → true), the end crystal, the ghast fireball (an attacker given).
+        // LivingEntity is false on the client; paintings / item frames are skipped by
+        // `handleAttack`; small fireballs and wither skulls are never damaged.
+        match e.entity_type() {
+            T::Player => true,
+            T::LegacyObject(t) => matches!(t, 1 | 10 | 51 | 63),
+            _ => false,
+        }
+    }
+
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        let p = &mut self.player;
+        if super::attack_knockback_applies(knockback, p.sprinting, sprint_bonus) {
+            p.vel[0] *= 0.6;
+            p.vel[2] *= 0.6;
+            p.set_sprinting(false);
+            if let Some(r) = &mut self.rec {
+                r.note("attack slow-down not representable");
+            }
+        }
+    }
+
+    fn server_flags(&self) -> Option<u8> {
+        self.server_flags
+    }
+
+    fn velocity_now(&self) -> Vec3 {
+        let v = self.player.vel;
+        Vec3::new(v[0], v[1], v[2])
+    }
+
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
     }
 
     fn entity_config(&self) -> Option<ghast_entity::Config> {

@@ -168,6 +168,7 @@ mod tests {
         assert_eq!(name(0), Some("air_drag_modifier"));
         assert_eq!(name(9), Some("bounciness"));
         assert_eq!(name(17), Some("friction_modifier"));
-        assert_eq!((0..64).filter(|&i| name(i).is_some()).count(), 17);
+        assert_eq!(name(5), Some("attack_speed"));
+        assert_eq!((0..64).filter(|&i| name(i).is_some()).count(), 18);
     }
 }

@@ -548,6 +548,45 @@ pub(crate) trait Sim: WorldView + std::fmt::Debug {
     fn day_clock(&self) -> Option<i32> {
         Some(crate::common::ClockUpdate::LEGACY_DAY)
     }
+    /// `entity.damage(..)` / `hurtClient` of an attack target on the client returns `true`
+    /// (with `isAttackable()` and no `handleAttack` / `skipAttackInteraction`): the attack's
+    /// knockback part then runs on the client. Other players, vehicles, end crystals, … — the
+    /// version's own list; a living mob is never hurt on the client.
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        e.is_player()
+    }
+    /// `PlayerEntity.attack` after a hit that [`Sim::attack_hurts`]: with knockback
+    /// (`knockback` enchantment level, 26.x: the attribute part, plus 1 for a sprint attack;
+    /// 1.9+ only at full strength: `sprint_bonus`) the attacker's `velocity x/z *= 0.6` and
+    /// `setSprinting(false)`, before this tick's movement.
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        let _ = (knockback, sprint_bonus);
+    }
+    /// The flags byte (entity data index 0) the server last sent for our entity (`None`
+    /// before any).
+    fn server_flags(&self) -> Option<u8> {
+        None
+    }
+    /// The player's velocity now (blocks per tick), with server velocity / explosion pushes
+    /// applied since the last step.
+    fn velocity_now(&self) -> Vec3 {
+        Vec3::default()
+    }
+    /// The last movement step's `(horizontalCollision, verticalCollision)`.
+    fn collisions(&self) -> (bool, bool) {
+        (false, false)
+    }
+}
+
+/// `velocity *= (0.6, 1, 0.6)` and `setSprinting(false)` when an attack has knockback:
+/// `knockback + (sprinting && sprint_bonus ? 1 : 0) > 0`. Returns whether it applied.
+#[inline]
+pub(super) fn attack_knockback_applies(
+    knockback: i32,
+    sprinting: bool,
+    sprint_bonus: bool,
+) -> bool {
+    knockback + i32::from(sprinting && sprint_bonus) > 0
 }
 
 /// Options of the per-version sim.
@@ -1314,6 +1353,21 @@ impl Sim for Box<dyn Sim> {
     }
     fn day_clock(&self) -> Option<i32> {
         (**self).day_clock()
+    }
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        (**self).attack_hurts(e)
+    }
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        (**self).attack_slow(knockback, sprint_bonus);
+    }
+    fn server_flags(&self) -> Option<u8> {
+        (**self).server_flags()
+    }
+    fn velocity_now(&self) -> Vec3 {
+        (**self).velocity_now()
+    }
+    fn collisions(&self) -> (bool, bool) {
+        (**self).collisions()
     }
 }
 

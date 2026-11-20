@@ -85,6 +85,8 @@ pub(crate) struct ModernSim {
     predictions: crate::sim::predict::Sequenced<BlockState>,
     /// An ack moved the player back ([`Sim::take_snap`]).
     snapped: bool,
+    /// The shared flags byte (entity data index 0) the server last sent for our entity.
+    server_flags: Option<u8>,
 }
 
 /// A vehicle the player rides.
@@ -501,6 +503,7 @@ impl ModernSim {
                 for e in &p.metadata {
                     match (&e.value, e.key) {
                         (V::Byte(b), DATA_SHARED_FLAGS) if id == self.own.id => {
+                            self.server_flags = Some(*b as u8);
                             self.ext.apply_shared_flags(&mut self.player, *b as u8);
                             self.ext_active |= self.ext.fall_flying;
                         }
@@ -992,6 +995,7 @@ impl ModernSim {
             entity_push: true,
             predictions: Default::default(),
             snapped: false,
+            server_flags: None,
         }
     }
 
@@ -1773,6 +1777,7 @@ impl Sim for ModernSim {
         self.old_pos = [0.0; 3];
         // handleLogin / handleRespawn: wait for the level again.
         self.gate = modern::LoadGate::waiting();
+        self.server_flags = None;
         self.sync_level();
     }
 
@@ -1783,6 +1788,7 @@ impl Sim for ModernSim {
         let old_mining = self.mining;
         let old_ranges = self.ranges;
         let old_moves = (self.ext.attributes, self.movement_attributes);
+        let old_flags = self.server_flags;
         self.reset_player();
         if keep & 1 != 0 {
             self.player.attributes = old.attributes;
@@ -1794,6 +1800,7 @@ impl Sim for ModernSim {
         if keep & 2 != 0 {
             self.player.sent.input = old.sent.input;
             self.player.sent.sprinting = old.sent.sprinting;
+            self.server_flags = old_flags;
         }
     }
 
@@ -1867,6 +1874,10 @@ impl Sim for ModernSim {
 
     fn attributes(&mut self, attributes: &[AttributeUpdate]) {
         for a in attributes {
+            // The engine's (the attack strength), not movement.
+            if a.name == "attack_speed" {
+                continue;
+            }
             if let Some(r) = &mut self.rec {
                 let mods = a
                     .modifiers
@@ -1972,6 +1983,53 @@ impl Sim for ModernSim {
     fn drain_block_updates(&mut self, out: &mut Vec<(BlockPos, u32)>) -> usize {
         out.append(&mut self.updates.list);
         std::mem::take(&mut self.updates.dropped)
+    }
+
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        // 26.x `hurtClient`: `RemotePlayer`, every `VehicleEntity` (boats, rafts, minecarts),
+        // the end crystal, the shulker bullet. Hanging entities (paintings, item frames, leash
+        // knots) are skipped by `skipAttackInteraction`; the fireball and the wind charges are
+        // deflected (`REDIRECTABLE_PROJECTILE`); everything else is `false`.
+        if e.is_player() {
+            return true;
+        }
+        super::entity::info(e.entity_type()).is_some_and(|i| {
+            let n = i.name;
+            matches!(n, "end_crystal" | "shulker_bullet")
+                || n.ends_with("_boat")
+                || n.ends_with("_raft")
+                || n.ends_with("minecart")
+        })
+    }
+
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        let p = &mut self.player;
+        if super::super::attack_knockback_applies(knockback, p.sprinting, sprint_bonus) {
+            // Player.causeExtraKnockback: `setDeltaMovement(getDeltaMovement().multiply(0.6,
+            // 1.0, 0.6))`, `setSprinting(false)`.
+            p.vel[0] *= 0.6;
+            p.vel[2] *= 0.6;
+            p.set_sprinting(false);
+            if let Some(r) = &mut self.rec {
+                r.note("attack slow-down not representable");
+            }
+        }
+    }
+
+    fn server_flags(&self) -> Option<u8> {
+        self.server_flags
+    }
+
+    fn velocity_now(&self) -> Vec3 {
+        let v = self.player.vel;
+        Vec3::new(v[0], v[1], v[2])
+    }
+
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
     }
 
     fn world_packet_ids(&self) -> Vec<i32> {

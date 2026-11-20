@@ -81,6 +81,8 @@ pub(crate) struct Sim12 {
     ride: Option<Box<Ride12>>,
     /// The answer to a server packet that goes out at once (`vehicle_move`).
     reply: Option<Outbound>,
+    /// The flags byte (entity data index 0) the server last sent for our entity.
+    server_flags: Option<u8>,
 }
 
 /// The vehicle the player rides: its entity id and its client-side state.
@@ -209,6 +211,7 @@ impl Sim12 {
             rec: None,
             ride: None,
             reply: None,
+            server_flags: None,
         }
     }
 
@@ -331,9 +334,14 @@ impl Sim12 {
                 let p: cb::EntityMetadata = raw.decode_as()?;
                 for e in &p.metadata {
                     match (e.key, &e.value) {
-                        // The shared flags: sprinting, fall flying.
+                        // The shared flags: sprinting, fall flying (sneaking is the input's:
+                        // `ClientPlayerEntity.isSneaking`).
                         (0, V::Byte(b)) if own => {
+                            self.server_flags = Some(*b as u8);
                             self.ext.apply_shared_flags(&mut self.player, *b as u8);
+                            if let Some(r) = &mut self.rec {
+                                r.note("own entity flags not representable");
+                            }
                         }
                         // A rocket's shooter (an entity id, 0 for none).
                         (7, V::VarInt(v)) if !own => {
@@ -822,11 +830,10 @@ impl Sim for Sim12 {
         {
             use ghast_protocol::v1_12_2::play::clientbound::id;
             self.session.note(raw, id::LOGIN, id::RESPAWN);
-            if self.glide.watch
-                && matches!(
-                    raw.id,
-                    id::SPAWN_ENTITY | id::ENTITY_DESTROY | id::ENTITY_METADATA
-                )
+            // Our entity data always (the shared flags); rocket spawns and removals while
+            // gliding can happen.
+            if raw.id == id::ENTITY_METADATA
+                || (self.glide.watch && matches!(raw.id, id::SPAWN_ENTITY | id::ENTITY_DESTROY))
             {
                 self.glide_packet(raw)?;
             }
@@ -942,6 +949,7 @@ impl Sim for Sim12 {
         self.glide.rockets.clear();
         self.glide.pending.clear();
         self.update_glide();
+        self.server_flags = None;
     }
 
     fn teleport(&mut self, pose: &mut Pose, t: &Teleport) {
@@ -1056,21 +1064,69 @@ impl Sim for Sim12 {
     fn world_packet_ids(&self) -> Vec<i32> {
         use ghast_protocol::v1_12_2::play::clientbound as cb;
         let mut ids: Vec<i32> = self.world.packet_ids().collect();
-        // Riding: boarding and the server's boat corrections.
-        ids.extend([cb::id::SET_PASSENGERS, cb::id::VEHICLE_MOVE]);
+        // Riding: boarding and the server's boat corrections. Our entity data: the shared
+        // flags (sprinting, fall flying).
+        ids.extend([
+            cb::id::SET_PASSENGERS,
+            cb::id::VEHICLE_MOVE,
+            cb::id::ENTITY_METADATA,
+        ]);
         if self.glide.watch {
-            // Gliding: the server's flag 7 (our entity data) and the rockets it attaches to us.
-            ids.extend([
-                cb::id::SPAWN_ENTITY,
-                cb::id::ENTITY_DESTROY,
-                cb::id::ENTITY_METADATA,
-            ]);
+            // Gliding: the rockets the server attaches to us.
+            ids.extend([cb::id::SPAWN_ENTITY, cb::id::ENTITY_DESTROY]);
         }
         ids
     }
 
     fn take_filter_dirty(&mut self) -> bool {
         std::mem::take(&mut self.glide.filter_dirty)
+    }
+
+    #[cfg(all(test, ghast_modern, feature = "v1_8", feature = "v1_16_5"))]
+    fn test_set_own_id(&mut self, id: i32) {
+        self.glide.own_id = id;
+    }
+
+    fn attack_hurts(&self, e: &ghast_entity::Entity) -> bool {
+        use ghast_entity::EntityType as T;
+        // 1.12.2 `damage` on the client: `OtherClientPlayerEntity` always, boats and minecarts
+        // (`world.isClient` → true), the end crystal, the ghast fireball (an attacker given),
+        // the shulker bullet. LivingEntity is false on the client; paintings / item frames
+        // are skipped by `handleAttack`; small / dragon fireballs and wither skulls are never
+        // damaged.
+        match e.entity_type() {
+            T::Player => true,
+            T::LegacyObject(t) => matches!(t, 1 | 10 | 51 | 63 | 67),
+            _ => false,
+        }
+    }
+
+    fn attack_slow(&mut self, knockback: i32, sprint_bonus: bool) {
+        let p = &mut self.player;
+        if super::attack_knockback_applies(knockback, p.sprinting, sprint_bonus) {
+            p.vel[0] *= 0.6;
+            p.vel[2] *= 0.6;
+            p.set_sprinting(false);
+            if let Some(r) = &mut self.rec {
+                r.note("attack slow-down not representable");
+            }
+        }
+    }
+
+    fn server_flags(&self) -> Option<u8> {
+        self.server_flags
+    }
+
+    fn velocity_now(&self) -> Vec3 {
+        let v = self.player.vel;
+        Vec3::new(v[0], v[1], v[2])
+    }
+
+    fn collisions(&self) -> (bool, bool) {
+        (
+            self.player.horizontal_collision,
+            self.player.vertical_collision,
+        )
     }
 
     fn mount_rules(&self, entity_id: i32) -> Option<ghast_inventory::MountRules> {
