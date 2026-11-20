@@ -79,3 +79,7 @@ required-features = ["v1_8", "v1_12", "v1_16_5"]
 [[example]]
 name = "live_probe"
 required-features = ["v1_8", "v1_12", "v1_16_5"]
+
+[[test]]
+name = "oracle_interp"
+required-features = ["v1_8", "v1_12"]

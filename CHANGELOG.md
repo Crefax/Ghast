@@ -24,7 +24,11 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   drowning, burning, berry bush; 26.x `damage_event`) and `estimated_velocity` (the last two
   server positions over the ticks between them). `Event::Hurt { id, attacker }` (26.x with the
   attacking entity). One small heap block per living entity with the view on; `Entity` grew by
-  8 bytes (the pointer).
+  8 bytes (the pointer). Oracle-checked: the new `interp` dump (real spawn / move / look /
+  teleport packets through the real 1.8.9 and 1.12.2 `ClientPlayNetworkHandler`, then
+  `World.tickEntities`) replays bit for bit, positions and rotations, 12 000 entity ticks per
+  version (`tests/golden/{1.8.9,1.12.2}/interp.jsonl.gz`); 1.12.2 spawns clamp the drawn pitch
+  to ±90 as `updatePositionAndAngles` does.
 - **The client picks entities at their drawn position** (`ghast-client`, A8 of the PvP findings):
   entity tracking (`Interests::ENTITIES` / `ENTITY_TRACKING`) turns the client view on, the
   engine steps it where vanilla ticks the world's entities and stamps its clock with the tick

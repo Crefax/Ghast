@@ -90,6 +90,11 @@ public final class Main {
             }
             case "recipes" -> write(a.path("--out", golden.resolve("recipes.jsonl.gz")), RecipeDump::lines);
             case "dig-facts" -> write(a.path("--out", golden.resolve("dig_facts.jsonl.gz")), DigDump::facts);
+            case "interp" -> {
+                long seed = a.lng("--seed", 1);
+                int cases = (int) a.lng("--cases", InterpDump.CASES);
+                write(a.path("--out", golden.resolve("interp.jsonl.gz")), sink -> InterpDump.lines(seed, cases, sink));
+            }
             case "picks" -> {
                 long seed = a.lng("--seed", 1);
                 int worlds = (int) a.lng("--worlds", PickDump.WORLDS);
@@ -213,6 +218,7 @@ public final class Main {
         write(dir.resolve("dig_facts.jsonl.gz"), DigDump::facts);
         write(dir.resolve("dig.jsonl.gz"), sink -> dig(1, DigDump.CASES, sink));
         write(dir.resolve("picks.jsonl.gz"), sink -> picks(1, PickDump.WORLDS, PickDump.RAYS, sink));
+        write(dir.resolve("interp.jsonl.gz"), sink -> InterpDump.lines(1, InterpDump.CASES, sink));
         write(dir.resolve("clicks_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, sink));
         write(dir.resolve("clicks_craft_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> ClickDump.cases(GOLDEN_CLICK_SEED, GOLDEN_CLICK_CASES, true, sink));
         write(dir.resolve("clicks_menus_seed" + GOLDEN_CLICK_SEED + ".jsonl.gz"), sink -> MenuClickDump.all(GOLDEN_CLICK_SEED, GOLDEN_MENU_CASES, sink));

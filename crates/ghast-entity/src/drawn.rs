@@ -84,14 +84,26 @@ pub(crate) fn legacy_lerp(e: &Entity) -> Option<Lerp> {
 }
 
 impl Client {
-    /// A freshly spawned entity: drawn where the server put it.
+    /// A freshly spawned entity: drawn where the server put it. 1.12.2 player and mob spawns
+    /// go through `updatePositionAndAngles`, which clamps x / z to ±3e7 and the pitch to ±90
+    /// (objects such as the armor stand set their rotation directly).
     pub(crate) fn new(e: &Entity, lerp: Lerp, now: u64) -> Self {
+        let (mut pos, mut pitch) = (e.pos, e.pitch);
+        if e.era == Era::V1_12 && !matches!(e.ty, EntityType::LegacyObject(_)) {
+            // MathHelper.clamp: NaN passes through, as with `clamp`.
+            pos = [
+                pos[0].clamp(-3.0e7, 3.0e7),
+                pos[1],
+                pos[2].clamp(-3.0e7, 3.0e7),
+            ];
+            pitch = pitch.clamp(-90.0, 90.0);
+        }
         Client {
             lerp,
-            pos: e.pos,
-            target: e.pos,
-            rot: [e.yaw, e.pitch],
-            target_rot: [e.yaw, e.pitch],
+            pos,
+            target: pos,
+            rot: [e.yaw, pitch],
+            target_rot: [e.yaw, pitch],
             steps: 0,
             bb: None,
             spawned: now,
