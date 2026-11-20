@@ -60,7 +60,11 @@ pub trait Behavior {
     /// [`TickEvents::raw`], including packets the core consumes itself (the core's handling
     /// does not change). Read every tick like [`Behavior::interests`]; a change updates the
     /// packet filter. Decoding is the behaviour's job (`ghast::protocol::v1_8::play::clientbound`
-    /// / `v1_16_5`).
+    /// / `v1_16_5`). A behaviour made of modules returns the union of their lists
+    /// (`Cow::Owned([a.ids(version), b.ids(version)].concat())`; duplicates are harmless).
+    /// Most needs have typed events now: [`TickEvents::effects`], [`TickEvents::hurt`],
+    /// [`TickEvents::deaths`], [`TickEvents::item_use`], [`TickEvents::entities`],
+    /// [`TickContext::spawn_position`].
     fn raw_packets(&self, version: GameVersion) -> std::borrow::Cow<'static, [i32]> {
         let _ = version;
         std::borrow::Cow::Borrowed(&[])

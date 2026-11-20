@@ -95,6 +95,13 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   contents of window 0 / the open window (join, respawn, a rejected click's resync).
 - `Inventory::use_equips` / `equip_from_hand`: the right-click armor equip rules per version;
   `Capabilities::use_equip_swings`.
+- **Pathfinder movement-only following** (`ghast-pathfinder`):
+  `FollowConfig::with_movement_only(true)` leaves the aim to the behaviour (a fight keeps
+  looking at its target) and steers with strafe-relative keys for the behaviour's look this
+  tick: of the eight key directions the one whose simulated next ticks end closest to the next
+  step and keep to the floor; digs, places, doors, gap jumps, ladders and pillars still aim
+  while they last (`Follower::aiming`). `Follower::waypoint` / `current_move` (and
+  `Controller::waypoint`) expose the point being walked to.
 
 ### Fixed
 

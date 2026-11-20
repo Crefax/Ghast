@@ -78,7 +78,18 @@ checks for `dig` / `place` use it.
 
 Other rules the client enforces:
 - Window clicks only while the look is still, one click in flight at a time; every window
-  confirm is answered exactly once.
+  confirm is answered exactly once. Confirms are applied when they arrive, before the next
+  tick, but the server handles a click in its own tick and the confirm comes back with that
+  tick's packets: even at ~1 ms ping consecutive clicks usually go out every second tick
+  (a shift-click re-equip of three pieces: settle, open, three clicks ≈ 7 ticks).
+  `ctx.can_click()` tells whether a click would be refused now without sending anything.
+- The mouse turns at most `Rotation::MAX_YAW_PER_TICK` (14°) / `MAX_PITCH_PER_TICK` (10.5°)
+  per tick by default (`Client::turn_rate` changes it). That cap is a behaviour-tuning choice
+  of ghast, not a vanilla rule: vanilla turns as far as the mouse moved. Every step stays a
+  whole number of mouse counts of the sensitivity's GCD.
+- Buttons are keys: a new right press needs a tick with the button released before it
+  (press edge); held, right uses again every 4 ticks (vanilla's right-click delay), left keeps
+  breaking. `ctx.press_preview(button)` gives what the next key handling acts on.
 - Silent-server guard: after 1.5 s without inbound data the behaviour is frozen (keys
   released) while the vanilla movement packet continues.
 

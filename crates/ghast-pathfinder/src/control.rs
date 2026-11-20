@@ -316,6 +316,120 @@ impl Controller {
         &self.cfg
     }
 
+    /// The point the controller walks to now: the centre of the next step's feet block at its
+    /// feet height (`None` once the last step is reached).
+    #[must_use]
+    pub fn waypoint(&self) -> Option<[f64; 3]> {
+        self.path.steps.get(self.reached + 1).map(Step::target)
+    }
+
+    /// Whether this tick's move needs the controller's own look: a dig / place / door job, a
+    /// gap jump, a ladder, a pillar or a dig down (the movement-only mode of the follower aims
+    /// for these).
+    #[must_use]
+    pub(crate) fn needs_look(&self) -> bool {
+        self.progress == Progress::Working
+            || self.leap.is_some()
+            || self.path.steps.get(self.reached + 1).is_some_and(|s| {
+                matches!(
+                    s.kind,
+                    MoveKind::Parkour { .. }
+                        | MoveKind::ClimbUp
+                        | MoveKind::ClimbDown
+                        | MoveKind::ClimbExit
+                        | MoveKind::Pillar
+                        | MoveKind::DigDown
+                        | MoveKind::Door { .. }
+                )
+            })
+    }
+
+    /// Movement only: `planned` (this tick's keys for the controller's own look) pressed for
+    /// the look `look` instead: of the eight key directions, the one whose next ticks end
+    /// closest to the next step, without leaving the floor where the path does not go (jump
+    /// and sneak kept; the sprint key only with forward).
+    pub(crate) fn steer_keys<S: BlockSource + ?Sized>(
+        &self,
+        obs: &Observation,
+        planned: Keys,
+        look: (f32, f32),
+        world: &S,
+    ) -> Keys {
+        match self.path.version {
+            #[cfg(feature = "v1_8")]
+            Version::V1_8 => self.steer_as::<P18, S>(obs, planned, look, world),
+            #[cfg(feature = "v1_12_2")]
+            Version::V1_12 => self.steer_as::<P12, S>(obs, planned, look, world),
+            #[cfg(feature = "v1_16_5")]
+            Version::V1_16_5 => self.steer_as::<P16, S>(obs, planned, look, world),
+            #[cfg(feature = "v26_1")]
+            Version::V26_1 => self.steer_as::<P26, S>(obs, planned, look, world),
+            #[cfg(feature = "v26_2")]
+            Version::V26_2 => self.steer_as::<P262, S>(obs, planned, look, world),
+        }
+    }
+
+    fn steer_as<P: Physics, S: BlockSource + ?Sized>(
+        &self,
+        obs: &Observation,
+        planned: Keys,
+        look: (f32, f32),
+        world: &S,
+    ) -> Keys {
+        if !(planned.forward || planned.back || planned.left || planned.right) {
+            return planned;
+        }
+        let view = SourceView::<P, S>::new(world);
+        let Some(goal) = self.waypoint() else {
+            return planned;
+        };
+        let mut best = (f64::INFINITY, planned);
+        for (f, s) in [
+            (1, 0),
+            (1, 1),
+            (0, 1),
+            (-1, 1),
+            (-1, 0),
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+        ] {
+            let k = Keys {
+                forward: f > 0,
+                back: f < 0,
+                left: s > 0,
+                right: s < 0,
+                sprint: planned.sprint && f > 0,
+                ..planned
+            };
+            let (end, floor) = self.ahead::<P, S>(&view, obs, k, look);
+            let d = hdist(end, goal) + (end[1] - goal[1]).abs() + if floor { 0.0 } else { 100.0 };
+            if d < best.0 {
+                best = (d, k);
+            }
+        }
+        best.1
+    }
+
+    /// Where `keys` held for [`STEER_TICKS`] ticks at `look` take the player, and whether it
+    /// stayed on a floor or over the path.
+    fn ahead<P: Physics, S: BlockSource + ?Sized>(
+        &self,
+        view: &SourceView<'_, P, S>,
+        obs: &Observation,
+        keys: Keys,
+        look: (f32, f32),
+    ) -> ([f64; 3], bool) {
+        let mut s = P::from_observation(obs, &self.live);
+        let mut floor = true;
+        for _ in 0..STEER_TICKS {
+            P::tick(&mut s, keys, look.0, look.1, view);
+            let o = P::observe(&s);
+            floor &= o.on_ground || self.allowed_column(o.pos);
+        }
+        (P::observe(&s).pos, floor)
+    }
+
     /// The move (`from`, `to` feet blocks) the controller is on: after [`Progress::Stuck`] /
     /// [`Progress::OffPath`] the move that failed, for [`Pathfinder::plan_avoiding`].
     #[must_use]
@@ -1373,6 +1487,9 @@ impl Controller {
         (true, clear)
     }
 }
+
+/// Ticks the movement-only steering looks ahead per key direction.
+const STEER_TICKS: u32 = 3;
 
 /// Ticks without progress after which the walk accepts grazing a wall instead of braking.
 const WEDGED_TICKS: u32 = 10;

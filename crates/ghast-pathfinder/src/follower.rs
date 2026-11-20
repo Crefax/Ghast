@@ -220,6 +220,10 @@ pub struct FollowConfig {
     /// Most simulated ticks of the verification per game tick (also bounded by
     /// `budget.time`). Default 400.
     pub verify_ticks: u32,
+    /// Movement only: the follower leaves the aim to the behaviour (a fight keeps looking at
+    /// its target) and steers with the keys relative to the look the behaviour's aim gives
+    /// this tick. Default off. See [`FollowConfig::with_movement_only`].
+    pub movement_only: bool,
 }
 
 impl Default for FollowConfig {
@@ -230,6 +234,7 @@ impl Default for FollowConfig {
             verify: true,
             budget: Budget::nodes(2000).with_time(Duration::from_millis(5)),
             verify_ticks: 400,
+            movement_only: false,
         }
     }
 }
@@ -246,6 +251,23 @@ impl FollowConfig {
     #[must_use]
     pub fn with_max_replans(mut self, n: u32) -> Self {
         self.max_replans = n;
+        self
+    }
+
+    /// Movement only (strafe-relative steering): the follower never sets the aim on plain moves
+    /// (walks, diagonals, step-ups, drops, swims); it plans the keys for the look it wants and
+    /// presses the one of the eight key directions (forward / back × left / right) closest to
+    /// that move for the look the behaviour's aim gives this tick
+    /// ([`TickContext::planned_look`], so tick the follower after `set_aim`): the direction
+    /// whose next ticks, simulated, end closest to where the planned keys would go and keep
+    /// to the floor. The sprint key stays down only with forward. Moves that need the look — digging, placing, doors, gap
+    /// jumps, ladders, pillars — still aim while they last ([`Follower::aiming`] tells). Eight
+    /// directions are coarser than a turned look (up to 22.5° off), so corners and ledges are
+    /// walked less exactly than with the aim; [`Follower::waypoint`] gives the point to steer
+    /// to for a behaviour that drives the keys itself.
+    #[must_use]
+    pub fn with_movement_only(mut self, on: bool) -> Self {
+        self.movement_only = on;
         self
     }
 
@@ -366,6 +388,8 @@ pub struct Follower {
     plan_ticks: u32,
     /// Whether the goal lay in loaded terrain when the current plan started.
     goal_loaded: Option<bool>,
+    /// The last tick set the aim.
+    aimed: bool,
 }
 
 /// A plan in progress: the search, then the simulated check.
@@ -442,6 +466,7 @@ impl Follower {
             planning: None,
             plan_ticks: 0,
             goal_loaded: None,
+            aimed: false,
         }
     }
 
@@ -482,6 +507,26 @@ impl Follower {
     #[must_use]
     pub fn path(&self) -> Option<&crate::Path> {
         self.ctrl.as_ref().map(Controller::path)
+    }
+
+    /// The point the follower walks to now (the next step's block centre at its feet height),
+    /// `None` without a path being followed.
+    #[must_use]
+    pub fn waypoint(&self) -> Option<[f64; 3]> {
+        self.ctrl.as_ref().and_then(Controller::waypoint)
+    }
+
+    /// The move (`from`, `to` feet blocks) being followed.
+    #[must_use]
+    pub fn current_move(&self) -> Option<([i32; 3], [i32; 3])> {
+        self.ctrl.as_ref().and_then(Controller::current_move)
+    }
+
+    /// Whether the last [`Follower::tick`] set the aim (always, unless
+    /// [`FollowConfig::with_movement_only`] is on and the move did not need the look).
+    #[must_use]
+    pub fn aiming(&self) -> bool {
+        self.aimed
     }
 
     /// Plans made since the follower was created (for logs and tests).
@@ -721,11 +766,20 @@ impl Follower {
             ctrl.progress(),
             Progress::Arrived | Progress::Stuck | Progress::OffPath
         );
-        if !done {
+        let steer = self.cfg.movement_only && !ctrl.needs_look();
+        self.aimed = !done && !steer;
+        if self.aimed {
             ctx.set_aim(yaw, pitch);
         }
         let look = ctx.planned_look();
-        let cmd = ctrl.keys(&obs, look, &world_of(ctx));
+        let cmd = if steer {
+            // The keys for the wanted look, pressed relative to the behaviour's look.
+            let mut cmd = ctrl.keys(&obs, (yaw, look.1), &world_of(ctx));
+            cmd.keys = ctrl.steer_keys(&obs, cmd.keys, look, &world_of(ctx));
+            cmd
+        } else {
+            ctrl.keys(&obs, look, &world_of(ctx))
+        };
         match ctrl.progress() {
             Progress::Arrived => {
                 let path = ctrl.path();
@@ -1225,6 +1279,48 @@ pub(crate) mod tests {
 
     fn follower() -> Follower {
         Follower::new(Pathfinder::new(Config::default()), FollowConfig::default())
+    }
+
+    /// Movement only: the behaviour looks a fixed way (a fight's target) the whole time, the
+    /// follower never touches the aim and still walks the maze with strafe-relative keys.
+    #[test]
+    fn movement_only_walks_a_maze_with_the_behaviours_look() {
+        for (n, seed) in [(7, 3u64), (15, 5)] {
+            let mut w = flat(6);
+            maze(&mut w, (-n, -n), n, 2, seed);
+            let c = if n % 2 == 1 { 0 } else { 1 };
+            let goal = Goal::Near {
+                pos: [c, 64, c],
+                radius: 1.0,
+            };
+            let from = [f64::from(-n - 4) + 0.5, 64.0, f64::from(n + 4) + 0.5];
+            for look in [37.0f32, -120.0, 180.0] {
+                let mut f = Follower::new(
+                    Pathfinder::new(Config::default()),
+                    FollowConfig::default().with_movement_only(true),
+                );
+                f.goto(goal.clone());
+                let mut io = SimIo::<P18, _>::new(&w, from);
+                let mut status = FollowStatus::Moving;
+                let mut ticks = 0;
+                while ticks < 20_000 {
+                    io.set_aim(look, 0.0);
+                    status = f.step(&mut io);
+                    if status != FollowStatus::Moving {
+                        break;
+                    }
+                    assert!(!f.aiming(), "a plain walk aimed");
+                    io.advance();
+                    ticks += 1;
+                }
+                eprintln!(
+                    "maze {n} look {look}: {status:?} in {ticks} ticks, {} plans",
+                    f.plans()
+                );
+                assert_eq!(status, FollowStatus::Arrived, "maze {n} look {look}");
+                assert!(goal.is_reached(Pathfinder::start_block(io.feet())));
+            }
+        }
     }
 
     /// Mazes of 15, 31 and 63 blocks: the bot starts outside, the goal is the centre cell,

@@ -1202,8 +1202,9 @@ pub enum Outbound {
         /// 1.9+: the off hand.
         off_hand: bool,
     },
-    /// Use the held item (1.8 `block_place` at −1/−1/−1 face 255 with the held stack; 1.16
-    /// `use_item`).
+    /// Use the held item: 1.8 `block_place` in vanilla's own form (position −1/−1/−1, face 255,
+    /// the held stack, cursor 0/0/0 — what servers and anticheats expect; other forms are
+    /// flagged as bad packets); 1.9+ `use_item` with the hand.
     UseItem {
         /// The held stack.
         held: Option<ghast_inventory::Stack>,

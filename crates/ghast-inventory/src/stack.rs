@@ -43,6 +43,14 @@ impl ItemData {
 /// The fields are private so the representation can change without breaking users: read them
 /// with [`Stack::id`], [`Stack::count`], [`Stack::damage`], [`Stack::data`], build stacks with
 /// [`Stack::new`] and the `with_*` methods.
+///
+/// What the stack means is read per version (`v` = [`Inventory::version`](crate::Inventory::version)):
+/// [`Stack::item_name`], [`Stack::kind`] / [`Stack::is_sword`], [`Stack::max_stack_size`],
+/// [`Stack::max_damage`] / [`Stack::damage_value`] (durability left = max − damage),
+/// [`Stack::custom_name`], [`Stack::lore`], [`Stack::enchantments`] (levels by name:
+/// [`Inventory::enchantment_level`](crate::Inventory::enchantment_level)) and
+/// [`Stack::potion`]. The version's static item facts are in `ghast-data`
+/// (`ghast_data::v1_8::Item::from_id(id).info()`, and so on).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Stack {
     pub(crate) id: i32,

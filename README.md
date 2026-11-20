@@ -67,10 +67,16 @@ impl Behavior for Afk {
     fn tick(&mut self, ctx: &mut TickContext<'_>) {
         for m in &ctx.events().chat { println!("{}", m.plain()); }
         if ctx.is_dead() { ctx.respawn(); }
+        if ctx.tick() % 200 == 0 {
+            // `Pose` holds the feet position as `pos: Vec3` (and yaw, pitch, on_ground, …).
+            let p = ctx.pose().pos;
+            println!("at {:.1} {:.1} {:.1}", p.x, p.y, p.z);
+        }
     }
 }
 
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+// The address is a `connect::TargetAddr`: parse "host:port", or `.into()` a `SocketAddr`.
 let client = Client::new("localhost:25565".parse()?, GameVersion::V1_8_9, Account::offline("Bot")?);
 let end = client.run(&mut Afk).await?;
 # Ok(()) }
