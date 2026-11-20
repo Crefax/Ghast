@@ -686,8 +686,8 @@ impl Entity {
     /// The **server position**: exactly the coordinates the vanilla client tracks from the
     /// packets (1.8: `serverPos / 32.0`; 1.12: spawn / teleport coordinates, after a relative
     /// move the tracked 1/4096 position; 1.16: the packet coordinates, rel moves applied in
-    /// 1/4096 fixed point). The rendered position interpolates towards this over 3 ticks in
-    /// vanilla; a bot does not need that.
+    /// 1/4096 fixed point). The vanilla client draws and picks the entity at a position that
+    /// interpolates towards this over 3 ticks: [`Entity::drawn_position`].
     ///
     /// **26.1** is different: this is the entity's *current* position as the client holds it
     /// (`Entity.position()`): position packets of interpolated entities (living entities, boats,
@@ -713,6 +713,7 @@ impl Entity {
     /// tracking) and its `tick_client` once per client tick; otherwise, and for the entities the
     /// view does not interpolate, this is [`Entity::position`].
     #[must_use]
+    #[inline]
     pub fn drawn_position(&self) -> [f64; 3] {
         match &self.client {
             Some(c) if c.lerp != crate::drawn::Lerp::External || c.bb.is_some() => c.pos,
@@ -724,11 +725,14 @@ impl Entity {
     /// keeps its minimum corner after a growing resize until the next move), `[min_x, min_y,
     /// min_z, max_x, max_y, max_z]`. This is the box vanilla's crosshair pick tests.
     #[must_use]
+    #[inline]
     pub fn drawn_bounding_box(&self) -> Option<[f64; 6]> {
-        if let Some(b) = self.client.as_ref().and_then(|c| c.bb) {
-            return Some(b);
-        }
-        let [x, y, z] = self.drawn_position();
+        let [x, y, z] = match self.client.as_deref() {
+            None => self.pos,
+            Some(c) if c.bb.is_some() => return c.bb,
+            Some(c) if c.lerp != crate::drawn::Lerp::External => c.pos,
+            Some(_) => self.pos,
+        };
         let b = self.dimensions()?.bounding_box(x, y, z);
         Some([b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z])
     }

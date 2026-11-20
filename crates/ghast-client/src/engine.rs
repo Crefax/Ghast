@@ -2976,7 +2976,9 @@ impl TickContext<'_> {
 
     /// The entity the crosshair is on as the server judges it (from the sent pose; vanilla's
     /// pick: within 3 blocks outside creative, nearer than the block hit, boxes grown by the
-    /// type's targeting margin).
+    /// type's targeting margin, each entity's box at its drawn position,
+    /// [`ghast_entity::Entity::drawn_bounding_box`], as the vanilla client interpolates it).
+    /// The buttons and [`TickContext::attack`] use this same pick.
     #[must_use]
     pub fn target_entity(&self) -> Option<hands::EntityHit> {
         self.sent_crosshair().1
