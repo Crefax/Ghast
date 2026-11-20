@@ -189,6 +189,26 @@ impl Version {
         }
     }
 
+    /// The armor slot a right-click use of the stack equips (`None`: the use does not equip):
+    /// 1.8 `ArmorItem.onStartUse`; 1.12.2 / 1.16.5 `ArmorItem.use` and `ElytraItem.use` (the
+    /// armor pieces, the turtle helmet, the elytra; pumpkins and heads only go on by clicks);
+    /// 26.x `Item.use` with a swappable `equippable` for a humanoid armor slot (pumpkins and
+    /// heads are not swappable; a stack patching `equippable` is not predicted).
+    pub(crate) fn use_equip_target(self, s: &Stack) -> Option<ArmorIndex> {
+        match self {
+            Version::V1_8 => self.armor_target(s),
+            Version::V1_12 => equipment_1_12(s.id).filter(|_| matches!(s.id, 298..=317 | 443)),
+            Version::V1_16_5 | Version::V26_1 | Version::V26_2 => {
+                let n = self.name(s.id);
+                if n == "carved_pumpkin" || n.ends_with("_skull") || n.ends_with("_head") {
+                    None
+                } else {
+                    self.armor_target(s)
+                }
+            }
+        }
+    }
+
     /// Whether window 0's armor slot `a` accepts the stack (`Slot.canInsert`).
     pub(crate) fn armor_accepts(self, a: ArmorIndex, s: &Stack) -> bool {
         match self {

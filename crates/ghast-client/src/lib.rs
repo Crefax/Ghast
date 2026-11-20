@@ -121,7 +121,7 @@ pub use ghast_entity as entity;
 pub use ghast_inventory as inventory;
 pub use ghast_protocol::BlockPos;
 pub use ghast_world as world;
-pub use hands::{BlockHit, Buttons};
+pub use hands::{BlockHit, Button, Buttons, PressOutcome};
 pub use interest::Interests;
 pub use sim::{ForceStepPosition, WorldView};
 pub use swarm::{BotContext, BotError, BotHandle, ShutdownReport, Swarm, SwarmBuilder};

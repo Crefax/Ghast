@@ -852,6 +852,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
             HeldItem {
                 modern_item: None,
                 swing_on_use: false,
+                equips: false,
                 id,
                 count,
                 efficiency,
@@ -867,6 +868,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         DataSet::V1_12 => HeldItem {
             modern_item: None,
             swing_on_use: false,
+            equips: false,
             id,
             count,
             efficiency,
@@ -881,6 +883,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         DataSet::V1_16_5 => HeldItem {
             modern_item: None,
             swing_on_use: false,
+            equips: false,
             id,
             count,
             efficiency,
@@ -917,6 +920,7 @@ pub(crate) fn held_item_facts(data: DataSet, id: u16, count: u8, efficiency: u8)
         _ => HeldItem {
             modern_item: None,
             swing_on_use: false,
+            equips: false,
             id,
             count,
             efficiency,

@@ -128,6 +128,11 @@ pub struct Capabilities {
     /// enchantment effects only on a `ServerLevel`: the client's knockback is the attribute
     /// alone (a sprint attack at full strength still slows).
     pub attack_knockback_enchantment: bool,
+    /// Putting armor on with a right click swings the arm: 1.16.5 `ArmorItem.use` answers
+    /// `success(…, isClient)` (SUCCESS swings) and 26.x `Equippable.swapWithEquipmentSlot`
+    /// SUCCESS (a client swing); 1.12.2 `ArmorItem.use` SUCCESS swings nothing, 1.8
+    /// `interactItem` neither.
+    pub use_equip_swings: bool,
 }
 
 const fn f(v: f32) -> f64 {
@@ -186,6 +191,7 @@ pub(crate) const V1_8_9: Capabilities = Capabilities {
     spectator_block_click_swings: true,
     spectator_switch_stops_use: false,
     attack_knockback_enchantment: true,
+    use_equip_swings: false,
 };
 
 /// 1.12.2 (protocol 340).
@@ -214,6 +220,7 @@ pub(crate) const V1_16_5: Capabilities = Capabilities {
     immediate_respawn_rule: true,
     client_entity_push: true,
     drop_prediction: true,
+    use_equip_swings: true,
     ..V1_12_2
 };
 

@@ -1452,3 +1452,54 @@ impl Hurt {
         }
     }
 }
+
+/// A step of an item use (eating, drinking, blocking, drawing a bow) of the player
+/// ([`crate::TickEvents::item_use`]). `item` is the used stack's item id (the version's
+/// numbering, as [`ghast_inventory::Stack::id`]), `off_hand` the hand it is in (always `false`
+/// on 1.8), `ticks` the player ticks the use lasted (vanilla's `getItemUseTime` /
+/// `getTicksUsingItem`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum UseEvent {
+    /// The right button started a use (the client's `setCurrentHand` / `startUsingItem`, in the
+    /// key handling that sent the `use_item`).
+    Started {
+        /// The used item.
+        item: i32,
+        /// In the off hand.
+        off_hand: bool,
+    },
+    /// The server finished the use (entity status 9 for our entity: the food was eaten, the
+    /// potion drunk; the item's effects and the stack's new count follow in their own
+    /// packets).
+    Finished {
+        /// The used item.
+        item: i32,
+        /// In the off hand.
+        off_hand: bool,
+        /// Player ticks it lasted.
+        ticks: u32,
+    },
+    /// The right button was released before the server finished it (`release_use_item` sent:
+    /// a bow shot, a lowered shield, eating cut short).
+    Released {
+        /// The used item.
+        item: i32,
+        /// In the off hand.
+        off_hand: bool,
+        /// Player ticks it lasted.
+        ticks: u32,
+    },
+    /// The use ended without a release or a finish: the held slot changed (the behaviour's
+    /// `select_slot` or the server's), the used hand no longer holds that item, the drop key
+    /// dropped it, the game mode became spectator (26.x), or a new player entity (join,
+    /// respawn).
+    Interrupted {
+        /// The used item.
+        item: i32,
+        /// In the off hand.
+        off_hand: bool,
+        /// Player ticks it lasted.
+        ticks: u32,
+    },
+}

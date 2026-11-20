@@ -21,7 +21,7 @@ const VERSIONS: [GameVersion; 5] = [
 
 /// What an attack target is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
+pub(super) enum Kind {
     Player,
     Zombie,
 }
@@ -32,7 +32,7 @@ fn uuid(id: i32) -> uuid::Uuid {
 
 /// Spawns a player or a zombie at `pos`, facing south (26.x: a player's tab-list entry first,
 /// the client adds no player without one).
-fn put(e: &mut Engine<Box<dyn Sim>>, id: i32, kind: Kind, pos: Vec3) {
+pub(super) fn put(e: &mut Engine<Box<dyn Sim>>, id: i32, kind: Kind, pos: Vec3) {
     let v = e.core.opts.caps.version;
     if kind == Kind::Player && v.caps().configuration_state {
         // player_info: actions {add player}, one entry (uuid, name, no properties).
@@ -227,7 +227,7 @@ fn own_flags(v: GameVersion, flags: u8) -> RawPacket {
 
 /// A joined engine with entity tracking, full food (sprinting needs it) and our entity id
 /// known to the sim, standing at (8.5, 64, 8.5) facing west.
-fn setup(v: GameVersion) -> Engine<Box<dyn Sim>> {
+pub(super) fn setup(v: GameVersion) -> Engine<Box<dyn Sim>> {
     let mut e = engine(v);
     join(&mut e);
     floor(&mut e);

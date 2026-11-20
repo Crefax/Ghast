@@ -80,8 +80,35 @@ the API has been stable for a while and the 1.0 criteria in CONTRIBUTING.md are 
   still whole mouse counts), `Rotation::with_turn_rate` / `turn_rate`.
 - `Client::gui_releases_keys` (default on, see Fixed), `Capabilities::attack_knockback_enchantment`,
   `Inbound::LegacyAttributes` (1.12 / 1.16 movement and attack speed).
+- **Item use events** (`ghast-client`, every version): `TickEvents::item_use` lists our use's
+  steps as `common::UseEvent`: `Started` (the right button's key handling), `Finished` (the
+  server's entity status 9, with the ticks it lasted), `Released` (`release_use_item`) and
+  `Interrupted` (slot change, the stack left the hand, drop, 26.x spectator switch, new player
+  entity), each with the item id and hand; behind the boxed lazy events block.
+- `TickContext::can_click`: whether a click would be refused now (dead, turning, the
+  inventory's own reasons) without sending anything.
+- `TickContext::press_preview(Button)` → `PressOutcome` (`Entity`, `Block`, `Item`,
+  `Nothing`): what a left / right press acts on in this tick's key handling, from the same
+  pick the buttons run (the client's pose with the held item; `target_entity` is the server's
+  view of it from the sent pose). New `Button` / `PressOutcome` in `hands`, re-exported.
+- `ghast_inventory::Events::player_synced` / `window_synced`: the server sent the full
+  contents of window 0 / the open window (join, respawn, a rejected click's resync).
+- `Inventory::use_equips` / `equip_from_hand`: the right-click armor equip rules per version;
+  `Capabilities::use_equip_swings`.
 
 ### Fixed
+
+- **Right-click armor equip is predicted** (`ghast-client`, every version): the use puts the
+  held piece on at once like the vanilla client, before the server's slot updates (a bot saw
+  the slot empty for 1–2 ticks and pressed again). 1.8.9 `ArmorItem.onStartUse`, 1.12.2 /
+  1.16.5 `ArmorItem.use` / `ElytraItem.use`: only into an empty armor slot, the hand empties
+  (a taken slot: FAIL, 1.9+ tries the off hand); 26.x `Equippable.swapWithEquipmentSlot`: a
+  swappable armor-slot item swaps with the worn piece unless it is the same item or carries the
+  binding curse outside creative (creative keeps the hand's stack when the slot was empty).
+  1.16.5 and 26.x swing the arm on it (SUCCESS), 1.8.9 / 1.12.2 do not. Pumpkins and heads still
+  go on only by clicks.
+- `TickContext::open_inventory` is refused while turning (`ClickRefused::Turning`), like
+  `click`: a screen opened mid-turn refused every click until the player was still.
 
 - **Attack slow-down** (`ghast-client`, every version): `PlayerEntity.attack` runs on the
   client after every attack (`TickContext::attack` and left clicks): a hit the client counts as

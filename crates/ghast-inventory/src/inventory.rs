@@ -461,6 +461,14 @@ pub struct Events {
     pub closed: bool,
     /// Clicks that were confirmed, rejected or timed out, in order.
     pub clicks: Vec<ClickResult>,
+    /// The server sent the full contents of window 0 (`window_items` / 26.x
+    /// `container_set_content` for the player inventory): every slot of it, armor and the
+    /// crafting grid included, is the server's now. Servers send it at join, at respawn and
+    /// after a rejected click; a kit given with single `set_slot`s does not set it.
+    pub player_synced: bool,
+    /// The server sent the full contents of the open window (its own slots and the player
+    /// slots it shows).
+    pub window_synced: bool,
 }
 
 /// An open container window.
@@ -2265,6 +2273,81 @@ impl Inventory {
         true
     }
 
+    /// What a right-click use of the stack in the main hand (or the off hand, 1.12+) does to
+    /// the armor on the client (no packet; vanilla's item `use`): `true` when it equips the
+    /// stack. 1.8 / 1.12.2 / 1.16.5 (`ArmorItem` / `ElytraItem`): only into an empty armor
+    /// slot. 26.x (a swappable `equippable`): also swaps with the piece worn, unless that is
+    /// the same item with the same components or carries the binding curse outside creative.
+    /// `creative` is the game mode.
+    #[must_use]
+    pub fn use_equips(&self, off_hand: bool, creative: bool) -> bool {
+        self.use_equip_plan(off_hand, creative).is_some()
+    }
+
+    /// The hand's player index and the armor index its use equips.
+    fn use_equip_plan(&self, off_hand: bool, creative: bool) -> Option<(usize, usize)> {
+        let hand = if off_hand {
+            if self.version == Version::V1_8 {
+                return None;
+            }
+            40
+        } else {
+            usize::from(self.m.selected.min(8))
+        };
+        let s = self.m.player[hand].as_ref().filter(|s| s.count > 0)?;
+        let a = self.version.use_equip_target(s)?;
+        let worn_k = 39 - usize::from(a);
+        match &self.m.player[worn_k] {
+            None => Some((hand, worn_k)),
+            Some(_) if !matches!(self.version, Version::V26_1 | Version::V26_2) => None,
+            // Equippable.swapWithEquipmentSlot: FAIL for the same item or a cursed piece.
+            Some(w) => (!w.same_item(s)
+                && (creative || self.enchantment_level(w, "binding_curse") == 0))
+                .then_some((hand, worn_k)),
+        }
+    }
+
+    /// Applies the right-click equip of [`Inventory::use_equips`] like the vanilla client,
+    /// before the server's slot updates: 1.8 – 1.16.5 the stack moves into the armor slot and
+    /// the hand empties (creative too); 26.x a single item swaps with the worn piece (in
+    /// creative a copy goes on and the hand keeps its stack when the slot was empty), a larger
+    /// stack puts one on and keeps the rest (not predicted when a worn piece would have to go
+    /// into the inventory). Returns whether the use equips (the server's answer then follows).
+    pub fn equip_from_hand(&mut self, off_hand: bool, creative: bool) -> bool {
+        let Some((hand, worn_k)) = self.use_equip_plan(off_hand, creative) else {
+            return false;
+        };
+        let modern = matches!(self.version, Version::V26_1 | Version::V26_2);
+        let worn = self.m.player[worn_k].take();
+        let held = self.m.player[hand].take().expect("planned with a stack");
+        if !modern {
+            self.m.player[worn_k] = Some(held);
+        } else if held.count <= 1 {
+            let to_hand = match (&worn, creative) {
+                (None, true) => Some(held.clone()),
+                _ => worn,
+            };
+            self.m.player[worn_k] = Some(held);
+            self.m.player[hand] = to_hand;
+        } else if worn.is_some() {
+            // Inventory.add of the old piece: left to the server's updates.
+            self.m.player[worn_k] = worn;
+            self.m.player[hand] = Some(held);
+            return true;
+        } else {
+            let mut one = held.clone();
+            one.count = 1;
+            self.m.player[worn_k] = Some(one);
+            let mut rest = held;
+            if !creative {
+                rest.count -= 1;
+            }
+            self.m.player[hand] = Some(rest);
+        }
+        self.events.player_changed = true;
+        true
+    }
+
     /// Client-side drop of the held stack (no packet): one item off the selected hotbar stack,
     /// or all of it with `whole_stack`, the slot emptied when nothing is left. The 1.16.5 / 26.1
     /// drop key does this before the server's `set_slot` (`ClientPlayerEntity.dropSelectedItem`,
@@ -2453,6 +2536,11 @@ impl Inventory {
         }
         self.events.player_changed |= player;
         self.events.window_changed |= window;
+        if lay.screen == Screen::Player {
+            self.events.player_synced = true;
+        } else {
+            self.events.window_synced = true;
+        }
         if self.resync.is_some_and(|(w, _)| w == window_id) {
             self.resync = None;
         }

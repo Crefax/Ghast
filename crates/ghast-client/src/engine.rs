@@ -359,6 +359,16 @@ impl TickEvents {
     pub fn entities_dropped(&self) -> usize {
         self.more.entities_dropped
     }
+
+    /// Our item use's steps in order (at most 64 between two behaviour ticks): started by the
+    /// right button's key handling, finished by the server (entity status 9), released, or
+    /// interrupted (see [`crate::common::UseEvent`]). A use started and ended in the key
+    /// handling after the behaviour's tick shows up on the next tick, like
+    /// [`TickContext::using_item`].
+    #[must_use]
+    pub fn item_use(&self) -> &[crate::common::UseEvent] {
+        &self.more.item_use
+    }
 }
 
 /// The rarely filled event lists of [`TickEvents`].
@@ -371,6 +381,7 @@ struct MoreEvents {
     deaths: Vec<crate::common::Death>,
     entities: Vec<ghast_entity::Event>,
     entities_dropped: usize,
+    item_use: Vec<crate::common::UseEvent>,
 }
 
 /// Tunables of the core.
@@ -1370,7 +1381,7 @@ impl<S: Sim> Engine<S> {
             Inbound::EntityStatus { entity_id, status } => {
                 // 9: the server finished our item use (eating, drinking).
                 if entity_id == c.entity_id && status == 9 {
-                    c.hands.stop_using();
+                    c.hands.finish_using();
                 }
                 // LivingEntity.handleStatus: 2 hurt, 33 thorns, 36 drowning, 37 burning (1.9+),
                 // 44 sweet berry bush (1.14+); 26.x sends damage events instead.
@@ -1614,6 +1625,9 @@ impl<S: Sim> Engine<S> {
                 std::mem::swap(&mut c.dialogs, &mut c.dialogs_pending);
             }
             c.current.inventory = c.inv.drain_events();
+            if !c.hands.use_events.is_empty() {
+                c.current.more().item_use.append(&mut c.hands.use_events);
+            }
             if let Some(s) = self.sim.entities_mut() {
                 let ev = s.drain_events();
                 let n = ev.len();
@@ -1741,8 +1755,20 @@ impl<S: Sim> Engine<S> {
                 eyes.z.floor() as i32,
             )
             .is_some_and(|b| b.water);
-            let held = held_item(&c.inv, sim);
+            let mut held = held_item(&c.inv, sim);
+            let mut off_held = off_held_item(&c.inv, sim);
+            let creative = c.game_mode == GameMode::Creative;
+            if right {
+                // Whether a use of each hand's stack puts it on (armor, elytra).
+                if let Some(h) = held.as_mut() {
+                    h.equips = c.inv.use_equips(false, creative);
+                }
+                if let Some(h) = off_held.as_mut() {
+                    h.equips = c.inv.use_equips(true, creative);
+                }
+            }
             let mut placed = false;
+            let mut equipped = None;
             let first = c.out.len();
             let mut io = HandsIo {
                 blocks: &blocks,
@@ -1751,7 +1777,7 @@ impl<S: Sim> Engine<S> {
                 held_stack: c.inv.held().cloned(),
                 food: c.health.food,
                 modern: c.opts.caps.combat_1_9,
-                off_held: off_held_item(&c.inv, sim),
+                off_held,
                 off_stack: c.inv.offhand().cloned(),
                 entity,
                 factors: DigFactors {
@@ -1767,12 +1793,18 @@ impl<S: Sim> Engine<S> {
                 placed: &mut placed,
                 spectator: c.game_mode == GameMode::Spectator,
                 spectator_swings: c.opts.caps.spectator_block_click_swings,
-                creative: c.game_mode == GameMode::Creative,
+                creative,
                 place_blocked: &blocked,
+                equipped: &mut equipped,
+                equip_swings: c.opts.caps.use_equip_swings,
             };
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
             let _ = placed;
+            // interactItem: the item's use put the stack on (the server's slot updates follow).
+            if let Some(off_hand) = equipped {
+                c.inv.equip_from_hand(off_hand, creative);
+            }
             predict_planting(c, sim, first);
         }
         // This tick's attacks (behaviour and button): `PlayerEntity.attack` runs on the client
@@ -2734,12 +2766,7 @@ impl TickContext<'_> {
     /// flight, same-tick packet order, unpredictable result, …). The result arrives in
     /// [`TickEvents::inventory`] on a later tick.
     pub fn click(&mut self, click: ghast_inventory::Click) -> Result<ClickTicket, ClickRefused> {
-        if self.core.dead {
-            return Err(ClickRefused::Dead);
-        }
-        if self.core.turned || self.core.aimed {
-            return Err(ClickRefused::Turning);
-        }
+        self.still()?;
         let o = self
             .core
             .inv
@@ -2768,6 +2795,28 @@ impl TickContext<'_> {
         };
         self.core.out.push(Outbound::Inventory(o));
         Ok(ticket)
+    }
+
+    /// Whether [`TickContext::click`] would refuse right now for a reason other than the click
+    /// itself, without sending or changing anything: [`ClickRefused::Dead`],
+    /// [`ClickRefused::Turning`] (the look changed in the last movement step, or an aim is set
+    /// for this tick — check after this tick's `set_aim`), or the inventory's own reason
+    /// ([`ghast_inventory::Inventory::can_click`]: a click in flight, a resync, a click or open
+    /// earlier in this tick, no screen open).
+    pub fn can_click(&self) -> Result<(), ClickRefused> {
+        self.still()?;
+        self.core.inv.can_click().map_err(ClickRefused::Inventory)
+    }
+
+    /// Clicks and opening the inventory need a living player that is not turning.
+    fn still(&self) -> Result<(), ClickRefused> {
+        if self.core.dead {
+            return Err(ClickRefused::Dead);
+        }
+        if self.core.turned || self.core.aimed {
+            return Err(ClickRefused::Turning);
+        }
+        Ok(())
     }
 
     /// Renames the item in the open anvil (26.1 `rename_item`, written now; nothing is sent
@@ -2838,11 +2887,11 @@ impl TickContext<'_> {
     }
 
     /// Opens the player inventory GUI (1.8: the "open inventory" client command; 1.16: nothing
-    /// is sent). Window 0 clicks need it open. Refused while the player is dead.
+    /// is sent). Window 0 clicks need it open. Refused like [`TickContext::click`] while the
+    /// player is dead or turning (a screen opened mid-turn would refuse every click until the
+    /// player is still anyway).
     pub fn open_inventory(&mut self) -> Result<(), ClickRefused> {
-        if self.core.dead {
-            return Err(ClickRefused::Dead);
-        }
+        self.still()?;
         if let Some(o) = self
             .core
             .inv
@@ -3024,10 +3073,72 @@ impl TickContext<'_> {
     /// pick: within 3 blocks outside creative, nearer than the block hit, boxes grown by the
     /// type's targeting margin, each entity's box at its drawn position,
     /// [`ghast_entity::Entity::drawn_bounding_box`], as the vanilla client interpolates it).
-    /// The buttons and [`TickContext::attack`] use this same pick.
+    /// [`TickContext::attack`] checks this pick. The buttons run the same pick from the
+    /// client's current pose (equal to the sent one unless the last movement packet left the
+    /// position or look out): [`TickContext::press_preview`] gives their exact result.
     #[must_use]
     pub fn target_entity(&self) -> Option<hands::EntityHit> {
         self.sent_crosshair().1
+    }
+
+    /// What a press of `button` would act on in this tick's key handling, computed exactly
+    /// as that key handling will (it runs after the behaviour's tick, before the turn and the
+    /// movement step): vanilla's crosshair pick from the client's current pose — the pose of
+    /// the last movement step with its look, not [`TickContext::sent`] — with the held item
+    /// and each entity at its drawn position, then the button's rules (an entity wins over a
+    /// block; a block hit on a block broken earlier in this tick or on air counts as none).
+    /// It says what a press acts on, not whether the key handling presses at all this tick
+    /// (the miss delay, a block being broken, a use in progress, a 4-tick right-click delay,
+    /// an open screen or death hold it back). Actions later in this tick that change the
+    /// world, the held slot or the entities can change the result.
+    ///
+    /// [`TickContext::target_entity`] is the server's view of the same pick (from the sent
+    /// pose, without the held item): it equals this pick when the last movement packet
+    /// carried the current position and look and nothing moved since. Use this one to decide
+    /// on a right press that must not interact with an entity.
+    #[must_use]
+    pub fn press_preview(&self, button: hands::Button) -> hands::PressOutcome {
+        use hands::PressOutcome;
+        let c = &*self.core;
+        let caps = c.opts.caps;
+        let eye = if c.pose.sneaking {
+            caps.sneak_eye_height
+        } else {
+            caps.eye_height
+        };
+        let eyes = Vec3::new(c.pose.pos.x, c.pose.pos.y + eye, c.pose.pos.z);
+        let mut list = PickList::default();
+        list.fill(self.world, caps, eyes);
+        let t = self.world.crosshair_target(&PickQuery {
+            eyes,
+            rotation: (c.pose.yaw, c.pose.pitch),
+            look: hands::look_vector(c.pose.yaw, c.pose.pitch),
+            held: c.inv.held().and_then(|s| u16::try_from(s.id()).ok()),
+            now: true,
+            creative: c.game_mode == GameMode::Creative,
+            player_bb: pick_box(c.pose.pos),
+            entities: &list.entities,
+        });
+        match list.split(t, eyes) {
+            (_, Some(e)) => return PressOutcome::Entity(e),
+            (Some(hit), None)
+                if !c.broken_now.contains(&hit.pos)
+                    && self
+                        .world
+                        .block_query(hit.pos.x, hit.pos.y, hit.pos.z)
+                        .is_some_and(|b| !b.air) =>
+            {
+                return PressOutcome::Block(hit);
+            }
+            _ => {}
+        }
+        let has_item = c.inv.held().is_some() || (caps.combat_1_9 && c.inv.offhand().is_some());
+        match button {
+            hands::Button::Right if has_item && c.game_mode != GameMode::Spectator => {
+                PressOutcome::Item
+            }
+            _ => PressOutcome::Nothing,
+        }
     }
 
     /// Attacks `entity` (`use_entity` attack and the arm swing in the version's order; 1.16
@@ -3072,6 +3183,8 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
+            equipped: &mut None,
+            equip_swings: false,
         };
         if !modern {
             io.out.push(Outbound::Swing);
@@ -3271,6 +3384,8 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
+            equipped: &mut None,
+            equip_swings: false,
         };
         c.hands.click_block(pos, face, &mut io);
         c.out.push(Outbound::Swing);
@@ -3327,6 +3442,8 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
+            equipped: &mut None,
+            equip_swings: false,
         };
         c.hands
             .right_click_block(BlockHit { hit, ..t }, &b, &mut io);
@@ -3469,6 +3586,19 @@ mod tests_entities;
 ))]
 #[path = "engine_tests_self.rs"]
 mod tests_self;
+
+/// Armor equips, item use events, click checks, resync signal, press preview
+/// (`engine_tests_hands.rs`).
+#[cfg(all(
+    test,
+    feature = "v1_8",
+    feature = "v1_12_2",
+    feature = "v1_16_5",
+    feature = "v26_1",
+    feature = "v26_2"
+))]
+#[path = "engine_tests_hands.rs"]
+mod tests_hands;
 
 /// Mount screen rules read off the tracked entity (`engine_tests_mounts.rs`).
 #[cfg(all(test, feature = "v1_8", feature = "v1_12_2", feature = "v1_16_5"))]

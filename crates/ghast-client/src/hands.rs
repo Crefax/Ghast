@@ -128,6 +128,9 @@ pub struct HeldItem {
     /// Using the item succeeds on the client and swings the arm (26.1: a firework rocket while
     /// gliding, `FireworkRocketItem.use`).
     pub(crate) swing_on_use: bool,
+    /// Using the item puts it on (`ArmorItem.use` and the like: the inventory's
+    /// `use_equips`); filled by the engine only for its key handling.
+    pub(crate) equips: bool,
 }
 
 impl BlockQuery {
@@ -216,6 +219,7 @@ impl HeldItem {
         HeldItem {
             modern_item: None,
             swing_on_use: false,
+            equips: false,
             id,
             count: 1,
             efficiency: 0,
@@ -725,6 +729,36 @@ pub struct Buttons {
     pub right: bool,
 }
 
+/// A mouse button ([`crate::TickContext::press_preview`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Button {
+    /// Left: attack / mine.
+    Left,
+    /// Right: interact / use / place.
+    Right,
+}
+
+/// What a press of a button would act on in this tick's key handling
+/// ([`crate::TickContext::press_preview`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum PressOutcome {
+    /// The entity under the crosshair: left attacks it; right sends `use_entity` interact-at
+    /// and interact for it (anticheats check their reach and hitbox like an attack), then
+    /// uses the held item as vanilla does for an entity that does not handle the click.
+    Entity(EntityHit),
+    /// The block under the crosshair: left starts digging it; right clicks it (activates it,
+    /// or the held item goes on it; an item use may still follow).
+    Block(BlockHit),
+    /// Right only: no entity and no block in reach, the held item is used (1.9+: the main
+    /// hand's, else the off hand's).
+    Item,
+    /// Nothing is acted on: left misses (the miss delay), right has no item to use (or the
+    /// player is a spectator, who uses no items).
+    Nothing,
+}
+
 /// What the hands need from the client each tick.
 pub(crate) struct HandsIo<'a> {
     /// Block lookup (version-specific facts).
@@ -768,6 +802,10 @@ pub(crate) struct HandsIo<'a> {
     /// 1.8.9 / 1.12.2: the client writes no `block_place` for this click with this block item
     /// ([`crate::sim::Sim::place_suppressed`]).
     pub place_blocked: &'a dyn Fn(BlockPos, Face, u16) -> bool,
+    /// An item use equipped the stack of this hand (off hand): the engine moves it.
+    pub equipped: &'a mut Option<bool>,
+    /// That equip swings the arm (1.16.5 / 26.x SUCCESS; 1.8 / 1.12.2 do not).
+    pub equip_swings: bool,
 }
 
 impl HandsIo<'_> {
@@ -815,17 +853,42 @@ pub struct Hands {
     pub(crate) placing: Vec<u32>,
     /// 1.9+: ticks since the last swing / attack (`ticksSinceLastSwing`, attack cooldown).
     pub ticks_since_swing: u32,
+    /// Item use steps since the engine last drained them (at most [`MAX_USE_EVENTS`]).
+    pub(crate) use_events: Vec<crate::common::UseEvent>,
 }
+
+/// Most item use steps kept between two behaviour ticks.
+const MAX_USE_EVENTS: usize = 64;
 
 impl Hands {
     /// A new player: nothing held, nothing in progress.
     pub fn reset(&mut self) {
+        self.stop_using();
         let (broken, dug) = (self.broken, self.dug);
         let placing = std::mem::take(&mut self.placing);
+        let use_events = std::mem::take(&mut self.use_events);
         *self = Hands::default();
         self.broken = broken;
         self.dug = dug;
         self.placing = placing;
+        self.use_events = use_events;
+    }
+
+    /// Records an item use step for the behaviour.
+    #[cold]
+    fn use_event(&mut self, e: crate::common::UseEvent) {
+        if self.use_events.len() < MAX_USE_EVENTS {
+            self.use_events.push(e);
+        }
+    }
+
+    /// The use in progress ends: `make` builds its event from (item, off hand, ticks).
+    fn end_use(&mut self, make: fn(i32, bool, u32) -> crate::common::UseEvent) {
+        if self.using {
+            self.using = false;
+            let e = make(i32::from(self.use_item), self.use_hand_off, self.use_ticks);
+            self.use_event(e);
+        }
     }
 
     /// The block being broken and its progress 0..1.
@@ -862,6 +925,10 @@ impl Hands {
         self.using = true;
         self.use_hand_off = off_hand;
         self.use_item = id;
+        self.use_event(crate::common::UseEvent::Started {
+            item: i32::from(id),
+            off_hand,
+        });
     }
 
     /// The use this tick's key handling released, if any: (off hand, item id, player ticks it
@@ -878,9 +945,25 @@ impl Hands {
         }
     }
 
-    /// The server finished our item use (entity status 9) or the held slot changed.
+    /// The use ends without a release or a finish (the held slot changed, the stack left the
+    /// hand, a new player entity).
     pub fn stop_using(&mut self) {
-        self.using = false;
+        self.end_use(
+            |item, off_hand, ticks| crate::common::UseEvent::Interrupted {
+                item,
+                off_hand,
+                ticks,
+            },
+        );
+    }
+
+    /// The server finished our item use (entity status 9).
+    pub(crate) fn finish_using(&mut self) {
+        self.end_use(|item, off_hand, ticks| crate::common::UseEvent::Finished {
+            item,
+            off_hand,
+            ticks,
+        });
     }
 
     /// One tick with the buttons as held now.
@@ -949,7 +1032,11 @@ impl Hands {
                     pos: BlockPos::new(0, 0, 0),
                     face: Face::Down,
                 });
-                self.using = false;
+                self.end_use(|item, off_hand, ticks| crate::common::UseEvent::Released {
+                    item,
+                    off_hand,
+                    ticks,
+                });
             }
         } else {
             if left && !self.left_was {
@@ -976,7 +1063,7 @@ impl Hands {
                 io.held
             };
             if hand.is_none_or(|h| h.id != self.use_item) {
-                self.using = false;
+                self.stop_using();
             }
         }
     }
@@ -1156,9 +1243,7 @@ impl Hands {
                     held: io.held_stack.clone(),
                     off_hand: false,
                 });
-                if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                    self.start_using(false, h.id);
-                }
+                self.used_legacy(h, io);
             }
             return;
         }
@@ -1183,10 +1268,17 @@ impl Hands {
                 held: io.held_stack.clone(),
                 off_hand: false,
             });
-            // FoodItem.onStartUse: only when the player can eat.
-            if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                self.start_using(false, h.id);
-            }
+            self.used_legacy(h, io);
+        }
+    }
+
+    /// 1.8 `interactItem` after its packet: the item's `onStartUse` (food only when the player
+    /// can eat; armor goes on).
+    fn used_legacy(&mut self, h: HeldItem, io: &mut HandsIo<'_>) {
+        if h.usable && (!h.food || h.always_edible || io.food < 20) {
+            self.start_using(false, h.id);
+        } else if h.equips {
+            *io.equipped = Some(false);
         }
     }
 
@@ -1262,8 +1354,18 @@ impl Hands {
                     io.out.push(swing);
                     return;
                 }
-                if h.usable && (!h.food || h.always_edible || io.food < 20) {
-                    self.start_using(off_hand, h.id);
+                if h.usable {
+                    if !h.food || h.always_edible || io.food < 20 {
+                        self.start_using(off_hand, h.id);
+                        return;
+                    }
+                } else if h.equips {
+                    // ArmorItem / ElytraItem.use, 26.x Equippable.swapWithEquipmentSlot:
+                    // SUCCESS (1.16.5 / 26.x swing on the client), the click ends.
+                    *io.equipped = Some(off_hand);
+                    if io.equip_swings {
+                        io.out.push(swing);
+                    }
                     return;
                 }
             }
@@ -1444,6 +1546,8 @@ mod tests {
                         spectator_swings: true,
                         creative,
                         place_blocked: &|_, _, _| false,
+                        equipped: &mut None,
+                        equip_swings: false,
                     };
                     h.tick(true, false, &mut io);
                     if t == 0 {
@@ -1491,6 +1595,8 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
+                equipped: &mut None,
+                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             kinds(&out)
@@ -1552,6 +1658,8 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &check,
+                equipped: &mut None,
+                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             assert_eq!(placed, !blocked);
@@ -1603,6 +1711,8 @@ mod tests {
                 spectator_swings: swings,
                 creative: false,
                 place_blocked: &|_, _, _| true,
+                equipped: &mut None,
+                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             assert!(!placed);
@@ -1672,6 +1782,8 @@ mod tests {
                     spectator_swings: true,
                     creative: false,
                     place_blocked: &|_, _, _| false,
+                    equipped: &mut None,
+                    equip_swings: false,
                 };
                 h.tick(true, false, &mut io);
                 let starts = out
@@ -1727,6 +1839,8 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
+                equipped: &mut None,
+                equip_swings: false,
             };
             h.click_mouse(hit, &mut io);
             assert_eq!(kinds(&out)[..2], want);
@@ -1783,6 +1897,8 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
+                equipped: &mut None,
+                equip_swings: false,
             };
             h.tick(true, false, &mut io);
             ticks += 1;
