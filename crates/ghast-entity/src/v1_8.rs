@@ -451,7 +451,8 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
-    crate::drawn::relative(e, rot.is_some(), now);
+    let d = crate::drawn::relative(e, rot.is_some(), now);
+    s.lerp_changed(d);
     s.event(Event::Moved(eid));
     Ok(true)
 }
@@ -472,7 +473,8 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     e.yaw = angle(y);
     e.pitch = angle(pi);
     e.on_ground = on_ground;
-    crate::drawn::teleport(e, now);
+    let d = crate::drawn::teleport(e, now);
+    s.lerp_changed(d);
     s.event(Event::Moved(eid));
     Ok(true)
 }

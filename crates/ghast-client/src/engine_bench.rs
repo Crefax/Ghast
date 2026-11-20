@@ -17,6 +17,12 @@ use crate::hands::Buttons;
 use crate::sim::Sim;
 use crate::version::GameVersion;
 
+/// GHAST_BENCH_CLIENT_VIEW=1: the crowd is tracked with the client view (drawn positions and
+/// clocks, what `Client` turns on with entity tracking).
+fn client_view() -> bool {
+    std::env::var_os("GHAST_BENCH_CLIENT_VIEW").is_some()
+}
+
 /// Walks a square, turns, sneaks now and then, holds the left button some of the time.
 /// `active` (GHAST_BENCH_ACTIVE=1, identity checks): looks down at the ground, digs with the
 /// left button, right-clicks with an empty hand and asks for the target every tick.
@@ -140,7 +146,8 @@ fn run<S: Sim>(
                     .with_metadata(true)
                     .with_equipment(false)
                     .with_effects(false)
-                    .with_events(false),
+                    .with_events(false)
+                    .with_client_motion(client_view()),
             ));
             let ty = |name| i32::from($($data)::+::entity_by_name(name).unwrap().id);
             for k in 0..n {
@@ -196,6 +203,47 @@ fn run<S: Sim>(
     {
         mobs!(n, ghast_protocol::v26_2, ghast_data::v26_2);
     }
+    // GHAST_BENCH_ENTITIES=N on 1.8.9: N cows by `spawn_entity_living` (1.8 layout), entity
+    // tracking on.
+    #[cfg(feature = "v1_8")]
+    if version == GameVersion::V1_8_9
+        && let Some(n) = bench_entities
+    {
+        use ghast_protocol::v1_8::play::clientbound as cb;
+        e.sim.set_entities(Some(
+            ghast_entity::Config::default()
+                .with_metadata(true)
+                .with_equipment(false)
+                .with_effects(false)
+                .with_events(false)
+                .with_client_motion(client_view()),
+        ));
+        for k in 0..n {
+            let a = f64::from(k) * 2.399;
+            let r = 1.0 + f64::from(k % 7);
+            let mut b: Vec<u8> = Vec::new();
+            let mut u = (1000 + k) as u32;
+            loop {
+                if u < 0x80 {
+                    b.push(u as u8);
+                    break;
+                }
+                b.push((u as u8 & 0x7f) | 0x80);
+                u >>= 7;
+            }
+            b.push(92); // cow
+            for v in [8.5 + r * a.cos(), 64.0, 8.5 + r * a.sin()] {
+                b.extend_from_slice(&((v * 32.0).floor() as i32).to_be_bytes());
+            }
+            b.extend_from_slice(&[0; 9]);
+            b.push(0x7f);
+            let raw = ghast_protocol::RawPacket {
+                id: cb::id::SPAWN_ENTITY_LIVING,
+                body: bytes::Bytes::from(b),
+            };
+            e.sim.world_packet(&raw).unwrap();
+        }
+    }
     // GHAST_BENCH_ENTITIES=N on 1.12.2: the same crowd as 1.12.2 spawn packets (cows by
     // `spawn_entity_living`, every fifth a boat by `spawn_entity`), entity tracking on.
     #[cfg(feature = "v1_12_2")]
@@ -208,7 +256,8 @@ fn run<S: Sim>(
                 .with_metadata(true)
                 .with_equipment(false)
                 .with_effects(false)
-                .with_events(false),
+                .with_events(false)
+                .with_client_motion(client_view()),
         ));
         let cow = i32::from(ghast_data::v1_12::entity_by_name("cow").unwrap().id);
         for k in 0..n {

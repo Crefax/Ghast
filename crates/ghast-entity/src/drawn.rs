@@ -117,6 +117,12 @@ impl Client {
         self.moved = now;
     }
 
+    /// The interpolating-count change after an update that found it `idle` (no steps left).
+    #[inline]
+    fn lerp_delta(&self, idle: bool) -> i32 {
+        i32::from(self.steps > 0) - i32::from(!idle)
+    }
+
     /// Blocks per tick between the last two server positions.
     pub(crate) fn velocity(&self) -> [f64; 3] {
         let dt = self.moved.saturating_sub(self.from_tick).max(1) as f64;
@@ -135,9 +141,10 @@ impl Client {
         self.steps = steps;
     }
 
-    /// One client tick (`tickMovement`'s interpolation step; a shulker's block snap).
+    /// One client tick (`tickMovement`'s interpolation step; a shulker's block snap). Returns
+    /// `true` when the interpolation ended in this step.
     #[inline]
-    pub(crate) fn step(&mut self) {
+    pub(crate) fn step(&mut self) -> bool {
         match self.lerp {
             Lerp::Player | Lerp::Living if self.steps > 0 => {
                 let n = f64::from(self.steps);
@@ -165,12 +172,15 @@ impl Client {
                 self.pos = p;
                 // setRotation: `% 360.0F`.
                 self.rot = [yaw % 360.0, pitch % 360.0];
+                self.steps == 0
             }
-            Lerp::Shulker => {
+            Lerp::Shulker if self.steps > 0 => {
                 let [x, y, z] = self.to;
                 self.pos = [x.floor() + 0.5, y.floor(), z.floor() + 0.5];
+                self.steps = 0;
+                true
             }
-            _ => {}
+            _ => false,
         }
     }
 }
@@ -192,31 +202,51 @@ fn wrap_degrees(d: f64) -> f64 {
 /// with `rotated`, its rotation are the new ones): `onEntityUpdate`'s
 /// `updateTrackedPositionAndAngles(server position, rotation, 3)`, where a packet without a
 /// rotation passes the drawn rotation.
+///
+/// Returns the change of the store's count of interpolating entities (+1 when it starts, −1
+/// when it stops, else 0): a tick without any visits nothing.
 #[inline]
-pub(crate) fn relative(e: &mut Entity, rotated: bool, now: u64) {
+#[must_use]
+pub(crate) fn relative(e: &mut Entity, rotated: bool, now: u64) -> i32 {
     let (pos, rot) = (e.pos, [e.yaw, e.pitch]);
     let Some(c) = e.client.as_deref_mut() else {
-        return;
+        return 0;
     };
+    let idle = c.steps == 0;
     c.server_moved(pos, now);
-    if matches!(c.lerp, Lerp::Player | Lerp::Living) {
-        let rot = if rotated { rot } else { c.rot };
-        c.track(pos, rot, 3);
+    match c.lerp {
+        Lerp::Player | Lerp::Living => {
+            let rot = if rotated { rot } else { c.rot };
+            c.track(pos, rot, 3);
+        }
+        // The shulker's next tick snaps it onto the new position's block.
+        Lerp::Shulker => c.steps = 1,
+        Lerp::External => {}
     }
+    c.lerp_delta(idle)
 }
 
 /// A teleport was applied to `e`: `onEntityPosition` keeps the drawn position when the new one
 /// is within 1/32 (y: 1/64) of it, then `updateTrackedPositionAndAngles(.., 3)` (1.8) or
 /// `(.., 0)` for the kept position (1.12).
+///
+/// Returns the change of the store's count of interpolating entities (see [`relative`]).
 #[inline]
-pub(crate) fn teleport(e: &mut Entity, now: u64) {
+#[must_use]
+pub(crate) fn teleport(e: &mut Entity, now: u64) -> i32 {
     let (pos, rot, era) = (e.pos, [e.yaw, e.pitch], e.era);
     let Some(c) = e.client.as_deref_mut() else {
-        return;
+        return 0;
     };
+    let idle = c.steps == 0;
     c.server_moved(pos, now);
-    if !matches!(c.lerp, Lerp::Player | Lerp::Living) {
-        return;
+    match c.lerp {
+        Lerp::Player | Lerp::Living => {}
+        Lerp::Shulker => {
+            c.steps = 1;
+            return c.lerp_delta(idle);
+        }
+        Lerp::External => return 0,
     }
     let d = c.pos;
     // `!(a >= t)` as vanilla writes it: NaN counts as near.
@@ -230,6 +260,7 @@ pub(crate) fn teleport(e: &mut Entity, now: u64) {
     } else {
         c.track(pos, rot, 3);
     }
+    c.lerp_delta(idle)
 }
 
 #[cfg(test)]
@@ -248,7 +279,7 @@ mod tests {
     }
 
     fn tick(e: &mut Entity) {
-        e.client.as_deref_mut().unwrap().step();
+        let _ = e.client.as_deref_mut().unwrap().step();
     }
 
     /// Vanilla's three steps: 1/3, then 1/2 of the rest, then the rest; a second packet restarts
@@ -257,7 +288,7 @@ mod tests {
     fn three_steps_and_restart() {
         let mut e = player([0.0, 64.0, 0.0]);
         e.pos = [3.0, 64.0, 0.0];
-        relative(&mut e, false, 1);
+        let _ = relative(&mut e, false, 1);
         assert_eq!(
             drawn(&e),
             [0.0, 64.0, 0.0],
@@ -266,7 +297,7 @@ mod tests {
         tick(&mut e);
         assert_eq!(drawn(&e)[0], 1.0);
         e.pos = [6.0, 64.0, 0.0];
-        relative(&mut e, false, 2);
+        let _ = relative(&mut e, false, 2);
         tick(&mut e);
         // 1 + (6 - 1) / 3
         assert_eq!(drawn(&e)[0], 1.0 + 5.0 / 3.0);
@@ -287,10 +318,10 @@ mod tests {
     fn look_restarts_steps() {
         let mut e = player([0.0, 64.0, 0.0]);
         e.pos = [3.0, 64.0, 0.0];
-        relative(&mut e, false, 1);
+        let _ = relative(&mut e, false, 1);
         tick(&mut e);
         e.yaw = 90.0;
-        relative(&mut e, true, 2);
+        let _ = relative(&mut e, true, 2);
         tick(&mut e);
         assert_eq!(drawn(&e)[0], 1.0 + 2.0 / 3.0);
         let c = e.client.as_ref().unwrap();
@@ -305,11 +336,11 @@ mod tests {
             let mut e = player([0.0, 64.0, 0.0]);
             e.era = era;
             e.pos = [0.03, 64.0, 0.0];
-            teleport(&mut e, 1);
+            let _ = teleport(&mut e, 1);
             let c = e.client.as_ref().unwrap();
             assert_eq!((c.target, c.steps), ([0.0, 64.0, 0.0], steps));
             e.pos = [0.0, 64.015_625, 0.0];
-            teleport(&mut e, 2);
+            let _ = teleport(&mut e, 2);
             assert_eq!(e.client.as_ref().unwrap().target, [0.0, 64.015_625, 0.0]);
         }
     }
@@ -321,7 +352,7 @@ mod tests {
         let mut e = player([0.0; 3]);
         e.client.as_deref_mut().unwrap().rot = [170.0, 0.0];
         e.yaw = -170.0;
-        relative(&mut e, true, 1);
+        let _ = relative(&mut e, true, 1);
         tick(&mut e);
         let y = e.client.as_ref().unwrap().rot[0];
         assert_eq!(y, (170.0f64 + 20.0 / 3.0) as f32);

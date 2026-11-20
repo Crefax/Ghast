@@ -796,7 +796,8 @@ fn relative(
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
-    crate::drawn::relative(e, look, now);
+    // External: never interpolates here (the client view does).
+    let _ = crate::drawn::relative(e, look, now);
     if let Some(c) = client {
         if pos {
             c.moved(eid, e.pos);
@@ -831,7 +832,7 @@ fn teleport(
     // Packet coordinates are set even for a vehicle the bot controls.
     e.pos = p;
     if !ctl {
-        crate::drawn::teleport(e, now);
+        let _ = crate::drawn::teleport(e, now);
         e.yaw = angle(y);
         e.pitch = angle(pi);
         e.on_ground = on_ground;

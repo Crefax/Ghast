@@ -365,6 +365,9 @@ pub struct Entities {
     /// The client view is on (`track_client_motion`): living entities carry their drawn state
     /// and clocks.
     pub(crate) client_motion: bool,
+    /// Entities whose drawn state still changes on the next client tick (interpolation steps
+    /// left): a tick without any visits nothing.
+    pub(crate) lerping: u32,
 }
 
 impl Entities {
@@ -577,6 +580,7 @@ impl Entities {
         }
         let me = self.self_id.and_then(|id| self.map.remove(&id));
         self.map.clear();
+        self.lerping = 0;
         shrink_map(&mut self.map);
         if let Some(mut me) = me {
             me.set_vehicle(None);
@@ -663,6 +667,7 @@ impl Entities {
             return;
         }
         self.client_motion = on;
+        self.lerping = 0;
         let mut map = std::mem::take(&mut self.map);
         for e in map.values_mut() {
             if on && Some(e.id) != self.self_id {
@@ -676,13 +681,32 @@ impl Entities {
 
     /// One client tick of the legacy (1.8 / 1.12) drawn positions.
     pub(crate) fn step_drawn(&mut self) {
-        if !self.client_motion {
+        if self.lerping == 0 {
             return;
         }
+        let mut ended = 0;
         for e in self.map.values_mut() {
-            if let Some(c) = e.client.as_deref_mut() {
-                c.step();
+            if let Some(c) = e.client.as_deref_mut()
+                && c.steps > 0
+            {
+                ended += u32::from(c.step());
             }
+        }
+        self.lerping -= ended;
+    }
+
+    /// The count of interpolating entities changed by `d` ([`crate::drawn::relative`] /
+    /// `teleport`).
+    #[inline]
+    pub(crate) fn lerp_changed(&mut self, d: i32) {
+        self.lerping = self.lerping.wrapping_add_signed(d);
+    }
+
+    /// An entity left the store: it no longer counts as interpolating.
+    #[inline]
+    fn forget_lerp(&mut self, e: &Entity) {
+        if e.client.as_ref().is_some_and(|c| c.steps > 0) {
+            self.lerping -= 1;
         }
     }
 
@@ -710,7 +734,9 @@ impl Entities {
             self.unlink(id);
         }
         let cap = self.map.capacity();
-        self.map.insert(id, e);
+        if let Some(old) = self.map.insert(id, e) {
+            self.forget_lerp(&old);
+        }
         after_insert(&mut self.map, cap);
         self.event(Event::Spawned(id));
     }
@@ -721,6 +747,7 @@ impl Entities {
         }
         self.unlink(id);
         if let Some(e) = self.map.remove(&id) {
+            self.forget_lerp(&e);
             self.event(Event::Removed { id, ty: e.ty });
         }
         shrink_map(&mut self.map);

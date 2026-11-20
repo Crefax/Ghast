@@ -546,7 +546,8 @@ fn relative(s: &mut Entities, r: &mut Reader<'_>, pos: bool, look: bool) -> R<bo
         e.pitch = angle(p);
     }
     e.on_ground = on_ground;
-    crate::drawn::relative(e, rot.is_some(), now);
+    let d = crate::drawn::relative(e, rot.is_some(), now);
+    s.lerp_changed(d);
     s.event(Event::Moved(eid));
     Ok(true)
 }
@@ -576,7 +577,8 @@ fn teleport(s: &mut Entities, r: &mut Reader<'_>) -> R<bool> {
     e.yaw = angle(y);
     e.pitch = angle(pi);
     e.on_ground = on_ground;
-    crate::drawn::teleport(e, now);
+    let d = crate::drawn::teleport(e, now);
+    s.lerp_changed(d);
     s.event(Event::Moved(eid));
     Ok(true)
 }
@@ -787,5 +789,67 @@ mod tests {
     fn item_object_id() {
         assert!(known_object(2));
         assert!(!known_object(4));
+    }
+
+    fn body(parts: &[&[u8]]) -> Bytes {
+        Bytes::from(parts.concat())
+    }
+
+    /// The store counts the interpolating entities exactly: moves start it, the third step,
+    /// a near teleport (0 steps on 1.12) and a destroy end it; a tick with none visits nothing.
+    #[test]
+    fn interpolating_count() {
+        let mut t = Tracker::new(Config::default().with_client_motion(true));
+        let mob = |eid: u8, x: f64| {
+            let mut b = vec![eid];
+            b.extend_from_slice(&[0; 16]); // uuid
+            b.push(54); // zombie
+            for v in [x, 64.0, 0.5] {
+                b.extend_from_slice(&v.to_be_bytes());
+            }
+            b.extend_from_slice(&[0; 9]);
+            b.push(0xff);
+            Bytes::from(b)
+        };
+        let mv = |eid: u8, dz: i16| body(&[&[eid], &[0, 0, 0, 0], &dz.to_be_bytes(), &[1]]);
+        let tp = |eid: u8, x: f64, z: f64| {
+            let mut b = vec![eid];
+            for v in [x, 64.0, z] {
+                b.extend_from_slice(&v.to_be_bytes());
+            }
+            b.extend_from_slice(&[0, 0, 1]);
+            Bytes::from(b)
+        };
+        t.apply_body(id::SPAWN_ENTITY_LIVING, &mob(5, 0.5)).unwrap();
+        t.apply_body(id::SPAWN_ENTITY_LIVING, &mob(6, 3.5)).unwrap();
+        assert_eq!(t.store.lerping, 0);
+        t.apply_body(id::REL_ENTITY_MOVE, &mv(5, 4096)).unwrap();
+        t.apply_body(id::REL_ENTITY_MOVE, &mv(5, 4096)).unwrap();
+        t.apply_body(id::REL_ENTITY_MOVE, &mv(6, 4096)).unwrap();
+        assert_eq!(t.store.lerping, 2);
+        for _ in 0..3 {
+            t.tick_client();
+        }
+        assert_eq!(t.store.lerping, 0);
+        assert_eq!(t.get(5).unwrap().drawn_position()[2], 2.5);
+        // A far teleport starts it, a near one (within 1/32 of the drawn position) ends it.
+        t.apply_body(id::ENTITY_TELEPORT, &tp(5, 0.5, 8.0)).unwrap();
+        assert_eq!(t.store.lerping, 1);
+        t.tick_client();
+        let z = t.get(5).unwrap().drawn_position()[2];
+        t.apply_body(id::ENTITY_TELEPORT, &tp(5, 0.5, z + 0.01))
+            .unwrap();
+        assert_eq!(t.store.lerping, 0);
+        // A destroy while interpolating.
+        t.apply_body(id::REL_ENTITY_MOVE, &mv(6, 4096)).unwrap();
+        assert_eq!(t.store.lerping, 1);
+        t.apply_body(id::ENTITY_DESTROY, &Bytes::from_static(&[1, 6]))
+            .unwrap();
+        assert_eq!(t.store.lerping, 0);
+        // A re-spawn of an interpolating id.
+        t.apply_body(id::REL_ENTITY_MOVE, &mv(5, 4096)).unwrap();
+        assert_eq!(t.store.lerping, 1);
+        t.apply_body(id::SPAWN_ENTITY_LIVING, &mob(5, 0.5)).unwrap();
+        assert_eq!(t.store.lerping, 0);
     }
 }
