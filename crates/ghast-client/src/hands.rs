@@ -131,6 +131,8 @@ pub struct HeldItem {
     /// Using the item puts it on (`ArmorItem.use` and the like: the inventory's
     /// `use_equips`); filled by the engine only for its key handling.
     pub(crate) equips: bool,
+    /// That equip swings the arm (1.16.5 / 26.x SUCCESS; 1.8 / 1.12.2 do not).
+    pub(crate) equip_swings: bool,
 }
 
 impl BlockQuery {
@@ -220,6 +222,7 @@ impl HeldItem {
             modern_item: None,
             swing_on_use: false,
             equips: false,
+            equip_swings: false,
             id,
             count: 1,
             efficiency: 0,
@@ -802,10 +805,6 @@ pub(crate) struct HandsIo<'a> {
     /// 1.8.9 / 1.12.2: the client writes no `block_place` for this click with this block item
     /// ([`crate::sim::Sim::place_suppressed`]).
     pub place_blocked: &'a dyn Fn(BlockPos, Face, u16) -> bool,
-    /// An item use equipped the stack of this hand (off hand): the engine moves it.
-    pub equipped: &'a mut Option<bool>,
-    /// That equip swings the arm (1.16.5 / 26.x SUCCESS; 1.8 / 1.12.2 do not).
-    pub equip_swings: bool,
 }
 
 impl HandsIo<'_> {
@@ -853,6 +852,8 @@ pub struct Hands {
     pub(crate) placing: Vec<u32>,
     /// 1.9+: ticks since the last swing / attack (`ticksSinceLastSwing`, attack cooldown).
     pub ticks_since_swing: u32,
+    /// This tick's item use put the stack of this hand (off hand) on: the engine moves it.
+    pub(crate) equipped: Option<bool>,
     /// Item use steps since the engine last drained them (at most [`MAX_USE_EVENTS`]).
     pub(crate) use_events: Vec<crate::common::UseEvent>,
 }
@@ -876,6 +877,7 @@ impl Hands {
 
     /// Records an item use step for the behaviour.
     #[cold]
+    #[inline(never)]
     fn use_event(&mut self, e: crate::common::UseEvent) {
         if self.use_events.len() < MAX_USE_EVENTS {
             self.use_events.push(e);
@@ -883,6 +885,8 @@ impl Hands {
     }
 
     /// The use in progress ends: `make` builds its event from (item, off hand, ticks).
+    #[cold]
+    #[inline(never)]
     fn end_use(&mut self, make: fn(i32, bool, u32) -> crate::common::UseEvent) {
         if self.using {
             self.using = false;
@@ -947,23 +951,28 @@ impl Hands {
 
     /// The use ends without a release or a finish (the held slot changed, the stack left the
     /// hand, a new player entity).
+    #[inline]
     pub fn stop_using(&mut self) {
-        self.end_use(
-            |item, off_hand, ticks| crate::common::UseEvent::Interrupted {
-                item,
-                off_hand,
-                ticks,
-            },
-        );
+        if self.using {
+            self.end_use(
+                |item, off_hand, ticks| crate::common::UseEvent::Interrupted {
+                    item,
+                    off_hand,
+                    ticks,
+                },
+            );
+        }
     }
 
     /// The server finished our item use (entity status 9).
     pub(crate) fn finish_using(&mut self) {
-        self.end_use(|item, off_hand, ticks| crate::common::UseEvent::Finished {
-            item,
-            off_hand,
-            ticks,
-        });
+        if self.using {
+            self.end_use(|item, off_hand, ticks| crate::common::UseEvent::Finished {
+                item,
+                off_hand,
+                ticks,
+            });
+        }
     }
 
     /// One tick with the buttons as held now.
@@ -1274,11 +1283,11 @@ impl Hands {
 
     /// 1.8 `interactItem` after its packet: the item's `onStartUse` (food only when the player
     /// can eat; armor goes on).
-    fn used_legacy(&mut self, h: HeldItem, io: &mut HandsIo<'_>) {
+    fn used_legacy(&mut self, h: HeldItem, io: &HandsIo<'_>) {
         if h.usable && (!h.food || h.always_edible || io.food < 20) {
             self.start_using(false, h.id);
         } else if h.equips {
-            *io.equipped = Some(false);
+            self.equipped = Some(false);
         }
     }
 
@@ -1362,8 +1371,8 @@ impl Hands {
                 } else if h.equips {
                     // ArmorItem / ElytraItem.use, 26.x Equippable.swapWithEquipmentSlot:
                     // SUCCESS (1.16.5 / 26.x swing on the client), the click ends.
-                    *io.equipped = Some(off_hand);
-                    if io.equip_swings {
+                    self.equipped = Some(off_hand);
+                    if h.equip_swings {
                         io.out.push(swing);
                     }
                     return;
@@ -1546,8 +1555,6 @@ mod tests {
                         spectator_swings: true,
                         creative,
                         place_blocked: &|_, _, _| false,
-                        equipped: &mut None,
-                        equip_swings: false,
                     };
                     h.tick(true, false, &mut io);
                     if t == 0 {
@@ -1595,8 +1602,6 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
-                equipped: &mut None,
-                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             kinds(&out)
@@ -1658,8 +1663,6 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &check,
-                equipped: &mut None,
-                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             assert_eq!(placed, !blocked);
@@ -1711,8 +1714,6 @@ mod tests {
                 spectator_swings: swings,
                 creative: false,
                 place_blocked: &|_, _, _| true,
-                equipped: &mut None,
-                equip_swings: false,
             };
             h.tick(false, true, &mut io);
             assert!(!placed);
@@ -1782,8 +1783,6 @@ mod tests {
                     spectator_swings: true,
                     creative: false,
                     place_blocked: &|_, _, _| false,
-                    equipped: &mut None,
-                    equip_swings: false,
                 };
                 h.tick(true, false, &mut io);
                 let starts = out
@@ -1839,8 +1838,6 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
-                equipped: &mut None,
-                equip_swings: false,
             };
             h.click_mouse(hit, &mut io);
             assert_eq!(kinds(&out)[..2], want);
@@ -1897,8 +1894,6 @@ mod tests {
                 spectator_swings: true,
                 creative: false,
                 place_blocked: &|_, _, _| false,
-                equipped: &mut None,
-                equip_swings: false,
             };
             h.tick(true, false, &mut io);
             ticks += 1;

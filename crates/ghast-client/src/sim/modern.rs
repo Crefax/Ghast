@@ -2624,6 +2624,7 @@ pub(crate) fn held_item_facts(id: u16, count: u8, efficiency: u8) -> HeldItem {
         modern_item: item.map(|_| id),
         swing_on_use: false,
         equips: false,
+        equip_swings: false,
     }
 }
 

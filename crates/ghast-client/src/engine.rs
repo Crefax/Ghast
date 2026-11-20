@@ -679,6 +679,38 @@ fn held_item<W: Sim + ?Sized>(
     Some(sim.item_use_facts(s, false, sim.held_item(id, count, efficiency(s))))
 }
 
+/// Whether a use of each hand's stack puts it on (armor, elytra): only with the right button
+/// down, out of the key handling's hot path.
+#[inline(never)]
+fn use_equips(
+    c: &Core,
+    creative: bool,
+    held: &mut Option<hands::HeldItem>,
+    off_held: &mut Option<hands::HeldItem>,
+) {
+    let swings = c.opts.caps.use_equip_swings;
+    for (h, off) in [(held, false), (off_held, true)] {
+        if let Some(h) = h.as_mut() {
+            h.equips = c.inv.use_equips(off, creative);
+            h.equip_swings = swings;
+        }
+    }
+}
+
+/// `interactItem`'s equip on the client (see [`ghast_inventory::Inventory::equip_from_hand`]).
+#[cold]
+#[inline(never)]
+fn equip_from_hand(inv: &mut ghast_inventory::Inventory, off_hand: bool, creative: bool) {
+    inv.equip_from_hand(off_hand, creative);
+}
+
+/// Moves the hands' item use steps into the behaviour's events.
+#[cold]
+#[inline(never)]
+fn take_use_events(c: &mut Core) {
+    c.current.more().item_use.append(&mut c.hands.use_events);
+}
+
 /// Whether rays hit the entity (`Entity.collides`): living entities, players,
 /// paintings and the solid objects (boats, minecarts, TNT, falling blocks, item frames, armor
 /// stands, leash knots, end crystals); not items, orbs, projectiles.
@@ -1627,7 +1659,7 @@ impl<S: Sim> Engine<S> {
             }
             c.current.inventory = c.inv.drain_events();
             if !c.hands.use_events.is_empty() {
-                c.current.more().item_use.append(&mut c.hands.use_events);
+                take_use_events(c);
             }
             if let Some(s) = self.sim.entities_mut() {
                 let ev = s.drain_events();
@@ -1760,16 +1792,9 @@ impl<S: Sim> Engine<S> {
             let mut off_held = off_held_item(&c.inv, sim);
             let creative = c.game_mode == GameMode::Creative;
             if right {
-                // Whether a use of each hand's stack puts it on (armor, elytra).
-                if let Some(h) = held.as_mut() {
-                    h.equips = c.inv.use_equips(false, creative);
-                }
-                if let Some(h) = off_held.as_mut() {
-                    h.equips = c.inv.use_equips(true, creative);
-                }
+                use_equips(c, creative, &mut held, &mut off_held);
             }
             let mut placed = false;
-            let mut equipped = None;
             let first = c.out.len();
             let mut io = HandsIo {
                 blocks: &blocks,
@@ -1796,15 +1821,13 @@ impl<S: Sim> Engine<S> {
                 spectator_swings: c.opts.caps.spectator_block_click_swings,
                 creative,
                 place_blocked: &blocked,
-                equipped: &mut equipped,
-                equip_swings: c.opts.caps.use_equip_swings,
             };
             c.hands.tick(left, right, &mut io);
             // Other placements: the server's set_slot brings the new count of the held stack.
             let _ = placed;
             // interactItem: the item's use put the stack on (the server's slot updates follow).
-            if let Some(off_hand) = equipped {
-                c.inv.equip_from_hand(off_hand, creative);
+            if right && let Some(off_hand) = c.hands.equipped.take() {
+                equip_from_hand(&mut c.inv, off_hand, creative);
             }
             predict_planting(c, sim, first);
         }
@@ -3197,8 +3220,6 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
-            equipped: &mut None,
-            equip_swings: false,
         };
         if !modern {
             io.out.push(Outbound::Swing);
@@ -3398,8 +3419,6 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
-            equipped: &mut None,
-            equip_swings: false,
         };
         c.hands.click_block(pos, face, &mut io);
         c.out.push(Outbound::Swing);
@@ -3456,8 +3475,6 @@ impl TickContext<'_> {
             spectator_swings: c.opts.caps.spectator_block_click_swings,
             creative: c.game_mode == GameMode::Creative,
             place_blocked: &blocked,
-            equipped: &mut None,
-            equip_swings: false,
         };
         c.hands
             .right_click_block(BlockHit { hit, ..t }, &b, &mut io);
